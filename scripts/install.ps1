@@ -64,10 +64,11 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 '@ -ForegroundColor Yellow
 }
 
-Write-Host @'
+$summary = @'
 
 Squeezr installed.
   Binary : {0}
   {1}
 Verify in a new terminal:  squeezr --help
-'@ -f (Join-Path $InstallDir 'squeezr.exe'), $pathNote -ForegroundColor Green
+'@ -f (Join-Path $InstallDir 'squeezr.exe'), $pathNote
+Write-Host $summary -ForegroundColor Green
