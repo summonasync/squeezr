@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Squeezr.Cli/Squeezr.Cli.csproj" />
+    <Project Path="src/Squeezr.Core/Squeezr.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Squeezr.Tests/Squeezr.Tests.csproj" />
+  </Folder>
+</Solution>

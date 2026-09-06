@@ -1,0 +1,57 @@
+using Spectre.Console;
+using Spectre.Console.Cli;
+using Squeezr.Cli.Output;
+using Squeezr.Core.Indexing;
+using Squeezr.Core.Workspace;
+
+namespace Squeezr.Cli.Commands;
+
+public sealed class IndexCommand : Command<IndexCommand.Settings>
+{
+    public sealed class Settings : CommandSettings
+    {
+        [CommandOption("--repo")]
+        public string? Repo { get; set; }
+
+        [CommandOption("--full")]
+        public bool Full { get; set; }
+
+        [CommandOption("--json")]
+        public bool Json { get; set; }
+    }
+
+    protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var indexer = new WorkspaceIndexer();
+            var result = indexer.Index(Directory.GetCurrentDirectory(), settings.Repo, settings.Full);
+
+            if (settings.Json)
+            {
+                JsonOutput.Write(result);
+            }
+            else
+            {
+                foreach (var repo in result.Repos)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[bold]{repo.Name}[/]: +{repo.Added} ~{repo.Modified} -{repo.Deleted} " +
+                        $"(skipped: {repo.Skipped}, files: {repo.Files})");
+                }
+
+                foreach (var warning in result.Warnings)
+                {
+                    Console.Error.WriteLine($"warning: {warning}");
+                }
+            }
+
+            return 0;
+        }
+        catch (WorkspaceException ex)
+        {
+            Console.Error.WriteLine($"error: {ex.Message}");
+            return 1;
+        }
+    }
+}
