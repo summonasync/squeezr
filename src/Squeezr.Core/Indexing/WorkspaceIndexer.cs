@@ -1,4 +1,5 @@
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Indexing.Roslyn;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -9,7 +10,7 @@ public sealed class WorkspaceIndexer
 {
     private const double CompactHintThreshold = 0.3;
 
-    public IndexResult Index(string workspaceRoot, string? repoName = null, bool full = false)
+    public IndexResult Index(string workspaceRoot, string? repoName = null, bool full = false, bool noSemantic = false)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -18,6 +19,7 @@ public sealed class WorkspaceIndexer
 
         var manifest = WorkspaceManifestFile.Load(workspaceRoot);
         var config = ConfigFile.Load(workspaceRoot);
+        var effectiveNoSemantic = noSemantic || config.Indexing.NoSemantic;
 
         var targets = repoName is null
             ? manifest.Repos
@@ -34,7 +36,7 @@ public sealed class WorkspaceIndexer
             var textCache = new Dictionary<uint, string>();
 
             var works = targets
-                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, warnings, textCache))
+                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache))
                 .ToList();
 
             var changedDocs = works.SelectMany(w => w.Changed).ToList();
@@ -51,6 +53,7 @@ public sealed class WorkspaceIndexer
                         continue;
                     }
 
+                    warnings.Add($"dropping '{file.Path}' from index store: repository is not in the workspace manifest");
                     store.DeleteFile(file.Id);
                     tombstones.Add((file.RepoId, file.Id));
                 }
@@ -106,6 +109,7 @@ public sealed class WorkspaceIndexer
         RepoEntry repo,
         bool full,
         SqueezrConfig config,
+        bool noSemantic,
         List<string> warnings,
         Dictionary<uint, string> textCache)
     {
@@ -174,15 +178,28 @@ public sealed class WorkspaceIndexer
 
         foreach (var doc in deleted)
         {
+            CascadeSemanticRecords(doc.Id, store);
             store.DeleteFile(doc.Id);
         }
+
+        var csFiles = walk.Files.Where(f => f.Language == "csharp").ToList();
+        var changedByPath = changed.ToDictionary(c => c.Path, StringComparer.Ordinal);
+        var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+        var semantic = SemanticIndexPhase.Run(
+            repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add);
+        skipped += semantic.Skipped;
 
         var totalFiles = store.CountFiles(repoDoc.Id);
         store.SaveIndexState(new IndexStateDocument
         {
             RepoKey = repo.Name,
             LastFullIndexAt = now,
-            Stats = new IndexStateStats { Files = totalFiles }
+            Stats = new IndexStateStats
+            {
+                Files = totalFiles,
+                Symbols = store.CountSymbols(repoDoc.Id),
+                Chunks = store.CountChunks(repoDoc.Id)
+            }
         });
         repoDoc.LastIndexedAt = now;
         store.UpsertRepo(repoDoc);
@@ -191,6 +208,14 @@ public sealed class WorkspaceIndexer
             new RepoIndexResult(repo.Name, added, modified, deleted.Count, skipped, totalFiles),
             changed,
             deleted);
+    }
+
+    internal static void CascadeSemanticRecords(uint fileId, MetaStore store)
+    {
+        var oldIds = store.ListSymbolsByFile(fileId).Select(s => s.Id).ToList();
+        store.DeleteRefsByFromSymbolIds(oldIds);
+        store.DeleteSymbolsByFile(fileId);
+        store.DeleteChunksByFile(fileId);
     }
 
     internal static void RebuildTrigramIndex(
@@ -210,6 +235,7 @@ public sealed class WorkspaceIndexer
             if (!reposById.TryGetValue(file.RepoId, out var repoDoc)
                 || !entriesByName.TryGetValue(repoDoc.Name, out var entry))
             {
+                warnings.Add($"dropping '{file.Path}' from index store: repository is not in the workspace manifest");
                 store.DeleteFile(file.Id);
                 continue;
             }
@@ -224,6 +250,7 @@ public sealed class WorkspaceIndexer
                 var fullPath = Path.Combine(ResolveRepoRoot(workspaceRoot, entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
                 if (!File.Exists(fullPath))
                 {
+                    warnings.Add($"dropping '{file.Path}' from index store: file is missing on disk");
                     store.DeleteFile(file.Id);
                     continue;
                 }
@@ -234,7 +261,7 @@ public sealed class WorkspaceIndexer
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    warnings.Add($"skipped '{file.Path}': {ex.Message}");
+                    warnings.Add($"dropping '{file.Path}' from index store: unreadable ({ex.Message})");
                     store.DeleteFile(file.Id);
                     continue;
                 }

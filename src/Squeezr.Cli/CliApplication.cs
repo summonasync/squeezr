@@ -21,6 +21,12 @@ public static class CliApplication
                 .WithDescription("Index workspace repositories into the trigram index");
             config.AddCommand<SearchCommand>("search")
                 .WithDescription("Exact substring or regex search over the trigram index");
+            config.AddCommand<SymbolCommand>("symbol")
+                .WithDescription("Exact symbol lookup: signature, doc-comment, file:span");
+            config.AddCommand<MapCommand>("map")
+                .WithDescription("Repository map: directory tree with symbol signatures, no bodies");
+            config.AddCommand<ExpandCommand>("expand")
+                .WithDescription("Expand a line span from a file with surrounding context");
             config.AddCommand<CompactCommand>("compact")
                 .WithDescription("Rewrite the trigram index dropping tombstoned segments");
             config.AddCommand<DropCommand>("drop")

@@ -1,0 +1,65 @@
+using Spectre.Console;
+using Spectre.Console.Cli;
+using Squeezr.Cli.Output;
+using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Workspace;
+
+namespace Squeezr.Cli.Commands;
+
+public sealed class MapCommand : Command<MapCommand.Settings>
+{
+    public sealed class Settings : CommandSettings
+    {
+        [CommandOption("--repo")]
+        public string? Repo { get; set; }
+
+        [CommandOption("--depth")]
+        public int? Depth { get; set; }
+
+        [CommandOption("--max-tokens")]
+        public int? MaxTokens { get; set; }
+
+        [CommandOption("--json")]
+        public bool Json { get; set; }
+    }
+
+    protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = new RepoMapper(Directory.GetCurrentDirectory()).Build(
+                settings.Repo,
+                settings.Depth ?? RepoMapper.DefaultDepth,
+                settings.MaxTokens ?? RepoMapper.DefaultMaxTokens);
+
+            if (settings.Json)
+            {
+                JsonOutput.Write(result);
+            }
+            else
+            {
+                foreach (var line in result.Lines)
+                {
+                    Console.WriteLine($"{new string(' ', line.Depth * 2)}{line.Text}");
+                }
+
+                SymbolCommand.WriteBudgetLine(result.TokensUsed, result.Truncated, result.Hint);
+            }
+
+            return 0;
+        }
+        catch (WorkspaceException ex)
+        {
+            if (settings.Json)
+            {
+                JsonOutput.WriteError(ex.Message);
+            }
+            else
+            {
+                Console.Error.WriteLine($"error: {ex.Message}");
+            }
+
+            return 1;
+        }
+    }
+}

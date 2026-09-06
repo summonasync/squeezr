@@ -133,6 +133,46 @@ public class SearchEngineTests
     }
 
     [Fact]
+    public void Ranking_ContestsFileIsNotDemoted_TestsSuffixIs()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        WriteFile(workspace, "repo/src/Contests.cs", $"class Contests {{ /* {FixtureContent} */ }}\n");
+        WriteFile(workspace, "repo/src/FooTests.cs", $"class FooTests {{ /* {FixtureContent} */ }}\n");
+        manager.AddRepo("repo", "demo");
+        new WorkspaceIndexer().Index(workspace);
+
+        var engine = new SearchEngine(workspace);
+        var response = engine.Search(new SearchQuery(FixtureContent, false, null, null, null, null, null, null));
+
+        var paths = response.Matches.Select(m => m.Path).ToList();
+        paths[0].ShouldBe("src/Contests.cs");
+        paths[^1].ShouldBe("src/FooTests.cs");
+        response.Matches.First(m => m.Path == "src/Contests.cs").Score
+            .ShouldBeGreaterThan(response.Matches.First(m => m.Path == "src/FooTests.cs").Score);
+    }
+
+    [Fact]
+    public void Snippet_LongLineIsTruncatedWithMarker()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        var longLine = $"// {new string('x', 250)} {FixtureContent} {new string('y', 250)}";
+        WriteFile(workspace, "repo/a.cs", longLine + "\n");
+        manager.AddRepo("repo", "demo");
+        new WorkspaceIndexer().Index(workspace);
+
+        var engine = new SearchEngine(workspace);
+        var match = engine.Search(new SearchQuery(FixtureContent, false, null, null, null, null, null, null))
+            .Matches.ShouldHaveSingleItem();
+
+        match.Snippet.ShouldEndWith("…");
+        match.Snippet.Length.ShouldBe(201);
+    }
+
+    [Fact]
     public void Regex_InvalidPattern_ThrowsFriendlyError()
     {
         var workspace = NewIndexedWorkspace();

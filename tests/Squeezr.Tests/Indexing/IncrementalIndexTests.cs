@@ -85,7 +85,7 @@ public class IncrementalIndexTests
 
         new WorkspaceIndexer().Index(workspace, full: true);
 
-        using var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
+        var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
         reader.SegmentStats!.TombstonedSegments.ShouldBe(0);
         reader.SegmentStats.LiveSegments.ShouldBe(1);
     }
@@ -113,10 +113,8 @@ public class IncrementalIndexTests
         result.SegmentsDropped.ShouldBeGreaterThan(0);
         result.SizeAfterBytes.ShouldBeLessThan(result.SizeBeforeBytes);
 
-        using (var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace)))
-        {
-            reader.SegmentStats!.TombstonedSegments.ShouldBe(0);
-        }
+        var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
+        reader.SegmentStats!.TombstonedSegments.ShouldBe(0);
 
         var afterEngine = new SearchEngine(workspace);
         afterEngine.Search(Query("keepneedle")).Matches.ShouldBeEmpty();
@@ -135,6 +133,30 @@ public class IncrementalIndexTests
 
         result.SegmentsDropped.ShouldBe(0);
         new SearchEngine(workspace).Search(Query("quietneedle")).Matches.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void RepoDroppedFromManifest_FilesDroppedFromStoreWithWarning()
+    {
+        var workspace = TestDirs.NewTempDir();
+        Directory.CreateDirectory(Path.Combine(workspace, "one"));
+        Directory.CreateDirectory(Path.Combine(workspace, "two"));
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        WriteFile(workspace, "one/a.cs", "class A { string Term = \"orphanneedle\"; }");
+        WriteFile(workspace, "two/b.cs", "class B { }");
+        manager.AddRepo("one", "one");
+        manager.AddRepo("two", "two");
+        new WorkspaceIndexer().Index(workspace);
+
+        var manifest = WorkspaceManifestFile.Load(workspace);
+        WorkspaceManifestFile.Save(workspace, manifest with { Repos = manifest.Repos.Where(r => r.Name == "two").ToList() });
+
+        var result = new WorkspaceIndexer().Index(workspace);
+
+        result.Warnings.ShouldContain(w => w.Contains("dropping") && w.Contains("not in the workspace manifest"));
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        store.ListAllFiles().ShouldHaveSingleItem().Path.ShouldBe("b.cs");
     }
 
     [Fact]

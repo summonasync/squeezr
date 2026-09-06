@@ -176,6 +176,37 @@ public sealed class CliEndToEndTests
     }
 
     [Fact]
+    public async Task CorruptIndex_ReturnsFriendlyError_WithValidJson()
+    {
+        var root = TestDirs.NewTempDir();
+
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        Directory.CreateDirectory(Path.Combine(root, "code"));
+        File.WriteAllText(Path.Combine(root, "code", "Delta.cs"), "class Delta { }");
+        (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
+        (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
+        File.WriteAllBytes(
+            Path.Combine(root, ".squeezr", "trigram.idx"),
+            Enumerable.Repeat((byte)0xAA, 40).ToArray());
+
+        var search = await RunCliAsync(root, "search", "Delta", "--json");
+        search.ExitCode.ShouldBe(1);
+        search.StdErr.ShouldContain("error:");
+        using (var doc = JsonDocument.Parse(search.StdOut.Trim()))
+        {
+            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("not a squeezr trigram index");
+        }
+
+        var compact = await RunCliAsync(root, "compact", "--json");
+        compact.ExitCode.ShouldBe(1);
+        compact.StdErr.ShouldContain("error:");
+        using (var doc = JsonDocument.Parse(compact.StdOut.Trim()))
+        {
+            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("not a squeezr trigram index");
+        }
+    }
+
+    [Fact]
     public async Task Compact_DropsTombstones_KeepsSearchWorking()
     {
         var root = TestDirs.NewTempDir();

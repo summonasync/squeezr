@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 
 namespace Squeezr.Core.Indexing.Trigram;
@@ -121,16 +122,36 @@ public static class TrigramSegment
         long tombstonedBytes = 0;
         var liveBytesByFile = new Dictionary<uint, long>();
 
-        Span<byte> recordHeader = stackalloc byte[RecordHeaderSize];
+        var recordHeader = new byte[RecordHeaderSize];
+        var trailer = new byte[RecordTrailerSize];
         while (position + RecordHeaderSize + RecordTrailerSize <= stream.Length)
         {
             stream.Position = position;
             stream.ReadExactly(recordHeader);
-            var fileId = BinaryPrimitives.ReadUInt32LittleEndian(recordHeader[..4]);
-            var flags = BinaryPrimitives.ReadUInt32LittleEndian(recordHeader[8..12]);
-            var payloadLength = BinaryPrimitives.ReadUInt32LittleEndian(recordHeader[12..16]);
+            var fileId = BinaryPrimitives.ReadUInt32LittleEndian(recordHeader.AsSpan(0));
+            var flags = BinaryPrimitives.ReadUInt32LittleEndian(recordHeader.AsSpan(8));
+            var payloadLength = BinaryPrimitives.ReadUInt32LittleEndian(recordHeader.AsSpan(12));
             var recordBytes = (long)RecordHeaderSize + payloadLength + RecordTrailerSize;
             if (payloadLength > MaxPayloadBytes || position + recordBytes > stream.Length)
+            {
+                break;
+            }
+
+            var payload = ArrayPool<byte>.Shared.Rent((int)payloadLength);
+            bool valid;
+            try
+            {
+                stream.ReadExactly(payload.AsSpan(0, (int)payloadLength));
+                stream.ReadExactly(trailer);
+                valid = BinaryPrimitives.ReadUInt32LittleEndian(trailer.AsSpan(4)) == TrailerMagic
+                        && BinaryPrimitives.ReadUInt32LittleEndian(trailer.AsSpan(0)) == Fnv1a.Compute(payload.AsSpan(0, (int)payloadLength));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(payload);
+            }
+
+            if (!valid)
             {
                 break;
             }

@@ -36,28 +36,26 @@ public class TrigramIndexBenchTests
         var buildMs = stopwatch.ElapsedMilliseconds;
         var fileKb = new FileInfo(path).Length / 1024;
 
-        using (var reader = new Tg.TrigramIndexReader(path))
+        var reader = new Tg.TrigramIndexReader(path);
+        var target = Tg.TrigramHasher.ComputeHash('a', 'b', 'c');
+        var postings = reader.Find(target);
+        postings.ShouldNotBeNull();
+
+        var timings = new double[Lookups];
+        for (var i = 0; i < Lookups; i++)
         {
-            var target = Tg.TrigramHasher.ComputeHash('a', 'b', 'c');
-            var postings = reader.Find(target);
-            postings.ShouldNotBeNull();
-
-            var timings = new double[Lookups];
-            for (var i = 0; i < Lookups; i++)
-            {
-                stopwatch.Restart();
-                reader.Find(target);
-                timings[i] = stopwatch.Elapsed.TotalMilliseconds;
-            }
-
-            var avg = timings.Average();
-            var max = timings.Max();
-            _output.WriteLine(
-                $"docs={DocumentCount} build={buildMs}ms file={fileKb}KiB listDocs={postings!.DocumentCount} " +
-                $"lookup avg={avg:F3}ms max={max:F3}ms over {Lookups} runs");
-
-            avg.ShouldBeLessThan(5.0);
+            stopwatch.Restart();
+            reader.Find(target);
+            timings[i] = stopwatch.Elapsed.TotalMilliseconds;
         }
+
+        var avg = timings.Average();
+        var max = timings.Max();
+        _output.WriteLine(
+            $"docs={DocumentCount} build={buildMs}ms file={fileKb}KiB listDocs={postings!.DocumentCount} " +
+            $"lookup avg={avg:F3}ms max={max:F3}ms over {Lookups} runs");
+
+        avg.ShouldBeLessThan(5.0);
     }
 
     private static void BuildIndex(string path)

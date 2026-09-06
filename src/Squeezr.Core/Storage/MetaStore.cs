@@ -26,12 +26,18 @@ public sealed class MetaStore : IDisposable
             _db.Mapper.ToDocument(new RepoDocument());
             _db.Mapper.ToDocument(new FileDocument());
             _db.Mapper.ToDocument(new IndexStateDocument { Stats = new IndexStateStats() });
+            _db.Mapper.ToDocument(new SymbolDocument());
+            _db.Mapper.ToDocument(new RefDocument());
+            _db.Mapper.ToDocument(new ChunkDocument());
         }
         _db.GetCollection(ReposCollection).EnsureIndex("name", unique: true);
         _db.GetCollection(FilesCollection).EnsureIndex("repoId");
         _db.GetCollection(SymbolsCollection).EnsureIndex("fileId");
+        _db.GetCollection(SymbolsCollection).EnsureIndex("repoId");
         _db.GetCollection(RefsCollection).EnsureIndex("fromSymbolId");
+        _db.GetCollection(RefsCollection).EnsureIndex("fileId");
         _db.GetCollection(ChunksCollection).EnsureIndex("fileId");
+        _db.GetCollection(ChunksCollection).EnsureIndex("repoId");
     }
 
     public void AddRepo(RepoDocument repo)
@@ -72,6 +78,49 @@ public sealed class MetaStore : IDisposable
     public int CountFiles(uint repoId) => _db.GetCollection<FileDocument>(FilesCollection).Count(f => f.RepoId == repoId);
 
     public uint GetNextFileId() => NextId(FilesCollection);
+
+    public IReadOnlyList<SymbolDocument> ListSymbolsByFile(uint fileId) =>
+        _db.GetCollection<SymbolDocument>(SymbolsCollection).Find(s => s.FileId == fileId).ToList();
+
+    public IReadOnlyList<SymbolDocument> ListSymbolsByRepo(uint repoId) =>
+        _db.GetCollection<SymbolDocument>(SymbolsCollection).Find(s => s.RepoId == repoId).ToList();
+
+    public void DeleteSymbolsByFile(uint fileId) =>
+        _db.GetCollection<SymbolDocument>(SymbolsCollection).DeleteMany(s => s.FileId == fileId);
+
+    public void InsertSymbols(IEnumerable<SymbolDocument> symbols) =>
+        _db.GetCollection<SymbolDocument>(SymbolsCollection).InsertBulk(symbols);
+
+    public int CountSymbols(uint repoId) =>
+        _db.GetCollection<SymbolDocument>(SymbolsCollection).Count(s => s.RepoId == repoId);
+
+    public void DeleteRefsByFromSymbolIds(IReadOnlyCollection<long> symbolIds)
+    {
+        if (symbolIds.Count == 0)
+        {
+            return;
+        }
+
+        _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => symbolIds.Contains(r.FromSymbolId));
+    }
+
+    public IReadOnlyList<RefDocument> ListRefsByFromSymbol(long symbolId) =>
+        _db.GetCollection<RefDocument>(RefsCollection).Find(r => r.FromSymbolId == symbolId).ToList();
+
+    public void InsertRefs(IEnumerable<RefDocument> refs) =>
+        _db.GetCollection<RefDocument>(RefsCollection).InsertBulk(refs);
+
+    public IReadOnlyList<ChunkDocument> ListChunksByFile(uint fileId) =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection).Find(c => c.FileId == fileId).ToList();
+
+    public void DeleteChunksByFile(uint fileId) =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection).DeleteMany(c => c.FileId == fileId);
+
+    public void InsertChunks(IEnumerable<ChunkDocument> chunks) =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection).InsertBulk(chunks);
+
+    public int CountChunks(uint repoId) =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection).Count(c => c.RepoId == repoId);
 
     public IndexStateDocument? GetIndexState(string repoName) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).FindById(repoName);

@@ -4,7 +4,13 @@ public static class RankingWeights
 {
     public const double FilenameMatchBonus = 1000.0;
 
+    public const double SymbolNameMatchBonus = 1000.0;
+
+    public const double SignatureDocMatchBonus = 400.0;
+
     public const double BodyMatchBase = 100.0;
+
+    public const double CommentMatchMultiplier = 0.5;
 
     public const double TestFileMultiplier = 0.3;
 

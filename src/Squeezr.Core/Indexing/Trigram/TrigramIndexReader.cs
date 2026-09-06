@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 
 namespace Squeezr.Core.Indexing.Trigram;
 
-public sealed class TrigramIndexReader : IDisposable
+public sealed class TrigramIndexReader
 {
     private readonly List<(uint RepoId, uint FileId)> _docs = [];
     private readonly List<Dictionary<uint, int[]>> _docPostings = [];
@@ -92,10 +92,6 @@ public sealed class TrigramIndexReader : IDisposable
         }
 
         return PostingListIntersect.Intersect(lists);
-    }
-
-    public void Dispose()
-    {
     }
 
     private void LoadV1(Stream stream, byte[] header, string path)

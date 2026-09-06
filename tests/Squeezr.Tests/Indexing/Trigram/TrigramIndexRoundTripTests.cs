@@ -31,7 +31,7 @@ public class TrigramIndexRoundTripTests
         }));
         writer.Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.DocCount.ShouldBe(3u);
 
         var postingsA = reader.Find(HashA);
@@ -57,7 +57,7 @@ public class TrigramIndexRoundTripTests
         writer.AddDocument(new Tg.TrigramDocument(8, 200, new Dictionary<uint, int[]> { [HashA] = [0] }));
         writer.Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.GetDoc(0).ShouldBe((7u, 100u));
         reader.GetDoc(1).ShouldBe((8u, 200u));
     }
@@ -72,7 +72,7 @@ public class TrigramIndexRoundTripTests
         writer.AddDocument(new Tg.TrigramDocument(1, 3, new Dictionary<uint, int[]> { [HashA] = [0], [HashB] = [2], [HashC] = [5] }));
         writer.Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.IntersectTrigrams([HashA, HashB]).ShouldBe([0u, 2u]);
         reader.IntersectTrigrams([HashA, HashB, HashC]).ShouldBe([2u]);
         reader.IntersectTrigrams([HashA, HashC]).ShouldBe([2u]);
@@ -94,7 +94,7 @@ public class TrigramIndexRoundTripTests
         }
         writer.Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         var postings = reader.Find(HashA);
         postings.ShouldNotBeNull();
         postings!.DocIds.ShouldBe(Enumerable.Range(0, docCount).Select(i => (uint)i).ToArray());
@@ -107,7 +107,7 @@ public class TrigramIndexRoundTripTests
         var path = NewIndexPath();
         new Tg.TrigramIndexWriter().Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.DocCount.ShouldBe(0u);
         reader.Find(HashA).ShouldBeNull();
         reader.IntersectTrigrams([HashA]).ShouldBeEmpty();
@@ -137,7 +137,7 @@ public class TrigramIndexRoundTripTests
     }
 
     [Fact]
-    public void Dispose_ReleasesFileHandle()
+    public void Reader_HoldsNoFileHandle()
     {
         var path = NewIndexPath();
         var writer = new Tg.TrigramIndexWriter();
@@ -146,7 +146,6 @@ public class TrigramIndexRoundTripTests
 
         var reader = new Tg.TrigramIndexReader(path);
         reader.Find(HashA).ShouldNotBeNull();
-        reader.Dispose();
 
         File.Delete(path);
         File.Exists(path).ShouldBeFalse();
@@ -166,7 +165,7 @@ public class TrigramIndexRoundTripTests
         writer.AddDocument(new Tg.TrigramDocument(1, 3, new Dictionary<uint, int[]> { [first] = [2] }));
         writer.Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         var postings = reader.Find(last);
         postings.ShouldNotBeNull();
         postings!.DocIds.ShouldBe([1u]);
@@ -211,7 +210,7 @@ public class TrigramIndexRoundTripTests
         writer.AddDocument(new Tg.TrigramDocument(1, 1, new Dictionary<uint, int[]> { [HashA] = [0] }));
         writer.Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         Should.Throw<ArgumentOutOfRangeException>(() => reader.GetDoc(1));
     }
 
@@ -238,7 +237,7 @@ public class TrigramIndexRoundTripTests
             [new Tg.TrigramDocument(1, 11, new Dictionary<uint, int[]> { [HashB] = [3] })],
             [(1u, 10u)]);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.Version.ShouldBe(2u);
         reader.DocCount.ShouldBe(1u);
         reader.Find(HashA).ShouldBeNull();
@@ -277,7 +276,7 @@ public class TrigramIndexRoundTripTests
             stream.SetLength(fullLength - 4);
         }
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.DocCount.ShouldBe(0u);
         reader.Find(HashA).ShouldBeNull();
     }
@@ -297,7 +296,7 @@ public class TrigramIndexRoundTripTests
             stream.WriteByte(0xFF);
         }
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.DocCount.ShouldBe(0u);
     }
 
@@ -307,7 +306,7 @@ public class TrigramIndexRoundTripTests
         var path = NewIndexPath();
         WriteV1Index(path, [(1u, 10u), (1u, 11u)]);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         reader.Version.ShouldBe(1u);
         reader.DocCount.ShouldBe(2u);
         reader.GetDoc(0).ShouldBe((1u, 10u));
@@ -339,6 +338,35 @@ public class TrigramIndexRoundTripTests
     }
 
     [Fact]
+    public void Scan_RejectsRecordWithCorruptChecksumInTheMiddle()
+    {
+        var path = NewIndexPath();
+        Tg.TrigramIndexWriter.AppendBatch(
+            path,
+            [
+                new Tg.TrigramDocument(1, 10, new Dictionary<uint, int[]> { [HashA] = [0, 7] }),
+                new Tg.TrigramDocument(1, 11, new Dictionary<uint, int[]> { [HashB] = [3] })
+            ],
+            []);
+
+        var payloadStart = Tg.TrigramIndexFormat.HeaderSize + Tg.TrigramSegment.RecordHeaderSize;
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            stream.Position = payloadStart + 2;
+            var original = stream.ReadByte();
+            stream.Position = payloadStart + 2;
+            stream.WriteByte((byte)(original ^ 0xFF));
+        }
+
+        var stats = Tg.TrigramSegment.Scan(path);
+        stats.TotalSegments.ShouldBe(0);
+        stats.ValidEnd.ShouldBe(Tg.TrigramIndexFormat.HeaderSize);
+
+        var reader = new Tg.TrigramIndexReader(path);
+        reader.DocCount.ShouldBe(0u);
+    }
+
+    [Fact]
     public void GetDocumentPostings_ReturnsLiveSegmentPayload()
     {
         var path = NewIndexPath();
@@ -346,7 +374,7 @@ public class TrigramIndexRoundTripTests
         writer.AddDocument(new Tg.TrigramDocument(1, 10, new Dictionary<uint, int[]> { [HashA] = [0, 7], [HashB] = [3] }));
         writer.Write(path);
 
-        using var reader = new Tg.TrigramIndexReader(path);
+        var reader = new Tg.TrigramIndexReader(path);
         var postings = reader.GetDocumentPostings(0);
         postings[HashA].ShouldBe([0, 7]);
         postings[HashB].ShouldBe([3]);

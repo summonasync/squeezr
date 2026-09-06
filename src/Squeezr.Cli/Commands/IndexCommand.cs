@@ -16,6 +16,9 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         [CommandOption("--full")]
         public bool Full { get; set; }
 
+        [CommandOption("--no-semantic")]
+        public bool NoSemantic { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -25,7 +28,7 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         try
         {
             var indexer = new WorkspaceIndexer();
-            var result = indexer.Index(Directory.GetCurrentDirectory(), settings.Repo, settings.Full);
+            var result = indexer.Index(Directory.GetCurrentDirectory(), settings.Repo, settings.Full, settings.NoSemantic);
 
             if (settings.Json)
             {

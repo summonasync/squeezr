@@ -33,27 +33,25 @@ public static class WorkspaceCompactor
             {
                 int segmentsDropped;
                 bool rebuiltFromSources;
-                using (var reader = new TrigramIndexReader(trigramPath))
+                var reader = new TrigramIndexReader(trigramPath);
+                if (reader.Version == 1)
                 {
-                    if (reader.Version == 1)
+                    RebuildFromSources(workspaceRoot, tempPath);
+                    segmentsDropped = 0;
+                    rebuiltFromSources = true;
+                }
+                else
+                {
+                    var writer = new TrigramIndexWriter();
+                    for (uint docId = 0; docId < reader.DocCount; docId++)
                     {
-                        RebuildFromSources(workspaceRoot, tempPath);
-                        segmentsDropped = 0;
-                        rebuiltFromSources = true;
+                        var (repoId, fileId) = reader.GetDoc(docId);
+                        writer.AddDocument(new TrigramDocument(repoId, fileId, reader.GetDocumentPostings(docId)));
                     }
-                    else
-                    {
-                        var writer = new TrigramIndexWriter();
-                        for (uint docId = 0; docId < reader.DocCount; docId++)
-                        {
-                            var (repoId, fileId) = reader.GetDoc(docId);
-                            writer.AddDocument(new TrigramDocument(repoId, fileId, reader.GetDocumentPostings(docId)));
-                        }
 
-                        writer.Write(tempPath);
-                        segmentsDropped = reader.SegmentStats!.TombstonedSegments;
-                        rebuiltFromSources = false;
-                    }
+                    writer.Write(tempPath);
+                    segmentsDropped = reader.SegmentStats!.TombstonedSegments;
+                    rebuiltFromSources = false;
                 }
 
                 File.Move(tempPath, trigramPath, overwrite: true);

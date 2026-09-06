@@ -72,7 +72,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
             return 0;
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is WorkspaceException or InvalidDataException)
         {
             Console.Error.WriteLine($"error: {ex.Message}");
             if (settings.Json)

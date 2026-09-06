@@ -33,7 +33,8 @@ public sealed record SymbolRef(
     string? ToSymbolId,
     string? ToName,
     RefKind Kind,
-    int Line);
+    int Line,
+    string? FromPath = null);
 
 public enum RefKind
 {

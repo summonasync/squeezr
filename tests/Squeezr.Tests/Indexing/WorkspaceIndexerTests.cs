@@ -40,7 +40,7 @@ public class WorkspaceIndexerTests
         state!.Stats.Files.ShouldBe(2);
         state.LastFullIndexAt.ShouldNotBeNull();
 
-        using var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
+        var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
         reader.DocCount.ShouldBe(2u);
         var hash = TrigramHasher.ComputeHash('c', 'l', 'a');
         var postings = reader.Find(hash);

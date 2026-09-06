@@ -34,7 +34,7 @@ public sealed class SearchEngine
         }
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
-        using var reader = new TrigramIndexReader(indexPath);
+        var reader = new TrigramIndexReader(indexPath);
 
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
@@ -60,6 +60,8 @@ public sealed class SearchEngine
                 continue;
             }
 
+            var symbols = store.ListSymbolsByFile(file.Id);
+
             var fullPath = Path.Combine(ResolveRepoRoot(entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
             string content;
             try
@@ -80,7 +82,7 @@ public sealed class SearchEngine
                 repoDoc.Name,
                 file.Path,
                 line,
-                Score(file, query, caseSensitive),
+                Score(file, symbols, query, caseSensitive, snippet),
                 snippet));
         }
 
@@ -295,10 +297,15 @@ public sealed class SearchEngine
         }
 
         var line = content[start..end].Trim();
-        return line.Length <= 200 ? line : line[..200];
+        return line.Length <= 200 ? line : line[..200] + "…";
     }
 
-    private static double Score(FileDocument file, SearchQuery query, bool caseSensitive)
+    private static double Score(
+        FileDocument file,
+        IReadOnlyList<SymbolDocument> symbols,
+        SearchQuery query,
+        bool caseSensitive,
+        string snippet)
     {
         var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var fileName = Path.GetFileName(file.Path);
@@ -306,7 +313,23 @@ public sealed class SearchEngine
             ? RankingWeights.FilenameMatchBonus + RankingWeights.BodyMatchBase
             : RankingWeights.BodyMatchBase;
 
-        if (fileName.Contains("Tests", StringComparison.OrdinalIgnoreCase)
+        if (symbols.Any(s => s.Name.Contains(query.Query, comparison)))
+        {
+            score = Math.Max(score, RankingWeights.SymbolNameMatchBonus + RankingWeights.BodyMatchBase);
+        }
+        else if (symbols.Any(s =>
+                     (s.Signature?.Contains(query.Query, comparison) ?? false)
+                     || (s.DocComment?.Contains(query.Query, comparison) ?? false)))
+        {
+            score = Math.Max(score, RankingWeights.SignatureDocMatchBonus + RankingWeights.BodyMatchBase);
+        }
+
+        if (IsCommentLine(snippet))
+        {
+            score *= RankingWeights.CommentMatchMultiplier;
+        }
+
+        if (fileName.Contains("Tests", StringComparison.Ordinal)
             || fileName.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase)
             || fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
         {
@@ -315,6 +338,14 @@ public sealed class SearchEngine
 
         score += Math.Max(0.0, RankingWeights.SizeBonusCap * (1.0 - (double)file.SizeBytes / RankingWeights.SizeBonusReferenceBytes));
         return score;
+    }
+
+    private static bool IsCommentLine(string snippet)
+    {
+        var trimmed = snippet.TrimStart();
+        return trimmed.StartsWith("//", StringComparison.Ordinal)
+               || trimmed.StartsWith("/*", StringComparison.Ordinal)
+               || trimmed.StartsWith("*", StringComparison.Ordinal);
     }
 
     private string ResolveRepoRoot(RepoEntry repo) =>

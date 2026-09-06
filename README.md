@@ -50,7 +50,7 @@ squeezr search "w.rkspace" --regex --max-tokens 200
 
 - [x] **M1** — каркас CLI, LiteDB-схемы, конфиг, workspace
 - [x] **M2** — триграммный индекс, точный `search`, инкремент, `compact`
-- [~] **M3** — Roslyn: символы, чанки, `symbol`, `map`, `expand`
+- [x] **M3** — Roslyn: символы, чанки, `symbol`, `map`, `expand`
 - [ ] **M4** — Qdrant + ONNX-эмбеддинги: гибридный `search`, `refs`
 - [ ] **M5** — MCP `serve` со всеми тулами
 - [ ] **M6** — tree-sitter для JS/TS, fallback-чанкер
