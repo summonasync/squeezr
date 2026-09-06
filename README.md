@@ -32,8 +32,11 @@
 
 ## Быстрый старт
 
-```bash
-# собрать
+```powershell
+# собрать и установить в PATH (self-contained, .NET не нужен)
+pwsh -File scripts\install.ps1
+
+# или просто собрать для разработки
 dotnet build Squeezr.slnx
 
 # создать workspace в корне твоего проекта
@@ -45,6 +48,8 @@ squeezr index
 squeezr search "WorkspaceManager"
 squeezr search "w.rkspace" --regex --max-tokens 200
 ```
+
+Установка кладёт единый `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` и прописывает его в user PATH (скрипт сам проверит Docker и подскажет, если его нет — он понадобится только с M4). Снести: `pwsh -File scripts\uninstall.ps1`.
 
 ## Roadmap
 
@@ -74,5 +79,7 @@ dotnet build Squeezr.slnx
 squeezr init --name my-project && squeezr add /path/to/repo
 squeezr index && squeezr search "WorkspaceManager"
 ```
+
+Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `scripts\uninstall.ps1`.
 
 Status: M1–M2 done (CLI skeleton, trigram index, exact search), M3 in progress (Roslyn symbols). See the roadmap above.
