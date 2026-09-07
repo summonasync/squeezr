@@ -37,6 +37,11 @@ public static class SemanticIndexPhase
         var skipped = 0;
         using (session)
         {
+            foreach (var degradation in session.Warnings.Where(IsDegradationWarning))
+            {
+                warning(degradation);
+            }
+
             var provider = new RoslynProvider(session, config);
             var symbolsByFile = store.ListSymbolsByRepo(repoDoc.Id)
                 .GroupBy(s => s.FileId)
@@ -122,6 +127,10 @@ public static class SemanticIndexPhase
 
         return new SemanticPhaseResult(store.CountSymbols(repoDoc.Id), store.CountChunks(repoDoc.Id), skipped);
     }
+
+    private static bool IsDegradationWarning(string sessionWarning) =>
+        sessionWarning.StartsWith("MSBuild workspace unavailable", StringComparison.OrdinalIgnoreCase)
+        || sessionWarning.StartsWith("no reference assemblies on disk", StringComparison.OrdinalIgnoreCase);
 
     private static void PurgeRefs(
         IReadOnlyList<SourceFile> csFiles,

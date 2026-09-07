@@ -137,8 +137,15 @@ public sealed class RoslynSession : IDisposable
 
         var workspace = new AdhocWorkspace();
         var projectId = ProjectId.CreateNewId();
+        var references = DefaultMetadataReferences();
+        if (semantic && references.Length == 0)
+        {
+            warnings.Add("no reference assemblies on disk (single-file deployment); syntax-only extraction, references unresolved");
+            semantic = false;
+        }
+
         var projectInfo = ProjectInfo.Create(projectId, VersionStamp.Create(), "AdHoc", "AdHoc", LanguageNames.CSharp)
-            .WithMetadataReferences(DefaultMetadataReferences())
+            .WithMetadataReferences(references)
             .WithDocuments(files.Select(f =>
                 DocumentInfo.Create(
                     DocumentId.CreateNewId(projectId),
@@ -170,6 +177,7 @@ public sealed class RoslynSession : IDisposable
         return types
             .Select(t => t.Assembly)
             .Distinct()
+            .Where(a => !string.IsNullOrEmpty(a.Location))
             .Select(a => MetadataReference.CreateFromFile(a.Location))
             .ToArray();
     }

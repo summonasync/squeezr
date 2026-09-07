@@ -7,7 +7,7 @@ namespace Squeezr.Tests.Cli;
 
 public sealed class CliEndToEndTests
 {
-    private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "Squeezr.Cli.dll");
+    private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
 
     [Fact]
     public async Task Init_Add_Status_Drop_RoundTrip_WithJsonOutput()

@@ -37,6 +37,24 @@ public class RepoFileWalkerTests
     }
 
     [Fact]
+    public void Walk_DefaultConfig_SkipsIdeJunkFolders()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "src/Program.cs", "class Program { }");
+        WriteFile(root, ".vs/Slurpy.slnx/FileContentIndex/index.vsidx", "idx");
+        WriteFile(root, ".idea/workspace.xml", "<project />");
+
+        var config = SqueezrConfig.CreateDefault();
+        config.Indexing.Ignore.ShouldContain("**/.vs/**");
+        config.Indexing.Ignore.ShouldContain("**/.idea/**");
+
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, config.Indexing.Ignore, config.Indexing.MaxFileSizeKb);
+
+        result.Files.Select(f => f.RelativePath).ShouldBe(["src/Program.cs"]);
+        result.Skipped.ShouldBe(0);
+    }
+
+    [Fact]
     public void Walk_WithoutMatchingGlobs_IndexesEverything()
     {
         var root = TestDirs.NewTempDir();

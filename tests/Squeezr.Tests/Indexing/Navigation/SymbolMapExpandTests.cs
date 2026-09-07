@@ -10,7 +10,7 @@ namespace Squeezr.Tests.Indexing.Navigation;
 
 public class SymbolMapExpandTests
 {
-    private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "Squeezr.Cli.dll");
+    private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
 
     [Fact]
     public void Symbol_ExactName_ReturnsSignatureSpanDocAndBody()
@@ -163,6 +163,34 @@ public class SymbolMapExpandTests
 
         var cliQualified = await RunCliAsync(workspace, "expand", "src/Dup.cs", "1", "1", "--repo", "beta", "--json");
         cliQualified.ExitCode.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Expand_RepoNamedLikeTopDir_ExactVsPrefixIsAmbiguous()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        WriteFile(workspace, "src-repo/Util.cs", "public class Util { // SrcRepoMarker\n}\n");
+        WriteFile(workspace, "alpha/src/Util.cs", "public class Util { // AlphaRepoMarker\n}\n");
+        manager.AddRepo("src-repo", "src");
+        manager.AddRepo("alpha", "alpha");
+        new WorkspaceIndexer().Index(workspace);
+
+        var ex = Should.Throw<WorkspaceException>(() =>
+            new SpanExpander(workspace).Expand("src/Util.cs", 1, null, 0, null, 100));
+        ex.Message.ShouldContain("src:Util.cs");
+        ex.Message.ShouldContain("alpha:src/Util.cs");
+        ex.Message.ShouldContain("--repo");
+
+        var qualified = new SpanExpander(workspace).Expand("src/Util.cs", 1, 1, 0, "src", 100);
+        qualified.Repo.ShouldBe("src");
+        qualified.File.ShouldBe("Util.cs");
+        string.Join("\n", qualified.Span).ShouldContain("SrcRepoMarker");
+
+        var qualifiedAlpha = new SpanExpander(workspace).Expand("src/Util.cs", 1, 1, 0, "alpha", 100);
+        qualifiedAlpha.Repo.ShouldBe("alpha");
+        string.Join("\n", qualifiedAlpha.Span).ShouldContain("AlphaRepoMarker");
     }
 
     [Fact]

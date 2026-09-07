@@ -46,6 +46,8 @@ public sealed record SqueezrConfig
                     "**/bin/**",
                     "**/obj/**",
                     "**/dist/**",
+                    "**/.vs/**",
+                    "**/.idea/**",
                     "**/*.min.js"
                 ],
                 MaxFileSizeKb = 512,

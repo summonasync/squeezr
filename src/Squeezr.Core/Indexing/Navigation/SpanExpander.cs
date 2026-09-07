@@ -85,6 +85,40 @@ public sealed class SpanExpander
     private (RepoEntry Entry, FileDocument File) ResolveFile(WorkspaceManifest manifest, string file, string? repo)
     {
         var normalized = file.Replace('\\', '/').TrimStart('/');
+        var direct = TryResolve(manifest, normalized, repo);
+
+        var slash = normalized.IndexOf('/');
+        var prefixRepo = slash > 0 && manifest.Repos.Any(r => string.Equals(r.Name, normalized[..slash], StringComparison.OrdinalIgnoreCase))
+            ? normalized[..slash]
+            : null;
+
+        (RepoEntry Entry, FileDocument File)? prefixed = null;
+        if (prefixRepo is not null
+            && (repo is null || string.Equals(prefixRepo, repo, StringComparison.OrdinalIgnoreCase)))
+        {
+            prefixed = TryResolve(manifest, normalized[(slash + 1)..], prefixRepo);
+        }
+
+        if (direct is not null && prefixed is not null
+            && (!string.Equals(direct.Value.Entry.Name, prefixed.Value.Entry.Name, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(direct.Value.File.Path, prefixed.Value.File.Path, StringComparison.Ordinal)))
+        {
+            throw AmbiguousPath(
+                file,
+                [$"{direct.Value.Entry.Name}:{direct.Value.File.Path}", $"{prefixed.Value.Entry.Name}:{prefixed.Value.File.Path}"]);
+        }
+
+        var resolved = direct ?? prefixed;
+        if (resolved is null)
+        {
+            throw new WorkspaceException($"File '{file}' is not in the index. Run 'squeezr index' if the code changed.");
+        }
+
+        return resolved.Value;
+    }
+
+    private (RepoEntry Entry, FileDocument File)? TryResolve(WorkspaceManifest manifest, string normalized, string? repo)
+    {
         var candidates = new List<(RepoEntry Entry, FileDocument File)>();
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
         foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
@@ -106,7 +140,7 @@ public sealed class SpanExpander
             var suffix = files.Where(f => f.Path.EndsWith('/' + normalized, PathComparison)).ToList();
             if (suffix.Count > 1)
             {
-                throw AmbiguousPath(file, suffix.Select(f => $"{entry.Name}:{f.Path}"));
+                throw AmbiguousPath(normalized, suffix.Select(f => $"{entry.Name}:{f.Path}"));
             }
 
             if (suffix.Count == 1)
@@ -117,15 +151,10 @@ public sealed class SpanExpander
 
         if (candidates.Count > 1)
         {
-            throw AmbiguousPath(file, candidates.Select(c => $"{c.Entry.Name}:{c.File.Path}"));
+            throw AmbiguousPath(normalized, candidates.Select(c => $"{c.Entry.Name}:{c.File.Path}"));
         }
 
-        if (candidates.Count == 0)
-        {
-            throw new WorkspaceException($"File '{file}' is not in the index. Run 'squeezr index' if the code changed.");
-        }
-
-        return candidates[0];
+        return candidates.Count == 1 ? candidates[0] : null;
     }
 
     private static WorkspaceException AmbiguousPath(string file, IEnumerable<string> candidates) =>
