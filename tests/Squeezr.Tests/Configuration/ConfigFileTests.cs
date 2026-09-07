@@ -1,6 +1,7 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Configuration;
 
@@ -98,6 +99,17 @@ public class ConfigFileTests
         loaded.Embeddings.OpenAiCompatible.Model.ShouldBe("nomic-embed-text");
         loaded.Embeddings.OpenAiCompatible.Dimensions.ShouldBe(768);
         loaded.Embeddings.Onnx.Dimensions.ShouldBe(1536);
+    }
+
+    [Fact]
+    public void Load_MalformedJson_ThrowsWorkspaceException()
+    {
+        var root = NewWorkspaceWithConfig("{ not json");
+
+        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+
+        error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
+        error.Message.ShouldContain("not valid JSON");
     }
 
     private static string NewWorkspaceWithConfig(string json)

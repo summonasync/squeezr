@@ -2,7 +2,6 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -22,7 +21,12 @@ public sealed class DropCommand : Command<DropCommand.Settings>
         try
         {
             var workspaceRoot = Directory.GetCurrentDirectory();
-            var vectorStore = BuildVectorStore(workspaceRoot);
+            var warnings = EmbeddingRuntimeFactory.TryCreate(
+                workspaceRoot, withProvider: false, out _, out var vectorStore);
+            foreach (var warning in warnings)
+            {
+                Console.Error.WriteLine($"warning: {warning}");
+            }
 
             var manager = new WorkspaceManager(workspaceRoot);
             var result = manager.Drop();
@@ -44,25 +48,6 @@ public sealed class DropCommand : Command<DropCommand.Settings>
         {
             Console.Error.WriteLine($"error: {ex.Message}");
             return 1;
-        }
-    }
-
-    private static IVectorStore? BuildVectorStore(string workspaceRoot)
-    {
-        if (!File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
-        {
-            return null;
-        }
-
-        try
-        {
-            var config = ConfigFile.Load(workspaceRoot);
-            return new QdrantVectorStore(config.Qdrant, workspaceRoot);
-        }
-        catch (WorkspaceException ex)
-        {
-            Console.Error.WriteLine($"warning: {ex.Message}");
-            return null;
         }
     }
 

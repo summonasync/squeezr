@@ -33,6 +33,8 @@ public static class CliApplication
                 .WithDescription("Rewrite the trigram index dropping tombstoned segments");
             config.AddCommand<DropCommand>("drop")
                 .WithDescription("Remove the .squeezr index store");
+            config.AddCommand<ServeCommand>("serve")
+                .WithDescription("Run an MCP server over stdio for AI agents");
         });
 
         return app.RunAsync(args);

@@ -55,13 +55,66 @@ squeezr status                                # включая состояни�
 
 Установка кладёт единый `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` и прописывает его в user PATH (скрипт сам проверит Docker и подскажет, если его нет — он понадобится только с M4). Снести: `pwsh -File scripts\uninstall.ps1`.
 
+## MCP-сервер: агент ходит по индексу, а не по файлам
+
+`squeezr serve` поднимает MCP-сервер (stdio, JSON-RPC на stdout). Агент получает индекс как шесть тулов — карту, поиск, символы, ссылки и раскрытие спанов — и не читает файлы целиком вообще.
+
+Подключение к MCP-клиенту:
+
+```json
+{
+  "mcpServers": {
+    "squeezr": {
+      "command": "squeezr",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+Корень workspace = cwd процесса сервера: запускай клиент из корня проекта или задай cwd в конфиге клиента. Перед подключением нужны `squeezr init` / `add` / `index` — сервер читает готовый индекс и сам его не строит. Qdrant опционален: без него семантический слой молча отключается, `code_search` работает exact-only (warning в ответе).
+
+### Тулы
+
+| Тул | Параметры (дефолты) | Возвращает |
+|---|---|---|
+| `repo_map` | `repo?`, `depth?` (2), `maxTokens?` (4000) | дерево репо: директории → файлы → члены с сигнатурами. Тел нет, только карта для навигации |
+| `code_search` | `query` (обяз.), `repo?`, `topK?`, `maxTokens?` (без капа по умолчанию) | гибридные совпадения `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; тела не возвращаются |
+| `symbol_lookup` | `name` (обяз.), `kind?`, `repo?`, `maxTokens?` (300) | определения символа: сигнатура, doc-comment, `span`, тело — если влезло в бюджет. Символ не найден → пустой `data`, не ошибка |
+| `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{file, line, kind}`. Символ не найден → tool error (как `squeezr refs`, exit 1) |
+| `expand_span` | `file`, `startLine` (обяз.), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | строки спана + контекст из живого файла на диске (видит правки после индексации). Единственный тул, отдающий код построчно |
+| `index_status` | — | свежесть: возраст индекса, per-repo счётчики файлов/символов/чанков, pending-эмбеддинги, доступность Qdrant |
+
+Известные ограничения текущей реализации: у `find_references` нет `enclosingSymbol` — только `file/line/kind`. У `expand_span` параметр `maxTokens` пока только считает токены, выдачу не обрезает (бэклог `013-expand-budget`). `code_search` без `maxTokens` возвращает всё, что нашлось, — задавай бюджет явно.
+
+### Флоу навигации
+
+Двухуровневая выдача: тулы дают координаты, код раскрывается только через `expand_span`.
+
+1. `repo_map` — незнакомый репо: структура и сигнатуры, ноль тел.
+2. `code_search` (по тексту) или `symbol_lookup` (по имени) — точки интереса: file:line, сниппеты, сигнатуры.
+3. `find_references` — кто вызывает найденный символ.
+4. `expand_span` — раскрыть спан с контекстом, когда нужен сам код.
+
+### Семантика ответа
+
+Каждый тул отвечает единым конвертом:
+
+```json
+{ "data": ..., "tokensUsed": 42, "truncated": false, "warnings": [], "indexAge": "00:12:03", "staleFiles": [] }
+```
+
+- `tokensUsed` / `truncated` — фактическая стоимость ответа. `truncated: true` → сузь запрос (`repo`, `kind`) или подними `maxTokens`.
+- `warnings` — мягкая деградация (например, «vector store unavailable, falling back to exact search only») и подсказки при обрезке.
+- `indexAge` / `staleFiles` — свежесть. Изменённые файлы освежаются inline при чтении; то, что освежить не удалось, честно попадает в `staleFiles` — агент видит, что данные по этим файлам протухли, и может предложить `squeezr index`. Окончательное решение о реиндексе — за хозяином workspace.
+
 ## Roadmap
 
 - [x] **M1** — каркас CLI, LiteDB-схемы, конфиг, workspace
 - [x] **M2** — триграммный индекс, точный `search`, инкремент, `compact`
 - [x] **M3** — Roslyn: символы, чанки, `symbol`, `map`, `expand`
 - [x] **M4** — Qdrant + ONNX-эмбеддинги: гибридный `search`, `refs`
-- [ ] **M5** — MCP `serve` со всеми тулами
+- [x] **M5** — MCP `serve` со всеми тулами + README с agent-инструкциями
 - [ ] **M6** — tree-sitter для JS/TS, fallback-чанкер
 
 ## Стек
@@ -78,6 +131,8 @@ Born from a simple observation: agents waste 30–80k tokens navigating code by 
 
 The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: LiteDB + Qdrant (Docker) + ONNX embeddings — nothing leaves your machine.
 
+An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client config: `{ "mcpServers": { "squeezr": { "command": "squeezr", "args": ["serve"] } } }`, workspace root = server process cwd.
+
 ```bash
 dotnet build Squeezr.slnx
 squeezr init --name my-project && squeezr add /path/to/repo
@@ -86,4 +141,4 @@ squeezr index && squeezr search "WorkspaceManager"
 
 Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `scripts\uninstall.ps1`.
 
-Status: M1–M4 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs). See the roadmap above.
+Status: M1–M5 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs, MCP server with all six tools). See the roadmap above.

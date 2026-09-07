@@ -87,66 +87,9 @@ public sealed class WorkspaceIndexer
 
             DeleteVectorsForFiles(vectorStore, deletedVectorFileIds, warnings);
 
-            var trigramPath = SqueezrPaths.TrigramIndexPath(workspaceRoot);
-            uint? version = null;
-            if (!full)
-            {
-                try
-                {
-                    version = TrigramSegment.TryReadVersion(trigramPath);
-                }
-                catch (InvalidDataException)
-                {
-                    version = null;
-                }
-            }
-
-            if (version == TrigramIndexFormat.CurrentVersion)
-            {
-                if (changedDocs.Count > 0 || tombstones.Count > 0)
-                {
-                    var repoNames = store.ListRepos().ToDictionary(r => r.Id, r => r.Name);
-                    var trigramTotals = changedDocs
-                        .GroupBy(d => d.RepoId)
-                        .ToDictionary(g => g.Key, g => g.Count());
-                    if (progress is not null)
-                    {
-                        foreach (var (repoId, total) in trigramTotals)
-                        {
-                            if (repoNames.TryGetValue(repoId, out var name))
-                            {
-                                progress.PhaseStarted(name, IndexPhase.Trigram, total);
-                            }
-                        }
-                    }
-
-                    var documents = changedDocs.Select(doc =>
-                        new TrigramDocument(doc.RepoId, doc.Id, ToPostings(textCache[doc.Id])));
-                    TrigramIndexWriter.AppendBatch(trigramPath, documents, tombstones);
-
-                    if (progress is not null)
-                    {
-                        foreach (var doc in changedDocs)
-                        {
-                            if (repoNames.TryGetValue(doc.RepoId, out var name))
-                            {
-                                progress.ItemProcessed(name, doc.Path);
-                            }
-                        }
-                    }
-
-                    var stats = TrigramSegment.Scan(trigramPath);
-                    if (stats.TombstoneRatio > CompactHintThreshold)
-                    {
-                        warnings.Add(
-                            $"trigram index is {stats.TombstoneRatio:P0} tombstones; run 'squeezr compact' to reclaim space");
-                    }
-                }
-            }
-            else
-            {
-                RebuildTrigramIndex(workspaceRoot, store, manifest, warnings, textCache, trigramPath, progress);
-            }
+            ApplyTrigramUpdates(
+                workspaceRoot, store, manifest, warnings, textCache, SqueezrPaths.TrigramIndexPath(workspaceRoot),
+                changedDocs, tombstones, full, progress);
 
             if (progress is not null)
             {
@@ -162,6 +105,200 @@ public sealed class WorkspaceIndexer
 
     private static Dictionary<uint, int[]> ToPostings(string text) =>
         TrigramExtractor.ExtractPostings(text).ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
+
+    private static string DecodeUtf8(byte[] bytes) =>
+        bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
+            ? System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3)
+            : System.Text.Encoding.UTF8.GetString(bytes);
+
+    private static void ApplyTrigramUpdates(
+        string workspaceRoot,
+        MetaStore store,
+        WorkspaceManifest manifest,
+        List<string> warnings,
+        Dictionary<uint, string> textCache,
+        string trigramPath,
+        List<FileDocument> changedDocs,
+        List<(uint RepoId, uint Id)> tombstones,
+        bool full,
+        IIndexProgress? progress)
+    {
+        uint? version = null;
+        if (!full)
+        {
+            try
+            {
+                version = TrigramSegment.TryReadVersion(trigramPath);
+            }
+            catch (InvalidDataException)
+            {
+                version = null;
+            }
+        }
+
+        if (version == TrigramIndexFormat.CurrentVersion)
+        {
+            if (changedDocs.Count == 0 && tombstones.Count == 0)
+            {
+                return;
+            }
+
+            var repoNames = store.ListRepos().ToDictionary(r => r.Id, r => r.Name);
+            var trigramTotals = changedDocs
+                .GroupBy(d => d.RepoId)
+                .ToDictionary(g => g.Key, g => g.Count());
+            if (progress is not null)
+            {
+                foreach (var (repoId, total) in trigramTotals)
+                {
+                    if (repoNames.TryGetValue(repoId, out var name))
+                    {
+                        progress.PhaseStarted(name, IndexPhase.Trigram, total);
+                    }
+                }
+            }
+
+            var documents = changedDocs.Select(doc =>
+                new TrigramDocument(doc.RepoId, doc.Id, ToPostings(textCache[doc.Id])));
+            TrigramIndexWriter.AppendBatch(trigramPath, documents, tombstones);
+
+            if (progress is not null)
+            {
+                foreach (var doc in changedDocs)
+                {
+                    if (repoNames.TryGetValue(doc.RepoId, out var name))
+                    {
+                        progress.ItemProcessed(name, doc.Path);
+                    }
+                }
+            }
+
+            var stats = TrigramSegment.Scan(trigramPath);
+            if (stats.TombstoneRatio > CompactHintThreshold)
+            {
+                warnings.Add(
+                    $"trigram index is {stats.TombstoneRatio:P0} tombstones; run 'squeezr compact' to reclaim space");
+            }
+        }
+        else
+        {
+            RebuildTrigramIndex(workspaceRoot, store, manifest, warnings, textCache, trigramPath, progress);
+        }
+    }
+
+    public FileDocument? IndexFile(
+        string workspaceRoot,
+        string repoName,
+        string relativePath,
+        IEmbeddingProvider? embeddings = null,
+        IVectorStore? vectorStore = null)
+    {
+        if (!WorkspaceManifestFile.Exists(workspaceRoot))
+        {
+            throw new WorkspaceException("Workspace is not initialized. Run 'squeezr index' first.");
+        }
+
+        var manifest = WorkspaceManifestFile.Load(workspaceRoot);
+        var config = ConfigFile.Load(workspaceRoot);
+        var repo = manifest.Repos.FirstOrDefault(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase))
+                   ?? throw new WorkspaceException($"Repository '{repoName}' is not in the workspace.");
+
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot)))
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
+        {
+            var warnings = new List<string>();
+            var textCache = new Dictionary<uint, string>();
+            var repoDoc = store.FindRepo(repo.Name)
+                          ?? throw new WorkspaceException($"Repository '{repo.Name}' is missing from the index store.");
+            var repoRoot = ResolveRepoRoot(workspaceRoot, repo);
+            var fullPath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            var now = DateTime.UtcNow;
+            var existing = store.ListFiles(repoDoc.Id)
+                .FirstOrDefault(f => string.Equals(f.Path, relativePath, StringComparison.Ordinal));
+
+            List<FileDocument> changed;
+            List<(uint RepoId, uint Id)> tombstones;
+
+            if (!File.Exists(fullPath))
+            {
+                if (existing is null)
+                {
+                    return null;
+                }
+
+                CascadeSemanticRecords(existing.Id, store);
+                store.DeleteFile(existing.Id);
+                changed = [];
+                tombstones = [(existing.RepoId, existing.Id)];
+                DeleteVectorsForFiles(vectorStore, [existing.Id], warnings);
+            }
+            else
+            {
+                byte[] bytes;
+                try
+                {
+                    bytes = File.ReadAllBytes(fullPath);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    throw new WorkspaceException($"File '{relativePath}' is unreadable: {ex.Message}");
+                }
+
+                var text = DecodeUtf8(bytes);
+
+                var doc = existing ?? new FileDocument { Id = store.GetNextFileId(), RepoId = repoDoc.Id };
+                doc.Path = relativePath;
+                doc.Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+                doc.Language = LanguageDetector.Detect(fullPath);
+                doc.SizeBytes = bytes.Length;
+                doc.LineCount = text.Length == 0
+                    ? 0
+                    : text.Count(c => c == '\n') + (text.EndsWith('\n') ? 0 : 1);
+                doc.IndexedAt = now;
+                store.UpsertFile(doc);
+                textCache[doc.Id] = text;
+
+                var changedByPath = new Dictionary<string, FileDocument>(StringComparer.Ordinal) { [relativePath] = doc };
+                var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+                var csFiles = doc.Language == "csharp"
+                    ? new List<SourceFile> { new(relativePath, fullPath, doc.Language, doc.SizeBytes, doc.Sha256) }
+                    : [];
+
+                SemanticIndexPhase.Run(
+                    repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
+                    config.Indexing.NoSemantic, warnings.Add);
+
+                if (embeddings is not null && vectorStore is not null)
+                {
+                    var modelKey = EmbeddingModelKey.From(config.Embeddings);
+                    EmbeddingIndexPhase.Run(repoDoc, store, modelKey, embeddings, vectorStore, warnings.Add);
+                }
+
+                changed = [doc];
+                tombstones = [];
+            }
+
+            ApplyTrigramUpdates(
+                workspaceRoot, store, manifest, warnings, textCache, SqueezrPaths.TrigramIndexPath(workspaceRoot),
+                changed, tombstones, full: false, progress: null);
+
+            store.SaveIndexState(new IndexStateDocument
+            {
+                RepoKey = repo.Name,
+                LastFullIndexAt = now,
+                Stats = new IndexStateStats
+                {
+                    Files = store.CountFiles(repoDoc.Id),
+                    Symbols = store.CountSymbols(repoDoc.Id),
+                    Chunks = store.CountChunks(repoDoc.Id)
+                }
+            });
+            repoDoc.LastIndexedAt = now;
+            store.UpsertRepo(repoDoc);
+
+            return changed.Count > 0 ? changed[0] : null;
+        }
+    }
 
     private sealed record RepoWork(RepoIndexResult Result, List<FileDocument> Changed, List<FileDocument> Deleted);
 

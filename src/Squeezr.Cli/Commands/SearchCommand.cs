@@ -2,10 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Query;
-using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -48,20 +45,11 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         {
             var workspaceRoot = Directory.GetCurrentDirectory();
 
-            IEmbeddingProvider? embeddings = null;
-            IVectorStore? vectorStore = null;
-            try
+            var warnings = EmbeddingRuntimeFactory.TryCreate(
+                workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
+            foreach (var warning in warnings)
             {
-                if (File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
-                {
-                    var config = ConfigFile.Load(workspaceRoot);
-                    embeddings = EmbeddingProviderFactory.Create(config.Embeddings, workspaceRoot);
-                    vectorStore = new QdrantVectorStore(config.Qdrant, workspaceRoot);
-                }
-            }
-            catch (WorkspaceException ex)
-            {
-                ReportWarning(ex.Message);
+                ReportWarning(warning);
             }
 
             var engine = new SearchEngine(workspaceRoot);

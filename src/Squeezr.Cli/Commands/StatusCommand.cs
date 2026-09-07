@@ -2,8 +2,6 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -25,18 +23,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             var manager = new WorkspaceManager(workspaceRoot);
             var status = manager.GetStatus();
 
-            IVectorStore? vectorStore = null;
-            if (File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
+            var warnings = EmbeddingRuntimeFactory.TryCreate(
+                workspaceRoot, withProvider: false, out _, out var vectorStore);
+            foreach (var warning in warnings)
             {
-                try
-                {
-                    var config = ConfigFile.Load(workspaceRoot);
-                    vectorStore = new QdrantVectorStore(config.Qdrant, workspaceRoot);
-                }
-                catch (WorkspaceException ex)
-                {
-                    Console.Error.WriteLine($"warning: {ex.Message}");
-                }
+                Console.Error.WriteLine($"warning: {warning}");
             }
 
             QdrantStatus qdrant;

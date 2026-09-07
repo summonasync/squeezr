@@ -2,8 +2,6 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
 
@@ -36,17 +34,11 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
             var indexer = new WorkspaceIndexer();
             var workspaceRoot = Directory.GetCurrentDirectory();
 
-            IEmbeddingProvider? embeddings = null;
-            IVectorStore? vectorStore = null;
-            try
+            var warnings = EmbeddingRuntimeFactory.TryCreate(
+                workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
+            foreach (var warning in warnings)
             {
-                var config = ConfigFile.Load(workspaceRoot);
-                embeddings = EmbeddingProviderFactory.Create(config.Embeddings, workspaceRoot);
-                vectorStore = new QdrantVectorStore(config.Qdrant, workspaceRoot);
-            }
-            catch (WorkspaceException ex)
-            {
-                Console.Error.WriteLine($"warning: {ex.Message}");
+                Console.Error.WriteLine($"warning: {warning}");
             }
 
             IndexResult result;
