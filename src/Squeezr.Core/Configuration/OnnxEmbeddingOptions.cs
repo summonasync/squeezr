@@ -2,13 +2,13 @@ namespace Squeezr.Core.Configuration;
 
 public sealed record OnnxEmbeddingOptions
 {
-    public required string ModelPath { get; init; }
+    public string ModelPath { get; init; } = "~/.squeezr/models/bge-code-v1.onnx";
 
-    public required string TokenizerPath { get; init; }
+    public string TokenizerPath { get; init; } = "~/.squeezr/models/bge-code-v1/tokenizer.json";
 
-    public required int Dimensions { get; init; }
+    public int Dimensions { get; init; } = 1536;
 
-    public required int MaxSequenceLength { get; init; }
+    public int MaxSequenceLength { get; init; } = 512;
 
-    public required int BatchSize { get; init; }
+    public int BatchSize { get; init; } = 32;
 }

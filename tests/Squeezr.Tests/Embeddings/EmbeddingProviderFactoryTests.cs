@@ -1,0 +1,59 @@
+using Shouldly;
+using Squeezr.Cli.Embeddings;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Workspace;
+
+namespace Squeezr.Tests.Embeddings;
+
+public class EmbeddingProviderFactoryTests
+{
+    [Fact]
+    public void Create_UnknownProvider_ThrowsWorkspaceExceptionWithProviderName()
+    {
+        var config = new EmbeddingsConfig { Provider = "bert" };
+
+        var error = Should.Throw<WorkspaceException>(() => EmbeddingProviderFactory.Create(config, TestDirs.NewTempDir()));
+
+        error.Message.ShouldContain("'bert'");
+    }
+
+    [Fact]
+    public void Create_OnnxProvider_MissingModel_ThrowsWorkspaceException()
+    {
+        var root = TestDirs.NewTempDir();
+        var config = new EmbeddingsConfig
+        {
+            Onnx = new OnnxEmbeddingOptions
+            {
+                ModelPath = Path.Combine(root, "no-such-model.onnx"),
+                TokenizerPath = Path.Combine(root, "no-such-tokenizer")
+            }
+        };
+
+        var error = Should.Throw<WorkspaceException>(() => EmbeddingProviderFactory.Create(config, root));
+
+        error.Message.ShouldContain("fetch-model.ps1");
+    }
+
+    [Fact]
+    public void Create_OpenAiProvider_MissingApiKeyEnv_ThrowsWorkspaceException()
+    {
+        var config = new EmbeddingsConfig
+        {
+            Provider = "openai",
+            OpenAiCompatible = new OpenAiCompatibleOptions { ApiKeyEnv = "SQUEEZR_TESTS_DEFINITELY_MISSING_KEY" }
+        };
+
+        var error = Should.Throw<WorkspaceException>(() => EmbeddingProviderFactory.Create(config, TestDirs.NewTempDir()));
+
+        error.Message.ShouldContain("SQUEEZR_TESTS_DEFINITELY_MISSING_KEY");
+    }
+
+    [Fact]
+    public void Create_InvalidQdrantEndpoint_ThrowsWorkspaceException()
+    {
+        var error = Should.Throw<WorkspaceException>(() => new QdrantVectorStore(new QdrantConfig { Endpoint = "not a uri" }, TestDirs.NewTempDir()));
+
+        error.Message.ShouldContain("not a uri");
+    }
+}

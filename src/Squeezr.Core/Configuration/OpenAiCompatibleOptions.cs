@@ -2,11 +2,11 @@ namespace Squeezr.Core.Configuration;
 
 public sealed record OpenAiCompatibleOptions
 {
-    public required string Endpoint { get; init; }
+    public string Endpoint { get; init; } = "https://api.openai.com/v1";
 
-    public required string ApiKeyEnv { get; init; }
+    public string ApiKeyEnv { get; init; } = "SQUEEZR_API_KEY";
 
-    public required string Model { get; init; }
+    public string Model { get; init; } = "text-embedding-3-large";
 
-    public required int Dimensions { get; init; }
+    public int Dimensions { get; init; } = 1024;
 }

@@ -33,4 +33,7 @@ public sealed class ChunkDocument
 
     [BsonField("embeddingStatus")]
     public string EmbeddingStatus { get; set; } = "pending";
+
+    [BsonField("modelKey")]
+    public string? ModelKey { get; set; }
 }

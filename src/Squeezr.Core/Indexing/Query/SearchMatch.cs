@@ -5,4 +5,7 @@ public sealed record SearchMatch(
     string Path,
     int Line,
     double Score,
-    string Snippet);
+    string Snippet)
+{
+    public string Source { get; init; } = "exact";
+}

@@ -1,0 +1,130 @@
+using System.Net;
+using Shouldly;
+using Squeezr.Cli.Embeddings;
+using Squeezr.Core.Configuration;
+
+namespace Squeezr.Tests.Embeddings;
+
+public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
+{
+    private const string ApiKeyEnv = "SQUEEZR_TESTS_EMBEDDINGS_KEY";
+
+    public OpenAiCompatibleEmbeddingProviderTests()
+        => Environment.SetEnvironmentVariable(ApiKeyEnv, "test-key");
+
+    public void Dispose()
+        => Environment.SetEnvironmentVariable(ApiKeyEnv, null);
+
+    private static OpenAiCompatibleOptions Options(string endpoint = "http://localhost:11434/v1") => new()
+    {
+        Endpoint = endpoint,
+        ApiKeyEnv = ApiKeyEnv,
+        Model = "nomic-embed-text",
+        Dimensions = 768
+    };
+
+    [Fact]
+    public async Task EmbedAsync_ReturnsVectorsPlacedByIndex()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{"data":[{"index":1,"embedding":[4.0,5.0,6.0]},{"index":0,"embedding":[1.0,2.0,3.0]}]}"""));
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+
+        var vectors = await provider.EmbedAsync(["first text", "second text"], CancellationToken.None);
+
+        vectors.Length.ShouldBe(2);
+        vectors[0].ShouldBe([1f, 2f, 3f]);
+        vectors[1].ShouldBe([4f, 5f, 6f]);
+    }
+
+    [Fact]
+    public async Task EmbedAsync_PostsOpenAiShapedRequest()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{"data":[{"index":0,"embedding":[1.0]}]}"""));
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+
+        await provider.EmbedAsync(["hello"], CancellationToken.None);
+
+        handler.Requests.Count.ShouldBe(1);
+        var request = handler.Requests[0];
+        request.Method.ShouldBe("POST");
+        request.Path.ShouldBe("/v1/embeddings");
+        request.Body.ShouldNotBeNull().ShouldContain("\"input\":[\"hello\"]");
+        request.Body.ShouldNotBeNull().ShouldContain("\"model\":\"nomic-embed-text\"");
+    }
+
+    [Fact]
+    public async Task EmbedAsync_RetriesOn429AndSucceeds()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json((HttpStatusCode)429, """{"error":"rate limited"}"""),
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+
+        var vectors = await provider.EmbedAsync(["hello"], CancellationToken.None);
+
+        vectors[0].ShouldBe([1f]);
+        handler.Requests.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task EmbedAsync_DoesNotRetryOn400()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.BadRequest, """{"error":"bad request"}"""));
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+
+        var error = await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], CancellationToken.None));
+
+        error.Message.ShouldContain("400");
+        handler.Requests.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task EmbedAsync_GivesUpAfterThreeAttemptsOn500()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"),
+            StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"),
+            StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"));
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+
+        await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], CancellationToken.None));
+
+        handler.Requests.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task EmbedAsync_RetriesOnNetworkError()
+    {
+        var handler = new StubHttpMessageHandler(
+            new HttpRequestException("connection refused"),
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[7.0]}]}"""));
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+
+        var vectors = await provider.EmbedAsync(["hello"], CancellationToken.None);
+
+        vectors[0].ShouldBe([7f]);
+        handler.Requests.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void Constructor_ThrowsWhenApiKeyEnvIsMissing()
+    {
+        Environment.SetEnvironmentVariable(ApiKeyEnv, null);
+
+        var error = Should.Throw<InvalidOperationException>(() => new OpenAiCompatibleEmbeddingProvider(Options()));
+
+        error.Message.ShouldContain(ApiKeyEnv);
+    }
+
+    [Fact]
+    public void Dimensions_ComesFromConfig()
+    {
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), new StubHttpMessageHandler());
+        provider.Dimensions.ShouldBe(768);
+    }
+}

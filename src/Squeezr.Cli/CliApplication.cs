@@ -23,6 +23,8 @@ public static class CliApplication
                 .WithDescription("Exact substring or regex search over the trigram index");
             config.AddCommand<SymbolCommand>("symbol")
                 .WithDescription("Exact symbol lookup: signature, doc-comment, file:span");
+            config.AddCommand<RefsCommand>("refs")
+                .WithDescription("Caller-side reference points for a symbol: file:line kind");
             config.AddCommand<MapCommand>("map")
                 .WithDescription("Repository map: directory tree with symbol signatures, no bodies");
             config.AddCommand<ExpandCommand>("expand")

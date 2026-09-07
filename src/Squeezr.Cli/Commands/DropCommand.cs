@@ -1,6 +1,9 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -18,8 +21,13 @@ public sealed class DropCommand : Command<DropCommand.Settings>
     {
         try
         {
-            var manager = new WorkspaceManager(Directory.GetCurrentDirectory());
+            var workspaceRoot = Directory.GetCurrentDirectory();
+            var vectorStore = BuildVectorStore(workspaceRoot);
+
+            var manager = new WorkspaceManager(workspaceRoot);
             var result = manager.Drop();
+
+            DeleteCollectionBestEffort(vectorStore, cancellationToken);
 
             if (settings.Json)
             {
@@ -36,6 +44,51 @@ public sealed class DropCommand : Command<DropCommand.Settings>
         {
             Console.Error.WriteLine($"error: {ex.Message}");
             return 1;
+        }
+    }
+
+    private static IVectorStore? BuildVectorStore(string workspaceRoot)
+    {
+        if (!File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
+        {
+            return null;
+        }
+
+        try
+        {
+            var config = ConfigFile.Load(workspaceRoot);
+            return new QdrantVectorStore(config.Qdrant, workspaceRoot);
+        }
+        catch (WorkspaceException ex)
+        {
+            Console.Error.WriteLine($"warning: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static void DeleteCollectionBestEffort(IVectorStore? vectorStore, CancellationToken cancellationToken)
+    {
+        if (vectorStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var available = vectorStore.IsAvailableAsync(cancellationToken).GetAwaiter().GetResult();
+            if (!available)
+            {
+                Console.Error.WriteLine(
+                    "warning: Qdrant is not available; the vector collection may still exist. " +
+                    "Run 'docker compose down -v' to remove its volume.");
+                return;
+            }
+
+            vectorStore.DeleteCollectionAsync(cancellationToken).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"warning: failed to delete the Qdrant collection: {ex.Message}");
         }
     }
 }

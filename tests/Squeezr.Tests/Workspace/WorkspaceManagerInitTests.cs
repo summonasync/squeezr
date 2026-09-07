@@ -80,12 +80,12 @@ public class WorkspaceManagerInitTests
         var config = ConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("onnx");
-        config.Embeddings.Onnx.Dimensions.ShouldBe(768);
+        config.Embeddings.Onnx.Dimensions.ShouldBe(1536);
         config.Embeddings.Onnx.MaxSequenceLength.ShouldBe(512);
         config.Embeddings.Onnx.BatchSize.ShouldBe(32);
         config.Embeddings.Onnx.ModelPath.ShouldBe("~/.squeezr/models/bge-code-v1.onnx");
         config.Embeddings.OpenAiCompatible.Endpoint.ShouldBe("https://api.openai.com/v1");
-        config.Embeddings.OpenAiCompatible.ApiKeyEnv.ShouldBe("OPENAI_API_KEY");
+        config.Embeddings.OpenAiCompatible.ApiKeyEnv.ShouldBe("SQUEEZR_API_KEY");
         config.Embeddings.OpenAiCompatible.Model.ShouldBe("text-embedding-3-large");
         config.Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1024);
         config.Chunking.MaxTokensPerChunk.ShouldBe(512);

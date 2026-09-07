@@ -485,3 +485,4 @@ $RECYCLE.BIN/
 .squeezr/
 squeezr.workspace.json
 docker-compose.yml
+src/Squeezr.Cli/Models/

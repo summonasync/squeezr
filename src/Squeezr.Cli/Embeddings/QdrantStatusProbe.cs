@@ -1,0 +1,33 @@
+using Squeezr.Core.Embeddings;
+using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
+
+namespace Squeezr.Cli.Embeddings;
+
+public static class QdrantStatusProbe
+{
+    public static async Task<QdrantStatus> ProbeAsync(IVectorStore? store, MetaStore metaStore, CancellationToken ct)
+    {
+        var pendingChunks = metaStore.CountPendingChunks(null);
+        if (store is null)
+        {
+            return new QdrantStatus(false, null, pendingChunks);
+        }
+
+        var available = await store.IsAvailableAsync(ct);
+        long? points = null;
+        if (available)
+        {
+            try
+            {
+                points = await store.CountAsync(ct);
+            }
+            catch
+            {
+                available = false;
+            }
+        }
+
+        return new QdrantStatus(available, points, pendingChunks);
+    }
+}

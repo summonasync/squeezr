@@ -1,6 +1,10 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -17,8 +21,31 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
     {
         try
         {
-            var manager = new WorkspaceManager(Directory.GetCurrentDirectory());
+            var workspaceRoot = Directory.GetCurrentDirectory();
+            var manager = new WorkspaceManager(workspaceRoot);
             var status = manager.GetStatus();
+
+            IVectorStore? vectorStore = null;
+            if (File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
+            {
+                try
+                {
+                    var config = ConfigFile.Load(workspaceRoot);
+                    vectorStore = new QdrantVectorStore(config.Qdrant, workspaceRoot);
+                }
+                catch (WorkspaceException ex)
+                {
+                    Console.Error.WriteLine($"warning: {ex.Message}");
+                }
+            }
+
+            QdrantStatus qdrant;
+            using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
+            {
+                qdrant = QdrantStatusProbe.ProbeAsync(vectorStore, store, cancellationToken).GetAwaiter().GetResult();
+            }
+
+            status = status with { Qdrant = qdrant };
 
             if (settings.Json)
             {
@@ -49,6 +76,17 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             }
 
             AnsiConsole.Write(table);
+
+            if (qdrant.Available)
+            {
+                AnsiConsole.MarkupLine(
+                    $"Qdrant: [green]available[/] — {qdrant.Points} point(s), {qdrant.PendingChunks} pending chunk(s)");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"Qdrant: [red]unavailable[/] — {qdrant.PendingChunks} pending chunk(s)");
+            }
+
             return 0;
         }
         catch (WorkspaceException ex)

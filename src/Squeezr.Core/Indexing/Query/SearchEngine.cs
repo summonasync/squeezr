@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -9,11 +10,53 @@ public sealed class SearchEngine
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
 
+    private const int VectorTopK = 20;
+
     private readonly string _workspaceRoot;
 
     public SearchEngine(string workspaceRoot) => _workspaceRoot = Path.GetFullPath(workspaceRoot);
 
     public SearchResponse Search(SearchQuery query)
+    {
+        var matches = RunExactQuery(query, trackChunkKeys: false).Select(hit => hit.Match).ToList();
+        return Finalize(matches, query, []);
+    }
+
+    public async Task<SearchResponse> SearchHybridAsync(
+        SearchQuery query,
+        IEmbeddingProvider? embeddings,
+        IVectorStore? vectorStore,
+        CancellationToken ct)
+    {
+        var exact = RunExactQuery(query, trackChunkKeys: true);
+        var semantic = new List<(string Key, SearchMatch Match)>();
+        var warnings = new List<string>();
+
+        if (vectorStore is not null && embeddings is not null)
+        {
+            try
+            {
+                if (!await vectorStore.IsAvailableAsync(ct))
+                {
+                    warnings.Add("vector store is unavailable, falling back to exact search only");
+                }
+                else if (await vectorStore.CountAsync(ct) > 0)
+                {
+                    semantic = await RunSemanticQuery(query, embeddings, vectorStore, ct);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                warnings.Add($"vector search failed ({ex.Message}), falling back to exact search only");
+            }
+        }
+
+        var exactRanked = exact.Select(hit => (hit.Key!, hit.Match)).ToList();
+        var merged = RrfMerger.Merge(exactRanked, semantic);
+        return Finalize(merged, query, warnings);
+    }
+
+    private List<(SearchMatch Match, string? Key)> RunExactQuery(SearchQuery query, bool trackChunkKeys)
     {
         var indexPath = SqueezrPaths.TrigramIndexPath(_workspaceRoot);
         if (!File.Exists(indexPath))
@@ -44,7 +87,7 @@ public sealed class SearchEngine
         var caseSensitive = ResolveCaseSensitivity(query);
         var candidates = PlanCandidates(reader, query, filter, caseSensitive);
 
-        var matches = new List<SearchMatch>();
+        var matches = new List<(SearchMatch Match, string? Key)>();
         foreach (var docId in candidates)
         {
             var (repoId, fileId) = reader.GetDoc(docId);
@@ -78,29 +121,106 @@ public sealed class SearchEngine
                 continue;
             }
 
-            matches.Add(new SearchMatch(
+            string? key = null;
+            if (trackChunkKeys)
+            {
+                key = ResolveChunkKey(store, file.Id, line);
+            }
+
+            matches.Add((new SearchMatch(
                 repoDoc.Name,
                 file.Path,
                 line,
                 Score(file, symbols, query, caseSensitive, snippet),
-                snippet));
+                snippet), key));
         }
 
-        var ranked = matches
-            .OrderByDescending(m => m.Score)
-            .ThenBy(m => m.Path, StringComparer.Ordinal)
+        return matches
+            .OrderByDescending(hit => hit.Match.Score)
+            .ThenBy(hit => hit.Match.Path, StringComparer.Ordinal)
             .ToList();
+    }
 
-        if (query.TopK is > 0)
+    private async Task<List<(string Key, SearchMatch Match)>> RunSemanticQuery(
+        SearchQuery query,
+        IEmbeddingProvider embeddings,
+        IVectorStore vectorStore,
+        CancellationToken ct)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
+
+        uint? repoId = null;
+        if (query.Repo is not null)
         {
-            ranked = ranked.Take(query.TopK.Value).ToList();
+            var repo = store.FindRepo(query.Repo);
+            if (repo is null)
+            {
+                return [];
+            }
+
+            repoId = repo.Id;
         }
+
+        var vectors = await embeddings.EmbedAsync([query.Query], ct);
+        if (vectors.Length == 0)
+        {
+            return [];
+        }
+
+        var hits = await vectorStore.SearchAsync(vectors[0], VectorTopK, repoId, ct);
+        var reposById = store.ListRepos().ToDictionary(r => r.Id);
+
+        var result = new List<(string Key, SearchMatch Match)>();
+        foreach (var hit in hits)
+        {
+            if (!reposById.TryGetValue(hit.RepoId, out var repo))
+            {
+                continue;
+            }
+
+            var file = store.FindFileById(hit.FileId);
+            if (file is null)
+            {
+                continue;
+            }
+
+            var chunk = store.ListChunksByFile(hit.FileId)
+                .FirstOrDefault(c => c.StartLine == hit.StartLine && c.EndLine == hit.EndLine);
+            if (chunk is null)
+            {
+                continue;
+            }
+
+            result.Add((
+                $"{hit.FileId}:{chunk.StartLine}",
+                new SearchMatch(repo.Name, file.Path, hit.StartLine, hit.Score, chunk.Text.Trim())
+                {
+                    Source = "semantic"
+                }));
+        }
+
+        return result;
+    }
+
+    private static string ResolveChunkKey(MetaStore store, uint fileId, int line)
+    {
+        var start = store.ListChunksByFile(fileId)
+            .Where(c => c.StartLine <= line && line <= c.EndLine)
+            .Select(c => (int?)c.StartLine)
+            .Min();
+
+        return $"{fileId}:{(start ?? line)}";
+    }
+
+    private static SearchResponse Finalize(IReadOnlyList<SearchMatch> ranked, SearchQuery query, IReadOnlyList<string> warnings)
+    {
+        var limited = query.TopK is > 0 ? ranked.Take(query.TopK.Value).ToList() : ranked.ToList();
 
         var budget = query.MaxTokens;
         var tokensUsed = 0;
         var taken = new List<SearchMatch>();
         var truncated = false;
-        foreach (var match in ranked)
+        foreach (var match in limited)
         {
             if (budget is > 0 && taken.Count > 0 && tokensUsed + TokenCounter.Estimate(match.Snippet) > budget)
             {
@@ -112,7 +232,7 @@ public sealed class SearchEngine
             taken.Add(match);
         }
 
-        return new SearchResponse(taken, tokensUsed, truncated);
+        return new SearchResponse(taken, tokensUsed, truncated) { Warnings = warnings };
     }
 
     private static bool ResolveCaseSensitivity(SearchQuery query) =>

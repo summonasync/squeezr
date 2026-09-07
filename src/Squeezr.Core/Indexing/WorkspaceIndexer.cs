@@ -1,4 +1,5 @@
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Roslyn;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
@@ -15,7 +16,10 @@ public sealed class WorkspaceIndexer
         string? repoName = null,
         bool full = false,
         bool noSemantic = false,
-        IIndexProgress? progress = null)
+        IIndexProgress? progress = null,
+        IEmbeddingProvider? embeddings = null,
+        IVectorStore? vectorStore = null,
+        bool reembed = false)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -40,12 +44,28 @@ public sealed class WorkspaceIndexer
             var warnings = new List<string>();
             var textCache = new Dictionary<uint, string>();
 
+            if (reembed && embeddings is not null && vectorStore is not null)
+            {
+                store.MarkAllChunksPending(null);
+                try
+                {
+                    vectorStore.DeleteCollectionAsync(CancellationToken.None).GetAwaiter().GetResult();
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
+                {
+                    warnings.Add($"--reembed: failed to drop the existing vector collection: {ex.Message}");
+                }
+            }
+
+            var modelKey = embeddings is not null ? EmbeddingModelKey.From(config.Embeddings) : null;
+
             var works = targets
-                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache, progress))
+                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache, progress, embeddings, vectorStore, modelKey))
                 .ToList();
 
             var changedDocs = works.SelectMany(w => w.Changed).ToList();
             var tombstones = works.SelectMany(w => w.Deleted).Select(d => (d.RepoId, d.Id)).ToList();
+            var deletedVectorFileIds = works.SelectMany(w => w.Deleted).Select(d => d.Id).ToList();
 
             if (repoName is null)
             {
@@ -61,8 +81,11 @@ public sealed class WorkspaceIndexer
                     warnings.Add($"dropping '{file.Path}' from index store: repository is not in the workspace manifest");
                     store.DeleteFile(file.Id);
                     tombstones.Add((file.RepoId, file.Id));
+                    deletedVectorFileIds.Add(file.Id);
                 }
             }
+
+            DeleteVectorsForFiles(vectorStore, deletedVectorFileIds, warnings);
 
             var trigramPath = SqueezrPaths.TrigramIndexPath(workspaceRoot);
             uint? version = null;
@@ -151,7 +174,10 @@ public sealed class WorkspaceIndexer
         bool noSemantic,
         List<string> warnings,
         Dictionary<uint, string> textCache,
-        IIndexProgress? progress)
+        IIndexProgress? progress,
+        IEmbeddingProvider? embeddings,
+        IVectorStore? vectorStore,
+        string? modelKey)
     {
         var repoDoc = store.FindRepo(repo.Name)
                       ?? throw new WorkspaceException($"Repository '{repo.Name}' is missing from the index store.");
@@ -234,6 +260,11 @@ public sealed class WorkspaceIndexer
             repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add, progress);
         skipped += semantic.Skipped;
 
+        if (embeddings is not null && vectorStore is not null)
+        {
+            EmbeddingIndexPhase.Run(repoDoc, store, modelKey!, embeddings, vectorStore, warnings.Add, progress);
+        }
+
         var totalFiles = store.CountFiles(repoDoc.Id);
         store.SaveIndexState(new IndexStateDocument
         {
@@ -261,6 +292,28 @@ public sealed class WorkspaceIndexer
         store.DeleteRefsByFromSymbolIds(oldIds);
         store.DeleteSymbolsByFile(fileId);
         store.DeleteChunksByFile(fileId);
+    }
+
+    private static void DeleteVectorsForFiles(IVectorStore? vectorStore, List<uint> fileIds, List<string> warnings)
+    {
+        if (vectorStore is null || fileIds.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!vectorStore.IsAvailableAsync(CancellationToken.None).GetAwaiter().GetResult())
+            {
+                return;
+            }
+
+            vectorStore.DeleteByFileIdsAsync(fileIds, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
+        {
+            warnings.Add($"failed to remove vectors for {fileIds.Count} deleted file(s): {ex.Message}");
+        }
     }
 
     internal static void RebuildTrigramIndex(

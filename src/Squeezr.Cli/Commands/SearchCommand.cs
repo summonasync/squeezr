@@ -1,7 +1,11 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -42,16 +46,43 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
     {
         try
         {
-            var engine = new SearchEngine(Directory.GetCurrentDirectory());
-            var response = engine.Search(new SearchQuery(
-                settings.Query,
-                settings.Regex,
-                settings.IgnoreCase ? false : null,
-                settings.Repo,
-                settings.PathGlob,
-                settings.Language,
-                settings.TopK,
-                settings.MaxTokens));
+            var workspaceRoot = Directory.GetCurrentDirectory();
+
+            IEmbeddingProvider? embeddings = null;
+            IVectorStore? vectorStore = null;
+            try
+            {
+                if (File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
+                {
+                    var config = ConfigFile.Load(workspaceRoot);
+                    embeddings = EmbeddingProviderFactory.Create(config.Embeddings, workspaceRoot);
+                    vectorStore = new QdrantVectorStore(config.Qdrant, workspaceRoot);
+                }
+            }
+            catch (WorkspaceException ex)
+            {
+                ReportWarning(ex.Message);
+            }
+
+            var engine = new SearchEngine(workspaceRoot);
+            var response = engine.SearchHybridAsync(
+                new SearchQuery(
+                    settings.Query,
+                    settings.Regex,
+                    settings.IgnoreCase ? false : null,
+                    settings.Repo,
+                    settings.PathGlob,
+                    settings.Language,
+                    settings.TopK,
+                    settings.MaxTokens),
+                embeddings,
+                vectorStore,
+                cancellationToken).GetAwaiter().GetResult();
+
+            foreach (var warning in response.Warnings)
+            {
+                ReportWarning(warning);
+            }
 
             if (settings.Json)
             {
@@ -61,8 +92,11 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
             foreach (var match in response.Matches)
             {
+                var marker = match.Source == "exact"
+                    ? string.Empty
+                    : $" [grey][[{match.Source}]][/]";
                 AnsiConsole.MarkupLine(
-                    $"[bold]{(match.Repo + "/" + match.Path).EscapeMarkup()}[/]:{match.Line}: {match.Snippet.EscapeMarkup()}");
+                    $"[bold]{(match.Repo + "/" + match.Path).EscapeMarkup()}[/]:{match.Line}: {match.Snippet.EscapeMarkup()}{marker}");
             }
 
             if (response.Truncated)
@@ -83,4 +117,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             return 1;
         }
     }
+
+    private static void ReportWarning(string message) =>
+        Console.Error.WriteLine($"warning: {message}");
 }

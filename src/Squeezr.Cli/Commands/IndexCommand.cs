@@ -1,6 +1,9 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
 
@@ -19,6 +22,9 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         [CommandOption("--no-semantic")]
         public bool NoSemantic { get; set; }
 
+        [CommandOption("--reembed")]
+        public bool Reembed { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -29,6 +35,19 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         {
             var indexer = new WorkspaceIndexer();
             var workspaceRoot = Directory.GetCurrentDirectory();
+
+            IEmbeddingProvider? embeddings = null;
+            IVectorStore? vectorStore = null;
+            try
+            {
+                var config = ConfigFile.Load(workspaceRoot);
+                embeddings = EmbeddingProviderFactory.Create(config.Embeddings, workspaceRoot);
+                vectorStore = new QdrantVectorStore(config.Qdrant, workspaceRoot);
+            }
+            catch (WorkspaceException ex)
+            {
+                Console.Error.WriteLine($"warning: {ex.Message}");
+            }
 
             IndexResult result;
             if (!settings.Json && AnsiConsole.Profile.Capabilities.Interactive)
@@ -41,11 +60,14 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                         new PercentageColumn(),
                         new SpinnerColumn())
                     .Start(ctx => indexer.Index(
-                        workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic, new IndexProgressRenderer(ctx)));
+                        workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
+                        new IndexProgressRenderer(ctx), embeddings, vectorStore, settings.Reembed));
             }
             else
             {
-                result = indexer.Index(workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic);
+                result = indexer.Index(
+                    workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
+                    embeddings: embeddings, vectorStore: vectorStore, reembed: settings.Reembed);
             }
 
             if (settings.Json)

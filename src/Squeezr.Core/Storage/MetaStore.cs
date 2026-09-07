@@ -122,6 +122,59 @@ public sealed class MetaStore : IDisposable
     public int CountChunks(uint repoId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).Count(c => c.RepoId == repoId);
 
+    public int CountPendingChunks(uint? repoId, string? modelKey = null)
+    {
+        var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        if (modelKey is null)
+        {
+            return repoId.HasValue
+                ? chunks.Count(c => c.RepoId == repoId.Value && c.EmbeddingStatus != "ok")
+                : chunks.Count(c => c.EmbeddingStatus != "ok");
+        }
+
+        return repoId.HasValue
+            ? chunks.Count(c => c.RepoId == repoId.Value && (c.EmbeddingStatus != "ok" || c.ModelKey != modelKey))
+            : chunks.Count(c => c.EmbeddingStatus != "ok" || c.ModelKey != modelKey);
+    }
+
+    public IReadOnlyList<ChunkDocument> ListPendingChunks(uint repoId, string modelKey, int limit) =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection)
+            .Find(c => c.RepoId == repoId && (c.EmbeddingStatus != "ok" || c.ModelKey != modelKey))
+            .OrderBy(c => c.Id)
+            .Take(limit)
+            .ToList();
+
+    public void MarkChunksEmbedded(IEnumerable<long> chunkIds, string modelKey)
+    {
+        var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        foreach (var id in chunkIds)
+        {
+            var chunk = chunks.FindById(id);
+            if (chunk is null)
+            {
+                continue;
+            }
+
+            chunk.EmbeddingStatus = "ok";
+            chunk.ModelKey = modelKey;
+            chunks.Update(chunk);
+        }
+    }
+
+    public void MarkAllChunksPending(uint? repoId)
+    {
+        var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        var targets = repoId.HasValue
+            ? chunks.Find(c => c.RepoId == repoId.Value)
+            : chunks.FindAll();
+        foreach (var chunk in targets)
+        {
+            chunk.EmbeddingStatus = "pending";
+            chunk.ModelKey = null;
+            chunks.Update(chunk);
+        }
+    }
+
     public IndexStateDocument? GetIndexState(string repoName) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).FindById(repoName);
 

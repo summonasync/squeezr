@@ -2,9 +2,9 @@ namespace Squeezr.Core.Configuration;
 
 public sealed record EmbeddingsConfig
 {
-    public required string Provider { get; init; }
+    public string Provider { get; init; } = "onnx";
 
-    public required OnnxEmbeddingOptions Onnx { get; init; }
+    public OnnxEmbeddingOptions Onnx { get; init; } = new();
 
-    public required OpenAiCompatibleOptions OpenAiCompatible { get; init; }
+    public OpenAiCompatibleOptions OpenAiCompatible { get; init; } = new();
 }

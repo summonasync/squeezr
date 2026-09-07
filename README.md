@@ -44,10 +44,14 @@ squeezr init --name my-project
 squeezr add /path/to/repo
 
 # проиндексировать и искать
-squeezr index
-squeezr search "WorkspaceManager"
+squeezr index          # live-прогресс по фазам; --reembed для полного переэмбеддинга
+squeezr search "WorkspaceManager"            # гибрид: точный + семантический (RRF)
 squeezr search "w.rkspace" --regex --max-tokens 200
+squeezr refs Slugify                          # кто вызывает символ (C#)
+squeezr status                                # включая состояние Qdrant
 ```
+
+Эмбеддинги по умолчанию — локальная ONNX-модель bge-code-v1 (скачать: `pwsh -File scripts\fetch-model.ps1`); OpenAI-совместимый endpoint включается секцией `embeddings` в `.squeezr/config.json` (ключ — только через env `SQUEEZR_API_KEY`). Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
 
 Установка кладёт единый `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` и прописывает его в user PATH (скрипт сам проверит Docker и подскажет, если его нет — он понадобится только с M4). Снести: `pwsh -File scripts\uninstall.ps1`.
 
@@ -56,7 +60,7 @@ squeezr search "w.rkspace" --regex --max-tokens 200
 - [x] **M1** — каркас CLI, LiteDB-схемы, конфиг, workspace
 - [x] **M2** — триграммный индекс, точный `search`, инкремент, `compact`
 - [x] **M3** — Roslyn: символы, чанки, `symbol`, `map`, `expand`
-- [ ] **M4** — Qdrant + ONNX-эмбеддинги: гибридный `search`, `refs`
+- [x] **M4** — Qdrant + ONNX-эмбеддинги: гибридный `search`, `refs`
 - [ ] **M5** — MCP `serve` со всеми тулами
 - [ ] **M6** — tree-sitter для JS/TS, fallback-чанкер
 
@@ -82,4 +86,4 @@ squeezr index && squeezr search "WorkspaceManager"
 
 Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `scripts\uninstall.ps1`.
 
-Status: M1–M2 done (CLI skeleton, trigram index, exact search), M3 in progress (Roslyn symbols). See the roadmap above.
+Status: M1–M4 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs). See the roadmap above.
