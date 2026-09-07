@@ -13,7 +13,8 @@ public sealed record ExpandResult(
     IReadOnlyList<string> Before,
     IReadOnlyList<string> Span,
     IReadOnlyList<string> After,
-    int TokensUsed);
+    int TokensUsed,
+    bool Truncated);
 
 public sealed class SpanExpander
 {
@@ -64,22 +65,32 @@ public sealed class SpanExpander
         var after = lines[end..afterEnd];
 
         var budget = new TokenBudget(maxTokens);
-        foreach (var line in span)
+        var spanOut = TakeWithin(budget, span, out var spanCut);
+        var beforeOut = TakeWithin(budget, before, out var beforeCut);
+        var afterOut = TakeWithin(budget, after, out var afterCut);
+
+        return new ExpandResult(
+            entry.Name, fileDoc.Path, start, end, context,
+            beforeOut, spanOut, afterOut, budget.Used,
+            spanCut || beforeCut || afterCut);
+    }
+
+    private static List<string> TakeWithin(TokenBudget budget, string[] lines, out bool truncated)
+    {
+        var taken = new List<string>();
+        truncated = false;
+        foreach (var line in lines)
         {
-            budget.TryTake(line);
+            if (!budget.TryTake(line))
+            {
+                truncated = true;
+                break;
+            }
+
+            taken.Add(line);
         }
 
-        foreach (var line in before)
-        {
-            budget.TryTake(line);
-        }
-
-        foreach (var line in after)
-        {
-            budget.TryTake(line);
-        }
-
-        return new ExpandResult(entry.Name, fileDoc.Path, start, end, context, before, span, after, budget.Used);
+        return taken;
     }
 
     private (RepoEntry Entry, FileDocument File) ResolveFile(WorkspaceManifest manifest, string file, string? repo)

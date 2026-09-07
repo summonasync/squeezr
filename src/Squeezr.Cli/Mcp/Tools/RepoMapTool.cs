@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Workspace;
 
@@ -8,28 +9,46 @@ namespace Squeezr.Cli.Mcp.Tools;
 [McpServerToolType]
 public sealed class RepoMapTool
 {
-    private readonly McpWorkspace _workspace;
+    private const int GuardCandidateLimit = 50;
 
-    public RepoMapTool(McpWorkspace workspace) => _workspace = workspace;
+    private readonly McpWorkspace _workspace;
+    private readonly McpToolGate _gate;
+
+    public RepoMapTool(McpWorkspace workspace, McpToolGate gate)
+    {
+        _workspace = workspace;
+        _gate = gate;
+    }
 
     /// <summary>
     /// Structural map of the indexed repositories: nested directory/file tree rendered as indented
     /// lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members). Never returns
     /// bodies — use expand_span on coordinates from other tools to read code. Good entry point
-    /// for navigating an unfamiliar workspace.
+    /// for navigating an unfamiliar workspace. Signatures are refreshed on read: modified files
+    /// are reindexed inline or reported in staleFiles.
     /// </summary>
     [McpServerTool(Name = "repo_map", Title = "Repository map")]
-    public object Build(string? repo = null, int? depth = null, int? maxTokens = null)
+    public object Build(string? repo = null, int? depth = null, int? maxTokens = null) =>
+        _gate.Run(() => BuildCore(repo, depth, maxTokens));
+
+    private object BuildCore(string? repo, int? depth, int? maxTokens)
     {
         try
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
             var warnings = new List<string>();
-            var result = new RepoMapper(root).Build(
-                repo,
-                depth ?? RepoMapper.DefaultDepth,
-                maxTokens ?? RepoMapper.DefaultMaxTokens);
+            var resolvedDepth = depth ?? RepoMapper.DefaultDepth;
+            var resolvedMaxTokens = maxTokens ?? RepoMapper.DefaultMaxTokens;
+
+            var mapper = new RepoMapper(root);
+            var result = mapper.Build(repo, resolvedDepth, resolvedMaxTokens);
+
+            var freshness = Guard(root, result);
+            if (freshness.Refreshed.Count > 0)
+            {
+                result = mapper.Build(repo, resolvedDepth, resolvedMaxTokens);
+            }
 
             if (result.Hint is not null)
             {
@@ -38,12 +57,41 @@ public sealed class RepoMapTool
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();
 
-            return ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, staleFiles: null);
+            return ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
             return ToolErrors.From(ex);
         }
+    }
+
+    private static FreshnessResult Guard(string root, RepoMapResult result)
+    {
+        var candidates = new List<(string Repo, string File)>();
+        string? repo = null;
+        string? dir = null;
+        foreach (var line in result.Lines)
+        {
+            if (line.Depth == 0)
+            {
+                repo = line.Text.TrimEnd('/');
+                dir = null;
+            }
+            else if (line.Depth == 1)
+            {
+                var marker = line.Text.LastIndexOf(" (", StringComparison.Ordinal);
+                var name = (marker < 0 ? line.Text : line.Text[..marker]).TrimEnd('/');
+                dir = name == "." ? null : name;
+            }
+            else if (line.Depth == 2 && repo is not null)
+            {
+                candidates.Add((repo, dir is null ? line.Text : $"{dir}/{line.Text}"));
+            }
+        }
+
+        return FreshnessGuard.CheckAndRefresh(
+            root,
+            candidates.Distinct().Take(GuardCandidateLimit).ToList());
     }
 
     private sealed record MapLineData(

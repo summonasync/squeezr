@@ -79,13 +79,13 @@ squeezr status                                # включая состояни�
 | Тул | Параметры (дефолты) | Возвращает |
 |---|---|---|
 | `repo_map` | `repo?`, `depth?` (2), `maxTokens?` (4000) | дерево репо: директории → файлы → члены с сигнатурами. Тел нет, только карта для навигации |
-| `code_search` | `query` (обяз.), `repo?`, `topK?`, `maxTokens?` (без капа по умолчанию) | гибридные совпадения `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; тела не возвращаются |
+| `code_search` | `query` (обяз.), `repo?`, `topK?`, `maxTokens?` (2000) | гибридные совпадения `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; тела не возвращаются |
 | `symbol_lookup` | `name` (обяз.), `kind?`, `repo?`, `maxTokens?` (300) | определения символа: сигнатура, doc-comment, `span`, тело — если влезло в бюджет. Символ не найден → пустой `data`, не ошибка |
-| `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{file, line, kind}`. Символ не найден → tool error (как `squeezr refs`, exit 1) |
+| `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{file, line, kind, enclosingSymbol}` — enclosingSymbol выводится по спанам символов (инференс на тул-слое, точный захат — бэклог `015`). Символ не найден → tool error (как `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (обяз.), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | строки спана + контекст из живого файла на диске (видит правки после индексации). Единственный тул, отдающий код построчно |
 | `index_status` | — | свежесть: возраст индекса, per-repo счётчики файлов/символов/чанков, pending-эмбеддинги, доступность Qdrant |
 
-Известные ограничения текущей реализации: у `find_references` нет `enclosingSymbol` — только `file/line/kind`. У `expand_span` параметр `maxTokens` пока только считает токены, выдачу не обрезает (бэклог `013-expand-budget`). `code_search` без `maxTokens` возвращает всё, что нашлось, — задавай бюджет явно.
+Все тулы имеют дефолтный токен-бюджет (см. таблицу); при `truncated: true` сузь запрос или подними `maxTokens` явно.
 
 ### Флоу навигации
 

@@ -13,15 +13,23 @@ public sealed class IndexStatusTool
     private readonly McpWorkspace _workspace;
     private IVectorStore? _vectorStore;
     private bool _resolved;
+    private readonly McpToolGate _gate;
 
-    public IndexStatusTool(McpWorkspace workspace) => _workspace = workspace;
+    public IndexStatusTool(McpWorkspace workspace, McpToolGate gate)
+    {
+        _workspace = workspace;
+        _gate = gate;
+    }
 
     /// <summary>
     /// Workspace freshness: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability
     /// and point count, index age. Call before code_search to decide whether a reindex is needed.
     /// </summary>
     [McpServerTool(Name = "index_status", Title = "Index status")]
-    public async Task<object> GetAsync(CancellationToken cancellationToken = default)
+    public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
+        _gate.RunAsync(GetCore, cancellationToken);
+
+    private async Task<object> GetCore(CancellationToken cancellationToken)
     {
         try
         {

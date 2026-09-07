@@ -66,6 +66,10 @@ public sealed class ExpandCommand : Command<ExpandCommand.Settings>
                 }
 
                 Console.WriteLine($"tokens: {result.TokensUsed}");
+                if (result.Truncated)
+                {
+                    Console.WriteLine("truncated: output cut at --max-tokens");
+                }
             }
 
             return 0;

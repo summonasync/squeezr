@@ -9,13 +9,19 @@ namespace Squeezr.Cli.Mcp.Tools;
 public sealed class ExpandSpanTool
 {
     private readonly McpWorkspace _workspace;
+    private readonly McpToolGate _gate;
 
-    public ExpandSpanTool(McpWorkspace workspace) => _workspace = workspace;
+    public ExpandSpanTool(McpWorkspace workspace, McpToolGate gate)
+    {
+        _workspace = workspace;
+        _gate = gate;
+    }
 
     /// <summary>
     /// Reveal code around coordinates from code_search/symbol_lookup: the exact lines of the span
     /// plus contextLines of surrounding context, read from the live file on disk (reflects edits
-    /// made after indexing). The only tool that returns raw source lines.
+    /// made after indexing). The only tool that returns raw source lines. When truncated is true,
+    /// context (before/after) may be partially filled — the span itself has priority.
     /// </summary>
     [McpServerTool(Name = "expand_span", Title = "Expand span")]
     public object Expand(
@@ -23,7 +29,15 @@ public sealed class ExpandSpanTool
         int startLine,
         int? endLine = null,
         int? contextLines = null,
-        int? maxTokens = null)
+        int? maxTokens = null) =>
+        _gate.Run(() => ExpandCore(file, startLine, endLine, contextLines, maxTokens));
+
+    private object ExpandCore(
+        string file,
+        int startLine,
+        int? endLine,
+        int? contextLines,
+        int? maxTokens)
     {
         try
         {
@@ -47,7 +61,7 @@ public sealed class ExpandSpanTool
                 result.Span.ToList(),
                 result.After.ToList());
 
-            return ToolEnvelope.Wrap(data, result.TokensUsed, false, warnings, root, staleFiles: null);
+            return ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, staleFiles: null);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

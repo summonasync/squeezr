@@ -3,6 +3,7 @@ using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp;
@@ -106,6 +107,83 @@ public class McpMapExpandToolsTests
         var envelope = ParseEnvelope(result);
         envelope.GetProperty("data").GetProperty("span").EnumerateArray()
             .Select(l => l.GetString()).ShouldContain(l => l!.Contains("+ 100"));
+    }
+
+    [Fact]
+    public async Task RepoMap_AfterInlineRefresh_ReturnsFreshSignatures()
+    {
+        var workspace = NewIndexedWorkspace();
+        WriteFile(workspace, "repo/src/Calc.cs", """
+            namespace Demo;
+
+            public class Calc
+            {
+                /// <summary>Adds numbers.</summary>
+                public int Sum(int a, int b)
+                {
+                    return a + b;
+                }
+
+                public string Add(string a, string b)
+                {
+                    return a + b;
+                }
+            }
+            """);
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "repo_map",
+            new Dictionary<string, object?> { ["depth"] = 3 },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        var texts = envelope.GetProperty("data").EnumerateArray()
+            .Select(l => l.GetProperty("text").GetString()!).ToList();
+        texts.ShouldContain("int Calc.Sum(int a, int b)");
+        texts.ShouldNotContain("int Calc.Add(int a, int b)");
+        envelope.GetProperty("staleFiles").EnumerateArray().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task RepoMap_WithHeldLock_ReportsStaleFiles()
+    {
+        var workspace = NewIndexedWorkspace();
+        WriteFile(workspace, "repo/src/Calc.cs", """
+            namespace Demo;
+
+            public class Calc
+            {
+                /// <summary>Adds numbers.</summary>
+                public int Sum(int a, int b)
+                {
+                    return a + b;
+                }
+
+                public string Add(string a, string b)
+                {
+                    return a + b + string.Empty;
+                }
+            }
+            """);
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspace)))
+        {
+            await using var harness = await McpTestHarness.StartAsync(workspace);
+
+            var result = await harness.Client.CallToolAsync(
+                "repo_map",
+                new Dictionary<string, object?> { ["depth"] = 3 },
+                cancellationToken: CancellationToken.None);
+
+            result.IsError.ShouldNotBe(true);
+            var envelope = ParseEnvelope(result);
+            envelope.GetProperty("staleFiles").EnumerateArray()
+                .Select(s => s.GetString()!).ShouldBe(["demo/src/Calc.cs"]);
+            envelope.GetProperty("data").EnumerateArray()
+                .Select(l => l.GetProperty("text").GetString()!)
+                .ShouldContain("int Calc.Add(int a, int b)");
+        }
     }
 
     [Fact]

@@ -144,6 +144,33 @@ public class McpToolsTests
     }
 
     [Fact]
+    public async Task CodeSearch_WithoutMaxTokens_AppliesDefaultBudget()
+    {
+        var workspace = TestDirs.NewTempDir();
+        Directory.CreateDirectory(Path.Combine(workspace, "repo"));
+        var manager = new WorkspaceManager(workspace);
+        manager.Init("demo");
+        manager.AddRepo("repo", "demo");
+        foreach (var i in Enumerable.Range(1, 100))
+        {
+            WriteFile(workspace, $"repo/f{i:000}.cs", $"class C{i} {{ string Term = \"uniqneedle filler with some extra words to burn the budget\"; }}");
+        }
+        new WorkspaceIndexer().Index(workspace);
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "code_search",
+            new Dictionary<string, object?> { ["query"] = "uniqneedle" },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        envelope.GetProperty("tokensUsed").GetInt32().ShouldBeLessThanOrEqualTo(2000);
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.GetProperty("data").EnumerateArray().ShouldNotBeEmpty();
+    }
+
+    [Fact]
     public async Task IndexStatus_ReturnsFreshnessBlock()
     {
         var workspace = NewIndexedWorkspace();

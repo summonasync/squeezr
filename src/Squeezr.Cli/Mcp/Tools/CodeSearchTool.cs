@@ -13,13 +13,20 @@ public sealed class CodeSearchTool
 {
     private const int GuardCandidateLimit = 50;
 
+    private const int DefaultMaxTokens = 2000;
+
     private readonly McpWorkspace _workspace;
+    private readonly McpToolGate _gate;
     private readonly object _resolveLock = new();
     private IEmbeddingProvider? _embeddings;
     private IVectorStore? _vectorStore;
     private bool _resolved;
 
-    public CodeSearchTool(McpWorkspace workspace) => _workspace = workspace;
+    public CodeSearchTool(McpWorkspace workspace, McpToolGate gate)
+    {
+        _workspace = workspace;
+        _gate = gate;
+    }
 
     /// <summary>
     /// Hybrid exact/semantic search over the indexed workspace. Returns file:line matches with snippets
@@ -27,12 +34,22 @@ public sealed class CodeSearchTool
     /// Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.
     /// </summary>
     [McpServerTool(Name = "code_search", Title = "Search code")]
-    public async Task<object> SearchAsync(
+    public Task<object> SearchAsync(
         string query,
         string? repo = null,
         int? maxTokens = null,
         int? topK = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        _gate.RunAsync(
+            ct => SearchCore(query, repo, maxTokens, topK, ct),
+            cancellationToken);
+
+    private async Task<object> SearchCore(
+        string query,
+        string? repo,
+        int? maxTokens,
+        int? topK,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -42,7 +59,7 @@ public sealed class CodeSearchTool
             ResolveRuntime(root, warnings);
 
             var engine = new SearchEngine(root);
-            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens);
+            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens);
             var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken);
 
             warnings.AddRange(response.Warnings);
@@ -74,7 +91,7 @@ public sealed class CodeSearchTool
     private static FreshnessResult Guard(string root, SearchResponse response) =>
         FreshnessGuard.CheckAndRefresh(
             root,
-            response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).ToList());
+            response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList());
 
     private void ResolveRuntime(string root, List<string> warnings)
     {

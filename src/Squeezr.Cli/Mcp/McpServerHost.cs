@@ -46,6 +46,7 @@ public static class McpServerHost
                 $"warning: '{workspace.Root}' is not an initialized workspace; tool calls will return an error");
         }
 
+        var gate = new McpToolGate();
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.None));
         services.AddSingleton(workspace);
@@ -62,12 +63,12 @@ public static class McpServerHost
                     "Squeezr: local code index for AI agents. Hybrid exact/semantic search over indexed repositories.";
             })
             .WithStreamServerTransport(input, output)
-            .WithTools(new CodeSearchTool(workspace))
-            .WithTools(new IndexStatusTool(workspace))
-            .WithTools(new SymbolLookupTool(workspace))
-            .WithTools(new FindReferencesTool(workspace))
-            .WithTools(new RepoMapTool(workspace))
-            .WithTools(new ExpandSpanTool(workspace));
+            .WithTools(new CodeSearchTool(workspace, gate))
+            .WithTools(new IndexStatusTool(workspace, gate))
+            .WithTools(new SymbolLookupTool(workspace, gate))
+            .WithTools(new FindReferencesTool(workspace, gate))
+            .WithTools(new RepoMapTool(workspace, gate))
+            .WithTools(new ExpandSpanTool(workspace, gate));
 
         await using var provider = services.BuildServiceProvider();
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();

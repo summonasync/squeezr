@@ -13,8 +13,13 @@ public sealed class SymbolLookupTool
     private const string NotFoundPrefix = "No symbol named";
 
     private readonly McpWorkspace _workspace;
+    private readonly McpToolGate _gate;
 
-    public SymbolLookupTool(McpWorkspace workspace) => _workspace = workspace;
+    public SymbolLookupTool(McpWorkspace workspace, McpToolGate gate)
+    {
+        _workspace = workspace;
+        _gate = gate;
+    }
 
     /// <summary>
     /// Find symbol definitions by name across the indexed workspace: signature, doc comment,
@@ -26,7 +31,14 @@ public sealed class SymbolLookupTool
         string name,
         string? kind = null,
         string? repo = null,
-        int? maxTokens = null)
+        int? maxTokens = null) =>
+        _gate.Run(() => FindCore(name, kind, repo, maxTokens));
+
+    private object FindCore(
+        string name,
+        string? kind,
+        string? repo,
+        int? maxTokens)
     {
         try
         {
@@ -71,7 +83,7 @@ public sealed class SymbolLookupTool
     private static FreshnessResult Guard(string root, SymbolLookupResult result) =>
         FreshnessGuard.CheckAndRefresh(
             root,
-            result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).ToList());
+            result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList());
 
     private sealed record SymbolHitData(
         [property: JsonPropertyName("repo")] string Repo,

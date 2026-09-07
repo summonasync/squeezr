@@ -3,6 +3,7 @@ using ModelContextProtocol.Server;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp.Tools;
@@ -13,16 +14,25 @@ public sealed class FindReferencesTool
     private const int GuardCandidateLimit = 50;
 
     private readonly McpWorkspace _workspace;
+    private readonly McpToolGate _gate;
 
-    public FindReferencesTool(McpWorkspace workspace) => _workspace = workspace;
+    public FindReferencesTool(McpWorkspace workspace, McpToolGate gate)
+    {
+        _workspace = workspace;
+        _gate = gate;
+    }
 
     /// <summary>
     /// Find all references to a symbol in the index: every call site as file:line with the
-    /// reference kind. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup
-    /// to jump from a match to its usages.
+    /// reference kind and the enclosing symbol (smallest span containing the call site,
+    /// inferred from symbol spans — may be off for partial classes). Returns a tool error if
+    /// the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.
     /// </summary>
     [McpServerTool(Name = "find_references", Title = "Find references")]
-    public object Find(string symbol, string? repo = null)
+    public object Find(string symbol, string? repo = null) =>
+        _gate.Run(() => FindCore(symbol, repo));
+
+    private object FindCore(string symbol, string? repo)
     {
         try
         {
@@ -39,9 +49,7 @@ public sealed class FindReferencesTool
                 result = lookup.Find(symbol, repo);
             }
 
-            var data = result.Groups
-                .SelectMany(g => g.Refs.Select(r => new RefData(r.File, r.Line, r.Kind)))
-                .ToList();
+            var data = BuildData(root, result);
 
             var tokensUsed = data.Sum(d => TokenCounter.Estimate($"{d.File}:{d.Line} {d.Kind}"));
 
@@ -53,16 +61,60 @@ public sealed class FindReferencesTool
         }
     }
 
+    private static List<RefData> BuildData(string root, RefLookupResult result)
+    {
+        var symbolsByFile = new Dictionary<(string Repo, string File), IReadOnlyList<SymbolDocument>>();
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(root));
+
+        return result.Groups
+            .SelectMany(g => g.Refs.Select(r => new RefData(
+                r.File,
+                r.Line,
+                r.Kind,
+                FindEnclosing(LoadSymbols(store, g.Repo, r.File, symbolsByFile), r.Line))))
+            .ToList();
+    }
+
+    private static IReadOnlyList<SymbolDocument> LoadSymbols(
+        MetaStore store,
+        string repo,
+        string file,
+        Dictionary<(string Repo, string File), IReadOnlyList<SymbolDocument>> cache)
+    {
+        var key = (repo, file);
+        if (cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var repoDoc = store.FindRepo(repo);
+        var fileDoc = repoDoc is null ? null : store.ListFiles(repoDoc.Id).FirstOrDefault(f => f.Path.Equals(file, StringComparison.Ordinal));
+        var symbols = fileDoc is null
+            ? []
+            : store.ListSymbolsByFile(fileDoc.Id);
+        cache[key] = symbols;
+        return symbols;
+    }
+
+    private static string? FindEnclosing(IReadOnlyList<SymbolDocument> symbols, int line) =>
+        symbols
+            .Where(s => s.StartLine <= line && line <= s.EndLine)
+            .OrderBy(s => s.EndLine - s.StartLine)
+            .Select(s => s.ContainerName is null ? s.Name : $"{s.ContainerName}.{s.Name}")
+            .FirstOrDefault();
+
     private static FreshnessResult Guard(string root, RefLookupResult result) =>
         FreshnessGuard.CheckAndRefresh(
             root,
             result.Groups
                 .SelectMany(g => g.Refs.Select(r => (g.Repo, r.File)).Append((g.Repo, g.File)))
+                .Distinct()
                 .Take(GuardCandidateLimit)
                 .ToList());
 
     private sealed record RefData(
         [property: JsonPropertyName("file")] string File,
         [property: JsonPropertyName("line")] int Line,
-        [property: JsonPropertyName("kind")] string Kind);
+        [property: JsonPropertyName("kind")] string Kind,
+        [property: JsonPropertyName("enclosingSymbol")] string? EnclosingSymbol);
 }

@@ -114,6 +114,107 @@ public class McpNavigationToolsTests
     }
 
     [Fact]
+    public async Task FindReferences_ReportsEnclosingSymbol()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "find_references",
+            new Dictionary<string, object?> { ["symbol"] = "Add" },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        var refs = envelope.GetProperty("data").EnumerateArray().ToList();
+        refs.Count.ShouldBe(2);
+        refs.Single(r => r.GetProperty("file").GetString() == "src/Runner.cs")
+            .GetProperty("enclosingSymbol").GetString().ShouldBe("Runner.Go");
+        refs.Single(r => r.GetProperty("file").GetString() == "src/Other.cs")
+            .GetProperty("enclosingSymbol").GetString().ShouldBe("Other.Combine");
+    }
+
+    [Fact]
+    public async Task FindReferences_ClassLevelRef_InfersContainingClass()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "find_references",
+            new Dictionary<string, object?> { ["symbol"] = "Calc" },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        var fieldRefs = envelope.GetProperty("data").EnumerateArray()
+            .Where(r => r.GetProperty("file").GetString() == "src/FieldHolder.cs")
+            .ToList();
+        fieldRefs.ShouldNotBeEmpty();
+        fieldRefs.ShouldAllBe(r => r.GetProperty("enclosingSymbol").GetString() == "FieldHolder._calc");
+    }
+
+    [Fact]
+    public async Task FindReferences_WithHeldLock_ReportsDistinctStaleFiles()
+    {
+        var workspace = NewIndexedWorkspace();
+        WriteFile(workspace, "repo/src/Calc.cs", """
+            namespace Demo;
+
+            public class Calc
+            {
+                /// <summary>Adds numbers.</summary>
+                public int Add(int a, int b)
+                {
+                    return a + b + 0;
+                }
+
+                public string Add(string a, string b)
+                {
+                    return a + b + string.Empty;
+                }
+            }
+            """);
+        WriteFile(workspace, "repo/src/Runner.cs", """
+            namespace Demo;
+
+            public class Runner
+            {
+                public int Go()
+                {
+                    return new Calc().Add(1, 2 + 0);
+                }
+            }
+            """);
+        WriteFile(workspace, "repo/src/Other.cs", """
+            namespace Demo;
+
+            public class Other
+            {
+                public string Combine(Calc calc)
+                {
+                    return calc.Add("x", "y") + string.Empty;
+                }
+            }
+            """);
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspace)))
+        {
+            await using var harness = await McpTestHarness.StartAsync(workspace);
+
+            var result = await harness.Client.CallToolAsync(
+                "find_references",
+                new Dictionary<string, object?> { ["symbol"] = "Add" },
+                cancellationToken: CancellationToken.None);
+
+            result.IsError.ShouldNotBe(true);
+            var envelope = ParseEnvelope(result);
+            envelope.GetProperty("staleFiles").EnumerateArray()
+                .Select(s => s.GetString()!).OrderBy(f => f, StringComparer.Ordinal)
+                .ShouldBe(["demo/src/Calc.cs", "demo/src/Other.cs", "demo/src/Runner.cs"]);
+        }
+    }
+
+    [Fact]
     public async Task SymbolLookup_WithHeldLock_ReportsStaleFiles()
     {
         var workspace = NewIndexedWorkspace();
@@ -198,6 +299,14 @@ public class McpNavigationToolsTests
                 {
                     return calc.Add("x", "y");
                 }
+            }
+            """);
+        WriteFile(workspace, "repo/src/FieldHolder.cs", """
+            namespace Demo;
+
+            public class FieldHolder
+            {
+                private readonly Calc _calc = new Calc();
             }
             """);
         manager.AddRepo("repo", "demo");
