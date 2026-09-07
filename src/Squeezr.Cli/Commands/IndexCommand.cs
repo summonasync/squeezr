@@ -28,7 +28,25 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         try
         {
             var indexer = new WorkspaceIndexer();
-            var result = indexer.Index(Directory.GetCurrentDirectory(), settings.Repo, settings.Full, settings.NoSemantic);
+            var workspaceRoot = Directory.GetCurrentDirectory();
+
+            IndexResult result;
+            if (!settings.Json && AnsiConsole.Profile.Capabilities.Interactive)
+            {
+                result = AnsiConsole.Progress()
+                    .AutoClear(true)
+                    .Columns(
+                        new TaskDescriptionColumn(),
+                        new ProgressBarColumn(),
+                        new PercentageColumn(),
+                        new SpinnerColumn())
+                    .Start(ctx => indexer.Index(
+                        workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic, new IndexProgressRenderer(ctx)));
+            }
+            else
+            {
+                result = indexer.Index(workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic);
+            }
 
             if (settings.Json)
             {

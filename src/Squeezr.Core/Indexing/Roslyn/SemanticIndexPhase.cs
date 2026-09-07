@@ -16,7 +16,8 @@ public static class SemanticIndexPhase
         IReadOnlyDictionary<string, FileDocument> dbFilesByPath,
         SqueezrConfig config,
         bool noSemantic,
-        Action<string> warning)
+        Action<string> warning,
+        IIndexProgress? progress = null)
     {
         if (csFiles.Count == 0)
         {
@@ -35,8 +36,11 @@ public static class SemanticIndexPhase
         }
 
         var skipped = 0;
+        var symbolsInserted = 0;
         using (session)
         {
+            progress?.PhaseStarted(repoDoc.Name, IndexPhase.Semantic, csFiles.Count);
+
             foreach (var degradation in session.Warnings.Where(IsDegradationWarning))
             {
                 warning(degradation);
@@ -54,66 +58,74 @@ public static class SemanticIndexPhase
 
             foreach (var file in csFiles)
             {
-                byte[] content;
                 try
                 {
-                    content = File.ReadAllBytes(file.FullPath);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    warning($"skipped '{file.RelativePath}': unreadable ({ex.Message})");
-                    skipped++;
-                    continue;
-                }
+                    byte[] content;
+                    try
+                    {
+                        content = File.ReadAllBytes(file.FullPath);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        warning($"skipped '{file.RelativePath}': unreadable ({ex.Message})");
+                        skipped++;
+                        continue;
+                    }
 
-                var warningCountBefore = provider.Warnings.Count;
-                var result = provider.Parse(new FileRef(repoDoc.Name, file.RelativePath), content);
-                var parseFailed = provider.Warnings.Count > warningCountBefore;
-                if (parseFailed)
-                {
-                    warning($"skipped '{file.RelativePath}': symbol extraction failed; previous data kept");
-                    skipped++;
-                    continue;
-                }
+                    var warningCountBefore = provider.Warnings.Count;
+                    var result = provider.Parse(new FileRef(repoDoc.Name, file.RelativePath), content);
+                    var parseFailed = provider.Warnings.Count > warningCountBefore;
+                    if (parseFailed)
+                    {
+                        warning($"skipped '{file.RelativePath}': symbol extraction failed; previous data kept");
+                        skipped++;
+                        continue;
+                    }
 
-                var isChanged = changedByPath.TryGetValue(file.RelativePath, out var fileDoc);
-                if (!isChanged && dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc)
-                    && symbolsByFile.TryGetValue(existingDoc.Id, out var existingSymbols)
-                    && HasDrift(existingSymbols, result))
-                {
-                    isChanged = true;
-                    fileDoc = existingDoc;
-                }
+                    var isChanged = changedByPath.TryGetValue(file.RelativePath, out var fileDoc);
+                    if (!isChanged && dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc)
+                        && symbolsByFile.TryGetValue(existingDoc.Id, out var existingSymbols)
+                        && HasDrift(existingSymbols, result))
+                    {
+                        isChanged = true;
+                        fileDoc = existingDoc;
+                    }
 
-                List<SymbolDocument> symbolsForRefs;
-                if (isChanged)
-                {
-                    CascadeFile(fileDoc!.Id, symbolsByFile, store);
-                    symbolsForRefs = InsertSymbols(result, fileDoc, repoDoc, store);
-                    symbolsByFile[fileDoc.Id] = symbolsForRefs;
-                    InsertChunks(result, fileDoc, repoDoc, symbolsForRefs, store);
-                }
-                else if (dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc2)
-                         && symbolsByFile.TryGetValue(existingDoc2.Id, out var existingSymbols2))
-                {
-                    symbolsForRefs = existingSymbols2;
-                }
-                else
-                {
-                    continue;
-                }
+                    List<SymbolDocument> symbolsForRefs;
+                    if (isChanged)
+                    {
+                        CascadeFile(fileDoc!.Id, symbolsByFile, store);
+                        symbolsForRefs = InsertSymbols(result, fileDoc, repoDoc, store);
+                        symbolsByFile[fileDoc.Id] = symbolsForRefs;
+                        InsertChunks(result, fileDoc, repoDoc, symbolsForRefs, store);
+                        symbolsInserted += symbolsForRefs.Count;
+                    }
+                    else if (dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc2)
+                             && symbolsByFile.TryGetValue(existingDoc2.Id, out var existingSymbols2))
+                    {
+                        symbolsForRefs = existingSymbols2;
+                    }
+                    else
+                    {
+                        continue;
+                    }
 
-                if (noSemantic)
-                {
-                    continue;
-                }
+                    if (noSemantic)
+                    {
+                        continue;
+                    }
 
-                if (!isChanged)
-                {
-                    store.DeleteRefsByFromSymbolIds(symbolsForRefs.Select(s => s.Id).ToList());
-                }
+                    if (!isChanged)
+                    {
+                        store.DeleteRefsByFromSymbolIds(symbolsForRefs.Select(s => s.Id).ToList());
+                    }
 
-                InsertRefs(result, symbolsForRefs, repoRoot, dbFilesByPath, store);
+                    InsertRefs(result, symbolsForRefs, repoRoot, dbFilesByPath, store);
+                }
+                finally
+                {
+                    progress?.ItemProcessed(repoDoc.Name, file.RelativePath, symbolsInserted);
+                }
             }
 
             foreach (var providerWarning in provider.Warnings)

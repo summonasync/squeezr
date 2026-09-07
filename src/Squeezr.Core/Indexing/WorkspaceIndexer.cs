@@ -10,7 +10,12 @@ public sealed class WorkspaceIndexer
 {
     private const double CompactHintThreshold = 0.3;
 
-    public IndexResult Index(string workspaceRoot, string? repoName = null, bool full = false, bool noSemantic = false)
+    public IndexResult Index(
+        string workspaceRoot,
+        string? repoName = null,
+        bool full = false,
+        bool noSemantic = false,
+        IIndexProgress? progress = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -36,7 +41,7 @@ public sealed class WorkspaceIndexer
             var textCache = new Dictionary<uint, string>();
 
             var works = targets
-                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache))
+                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache, progress))
                 .ToList();
 
             var changedDocs = works.SelectMany(w => w.Changed).ToList();
@@ -77,9 +82,35 @@ public sealed class WorkspaceIndexer
             {
                 if (changedDocs.Count > 0 || tombstones.Count > 0)
                 {
+                    var repoNames = store.ListRepos().ToDictionary(r => r.Id, r => r.Name);
+                    var trigramTotals = changedDocs
+                        .GroupBy(d => d.RepoId)
+                        .ToDictionary(g => g.Key, g => g.Count());
+                    if (progress is not null)
+                    {
+                        foreach (var (repoId, total) in trigramTotals)
+                        {
+                            if (repoNames.TryGetValue(repoId, out var name))
+                            {
+                                progress.PhaseStarted(name, IndexPhase.Trigram, total);
+                            }
+                        }
+                    }
+
                     var documents = changedDocs.Select(doc =>
                         new TrigramDocument(doc.RepoId, doc.Id, ToPostings(textCache[doc.Id])));
                     TrigramIndexWriter.AppendBatch(trigramPath, documents, tombstones);
+
+                    if (progress is not null)
+                    {
+                        foreach (var doc in changedDocs)
+                        {
+                            if (repoNames.TryGetValue(doc.RepoId, out var name))
+                            {
+                                progress.ItemProcessed(name, doc.Path);
+                            }
+                        }
+                    }
 
                     var stats = TrigramSegment.Scan(trigramPath);
                     if (stats.TombstoneRatio > CompactHintThreshold)
@@ -91,7 +122,15 @@ public sealed class WorkspaceIndexer
             }
             else
             {
-                RebuildTrigramIndex(workspaceRoot, store, manifest, warnings, textCache, trigramPath);
+                RebuildTrigramIndex(workspaceRoot, store, manifest, warnings, textCache, trigramPath, progress);
+            }
+
+            if (progress is not null)
+            {
+                foreach (var repo in targets)
+                {
+                    progress.RepoCompleted(repo.Name);
+                }
             }
 
             return new IndexResult(works.Select(w => w.Result).ToList(), DateTime.UtcNow, warnings);
@@ -111,7 +150,8 @@ public sealed class WorkspaceIndexer
         SqueezrConfig config,
         bool noSemantic,
         List<string> warnings,
-        Dictionary<uint, string> textCache)
+        Dictionary<uint, string> textCache,
+        IIndexProgress? progress)
     {
         var repoDoc = store.FindRepo(repo.Name)
                       ?? throw new WorkspaceException($"Repository '{repo.Name}' is missing from the index store.");
@@ -121,7 +161,9 @@ public sealed class WorkspaceIndexer
             throw new WorkspaceException($"Repository path '{repoRoot}' does not exist.");
         }
 
+        progress?.PhaseStarted(repo.Name, IndexPhase.Walk, 0);
         var walk = RepoFileWalker.Walk(repoRoot, config.Indexing.Ignore, config.Indexing.MaxFileSizeKb, warnings.Add);
+        progress?.PhaseStarted(repo.Name, IndexPhase.Files, walk.Files.Count);
         var skipped = walk.Skipped;
         var dbFiles = store.ListFiles(repoDoc.Id);
         var dbByPath = dbFiles.ToDictionary(f => f.Path, StringComparer.Ordinal);
@@ -135,6 +177,8 @@ public sealed class WorkspaceIndexer
 
         foreach (var file in walk.Files)
         {
+            progress?.ItemProcessed(repo.Name, file.RelativePath);
+
             var isNew = !dbByPath.TryGetValue(file.RelativePath, out var existing);
             if (!full && !isNew && existing!.Sha256 == file.Sha256)
             {
@@ -185,8 +229,9 @@ public sealed class WorkspaceIndexer
         var csFiles = walk.Files.Where(f => f.Language == "csharp").ToList();
         var changedByPath = changed.ToDictionary(c => c.Path, StringComparer.Ordinal);
         var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+
         var semantic = SemanticIndexPhase.Run(
-            repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add);
+            repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add, progress);
         skipped += semantic.Skipped;
 
         var totalFiles = store.CountFiles(repoDoc.Id);
@@ -224,13 +269,27 @@ public sealed class WorkspaceIndexer
         WorkspaceManifest manifest,
         List<string> warnings,
         Dictionary<uint, string> textCache,
-        string targetPath)
+        string targetPath,
+        IIndexProgress? progress = null)
     {
         var writer = new TrigramIndexWriter();
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
         var entriesByName = manifest.Repos.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        var allFiles = store.ListAllFiles().ToList();
 
-        foreach (var file in store.ListAllFiles())
+        if (progress is not null)
+        {
+            var totals = allFiles
+                .Where(f => reposById.TryGetValue(f.RepoId, out var repoDoc) && entriesByName.ContainsKey(repoDoc.Name))
+                .GroupBy(f => reposById[f.RepoId].Name)
+                .ToDictionary(g => g.Key, g => g.Count());
+            foreach (var (name, total) in totals)
+            {
+                progress.PhaseStarted(name, IndexPhase.Trigram, total);
+            }
+        }
+
+        foreach (var file in allFiles)
         {
             if (!reposById.TryGetValue(file.RepoId, out var repoDoc)
                 || !entriesByName.TryGetValue(repoDoc.Name, out var entry))
@@ -241,37 +300,44 @@ public sealed class WorkspaceIndexer
             }
 
             string text;
-            if (textCache.TryGetValue(file.Id, out var cached))
+            try
             {
-                text = cached;
-            }
-            else
-            {
-                var fullPath = Path.Combine(ResolveRepoRoot(workspaceRoot, entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
-                if (!File.Exists(fullPath))
+                if (textCache.TryGetValue(file.Id, out var cached))
                 {
-                    warnings.Add($"dropping '{file.Path}' from index store: file is missing on disk");
-                    store.DeleteFile(file.Id);
-                    continue;
+                    text = cached;
+                }
+                else
+                {
+                    var fullPath = Path.Combine(ResolveRepoRoot(workspaceRoot, entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(fullPath))
+                    {
+                        warnings.Add($"dropping '{file.Path}' from index store: file is missing on disk");
+                        store.DeleteFile(file.Id);
+                        continue;
+                    }
+
+                    try
+                    {
+                        text = File.ReadAllText(fullPath);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        warnings.Add($"dropping '{file.Path}' from index store: unreadable ({ex.Message})");
+                        store.DeleteFile(file.Id);
+                        continue;
+                    }
                 }
 
-                try
-                {
-                    text = File.ReadAllText(fullPath);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    warnings.Add($"dropping '{file.Path}' from index store: unreadable ({ex.Message})");
-                    store.DeleteFile(file.Id);
-                    continue;
-                }
+                var postings = TrigramExtractor.ExtractPostings(text);
+                writer.AddDocument(new TrigramDocument(
+                    file.RepoId,
+                    file.Id,
+                    postings.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray())));
             }
-
-            var postings = TrigramExtractor.ExtractPostings(text);
-            writer.AddDocument(new TrigramDocument(
-                file.RepoId,
-                file.Id,
-                postings.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray())));
+            finally
+            {
+                progress?.ItemProcessed(repoDoc.Name, file.Path);
+            }
         }
 
         writer.Write(targetPath);
