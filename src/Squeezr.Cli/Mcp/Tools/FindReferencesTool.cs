@@ -24,9 +24,10 @@ public sealed class FindReferencesTool
 
     /// <summary>
     /// Find all references to a symbol in the index: every call site as file:line with the
-    /// reference kind and the enclosing symbol (smallest span containing the call site,
-    /// inferred from symbol spans — may be off for partial classes). Returns a tool error if
-    /// the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.
+    /// reference kind and the enclosing symbol (captured at index time by Roslyn — exact,
+    /// partial classes included; span-based inference is only a fallback for indexes built
+    /// before enclosing capture). Returns a tool error if the symbol is not indexed.
+    /// Pair with symbol_lookup to jump from a match to its usages.
     /// </summary>
     [McpServerTool(Name = "find_references", Title = "Find references")]
     public object Find(string symbol, string? repo = null) =>
@@ -63,15 +64,24 @@ public sealed class FindReferencesTool
 
     private static List<RefData> BuildData(string root, RefLookupResult result)
     {
+        var flattened = result.Groups
+            .SelectMany(g => g.Refs.Select(r => (g.Repo, Ref: r)))
+            .ToList();
+        if (flattened.All(x => x.Ref.EnclosingSymbol is not null))
+        {
+            return flattened
+                .Select(x => new RefData(x.Ref.File, x.Ref.Line, x.Ref.Kind, x.Ref.EnclosingSymbol))
+                .ToList();
+        }
+
         var symbolsByFile = new Dictionary<(string Repo, string File), IReadOnlyList<SymbolDocument>>();
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(root));
-
-        return result.Groups
-            .SelectMany(g => g.Refs.Select(r => new RefData(
-                r.File,
-                r.Line,
-                r.Kind,
-                FindEnclosing(LoadSymbols(store, g.Repo, r.File, symbolsByFile), r.Line))))
+        return flattened
+            .Select(x => new RefData(
+                x.Ref.File,
+                x.Ref.Line,
+                x.Ref.Kind,
+                x.Ref.EnclosingSymbol ?? FindEnclosing(LoadSymbols(store, x.Repo, x.Ref.File, symbolsByFile), x.Ref.Line)))
             .ToList();
     }
 

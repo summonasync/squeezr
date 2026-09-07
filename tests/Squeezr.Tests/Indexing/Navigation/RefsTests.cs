@@ -55,6 +55,7 @@ public class RefsTests
         pretty.StdOut.ShouldContain("src/Runner.cs:");
         pretty.StdOut.ShouldContain("src/Other.cs:");
         pretty.StdOut.ShouldContain(" call");
+        pretty.StdOut.ShouldContain("in Runner.Go");
 
         var json = await RunCliAsync(root, "refs", "Add", "--json");
         json.ExitCode.ShouldBe(0);
@@ -66,6 +67,8 @@ public class RefsTests
             refs[0].GetProperty("file").GetString()!.ShouldStartWith("src/");
             refs[0].GetProperty("line").GetInt32().ShouldBeGreaterThan(0);
             refs[0].GetProperty("kind").GetString().ShouldBe("call");
+            refs[0].GetProperty("enclosingSymbol").GetString().ShouldBe("Runner.Go");
+            refs[1].GetProperty("enclosingSymbol").GetString().ShouldBe("Other.Combine");
         }
 
         var missing = await RunCliAsync(root, "refs", "Nope", "--json");

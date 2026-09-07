@@ -135,7 +135,7 @@ public class McpNavigationToolsTests
     }
 
     [Fact]
-    public async Task FindReferences_ClassLevelRef_InfersContainingClass()
+    public async Task FindReferences_ClassLevelRef_UsesCapturedEnclosing()
     {
         var workspace = NewIndexedWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
@@ -150,8 +150,9 @@ public class McpNavigationToolsTests
         var fieldRefs = envelope.GetProperty("data").EnumerateArray()
             .Where(r => r.GetProperty("file").GetString() == "src/FieldHolder.cs")
             .ToList();
-        fieldRefs.ShouldNotBeEmpty();
-        fieldRefs.ShouldAllBe(r => r.GetProperty("enclosingSymbol").GetString() == "FieldHolder._calc");
+        fieldRefs.Count.ShouldBe(2);
+        fieldRefs.ShouldContain(r => r.GetProperty("enclosingSymbol").GetString() == "FieldHolder._calc");
+        fieldRefs.ShouldContain(r => r.GetProperty("enclosingSymbol").GetString() == "FieldHolder");
     }
 
     [Fact]

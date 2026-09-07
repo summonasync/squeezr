@@ -3,7 +3,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Indexing.Navigation;
 
-public sealed record RefHit(string File, int Line, string Kind);
+public sealed record RefHit(string File, int Line, string Kind, string? EnclosingSymbol);
 
 public sealed record SymbolRefGroup(
     string Name,
@@ -46,7 +46,7 @@ public sealed class RefLookup
                 var refs = store.ListRefsByFromSymbol(symbol.Id)
                     .OrderBy(r => r.FileId)
                     .ThenBy(r => r.Line)
-                    .Select(r => new RefHit(store.FindFileById(r.FileId)?.Path ?? "?", r.Line, r.Kind))
+                    .Select(r => new RefHit(store.FindFileById(r.FileId)?.Path ?? "?", r.Line, r.Kind, r.EnclosingSymbol))
                     .ToList();
                 groups.Add(new SymbolRefGroup(
                     symbol.Name,

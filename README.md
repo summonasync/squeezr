@@ -81,7 +81,7 @@ squeezr status                                # включая состояни�
 | `repo_map` | `repo?`, `depth?` (2), `maxTokens?` (4000) | дерево репо: директории → файлы → члены с сигнатурами. Тел нет, только карта для навигации |
 | `code_search` | `query` (обяз.), `repo?`, `topK?`, `maxTokens?` (2000) | гибридные совпадения `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; тела не возвращаются |
 | `symbol_lookup` | `name` (обяз.), `kind?`, `repo?`, `maxTokens?` (300) | определения символа: сигнатура, doc-comment, `span`, тело — если влезло в бюджет. Символ не найден → пустой `data`, не ошибка |
-| `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{file, line, kind, enclosingSymbol}` — enclosingSymbol выводится по спанам символов (инференс на тул-слое, точный захат — бэклог `015`). Символ не найден → tool error (как `squeezr refs`, exit 1) |
+| `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{file, line, kind, enclosingSymbol}` — enclosingSymbol захватывается на индексации Roslyn'ом (точно, включая partial-классы); для индексов, построенных до захвата, значение выводится по спанам символов (fallback-инференс). Символ не найден → tool error (как `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (обяз.), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | строки спана + контекст из живого файла на диске (видит правки после индексации). Единственный тул, отдающий код построчно |
 | `index_status` | — | свежесть: возраст индекса, per-repo счётчики файлов/символов/чанков, pending-эмбеддинги, доступность Qdrant |
 

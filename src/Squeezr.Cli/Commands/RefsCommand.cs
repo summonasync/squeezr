@@ -50,7 +50,8 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
                     {
                         foreach (var hit in fileGroup)
                         {
-                            AnsiConsole.MarkupLine($"  {hit.File.EscapeMarkup()}:{hit.Line} {hit.Kind.EscapeMarkup()}");
+                            var enclosing = hit.EnclosingSymbol is null ? string.Empty : $" (in {hit.EnclosingSymbol.EscapeMarkup()})";
+                            AnsiConsole.MarkupLine($"  {hit.File.EscapeMarkup()}:{hit.Line} {hit.Kind.EscapeMarkup()}{enclosing}");
                         }
                     }
                 }

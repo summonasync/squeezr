@@ -273,7 +273,8 @@ public static class SemanticIndexPhase
                 ToName = r.ToName ?? string.Empty,
                 Kind = r.Kind.ToString().ToLowerInvariant(),
                 FileId = fromDoc.Id,
-                Line = r.Line
+                Line = r.Line,
+                EnclosingSymbol = r.EnclosingName
             });
         }
 

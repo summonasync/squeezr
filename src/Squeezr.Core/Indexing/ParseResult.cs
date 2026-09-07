@@ -34,7 +34,8 @@ public sealed record SymbolRef(
     string? ToName,
     RefKind Kind,
     int Line,
-    string? FromPath = null);
+    string? FromPath = null,
+    string? EnclosingName = null);
 
 public enum RefKind
 {

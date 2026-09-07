@@ -15,6 +15,7 @@ public static class ReferenceExtractor
     {
         var refs = new List<SymbolRef>();
         var roots = new Dictionary<Document, SyntaxNode?>();
+        var models = new Dictionary<Document, SemanticModel?>();
         var scope = ImmutableHashSet.CreateRange(document.Project.Documents);
 
         foreach (var extracted in declared)
@@ -49,18 +50,34 @@ public static class ReferenceExtractor
                     }
 
                     var kind = Classify(root, location, symbol);
+                    SemanticModel? model = null;
+                    if (doc is not null && !models.TryGetValue(doc, out model))
+                    {
+                        model = await doc.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+                        models[doc] = model;
+                    }
+
+                    var enclosing = model?.GetEnclosingSymbol(location.Location.SourceSpan.Start, cancellationToken);
                     refs.Add(new SymbolRef(
                         null,
                         symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
                         kind,
                         line,
-                        doc?.FilePath));
+                        doc?.FilePath,
+                        FormatEnclosing(enclosing)));
                 }
             }
         }
 
         return refs;
     }
+
+    private static string? FormatEnclosing(ISymbol? enclosing) =>
+        enclosing is null
+            ? null
+            : enclosing.ContainingSymbol is { Kind: not RoslynSymbolKind.Namespace } container
+                ? $"{container.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}.{enclosing.Name}"
+                : enclosing.Name;
 
     private static RefKind Classify(SyntaxNode? root, ReferenceLocation location, ISymbol target)
     {

@@ -24,4 +24,7 @@ public sealed class RefDocument
 
     [BsonField("line")]
     public int Line { get; set; }
+
+    [BsonField("enclosingSymbol")]
+    public string? EnclosingSymbol { get; set; }
 }
