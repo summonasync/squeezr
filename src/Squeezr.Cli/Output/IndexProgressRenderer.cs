@@ -27,6 +27,7 @@ public sealed class IndexProgressRenderer : IIndexProgress
         }
 
         task.IsIndeterminate = totalItems == 0;
+        _context.Refresh();
     }
 
     public void ItemProcessed(string repoName, string currentItem, int? symbolsInserted = null)

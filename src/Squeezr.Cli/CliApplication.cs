@@ -1,12 +1,21 @@
+using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Commands;
+using Squeezr.Cli.Tui;
 
 namespace Squeezr.Cli;
 
 public static class CliApplication
 {
-    public static Task<int> RunAsync(string[] args)
+    public static Task<int> RunAsync(string[] args, IAnsiConsole? console = null, bool? interactive = null)
     {
+        if (args.Length == 0 && (interactive ?? AnsiConsole.Profile.Capabilities.Interactive))
+        {
+            return console is not null
+                ? TuiApp.RunAsync(console, Directory.GetCurrentDirectory())
+                : TuiApp.RunInteractiveAsync(Directory.GetCurrentDirectory());
+        }
+
         var app = new CommandApp();
         app.Configure(config =>
         {
@@ -35,6 +44,8 @@ public static class CliApplication
                 .WithDescription("Remove the .squeezr index store");
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run an MCP server over stdio for AI agents");
+            config.AddCommand<TuiCommand>("tui")
+                .WithDescription("Interactive terminal UI (dashboard, search, wizards)");
         });
 
         return app.RunAsync(args);
