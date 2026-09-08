@@ -6,3 +6,8 @@ public interface IParsingProvider
 
     ParseResult Parse(FileRef file, ReadOnlySpan<byte> content);
 }
+
+public interface IParsingProviderWithWarnings : IParsingProvider
+{
+    IReadOnlyList<string> Warnings { get; }
+}

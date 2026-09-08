@@ -1,6 +1,7 @@
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Roslyn;
+using Squeezr.Core.Indexing.TreeSitter;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -263,10 +264,19 @@ public sealed class WorkspaceIndexer
                 var csFiles = doc.Language == "csharp"
                     ? new List<SourceFile> { new(relativePath, fullPath, doc.Language, doc.SizeBytes, doc.Sha256) }
                     : [];
+                var tsTargets = IsTreeSitterLanguage(doc.Language) ? new List<FileDocument> { doc } : [];
 
                 SemanticIndexPhase.Run(
                     repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
                     config.Indexing.NoSemantic, warnings.Add);
+                var tsResult = TreeSitterIndexPhase.Run(
+                    repoRoot, repoDoc, store, tsTargets, textCache, config.Chunking, config.Indexing.NoSemantic,
+                    new TreeSitterProvider(config), warnings.Add);
+                var providerPaths = csFiles.Select(f => f.RelativePath)
+                    .Concat(tsTargets.Select(d => d.Path).Except(tsResult.FailedPaths))
+                    .ToHashSet(StringComparer.Ordinal);
+                IndexFallbackChunks(
+                    store, repoDoc, changedByPath, providerPaths, config.Chunking, textCache);
 
                 if (embeddings is not null && vectorStore is not null)
                 {
@@ -397,6 +407,17 @@ public sealed class WorkspaceIndexer
             repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add, progress);
         skipped += semantic.Skipped;
 
+        var tsTargets = changed.Where(d => IsTreeSitterLanguage(d.Language)).ToList();
+        var tsResult = TreeSitterIndexPhase.Run(
+            repoRoot, repoDoc, store, tsTargets, textCache, config.Chunking, noSemantic,
+            new TreeSitterProvider(config), warnings.Add, progress);
+        skipped += tsResult.Skipped;
+
+        var providerPaths = csFiles.Select(f => f.RelativePath)
+            .Concat(tsTargets.Select(d => d.Path).Except(tsResult.FailedPaths))
+            .ToHashSet(StringComparer.Ordinal);
+        IndexFallbackChunks(store, repoDoc, changedByPath, providerPaths, config.Chunking, textCache);
+
         if (embeddings is not null && vectorStore is not null)
         {
             EmbeddingIndexPhase.Run(repoDoc, store, modelKey!, embeddings, vectorStore, warnings.Add, progress);
@@ -427,8 +448,31 @@ public sealed class WorkspaceIndexer
     {
         var oldIds = store.ListSymbolsByFile(fileId).Select(s => s.Id).ToList();
         store.DeleteRefsByFromSymbolIds(oldIds);
+        store.DeleteRefsByFile(fileId);
         store.DeleteSymbolsByFile(fileId);
         store.DeleteChunksByFile(fileId);
+    }
+
+    private static bool IsTreeSitterLanguage(string language) =>
+        language is "javascript" or "typescript" or "tsx";
+
+    private static void IndexFallbackChunks(
+        MetaStore store,
+        RepoDocument repoDoc,
+        IReadOnlyDictionary<string, FileDocument> changedByPath,
+        IReadOnlyCollection<string> providerPaths,
+        ChunkingConfig chunking,
+        Dictionary<uint, string> textCache)
+    {
+        foreach (var (path, doc) in changedByPath)
+        {
+            if (providerPaths.Contains(path) || !textCache.TryGetValue(doc.Id, out var text))
+            {
+                continue;
+            }
+
+            FallbackChunker.Persist(store, repoDoc, doc, text, chunking);
+        }
     }
 
     private static void DeleteVectorsForFiles(IVectorStore? vectorStore, List<uint> fileIds, List<string> warnings)

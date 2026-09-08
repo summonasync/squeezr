@@ -107,6 +107,22 @@ public sealed class MetaStore : IDisposable
     public IReadOnlyList<RefDocument> ListRefsByFromSymbol(long symbolId) =>
         _db.GetCollection<RefDocument>(RefsCollection).Find(r => r.FromSymbolId == symbolId).ToList();
 
+    public IReadOnlyList<RefDocument> ListRefsByFile(uint fileId) =>
+        _db.GetCollection<RefDocument>(RefsCollection).Find(r => r.FileId == fileId).ToList();
+
+    public void DeleteRefsByFile(uint fileId) =>
+        _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => r.FileId == fileId);
+
+    public void DeleteRefsByFileIds(IReadOnlyCollection<uint> fileIds)
+    {
+        if (fileIds.Count == 0)
+        {
+            return;
+        }
+
+        _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => fileIds.Contains(r.FileId));
+    }
+
     public void InsertRefs(IEnumerable<RefDocument> refs) =>
         _db.GetCollection<RefDocument>(RefsCollection).InsertBulk(refs);
 

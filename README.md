@@ -26,6 +26,7 @@
 - **Триграммный индекс** — собственный движок: бинарный формат, delta+varint, tombstone-сегменты, append-only инкремент, crash-safe хвост. Lookup триграммы — ~0.5 мс на 100k документов.
 - **Точный `search`** — литерал, regex (через конъюнкцию обязательных триграмм, как у Кокса), smart-case, фильтры по репо/путям/языку, ранжирование.
 - **Символьный слой (C#)** — Roslyn извлекает символы, сигнатуры, doc-comments и refs с точностью компилятора.
+- **Символьный слой (JS/TS/TSX)** — tree-sitter извлекает функции, классы, интерфейсы, type-alias'ы и import-граф; прочий текст (Markdown, YAML, JSON…) — fallback-чанкер скользящим окном, тоже участвует в поиске.
 - **Токен-бюджет first-class** — каждая команда уважает `--max-tokens`: набирает результаты по рангу, честно говорит `truncated: true`, когда бюджет кончился.
 - **MCP-сервер** — агент ходит по картам и сниппетам, а не по простыням: `repo_map` → `code_search` → `find_references` → `expand_span`.
 - **Всё локально** — LiteDB + файлы в `.squeezr/`, Qdrant в Docker для векторов, ONNX-эмбеддинги на CPU. Ни одного байта кода не уходит наружу.
@@ -130,11 +131,11 @@ squeezr status                                # включая состояни�
 - [x] **M3** — Roslyn: символы, чанки, `symbol`, `map`, `expand`
 - [x] **M4** — Qdrant + ONNX-эмбеддинги: гибридный `search`, `refs`
 - [x] **M5** — MCP `serve` со всеми тулами + README с agent-инструкциями
-- [ ] **M6** — tree-sitter для JS/TS, fallback-чанкер
+- [x] **M6** — tree-sitter для JS/TS, fallback-чанкер
 
 ## Стек
 
-.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · Qdrant · ONNX Runtime · xUnit + Shouldly
+.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · tree-sitter (JS/TS) · Qdrant · ONNX Runtime · xUnit + Shouldly
 
 ---
 
@@ -156,4 +157,4 @@ squeezr index && squeezr search "WorkspaceManager"
 
 Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `scripts\uninstall.ps1`.
 
-Status: M1–M5 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs, MCP server with all six tools). See the roadmap above.
+Status: M1–M6 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs, MCP server with all six tools, tree-sitter JS/TS + fallback chunker). See the roadmap above.

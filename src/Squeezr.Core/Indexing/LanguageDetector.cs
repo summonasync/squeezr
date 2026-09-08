@@ -8,7 +8,7 @@ public static class LanguageDetector
         ["js"] = "javascript",
         ["jsx"] = "javascript",
         ["ts"] = "typescript",
-        ["tsx"] = "typescript",
+        ["tsx"] = "tsx",
         ["json"] = "json",
         ["md"] = "markdown",
         ["csproj"] = "xml",

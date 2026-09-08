@@ -5,7 +5,7 @@ using Squeezr.Core.Configuration;
 
 namespace Squeezr.Core.Indexing.Roslyn;
 
-public sealed class RoslynProvider : IParsingProvider
+public sealed class RoslynProvider : IParsingProviderWithWarnings
 {
     private readonly RoslynSession _session;
     private readonly SqueezrConfig _config;
