@@ -139,7 +139,7 @@ public sealed class QdrantVectorStore : IVectorStore
             };
         }
 
-        var results = await _client.SearchAsync(
+        var results = await _client.QueryAsync(
             _collection,
             vector,
             filter: filter,
