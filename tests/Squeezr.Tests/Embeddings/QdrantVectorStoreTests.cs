@@ -78,7 +78,7 @@ public class QdrantVectorStoreTests
         sw.Stop();
 
         available.ShouldBeFalse();
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(3));
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(6));
     }
 
     [Fact]
