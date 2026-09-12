@@ -88,13 +88,15 @@ public class RepoFileWalkerTests
     [Fact]
     public void Walk_SymlinkedDirectory_IsNotFollowed()
     {
-        var root = TestDirs.NewTempDir();
+        var baseDir = TestDirs.NewTempDir();
+        var root = Path.Combine(baseDir, "root");
+        var outside = Path.Combine(baseDir, "outside");
         WriteFile(root, "real/a.cs", "class A { }");
-        WriteFile(root, "outside/b.cs", "class B { }");
+        WriteFile(outside, "b.cs", "class B { }");
 
         try
         {
-            Directory.CreateSymbolicLink(Path.Combine(root, "link"), Path.Combine(root, "outside"));
+            Directory.CreateSymbolicLink(Path.Combine(root, "link"), outside);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

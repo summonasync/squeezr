@@ -33,13 +33,23 @@
 
 ## Быстрый старт
 
+Установка (self-contained, .NET не нужен):
+
+```bash
+# Linux
+scripts/install.sh
+```
+
 ```powershell
-# собрать и установить в PATH (self-contained, .NET не нужен)
+# Windows
 pwsh -File scripts\install.ps1
+```
 
-# или просто собрать для разработки
-dotnet build Squeezr.slnx
+Или просто собрать для разработки (нужен .NET 10 SDK): `dotnet build Squeezr.slnx`.
 
+Дальше одинаково на обеих платформах:
+
+```bash
 # создать workspace в корне твоего проекта
 squeezr init --name my-project
 squeezr add /path/to/repo
@@ -52,9 +62,9 @@ squeezr refs Slugify                          # кто вызывает симв
 squeezr status                                # включая состояние Qdrant
 ```
 
-Эмбеддинги по умолчанию — локальная ONNX-модель bge-code-v1 (скачать: `pwsh -File scripts\fetch-model.ps1`); OpenAI-совместимый endpoint включается секцией `embeddings` в `.squeezr/config.json` (ключ — только через env `SQUEEZR_API_KEY`). Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
+Эмбеддинги по умолчанию — локальная ONNX-модель bge-code-v1 (скачать: `scripts/fetch-model.sh` на Linux, `pwsh -File scripts\fetch-model.ps1` на Windows); OpenAI-совместимый endpoint включается секцией `embeddings` в `.squeezr/config.json` (ключ — только через env `SQUEEZR_API_KEY`). Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
 
-Установка кладёт единый `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` и прописывает его в user PATH (скрипт сам проверит Docker и подскажет, если его нет — он понадобится только с M4). Снести: `pwsh -File scripts\uninstall.ps1`.
+Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `pwsh -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится только с M4.
 
 ## TUI: человеческий интерфейс
 
@@ -130,7 +140,7 @@ squeezr status                                # включая состояни�
 
 Две формы, один движок:
 
-```powershell
+```bash
 squeezr watch            # человек: демон в терминале, Ctrl+C — чистый выход
 squeezr serve --watch    # агент: тот же движок внутри MCP-сервера
 ```
@@ -184,6 +194,8 @@ squeezr init --name my-project && squeezr add /path/to/repo
 squeezr index && squeezr search "WorkspaceManager"
 ```
 
-Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `scripts\uninstall.ps1`.
+Linux install (self-contained binary + `~/.local/bin` symlink, no .NET required): `scripts/install.sh`. Uninstall: `scripts/uninstall.sh`.
+
+Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `pwsh -File scripts\uninstall.ps1`.
 
 Status: M1–M6 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs, MCP server with all six tools, tree-sitter JS/TS + fallback chunker). See the roadmap above.

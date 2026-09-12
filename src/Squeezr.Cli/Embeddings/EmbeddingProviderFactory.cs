@@ -44,7 +44,7 @@ public static class EmbeddingProviderFactory
             if (File.Exists(bundled))
                 modelPath = bundled;
             else
-                throw new WorkspaceException($"Embedding model not found at '{modelPath}' and no bundled copy exists. Run scripts/fetch-model.ps1 to download it.");
+                throw new WorkspaceException($"Embedding model not found at '{modelPath}' and no bundled copy exists. Run scripts/fetch-model.sh (Linux/macOS) or scripts/fetch-model.ps1 (Windows) to download it.");
         }
 
         var tokenizerDir = ResolveTokenizerDir(options.TokenizerPath, workspaceRoot);
@@ -63,7 +63,7 @@ public static class EmbeddingProviderFactory
         if (File.Exists(Path.Combine(bundled, "vocab.json")))
             return bundled;
 
-        throw new WorkspaceException($"Tokenizer files not found at '{dir}' and no bundled copy exists. Run scripts/fetch-model.ps1 to download them.");
+        throw new WorkspaceException($"Tokenizer files not found at '{dir}' and no bundled copy exists. Run scripts/fetch-model.sh (Linux/macOS) or scripts/fetch-model.ps1 (Windows) to download them.");
     }
 
     private static string ResolveFile(string path, string workspaceRoot)

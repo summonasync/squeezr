@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Shouldly;
 using Spectre.Console.Testing;
 using Squeezr.Cli.Tui;
@@ -65,8 +66,9 @@ public class TuiWizardsTests
         code.ShouldBe(0);
         var repos = WorkspaceManifestFile.Load(workspace).Repos;
         repos.ShouldHaveSingleItem().Name.ShouldBe("repolib");
-        console.Output.ShouldContain("Added repo");
-        console.Output.ShouldContain("does not exist or is not a directory");
+        var flatOutput = Regex.Replace(console.Output, @"\s+", " ");
+        flatOutput.ShouldContain("Added repo");
+        flatOutput.ShouldContain("does not exist or is not a directory");
     }
 
     [Fact]
