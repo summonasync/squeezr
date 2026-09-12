@@ -47,10 +47,13 @@ public sealed class WatchEventFilter
     }
 
     private bool IsInsideStore(string fullPath) =>
-        fullPath.StartsWith(_storeDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(fullPath, _storeDir, StringComparison.OrdinalIgnoreCase);
+        fullPath.StartsWith(_storeDir + Path.DirectorySeparatorChar, PathComparison)
+        || string.Equals(fullPath, _storeDir, PathComparison);
 
     private string? FindRepoRoot(string fullPath) =>
         _repoRoots.FirstOrDefault(root =>
-            fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+            fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison));
+
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 }

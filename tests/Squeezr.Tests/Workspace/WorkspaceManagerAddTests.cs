@@ -113,4 +113,28 @@ public class WorkspaceManagerAddTests
 
         Should.Throw<WorkspaceException>(() => manager.AddRepo("a", "a"));
     }
+
+    [Fact]
+    public void Add_CaseDifferentPaths_AreDistinctRepos_OnCaseSensitiveFs()
+    {
+        var root = TestDirs.NewTempDir();
+        var upper = Path.Combine(root, "Repo");
+        var lower = Path.Combine(root, "repo");
+        Directory.CreateDirectory(upper);
+        File.WriteAllText(Path.Combine(upper, "marker.txt"), "");
+        if (File.Exists(Path.Combine(lower, "marker.txt")))
+        {
+            return;
+        }
+        Directory.CreateDirectory(lower);
+
+        var manager = new WorkspaceManager(root);
+        manager.Init(null);
+        manager.AddRepo(upper, "upper");
+
+        var entry = manager.AddRepo(lower, "lower");
+
+        entry.Path.ShouldBe("repo");
+        WorkspaceManifestFile.Load(root).Repos.Count.ShouldBe(2);
+    }
 }

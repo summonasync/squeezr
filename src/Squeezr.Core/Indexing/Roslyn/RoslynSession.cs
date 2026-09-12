@@ -11,6 +11,15 @@ public sealed class RoslynSession : IDisposable
 {
     private static readonly object LocatorLock = new();
 
+    private static readonly EnumerationOptions IgnoreCaseTopDir = new() { MatchCasing = MatchCasing.CaseInsensitive, AttributesToSkip = 0 };
+    private static readonly EnumerationOptions IgnoreCaseAllDirs = new() { MatchCasing = MatchCasing.CaseInsensitive, RecurseSubdirectories = true, AttributesToSkip = 0 };
+
+    private static StringComparer PathComparer =>
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     private readonly RoslynWorkspace _workspace;
     private readonly Dictionary<string, Document> _documents;
     private readonly string _root;
@@ -87,7 +96,7 @@ public sealed class RoslynSession : IDisposable
         }
 
         var workspace = MSBuildWorkspace.Create();
-        var solutionPath = Directory.EnumerateFiles(root, "*.sln*")
+        var solutionPath = Directory.EnumerateFiles(root, "*.sln*", IgnoreCaseTopDir)
             .Where(p => p.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
             .OrderBy(p => p.EndsWith("x", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
             .FirstOrDefault();
@@ -99,7 +108,7 @@ public sealed class RoslynSession : IDisposable
         }
         else
         {
-            var project = Directory.EnumerateFiles(root, "*.csproj", SearchOption.AllDirectories)
+            var project = Directory.EnumerateFiles(root, "*.csproj", IgnoreCaseAllDirs)
                 .FirstOrDefault(p => !IsBuildOutput(p));
             if (project is null)
             {
@@ -114,7 +123,7 @@ public sealed class RoslynSession : IDisposable
         var documents = solution.Projects
             .SelectMany(p => p.Documents)
             .Where(d => d.FilePath is not null && IsUnderRoot(d.FilePath, root))
-            .ToDictionary(d => Path.GetFullPath(d.FilePath!), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(d => Path.GetFullPath(d.FilePath!), PathComparer);
         if (documents.Count == 0)
         {
             workspace.Dispose();
@@ -127,7 +136,7 @@ public sealed class RoslynSession : IDisposable
 
     private static RoslynSession CreateAdHocSession(string root, bool semantic, List<string> warnings)
     {
-        var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+        var files = Directory.EnumerateFiles(root, "*.cs", IgnoreCaseAllDirs)
             .Where(p => !IsBuildOutput(p))
             .ToList();
         if (files.Count == 0)
@@ -156,7 +165,7 @@ public sealed class RoslynSession : IDisposable
 
         var documents = workspace.CurrentSolution.Projects
             .SelectMany(p => p.Documents)
-            .ToDictionary(d => Path.GetFullPath(d.FilePath!), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(d => Path.GetFullPath(d.FilePath!), PathComparer);
         warnings.Add($"ad-hoc workspace: {files.Count} file(s), project references unresolved");
         return new RoslynSession(workspace, documents, semantic, warnings, root);
     }
@@ -188,5 +197,5 @@ public sealed class RoslynSession : IDisposable
         || path.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsUnderRoot(string path, string root) =>
-        Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase);
+        Path.GetFullPath(path).StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, PathComparison);
 }

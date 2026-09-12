@@ -33,6 +33,18 @@ public class GlobMatcherTests
         GlobMatcherIsMatch(pattern, path).ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData("**/bin/**", "Src/Bin/x.cs")]
+    [InlineData("**/OBJ/**", "src/obj/Debug/x.dll")]
+    [InlineData("src/**", "SRC/a.cs")]
+    [InlineData("src\\**\\*.cs", "src/a.cs")]
+    [InlineData("src\\**\\*.cs", "src/sub/b.cs")]
+    [InlineData("*.cs", "PROGRAM.CS")]
+    public void IsMatch_IgnoresCaseAndAcceptsBackslashSeparators(string pattern, string path)
+    {
+        GlobMatcherIsMatch(pattern, path).ShouldBeTrue();
+    }
+
     private static bool GlobMatcherIsMatch(string pattern, string path) =>
         Squeezr.Core.Indexing.GlobMatcher.IsMatch(pattern, path);
 }

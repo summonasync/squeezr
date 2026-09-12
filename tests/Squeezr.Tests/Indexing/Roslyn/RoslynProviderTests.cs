@@ -26,6 +26,24 @@ public class RoslynProviderTests : IDisposable
     }
 
     [Fact]
+    public void Create_AdHocRepoWithCaseCollidingFiles_DoesNotThrow()
+    {
+        var dir = TestDirs.NewTempDir();
+        File.WriteAllText(Path.Combine(dir, "Model.cs"), "class Upper { }");
+        File.WriteAllText(Path.Combine(dir, "model.cs"), "class Lower { }");
+        if (File.ReadAllText(Path.Combine(dir, "Model.cs")) == "class Lower { }")
+        {
+            return;
+        }
+
+        using var session = RoslynSession.Create(dir, semantic: false);
+
+        session.Semantic.ShouldBeFalse();
+        session.FindDocument("Model.cs").ShouldNotBeNull();
+        session.FindDocument("model.cs").ShouldNotBeNull();
+    }
+
+    [Fact]
     public void SemanticParse_ExtractsSymbolsWithSignatureDocAndContainer()
     {
         var dir = NewMiniFixture();

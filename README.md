@@ -66,6 +66,8 @@ squeezr status                                # включая состояни�
 
 Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `pwsh -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится только с M4.
 
+Переехали со старой Windows-машины? Миграционный чек-лист — [docs/migration-windows-to-linux.md](docs/migration-windows-to-linux.md).
+
 ## TUI: человеческий интерфейс
 
 Не любишь помнить флаги — просто запусти `squeezr tui` (или голый `squeezr` в интерактивном терминале: без аргументов он открывает TUI). Если терминал неинтерактивный (pipe, CI) — бинарь честно падает в справку вместо меню.

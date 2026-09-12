@@ -7,6 +7,9 @@ public sealed class WorkspaceManager
 {
     private readonly string _root;
 
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     public WorkspaceManager(string root)
     {
         if (!Directory.Exists(root))
@@ -67,7 +70,7 @@ public sealed class WorkspaceManager
                 throw new WorkspaceException($"Repository '{repoName}' already exists in workspace '{manifest.Name}'.");
             }
 
-            if (manifest.Repos.Any(r => string.Equals(ToFullPath(r.Path), fullPath, StringComparison.OrdinalIgnoreCase)))
+            if (manifest.Repos.Any(r => string.Equals(ToFullPath(r.Path), fullPath, PathComparison)))
             {
                 throw new WorkspaceException($"Path '{fullPath}' is already added to the workspace.");
             }
@@ -143,14 +146,14 @@ public sealed class WorkspaceManager
 
     private string ToStoredPath(string fullPath)
     {
-        if (string.Equals(fullPath, _root, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(fullPath, _root, PathComparison))
         {
             return ".";
         }
 
         var rootWithSeparator = _root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                                 + Path.DirectorySeparatorChar;
-        return fullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
+        return fullPath.StartsWith(rootWithSeparator, PathComparison)
             ? Path.GetRelativePath(_root, fullPath).Replace('\\', '/')
             : fullPath.Replace('\\', '/');
     }

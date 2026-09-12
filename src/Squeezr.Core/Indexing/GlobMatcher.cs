@@ -3,7 +3,7 @@ namespace Squeezr.Core.Indexing;
 public static class GlobMatcher
 {
     public static bool IsMatch(string pattern, string path) =>
-        MatchSegments(pattern.Split('/'), 0, path.Split('/'), 0);
+        MatchSegments(pattern.Replace('\\', '/').ToLowerInvariant().Split('/'), 0, path.ToLowerInvariant().Split('/'), 0);
 
     private static bool MatchSegments(string[] pattern, int patternIndex, string[] segments, int segmentIndex)
     {
