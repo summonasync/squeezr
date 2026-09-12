@@ -16,13 +16,25 @@ public sealed class MetaStore : IDisposable
 
     private static readonly object MapperWarmupLock = new();
 
-    public MetaStore(string dbPath)
+    public MetaStore(string dbPath, bool createIfMissing = false)
     {
+        if (!createIfMissing && !File.Exists(dbPath))
+        {
+            throw new WorkspaceException($"Index store '{dbPath}' is missing. Run 'squeezr index' first.");
+        }
+
         // LiteDB 5.0.21 exposes a half-built EntityMapper to concurrent readers (empty mapper is cached
         // before its members are populated), so first-time mapping of an entity type must be serialized.
         lock (MapperWarmupLock)
         {
-            _db = new LiteDatabase(dbPath);
+            // Direct mode opens meta.db with FileShare.Read, so a second read-write connection (a search
+            // during a background watch pass) dies with a sharing violation. Shared mode keeps writers
+            // coordinated by LiteDB's own locks; single-writer discipline is enforced by IndexLock upstream.
+            _db = new LiteDatabase(new ConnectionString
+            {
+                Filename = dbPath,
+                Connection = ConnectionType.Shared
+            });
             _db.Mapper.ToDocument(new RepoDocument());
             _db.Mapper.ToDocument(new FileDocument());
             _db.Mapper.ToDocument(new IndexStateDocument { Stats = new IndexStateStats() });
@@ -181,10 +193,16 @@ public sealed class MetaStore : IDisposable
     {
         var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
         var targets = repoId.HasValue
-            ? chunks.Find(c => c.RepoId == repoId.Value)
-            : chunks.FindAll();
-        foreach (var chunk in targets)
+            ? chunks.Find(c => c.RepoId == repoId.Value).Select(c => c.Id).ToList()
+            : chunks.FindAll().Select(c => c.Id).ToList();
+        foreach (var id in targets)
         {
+            var chunk = chunks.FindById(id);
+            if (chunk is null)
+            {
+                continue;
+            }
+
             chunk.EmbeddingStatus = "pending";
             chunk.ModelKey = null;
             chunks.Update(chunk);

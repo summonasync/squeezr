@@ -54,7 +54,7 @@ public class QdrantStatusProbeTests
 
     private static MetaStore NewMetaStore(int pendingChunks)
     {
-        var store = new MetaStore(Path.Combine(TestDirs.NewTempDir(), "meta.db"));
+        var store = new MetaStore(Path.Combine(TestDirs.NewTempDir(), "meta.db"), createIfMissing: true);
         if (pendingChunks > 0)
         {
             store.InsertChunks(Enumerable.Range(0, pendingChunks).Select(i => new ChunkDocument

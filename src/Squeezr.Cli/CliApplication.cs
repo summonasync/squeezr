@@ -42,6 +42,8 @@ public static class CliApplication
                 .WithDescription("Rewrite the trigram index dropping tombstoned segments");
             config.AddCommand<DropCommand>("drop")
                 .WithDescription("Remove the .squeezr index store");
+            config.AddCommand<WatchCommand>("watch")
+                .WithDescription("Watch the workspace and re-index on file changes");
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")

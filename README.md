@@ -124,6 +124,35 @@ squeezr status                                # включая состояни�
 - `warnings` — мягкая деградация (например, «vector store unavailable, falling back to exact search only») и подсказки при обрезке.
 - `indexAge` / `staleFiles` — свежесть. Изменённые файлы освежаются inline при чтении; то, что освежить не удалось, честно попадает в `staleFiles` — агент видит, что данные по этим файлам протухли, и может предложить `squeezr index`. Окончательное решение о реиндексе — за хозяином workspace.
 
+## Watch-режим: индекс догоняет рабочее дерево сам
+
+Индекс по требованию — это компромисс: правишь файл, а `code_search` ещё отвечает про старую версию. FreshnessGuard освежает точечно при чтении, но полный догоняющий проход запускаешь руками. Watch-режим убирает и это.
+
+Две формы, один движок:
+
+```powershell
+squeezr watch            # человек: демон в терминале, Ctrl+C — чистый выход
+squeezr serve --watch    # агент: тот же движок внутри MCP-сервера
+```
+
+Как работает: `FileSystemWatcher` на корнях репо → фильтрация (те же ignore-глобы и расширения, что у индексации; записи в `.squeezr/` не считаются) → изменённые пути копятся в changed-сет → после окна тишины один инкрементальный проход по всему накопленному. «Save-all из 50 файлов» = один проход. Индекс занят (ручной `index`, TUI, второй serve) — движок ждёт с экспоненциальным backoff и никогда не отбирает лок. Живой статус: в терминале — Live-грид (workspace / status / last pass / error), в pipe — строки `pass started: N changed paths` / `pass completed: +A ~M -D` в stdout.
+
+Удаления — полный жизненный цикл (tombstone триграмм, чистка документов/чанков, drop Qdrant-точек файла): после `git checkout`/`git clean` выдача не содержит призраков. `serve --watch` не блокирует JSON-RPC — тулы отвечают и во время фонового прохода, конверт не меняется. FreshnessGuard остаётся страховкой: пока watch не догнал, конверт честно показывает `staleFiles`.
+
+Конфиг — секция `watch` в `.squeezr/config.json`:
+
+```json
+{
+  "watch": {
+    "enabled": false,
+    "debounceSeconds": 2,
+    "backoffMaxSeconds": 30
+  }
+}
+```
+
+`enabled` включает движок у `serve` без флага (флаг главнее конфига); явный `squeezr watch` — всегда намерение пользователя, конфиг не консультируется. Отсутствие секции или невалидные значения = дефолты.
+
 ## Roadmap
 
 - [x] **M1** — каркас CLI, LiteDB-схемы, конфиг, workspace
@@ -147,7 +176,7 @@ Born from a simple observation: agents waste 30–80k tokens navigating code by 
 
 The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: LiteDB + Qdrant (Docker) + ONNX embeddings — nothing leaves your machine.
 
-An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client config: `{ "mcpServers": { "squeezr": { "command": "squeezr", "args": ["serve"] } } }`, workspace root = server process cwd.
+An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client config: `{ "mcpServers": { "squeezr": { "command": "squeezr", "args": ["serve"] } } }`, workspace root = server process cwd. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits.
 
 ```bash
 dotnet build Squeezr.slnx

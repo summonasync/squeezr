@@ -120,7 +120,7 @@ public class MetaStoreChunkStatusTests
     }
 
     private static MetaStore NewStore() =>
-        new(Path.Combine(TestDirs.NewTempDir(), "meta.db"));
+        new(Path.Combine(TestDirs.NewTempDir(), "meta.db"), createIfMissing: true);
 
     private static ChunkDocument Chunk(uint repoId, uint fileId, string status, string? modelKey) =>
         new()

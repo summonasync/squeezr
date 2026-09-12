@@ -31,7 +31,7 @@ public sealed class WorkspaceManager
         Directory.CreateDirectory(SqueezrPaths.StoreDir(_root));
         ConfigFile.Save(_root, SqueezrConfig.CreateDefault());
         StateFile.Save(_root, new IndexState());
-        using (new MetaStore(SqueezrPaths.MetaDbPath(_root)))
+        using (new MetaStore(SqueezrPaths.MetaDbPath(_root), createIfMissing: true))
         {
         }
 

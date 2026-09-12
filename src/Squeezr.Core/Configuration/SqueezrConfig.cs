@@ -10,6 +10,8 @@ public sealed record SqueezrConfig
 
     public required QdrantConfig Qdrant { get; init; }
 
+    public WatchConfig Watch { get; init; } = new();
+
     public static SqueezrConfig CreateDefault() =>
         new()
         {
@@ -39,6 +41,7 @@ public sealed record SqueezrConfig
             Qdrant = new QdrantConfig
             {
                 Endpoint = "http://localhost:6334"
-            }
+            },
+            Watch = new WatchConfig()
         };
 }
