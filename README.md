@@ -60,6 +60,11 @@ squeezr search "WorkspaceManager"            # гибрид: точный + се
 squeezr search "w.rkspace" --regex --max-tokens 200
 squeezr refs Slugify                          # кто вызывает символ (C#)
 squeezr status                                # включая состояние Qdrant
+squeezr map --depth 2                         # карта репо: сигнатуры без тел
+squeezr symbol WorkspaceManager               # точный lookup символа
+squeezr expand src/Foo.cs 42 87               # раскрыть спан из живого файла
+squeezr compact                               # компактификация триграммного индекса
+squeezr drop                                  # полное удаление индекса workspace
 ```
 
 Эмбеддинги по умолчанию — локальная ONNX-модель bge-code-v1 (скачать: `scripts/fetch-model.sh` на Linux, `pwsh -File scripts\fetch-model.ps1` на Windows); OpenAI-совместимый endpoint включается секцией `embeddings` в `.squeezr/config.json` (ключ — только через env `SQUEEZR_API_KEY`). Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
