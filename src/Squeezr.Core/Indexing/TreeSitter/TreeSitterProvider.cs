@@ -45,7 +45,7 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
             var chunks = TsSymbolChunkBuilder.Build(symbols, text, _config.Chunking);
             return new ParseResult(language, symbols, refs, chunks);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
         {
             _warnings.Add($"parse failed for '{file.Path}': {ex.Message}");
             return new ParseResult(language, [], [], []);

@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Commands;
 using Squeezr.Cli.Tui;
+using System.Reflection;
 
 namespace Squeezr.Cli;
 
@@ -20,6 +21,8 @@ public static class CliApplication
         app.Configure(config =>
         {
             config.SetApplicationName("squeezr");
+            config.SetApplicationVersion(typeof(CliApplication).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0");
             config.AddCommand<InitCommand>("init")
                 .WithDescription("Create a new Squeezr workspace in the current directory");
             config.AddCommand<AddCommand>("add")

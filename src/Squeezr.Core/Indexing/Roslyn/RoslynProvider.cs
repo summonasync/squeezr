@@ -62,7 +62,7 @@ public sealed class RoslynProvider : IParsingProviderWithWarnings
 
             return new ParseResult("csharp", symbols.Select(s => s.Symbol).ToList(), refs, chunks);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
         {
             _warnings.Add($"parse failed for '{file.Path}': {ex.Message}");
             return new ParseResult("csharp", [], [], []);
