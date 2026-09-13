@@ -1,0 +1,11 @@
+model = "gpt-5"
+
+[mcp_servers.squeezr]
+command = "old-squeezr"
+args = ["serve"]
+
+[mcp_servers.squeezr.env]
+API_KEY = "x"
+
+[mcp_servers.memory]
+command = "npx"

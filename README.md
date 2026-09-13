@@ -92,20 +92,56 @@ squeezr drop                                  # полное удаление и
 
 `squeezr serve` поднимает MCP-сервер (stdio, JSON-RPC на stdout). Агент получает индекс как шесть тулов — карту, поиск, символы, ссылки и раскрытие спанов — и не читает файлы целиком вообще.
 
-Подключение к MCP-клиенту:
+### Подключение: `squeezr mcp install`
+
+Руками в конфиги лезть не нужно — одна команда зарегистрирует сервер у клиента:
+
+```bash
+squeezr mcp install                          # интерактив: детект клиентов → мультивыбор → scope → инструкции
+squeezr mcp install --client claude --scope project
+squeezr mcp install --client all --scope user --yes   # все найденные клиенты, без вопросов (для скриптов)
+```
+
+| Флаг | Что делает |
+|---|---|
+| `--client claude\|kimi\|qwen\|codex\|all` | Кого подключать; без флага squeezr сам найдёт установленных клиентов и предложит мультивыбор; `all` — все найденные |
+| `--scope user\|project` | `user` — сервер доступен во всех проектах, `project` — только в этом workspace; без флага спросит |
+| `--no-watch` | Не добавлять `--watch` к `serve` (по умолчанию индекс сам догоняет правки на диске) |
+| `--no-instructions` | Не писать агенту блок навигационных инструкций |
+| `--yes` | Согласиться на инструкции без вопроса (для неинтерактивных прогонов) |
+| `--json` | Машиночитаемый ответ вместо таблички |
+
+Что происходит под капотом: запись регистрируется как `serve --watch`, конфиг пишет родной CLI клиента (`claude mcp add`, `qwen mcp add`, `codex mcp add`), а где CLI нет (Kimi Code) — squeezr сам мержит JSON в конфиг-файл. Чужие серверы в конфиге не трогаются; повторный install обновляет запись при прямой записи (Kimi), а по CLI-пути клиент ответит «already exists» — это нормально, запись уже на месте. Отдельно спросит (дефолт — «да»), дописать ли агенту маркер-блок с флоу навигации: идемпотентно, в инструкционный файл клиента (Claude — CLAUDE.md, Kimi и Codex — AGENTS.md, Qwen — QWEN.md), `mcp remove` убирает его за собой.
+
+`squeezr mcp doctor` — чекап подключения: клиент найден, запись есть (user/project), бинарь в PATH, workspace проиндексирован, headless-статус через CLI клиента. Exit code 0/1 — можно вешать на скрипты и CI. `squeezr mcp remove [--client ...] [--scope ...]` удаляет запись и блок инструкций; обе команды уважают `--client` и `--json`.
+
+Корень workspace сервер разрешает от cwd процесса вверх (запускай клиент из корня проекта); Claude Code не умеет cwd в конфиге сервера — поэтому `serve` дополнительно уважает `CLAUDE_PROJECT_DIR`, который Claude выставляет своим MCP-процессам. Перед подключением нужны `squeezr init` / `add` / `index` — сервер читает готовый индекс и сам его не строит. Qdrant опционален: без него семантический слой молча отключается, `code_search` работает exact-only (warning в ответе).
+
+### Ручная настройка (справка)
+
+Если хочешь прописать конфиг сам — куда писать запись `squeezr`:
+
+| Клиент | user-scope | project-scope |
+|---|---|---|
+| Claude Code | `~/.claude.json` | `.mcp.json` |
+| Kimi Code | `~/.kimi-code/mcp.json` (или `$KIMI_CODE_HOME/mcp.json`) | `.kimi-code/mcp.json` |
+| Qwen Code | `~/.qwen/settings.json` | `.qwen/settings.json` |
+| Codex CLI | `~/.codex/config.toml` | `.codex/config.toml` (только trusted-проекты) |
+
+JSON-клиентам (Claude, Kimi, Qwen) — блок `mcpServers`:
 
 ```json
 {
   "mcpServers": {
     "squeezr": {
       "command": "squeezr",
-      "args": ["serve"]
+      "args": ["serve", "--watch"]
     }
   }
 }
 ```
 
-Корень workspace = cwd процесса сервера: запускай клиент из корня проекта или задай cwd в конфиге клиента. Перед подключением нужны `squeezr init` / `add` / `index` — сервер читает готовый индекс и сам его не строит. Qdrant опционален: без него семантический слой молча отключается, `code_search` работает exact-only (warning в ответе).
+Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`args` (плюс `startup_timeout_sec = 30`, чтобы индексатор успел стартовать). Заодно учти: Kimi и Qwen любят `cwd` в записи, Claude — нет (см. CLAUDE_PROJECT_DIR выше).
 
 ### Тулы
 
@@ -193,7 +229,7 @@ Born from a simple observation: agents waste 30–80k tokens navigating code by 
 
 The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: LiteDB + Qdrant (Docker) + ONNX embeddings — nothing leaves your machine.
 
-An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client config: `{ "mcpServers": { "squeezr": { "command": "squeezr", "args": ["serve"] } } }`, workspace root = server process cwd. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits.
+An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client onboarding is one command: `squeezr mcp install` detects supported agent CLIs (Claude Code, Kimi Code, Qwen Code, Codex), registers a `serve --watch` entry via the client's own CLI (direct config merge for Kimi), and optionally writes an idempotent instruction block into the client's instruction file; `squeezr mcp doctor` verifies the setup per client (exit 0/1), `squeezr mcp remove` undoes it. Flags: `--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--yes`, `--json`. Workspace root = server process cwd, with a `CLAUDE_PROJECT_DIR` fallback for Claude Code (no cwd key in its config); manual config paths (e.g. `~/.claude.json` / `.mcp.json`, `~/.codex/config.toml`) are listed in the RU section above. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits.
 
 ```bash
 dotnet build Squeezr.slnx

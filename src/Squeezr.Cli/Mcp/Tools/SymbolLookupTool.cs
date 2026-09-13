@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Core.Indexing;
@@ -21,11 +22,7 @@ public sealed class SymbolLookupTool
         _gate = gate;
     }
 
-    /// <summary>
-    /// Find symbol definitions by name across the indexed workspace: signature, doc comment,
-    /// file:span, and body within the token budget (maxTokens, default 300). Not-found returns
-    /// an empty result, not an error. Use expand_span (when available) for wider context around a hit.
-    /// </summary>
+    [Description("Find symbol definitions by name across the indexed workspace: signature, doc comment, file:span, and body within the token budget (maxTokens, default 300). Not-found returns an empty result, not an error. Use expand_span (when available) for wider context around a hit.")]
     [McpServerTool(Name = "symbol_lookup", Title = "Look up symbol")]
     public object Find(
         string name,

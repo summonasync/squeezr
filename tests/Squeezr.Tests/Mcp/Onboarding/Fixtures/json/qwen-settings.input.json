@@ -1,0 +1,13 @@
+{
+  "theme": "dark",
+  "model": "qwen3-coder",
+  "editor": {
+    "tabSize": 4
+  },
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    }
+  }
+}

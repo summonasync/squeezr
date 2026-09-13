@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Core.Indexing.Navigation;
@@ -17,12 +18,7 @@ public sealed class ExpandSpanTool
         _gate = gate;
     }
 
-    /// <summary>
-    /// Reveal code around coordinates from code_search/symbol_lookup: the exact lines of the span
-    /// plus contextLines of surrounding context, read from the live file on disk (reflects edits
-    /// made after indexing). The only tool that returns raw source lines. When truncated is true,
-    /// context (before/after) may be partially filled — the span itself has priority.
-    /// </summary>
+    [Description("Reveal code around coordinates from code_search/symbol_lookup: the exact lines of the span plus contextLines of surrounding context, read from the live file on disk (reflects edits made after indexing). The only tool that returns raw source lines. When truncated is true, context (before/after) may be partially filled — the span itself has priority.")]
     [McpServerTool(Name = "expand_span", Title = "Expand span")]
     public object Expand(
         string file,

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "squeezr": {
+      "command": "old-squeezr",
+      "args": ["serve"]
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    }
+  }
+}

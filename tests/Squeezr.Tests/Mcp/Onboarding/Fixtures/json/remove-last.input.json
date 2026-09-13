@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "squeezr": {
+      "command": "/opt/squeezr/bin/squeezr",
+      "args": ["serve", "--watch"]
+    }
+  },
+  "otherSetting": true
+}

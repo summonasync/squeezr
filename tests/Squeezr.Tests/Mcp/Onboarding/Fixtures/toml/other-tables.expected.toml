@@ -1,0 +1,14 @@
+# codex config
+model = "gpt-5"
+
+[profile]
+model = "o3"
+
+[mcp_servers.memory]
+command = "npx"
+
+[mcp_servers.squeezr]
+command = "/opt/squeezr/bin/squeezr"
+args = ["serve", "--watch"]
+cwd = "/work/demo"
+startup_timeout_sec = 30

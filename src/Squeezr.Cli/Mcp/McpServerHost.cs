@@ -15,12 +15,18 @@ public static class McpServerHost
 {
     private static readonly TimeSpan StdinEofGrace = TimeSpan.FromSeconds(1);
 
-    public static async Task RunStdioAsync(string workspaceRoot, CancellationToken ct, bool watch = false)
+    public static async Task RunStdioAsync(string startDirectory, CancellationToken ct, bool watch = false)
     {
-        Console.Error.WriteLine($"squeezr serve: workspace '{Path.GetFullPath(workspaceRoot)}'");
+        var resolution = WorkspaceRootResolver.Resolve(startDirectory);
+        if (resolution.ViaClaudeProjectDir)
+        {
+            Console.Error.WriteLine($"workspace root resolved via CLAUDE_PROJECT_DIR: {resolution.Root}");
+        }
+
+        Console.Error.WriteLine($"squeezr serve: workspace '{resolution.Root}'");
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
-        await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), workspaceRoot, ct, watch);
+        await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.Root, ct, watch);
         await forwardTask;
     }
 

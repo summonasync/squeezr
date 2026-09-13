@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
@@ -21,10 +22,7 @@ public sealed class IndexStatusTool
         _gate = gate;
     }
 
-    /// <summary>
-    /// Workspace freshness: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability
-    /// and point count, index age. Call before code_search to decide whether a reindex is needed.
-    /// </summary>
+    [Description("Workspace freshness: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability and point count, index age. Call before code_search to decide whether a reindex is needed.")]
     [McpServerTool(Name = "index_status", Title = "Index status")]
     public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
         _gate.RunAsync(GetCore, cancellationToken);

@@ -51,6 +51,7 @@ public static class CliApplication
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")
                 .WithDescription("Interactive terminal UI (dashboard, search, wizards)");
+            McpCommandRegistration.AddMcpBranch(config);
         });
 
         return app.RunAsync(args);

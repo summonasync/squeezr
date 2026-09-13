@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Core.Indexing;
@@ -20,13 +21,7 @@ public sealed class RepoMapTool
         _gate = gate;
     }
 
-    /// <summary>
-    /// Structural map of the indexed repositories: nested directory/file tree rendered as indented
-    /// lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members). Never returns
-    /// bodies — use expand_span on coordinates from other tools to read code. Good entry point
-    /// for navigating an unfamiliar workspace. Signatures are refreshed on read: modified files
-    /// are reindexed inline or reported in staleFiles.
-    /// </summary>
+    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members). Never returns bodies — use expand_span on coordinates from other tools to read code. Good entry point for navigating an unfamiliar workspace. Signatures are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "repo_map", Title = "Repository map")]
     public object Build(string? repo = null, int? depth = null, int? maxTokens = null) =>
         _gate.Run(() => BuildCore(repo, depth, maxTokens));

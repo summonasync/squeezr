@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
@@ -28,11 +29,7 @@ public sealed class CodeSearchTool
         _gate = gate;
     }
 
-    /// <summary>
-    /// Hybrid exact/semantic search over the indexed workspace. Returns file:line matches with snippets
-    /// (no full bodies); use expand_span (when available) to reveal a body around a hit.
-    /// Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.
-    /// </summary>
+    [Description("Hybrid exact/semantic search over the indexed workspace. Returns file:line matches with snippets (no full bodies); use expand_span (when available) to reveal a body around a hit. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,

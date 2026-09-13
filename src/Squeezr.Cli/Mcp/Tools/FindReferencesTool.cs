@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Core.Indexing;
@@ -22,13 +23,7 @@ public sealed class FindReferencesTool
         _gate = gate;
     }
 
-    /// <summary>
-    /// Find all references to a symbol in the index: every call site as file:line with the
-    /// reference kind and the enclosing symbol (captured at index time by Roslyn — exact,
-    /// partial classes included; span-based inference is only a fallback for indexes built
-    /// before enclosing capture). Returns a tool error if the symbol is not indexed.
-    /// Pair with symbol_lookup to jump from a match to its usages.
-    /// </summary>
+    [Description("Find all references to a symbol in the index: every call site as file:line with the reference kind and the enclosing symbol (captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture). Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
     [McpServerTool(Name = "find_references", Title = "Find references")]
     public object Find(string symbol, string? repo = null) =>
         _gate.Run(() => FindCore(symbol, repo));
