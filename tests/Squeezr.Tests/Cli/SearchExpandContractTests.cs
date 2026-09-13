@@ -39,10 +39,9 @@ public class SearchExpandContractTests
         var json = await RunCliAsync(root, "search", "needlestring", "--json");
         json.ExitCode.ShouldBe(0);
         string jsonPath;
-        using (var doc = JsonDocument.Parse(json.StdOut.Trim()))
+        using (var doc = JsonDocument.Parse(json.StdOut.Trim().Split('\n')[0]))
         {
-            var match = doc.RootElement.GetProperty("matches")[0];
-            jsonPath = match.GetProperty("path").GetString()!;
+            jsonPath = doc.RootElement.GetProperty("path").GetString()!;
         }
 
         jsonPath.ShouldBe("src/Calc.cs");

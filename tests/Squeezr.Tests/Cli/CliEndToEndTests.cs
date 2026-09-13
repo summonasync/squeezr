@@ -147,32 +147,44 @@ public sealed class CliEndToEndTests
         (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
         (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
 
-        var search = await RunCliAsync(root, "search", "Alpha", "--json");
+        var search = await RunCliAsync(root, "search", "Alpha", "--json", "--max-tokens", "1000");
         search.ExitCode.ShouldBe(0);
 
-        using (var doc = JsonDocument.Parse(search.StdOut.Trim()))
+        var lines = search.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        lines.Length.ShouldBe(2);
+        using (var doc = JsonDocument.Parse(lines[0]))
         {
-            var matches = doc.RootElement.GetProperty("matches");
-            matches.GetArrayLength().ShouldBe(1);
-            matches[0].GetProperty("path").GetString().ShouldBe("Alpha.cs");
-            matches[0].GetProperty("repo").GetString().ShouldBe("code");
-            matches[0].GetProperty("line").GetInt32().ShouldBe(1);
-            doc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeFalse();
-            doc.RootElement.GetProperty("tokensUsed").GetInt32().ShouldBeGreaterThan(0);
+            var match = doc.RootElement;
+            match.GetProperty("type").GetString().ShouldBe("match");
+            match.GetProperty("path").GetString().ShouldBe("Alpha.cs");
+            match.GetProperty("repo").GetString().ShouldBe("code");
+            match.GetProperty("line").GetInt32().ShouldBe(1);
+        }
+
+        using (var doc = JsonDocument.Parse(lines[1]))
+        {
+            var summary = doc.RootElement;
+            summary.GetProperty("type").GetString().ShouldBe("summary");
+            summary.GetProperty("matches").GetInt32().ShouldBe(1);
+            summary.GetProperty("tokensUsed").GetInt32().ShouldBeGreaterThan(0);
+            summary.GetProperty("maxTokens").GetInt32().ShouldBe(1000);
+            summary.GetProperty("truncated").GetBoolean().ShouldBeFalse();
         }
 
         var bare = TestDirs.NewTempDir();
         var missing = await RunCliAsync(bare, "search", "Alpha", "--json");
         missing.ExitCode.ShouldBe(1);
-        missing.StdErr.ShouldContain("squeezr index");
+        missing.StdOut.ShouldBeEmpty();
+        var missingError = ParseStdErrError(missing.StdErr);
+        missingError.GetProperty("code").GetString().ShouldBe("index_not_built");
+        missingError.GetProperty("message").GetString()!.ShouldContain("squeezr index");
 
         var invalid = await RunCliAsync(root, "search", "[", "--regex", "--json");
         invalid.ExitCode.ShouldBe(1);
-        invalid.StdErr.ShouldContain("Invalid regex pattern");
-        using (var doc = JsonDocument.Parse(invalid.StdOut.Trim()))
-        {
-            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("Invalid regex pattern");
-        }
+        invalid.StdOut.ShouldBeEmpty();
+        var invalidError = ParseStdErrError(invalid.StdErr);
+        invalidError.GetProperty("code").GetString().ShouldBe("invalid_query");
+        invalidError.GetProperty("message").GetString()!.ShouldContain("Invalid regex pattern");
     }
 
     [Fact]
@@ -191,19 +203,17 @@ public sealed class CliEndToEndTests
 
         var search = await RunCliAsync(root, "search", "Delta", "--json");
         search.ExitCode.ShouldBe(1);
-        search.StdErr.ShouldContain("error:");
-        using (var doc = JsonDocument.Parse(search.StdOut.Trim()))
-        {
-            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("not a squeezr trigram index");
-        }
+        search.StdOut.ShouldBeEmpty();
+        var searchError = ParseStdErrError(search.StdErr);
+        searchError.GetProperty("code").GetString().ShouldBe("invalid_data");
+        searchError.GetProperty("message").GetString()!.ShouldContain("not a squeezr trigram index");
 
         var compact = await RunCliAsync(root, "compact", "--json");
         compact.ExitCode.ShouldBe(1);
-        compact.StdErr.ShouldContain("error:");
-        using (var doc = JsonDocument.Parse(compact.StdOut.Trim()))
-        {
-            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("not a squeezr trigram index");
-        }
+        compact.StdOut.ShouldBeEmpty();
+        var compactError = ParseStdErrError(compact.StdErr);
+        compactError.GetProperty("code").GetString().ShouldBe("invalid_data");
+        compactError.GetProperty("message").GetString()!.ShouldContain("not a squeezr trigram index");
     }
 
     [Fact]
@@ -234,10 +244,24 @@ public sealed class CliEndToEndTests
 
         var search = await RunCliAsync(root, "search", "deltabody", "--json");
         search.ExitCode.ShouldBe(0);
-        using (var doc = JsonDocument.Parse(search.StdOut.Trim()))
+        var searchLines = search.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        using (var doc = JsonDocument.Parse(searchLines[0]))
         {
-            doc.RootElement.GetProperty("matches").GetArrayLength().ShouldBe(1);
+            doc.RootElement.GetProperty("type").GetString().ShouldBe("match");
         }
+
+        using (var doc = JsonDocument.Parse(searchLines[1]))
+        {
+            doc.RootElement.GetProperty("type").GetString().ShouldBe("summary");
+            doc.RootElement.GetProperty("matches").GetInt32().ShouldBe(1);
+        }
+    }
+
+    private static JsonElement ParseStdErrError(string stdErr)
+    {
+        var lines = stdErr.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        using var doc = JsonDocument.Parse(lines[^1]);
+        return doc.RootElement.GetProperty("error").Clone();
     }
 
     private static async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(string workingDir, params string[] args)

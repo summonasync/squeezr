@@ -51,6 +51,12 @@ public static class CliApplication
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")
                 .WithDescription("Interactive terminal UI (dashboard, search, wizards)");
+            config.AddBranch("workspace", workspace =>
+            {
+                workspace.SetDescription("Inspect the current workspace");
+                workspace.AddCommand<WorkspaceListCommand>("list")
+                    .WithDescription("List repositories in the current workspace");
+            });
             McpCommandRegistration.AddMcpBranch(config);
         });
 

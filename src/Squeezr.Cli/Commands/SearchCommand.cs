@@ -74,7 +74,17 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
             if (settings.Json)
             {
-                JsonOutput.Write(response);
+                foreach (var match in response.Matches)
+                {
+                    JsonOutput.WriteLine(SearchMatchLine.FromMatch(match));
+                }
+
+                JsonOutput.WriteLine(new SearchSummaryLine(
+                    "summary",
+                    response.Matches.Count,
+                    response.TokensUsed,
+                    settings.MaxTokens,
+                    response.Truncated));
                 return 0;
             }
 
@@ -96,13 +106,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         }
         catch (Exception ex) when (ex is WorkspaceException or InvalidDataException)
         {
-            Console.Error.WriteLine($"error: {ex.Message}");
-            if (settings.Json)
-            {
-                JsonOutput.Write(new { Error = ex.Message });
-            }
-
-            return 1;
+            return CommandError.Report(ex, settings.Json);
         }
     }
 

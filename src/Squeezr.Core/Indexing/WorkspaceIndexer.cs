@@ -24,7 +24,9 @@ public sealed class WorkspaceIndexer
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
-            throw new WorkspaceException("Workspace is not initialized. Run 'squeezr init' first.");
+            throw new WorkspaceException(
+                "Workspace is not initialized. Run 'squeezr init' first.",
+                WorkspaceException.NotInitializedCode);
         }
 
         var manifest = WorkspaceManifestFile.Load(workspaceRoot);
@@ -196,7 +198,9 @@ public sealed class WorkspaceIndexer
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
-            throw new WorkspaceException("Workspace is not initialized. Run 'squeezr index' first.");
+            throw new WorkspaceException(
+                "Workspace is not initialized. Run 'squeezr index' first.",
+                WorkspaceException.NotInitializedCode);
         }
 
         var manifest = WorkspaceManifestFile.Load(workspaceRoot);

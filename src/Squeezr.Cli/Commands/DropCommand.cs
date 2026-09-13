@@ -46,8 +46,7 @@ public sealed class DropCommand : Command<DropCommand.Settings>
         }
         catch (WorkspaceException ex)
         {
-            Console.Error.WriteLine($"error: {ex.Message}");
-            return 1;
+            return CommandError.Report(ex, settings.Json);
         }
     }
 

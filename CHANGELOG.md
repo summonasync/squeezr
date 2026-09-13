@@ -12,6 +12,14 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 ### Fixed
 - MCP `tools/list` now reports tool descriptions (agent-facing hints were empty)
 
+### Added (035, machine-readable CLI)
+- `status --json`: single camelCase object with top-level `files/symbols/chunks/staleFiles/indexAge` plus per-repo breakdown, field names aligned with the MCP envelope
+- `search --json` is now NDJSON: per-line `{"type":"match"}` entries flushed per line + final `{"type":"summary"}` (`matches/tokensUsed/maxTokens?/truncated`)
+- `squeezr workspace list`: workspace composition from the manifest; `--json` — NDJSON, one repo per line
+- Uniform error contract for all `--json` commands: `{"error":{"code","message"}}` on stderr + exit code 1, stable codes via `WorkspaceException.Code`
+- Stale-file detection in JSON mode (`StaleFileDetector`: walk + SHA-256 vs metadb, semantics = next incremental index pass)
+- Human-readable output frozen as regression guard (contract tests)
+
 ## [0.9.0-pre] — 2026-09-13
 
 Pre-release for dogfooding. v1 MVP (M1–M6) closed, post-MVP features landed.

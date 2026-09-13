@@ -17,7 +17,9 @@ public static class ExactSearchPlan
         var indexPath = SqueezrPaths.TrigramIndexPath(workspaceRoot);
         if (!File.Exists(indexPath))
         {
-            throw new WorkspaceException("Index is not built. Run 'squeezr index' first.");
+            throw new WorkspaceException(
+                "Index is not built. Run 'squeezr index' first.",
+                WorkspaceException.IndexNotBuiltCode);
         }
 
         if (query.Regex)
@@ -28,7 +30,9 @@ public static class ExactSearchPlan
             }
             catch (ArgumentException ex)
             {
-                throw new WorkspaceException($"Invalid regex pattern: {ex.Message}");
+                throw new WorkspaceException(
+                    $"Invalid regex pattern: {ex.Message}",
+                    WorkspaceException.InvalidQueryCode);
             }
         }
 

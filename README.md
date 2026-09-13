@@ -65,7 +65,10 @@ squeezr symbol WorkspaceManager               # точный lookup символ
 squeezr expand src/Foo.cs 42 87               # раскрыть спан из живого файла
 squeezr compact                               # компактификация триграммного индекса
 squeezr drop                                  # полное удаление индекса workspace
+squeezr workspace list                        # состав workspace: репозитории из манифеста
 ```
+
+Машиночитаемый вывод (`--json`): `status --json` — один JSON-объект (camelCase, включая `staleFiles`/`indexAge`); `search --json` и `workspace list --json` — NDJSON (один объект на строку, флаш на строку; у search финальная строка — `{"type":"summary"}`). Ошибки в JSON-режиме — `{"error":{"code","message"}}` на stderr + ненулевой exit code, коды стабильные (`not_initialized`, `index_not_built`, `invalid_query`, ...). Человекочитаемый вывод при этом не меняется.
 
 Эмбеддинги по умолчанию — локальная ONNX-модель bge-code-v1 (скачать: `scripts/fetch-model.sh` на Linux, `pwsh -File scripts\fetch-model.ps1` на Windows); OpenAI-совместимый endpoint включается секцией `embeddings` в `.squeezr/config.json` (ключ — только через env `SQUEEZR_API_KEY`). Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
 

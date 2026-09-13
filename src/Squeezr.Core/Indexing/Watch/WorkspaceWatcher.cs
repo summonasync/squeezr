@@ -49,7 +49,9 @@ public sealed class WorkspaceWatcher
         }
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
-            throw new WorkspaceException("Workspace is not initialized. Run 'squeezr init' first.");
+            throw new WorkspaceException(
+                "Workspace is not initialized. Run 'squeezr init' first.",
+                WorkspaceException.NotInitializedCode);
         }
 
         _workspaceRoot = Path.GetFullPath(workspaceRoot);

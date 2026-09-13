@@ -105,6 +105,12 @@ public sealed class WorkspaceManager
         return new WorkspaceStatus(manifest.Name, repos);
     }
 
+    public IReadOnlyList<RepoEntry> ListRepos()
+    {
+        var manifest = LoadManifest();
+        return manifest.Repos;
+    }
+
     public DropResult Drop()
     {
         var storeDir = SqueezrPaths.StoreDir(_root);
@@ -142,7 +148,9 @@ public sealed class WorkspaceManager
     private WorkspaceManifest LoadManifest() =>
         WorkspaceManifestFile.Exists(_root)
             ? WorkspaceManifestFile.Load(_root)
-            : throw new WorkspaceException("Workspace is not initialized. Run 'squeezr init' first.");
+            : throw new WorkspaceException(
+                "Workspace is not initialized. Run 'squeezr init' first.",
+                WorkspaceException.NotInitializedCode);
 
     private string ToStoredPath(string fullPath)
     {

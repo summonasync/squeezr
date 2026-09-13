@@ -82,16 +82,7 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
         }
         catch (WorkspaceException ex)
         {
-            if (settings.Json)
-            {
-                JsonOutput.WriteError(ex.Message);
-            }
-            else
-            {
-                Console.Error.WriteLine($"error: {ex.Message}");
-            }
-
-            return 1;
+            return CommandError.Report(ex, settings.Json);
         }
     }
 

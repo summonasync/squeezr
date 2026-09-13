@@ -155,10 +155,12 @@ public class SymbolMapExpandTests
 
         var cli = await RunCliAsync(workspace, "expand", "src/Dup.cs", "1", "3", "--json");
         cli.ExitCode.ShouldBe(1);
-        using (var doc = JsonDocument.Parse(cli.StdOut.Trim()))
+        cli.StdOut.ShouldBeEmpty();
+        using (var doc = JsonDocument.Parse(cli.StdErr.Trim()))
         {
-            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("alpha:src/Dup.cs");
-            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("beta:src/Dup.cs");
+            var message = doc.RootElement.GetProperty("error").GetProperty("message").GetString()!;
+            message.ShouldContain("alpha:src/Dup.cs");
+            message.ShouldContain("beta:src/Dup.cs");
         }
 
         var cliQualified = await RunCliAsync(workspace, "expand", "src/Dup.cs", "1", "1", "--repo", "beta", "--json");
@@ -263,9 +265,12 @@ public class SymbolMapExpandTests
 
         var missing = await RunCliAsync(root, "symbol", "Nope", "--json");
         missing.ExitCode.ShouldBe(1);
-        using (var doc = JsonDocument.Parse(missing.StdOut.Trim()))
+        missing.StdOut.ShouldBeEmpty();
+        using (var doc = JsonDocument.Parse(missing.StdErr.Trim()))
         {
-            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("No symbol named 'Nope'");
+            var error = doc.RootElement.GetProperty("error");
+            error.GetProperty("code").GetString().ShouldBe("workspace_error");
+            error.GetProperty("message").GetString()!.ShouldContain("No symbol named 'Nope'");
         }
     }
 

@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -40,7 +41,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
 
             if (settings.Json)
             {
-                JsonOutput.Write(status);
+                var staleFiles = StaleFileDetector.Detect(workspaceRoot);
+                JsonOutput.Write(WorkspaceStatusReport.Create(status, staleFiles));
                 return 0;
             }
 
@@ -82,8 +84,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         }
         catch (WorkspaceException ex)
         {
-            Console.Error.WriteLine($"error: {ex.Message}");
-            return 1;
+            return CommandError.Report(ex, settings.Json);
         }
     }
 }

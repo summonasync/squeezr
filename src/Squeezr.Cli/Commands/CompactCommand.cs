@@ -39,13 +39,7 @@ public sealed class CompactCommand : Command<CompactCommand.Settings>
         }
         catch (Exception ex) when (ex is WorkspaceException or InvalidDataException)
         {
-            Console.Error.WriteLine($"error: {ex.Message}");
-            if (settings.Json)
-            {
-                JsonOutput.Write(new { Error = ex.Message });
-            }
-
-            return 1;
+            return CommandError.Report(ex, settings.Json);
         }
     }
 

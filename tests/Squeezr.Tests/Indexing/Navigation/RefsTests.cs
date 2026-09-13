@@ -73,10 +73,12 @@ public class RefsTests
 
         var missing = await RunCliAsync(root, "refs", "Nope", "--json");
         missing.ExitCode.ShouldBe(1);
-        missing.StdErr.ShouldContain("No symbol named 'Nope'");
-        using (var doc = JsonDocument.Parse(missing.StdOut.Trim()))
+        missing.StdOut.ShouldBeEmpty();
+        using (var doc = JsonDocument.Parse(missing.StdErr.Trim()))
         {
-            doc.RootElement.GetProperty("error").GetString()!.ShouldContain("No symbol named 'Nope'");
+            var error = doc.RootElement.GetProperty("error");
+            error.GetProperty("code").GetString().ShouldBe("workspace_error");
+            error.GetProperty("message").GetString()!.ShouldContain("No symbol named 'Nope'");
         }
     }
 

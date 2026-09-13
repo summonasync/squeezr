@@ -16,13 +16,17 @@ public static class WorkspaceCompactor
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
-            throw new WorkspaceException("Workspace is not initialized. Run 'squeezr init' first.");
+            throw new WorkspaceException(
+                "Workspace is not initialized. Run 'squeezr init' first.",
+                WorkspaceException.NotInitializedCode);
         }
 
         var trigramPath = SqueezrPaths.TrigramIndexPath(workspaceRoot);
         if (!File.Exists(trigramPath))
         {
-            throw new WorkspaceException("Index is not built. Run 'squeezr index' first.");
+            throw new WorkspaceException(
+                "Index is not built. Run 'squeezr index' first.",
+                WorkspaceException.IndexNotBuiltCode);
         }
 
         using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot)))
