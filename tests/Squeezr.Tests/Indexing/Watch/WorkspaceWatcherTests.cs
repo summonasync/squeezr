@@ -188,6 +188,34 @@ public class WorkspaceWatcherTests
     }
 
     [Fact]
+    public async Task ProgressSink_ReceivesFileTicksAndPhasesDuringPass()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"oldneedle\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        var recorder = new WatchRecorder();
+        var progress = new RecordingProgressSink();
+        using var cts = new CancellationTokenSource();
+        var watcher = new WorkspaceWatcher(recorder, progress);
+        await watcher.StartAsync(workspace, cts.Token);
+        try
+        {
+            WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"freshneedle\"; }");
+
+            await UntilAsync(() => recorder.PassesCompleted >= 1);
+            recorder.Faults.ShouldBeEmpty();
+
+            progress.Phases.ShouldContain(IndexPhase.Files);
+            progress.Phases.ShouldContain(IndexPhase.Trigram);
+            progress.FileTicks.ShouldContain("a.cs");
+        }
+        finally
+        {
+            await StopWatcherAsync(watcher, cts);
+        }
+    }
+
+    [Fact]
     public async Task WriteInsideSqueezrStore_DoesNotTriggerPass()
     {
         var workspace = NewRootRepoWorkspace();
@@ -301,6 +329,55 @@ public class WorkspaceWatcherTests
         var fullPath = Path.Combine(workspace, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllText(fullPath, content);
+    }
+
+    private sealed class RecordingProgressSink : IIndexProgress
+    {
+        private readonly object _gate = new();
+        private readonly List<IndexPhase> _phases = [];
+        private readonly List<string> _fileTicks = [];
+
+        public IReadOnlyList<IndexPhase> Phases
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _phases.ToArray();
+                }
+            }
+        }
+
+        public IReadOnlyList<string> FileTicks
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _fileTicks.ToArray();
+                }
+            }
+        }
+
+        public void PhaseStarted(string repoName, IndexPhase phase, int totalItems)
+        {
+            lock (_gate)
+            {
+                _phases.Add(phase);
+            }
+        }
+
+        public void ItemProcessed(string repoName, string currentItem, int? symbolsInserted = null)
+        {
+            lock (_gate)
+            {
+                _fileTicks.Add(currentItem);
+            }
+        }
+
+        public void RepoCompleted(string repoName)
+        {
+        }
     }
 
     private sealed class WatchRecorder : IWatchStatus

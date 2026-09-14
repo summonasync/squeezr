@@ -9,6 +9,9 @@ public sealed class ServeCommand : Command<ServeCommand.Settings>
     {
         [CommandOption("--watch")]
         public bool Watch { get; set; }
+
+        [CommandOption("--events")]
+        public bool Events { get; set; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -20,7 +23,8 @@ public sealed class ServeCommand : Command<ServeCommand.Settings>
             cts.Cancel();
         };
 
-        McpServerHost.RunStdioAsync(Directory.GetCurrentDirectory(), cts.Token, settings.Watch).GetAwaiter().GetResult();
+        McpServerHost.RunStdioAsync(
+            Directory.GetCurrentDirectory(), cts.Token, settings.Watch, settings.Events).GetAwaiter().GetResult();
         return 0;
     }
 }

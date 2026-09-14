@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
@@ -25,10 +26,15 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
 
         [CommandOption("--json")]
         public bool Json { get; set; }
+
+        [CommandOption("--events")]
+        public bool Events { get; set; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        IndexEventWriter? events = null;
+        var startedAt = Stopwatch.GetTimestamp();
         try
         {
             var indexer = new WorkspaceIndexer();
@@ -41,8 +47,12 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                 Console.Error.WriteLine($"warning: {warning}");
             }
 
+            events = settings.Events ? new IndexEventWriter(Console.Out) : null;
+            events?.Started(workspaceRoot);
+
+            IndexEventsRenderer? renderer = null;
             IndexResult result;
-            if (!settings.Json && AnsiConsole.Profile.Capabilities.Interactive)
+            if (!settings.Json && !settings.Events && AnsiConsole.Profile.Capabilities.Interactive)
             {
                 result = AnsiConsole.Progress()
                     .AutoClear(true)
@@ -57,16 +67,20 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
             }
             else
             {
+                renderer = settings.Events ? new IndexEventsRenderer(events!) : null;
                 result = indexer.Index(
                     workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
-                    embeddings: embeddings, vectorStore: vectorStore, reembed: settings.Reembed);
+                    renderer, embeddings, vectorStore, settings.Reembed);
             }
+
+            events?.Completed(
+                result, (int)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, renderer?.Symbols);
 
             if (settings.Json)
             {
                 JsonOutput.Write(result);
             }
-            else
+            else if (!settings.Events)
             {
                 foreach (var repo in result.Repos)
                 {
@@ -85,7 +99,8 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         }
         catch (WorkspaceException ex)
         {
-            return CommandError.Report(ex, settings.Json);
+            events?.Error(CommandError.CodeFor(ex), ex.Message);
+            return CommandError.Report(ex, settings.Json || settings.Events);
         }
     }
 }

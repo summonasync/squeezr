@@ -20,6 +20,12 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 - Stale-file detection in JSON mode (`StaleFileDetector`: walk + SHA-256 vs metadb, semantics = next incremental index pass)
 - Human-readable output frozen as regression guard (contract tests)
 
+### Added (036, progress events)
+- `index --events` and `serve --watch --events`: NDJSON progress event stream, one event per line, flushed per line — `started` → `fileIndexed` (cumulative file count) → `progress` (phase totals for semantic/embeddings/trigram) → `completed` (totals, durationMs, inserted symbols) / `error` (terminal, stable codes)
+- Event transport: `index` streams events on stdout; `serve --watch` streams them on stderr so the MCP JSON-RPC channel on stdout stays untouched
+- Composes with `--json`: events form a complete sequence first, then the final `--json` result object; errors emit a terminal `error` event plus the uniform `{"error":{"code","message"}}` envelope on stderr with exit code 1
+- A quiet incremental `index --events` run emits exactly `started` → `fileIndexed`×N → `completed`; human-readable output and watch/MCP behavior are unchanged
+
 ## [0.9.0-pre] — 2026-09-13
 
 Pre-release for dogfooding. v1 MVP (M1–M6) closed, post-MVP features landed.

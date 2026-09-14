@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using Squeezr.Cli.Mcp.Tools;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Workspace;
@@ -15,7 +16,8 @@ public static class McpServerHost
 {
     private static readonly TimeSpan StdinEofGrace = TimeSpan.FromSeconds(1);
 
-    public static async Task RunStdioAsync(string startDirectory, CancellationToken ct, bool watch = false)
+    public static async Task RunStdioAsync(
+        string startDirectory, CancellationToken ct, bool watch = false, bool events = false)
     {
         var resolution = WorkspaceRootResolver.Resolve(startDirectory);
         if (resolution.ViaClaudeProjectDir)
@@ -26,7 +28,7 @@ public static class McpServerHost
         Console.Error.WriteLine($"squeezr serve: workspace '{resolution.Root}'");
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
-        await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.Root, ct, watch);
+        await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.Root, ct, watch, events);
         await forwardTask;
     }
 
@@ -47,7 +49,7 @@ public static class McpServerHost
     }
 
     public static async Task RunAsync(
-        Stream input, Stream output, string workspaceRoot, CancellationToken ct, bool watch = false)
+        Stream input, Stream output, string workspaceRoot, CancellationToken ct, bool watch = false, bool events = false)
     {
         var workspace = new McpWorkspace(workspaceRoot);
         if (!workspace.IsWorkspace)
@@ -83,7 +85,7 @@ public static class McpServerHost
         await using var provider = services.BuildServiceProvider();
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();
         await server.StartAsync(ct);
-        var watcher = await TryStartWatchEngineAsync(workspace, watch, ct);
+        var watcher = await TryStartWatchEngineAsync(workspace, watch, ct, events);
         lifetime.MarkStarted();
         try
         {
@@ -102,10 +104,15 @@ public static class McpServerHost
     }
 
     private static async Task<WorkspaceWatcher?> TryStartWatchEngineAsync(
-        McpWorkspace workspace, bool watchRequested, CancellationToken ct)
+        McpWorkspace workspace, bool watchRequested, CancellationToken ct, bool events)
     {
         if (!watchRequested && !ConfigRequestsWatch(workspace.Root))
         {
+            if (events)
+            {
+                Console.Error.WriteLine("warning: --events has no effect: watch engine is off (pass --watch or set watch.enabled)");
+            }
+
             return null;
         }
 
@@ -117,7 +124,19 @@ public static class McpServerHost
 
         try
         {
-            var watcher = new WorkspaceWatcher();
+            WorkspaceWatcher watcher;
+            if (events)
+            {
+                var writer = new IndexEventWriter(Console.Error);
+                var renderer = new IndexEventsRenderer(writer);
+                watcher = new WorkspaceWatcher(
+                    new WatchEventsStatus(writer, workspace.Root, renderer), renderer);
+            }
+            else
+            {
+                watcher = new WorkspaceWatcher();
+            }
+
             await watcher.StartAsync(workspace.Root, ct);
             Console.Error.WriteLine("squeezr serve: watch engine running");
             return watcher;
