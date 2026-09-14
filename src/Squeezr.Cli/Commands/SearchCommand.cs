@@ -67,8 +67,15 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 vectorStore,
                 cancellationToken).GetAwaiter().GetResult();
 
+            var vectorStoreUnavailable = false;
             foreach (var warning in response.Warnings)
             {
+                if (warning == SearchEngine.VectorStoreUnavailableWarning)
+                {
+                    vectorStoreUnavailable = true;
+                    continue;
+                }
+
                 ReportWarning(warning);
             }
 
@@ -100,6 +107,11 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             if (response.Truncated)
             {
                 AnsiConsole.MarkupLine("[grey]truncated: refine the query or raise --max-tokens[/]");
+            }
+
+            if (vectorStoreUnavailable)
+            {
+                AnsiConsole.MarkupLine($"[grey]{SearchEngine.VectorStoreUnavailableWarning}[/]");
             }
 
             return 0;

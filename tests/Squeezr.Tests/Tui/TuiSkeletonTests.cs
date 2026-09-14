@@ -128,6 +128,8 @@ public class TuiSkeletonTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with { Qdrant = config.Qdrant with { Endpoint = "http://localhost:9" } });
         WriteFile(workspace, "repo/src/Calc.cs", """
             namespace Demo;
 

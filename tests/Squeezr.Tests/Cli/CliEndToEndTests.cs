@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Cli;
@@ -254,6 +255,50 @@ public sealed class CliEndToEndTests
         {
             doc.RootElement.GetProperty("type").GetString().ShouldBe("summary");
             doc.RootElement.GetProperty("matches").GetInt32().ShouldBe(1);
+        }
+    }
+
+    [Fact]
+    public async Task Search_QdrantDown_DowngradesUnavailableWarningToFooterHint()
+    {
+        var root = TestDirs.NewTempDir();
+        const string apiKeyEnv = "SQUEEZR_API_KEY_SEARCH_DF5_E2E";
+
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        Directory.CreateDirectory(Path.Combine(root, "code"));
+        File.WriteAllText(Path.Combine(root, "code", "Omega.cs"), "class Omega { string Term = \"omegabody\"; }");
+        (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
+        (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
+
+        var config = ConfigFile.Load(root);
+        ConfigFile.Save(root, config with
+        {
+            Embeddings = config.Embeddings with
+            {
+                Provider = "openai",
+                OpenAiCompatible = config.Embeddings.OpenAiCompatible with { ApiKeyEnv = apiKeyEnv }
+            },
+            Qdrant = config.Qdrant with { Endpoint = "http://localhost:9" }
+        });
+
+        var previousKey = Environment.GetEnvironmentVariable(apiKeyEnv);
+        Environment.SetEnvironmentVariable(apiKeyEnv, "test-key");
+        try
+        {
+            var first = await RunCliAsync(root, "search", "omegabody");
+            var second = await RunCliAsync(root, "search", "omegabody");
+
+            foreach (var run in new[] { first, second })
+            {
+                run.ExitCode.ShouldBe(0);
+                run.StdOut.ShouldContain("Omega.cs");
+                run.StdOut.ShouldContain("vector store is unavailable");
+                run.StdErr.ShouldNotContain("warning:");
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(apiKeyEnv, previousKey);
         }
     }
 

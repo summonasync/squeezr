@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Squeezr.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="Microsoft.Build" Version="17.11.48" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Build.Framework" Version="17.11.48" ExcludeAssets="runtime" PrivateAssets="all" />
@@ -20,5 +24,19 @@
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
     <PackageReference Include="TreeSitter.DotNet" Version="1.3.0" />
   </ItemGroup>
+
+  <!-- BuildHost contentFiles materialize as Content items only at execution time
+       (ResolvePackageAssets), so a declarative Update cannot reach them. -->
+  <Target Name="ExcludeBuildHostContentFromSingleFile"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="RunProduceContentAssets">
+    <ItemGroup>
+      <Content Update="@(Content)"
+               Condition="'%(Content.NuGetPackageId)' == 'Microsoft.CodeAnalysis.Workspaces.MSBuild'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+    </ItemGroup>
+  </Target>
 
 </Project>

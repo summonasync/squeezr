@@ -31,6 +31,9 @@ fi
 step() { echo "==> $1"; }
 
 step "Publishing self-contained $rid single-file build"
+# dotnet publish does not clean -o; leftovers from a previous publish with
+# another RID (e.g. onnxruntime.dll) would leak into the install dir.
+rm -rf "$publish_dir"
 dotnet publish "$repo_root/src/Squeezr.Cli/Squeezr.Cli.csproj" \
   -c Release -r "$rid" --self-contained true \
   -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
@@ -57,6 +60,14 @@ else
 [!] Docker not found. Squeezr works without it (trigram + symbol layers),
     but semantic search (milestone M4+) needs Qdrant in Docker.
     Install Docker Engine: https://docs.docker.com/engine/install/
+HINT
+fi
+
+if [[ ! -d "$install_dir/Models" ]]; then
+  cat <<HINT >&2
+
+[!] No embedding model in $install_dir/Models - semantic search (M4+) will be disabled.
+    Run scripts/fetch-model.sh to download bge-code-v1, then re-run this script.
 HINT
 fi
 

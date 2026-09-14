@@ -35,105 +35,133 @@ public static class SemanticIndexPhase
             return new SemanticPhaseResult(0, 0, 0);
         }
 
-        var skipped = 0;
-        var symbolsInserted = 0;
         using (session)
         {
-            progress?.PhaseStarted(repoDoc.Name, IndexPhase.Semantic, csFiles.Count);
+            return RunWithSession(
+                session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warning, progress);
+        }
+    }
 
-            foreach (var degradation in session.Warnings.Where(IsDegradationWarning))
+    internal static SemanticPhaseResult RunWithSession(
+        RoslynSession session,
+        string repoRoot,
+        RepoDocument repoDoc,
+        MetaStore store,
+        IReadOnlyList<SourceFile> csFiles,
+        IReadOnlyDictionary<string, FileDocument> changedByPath,
+        IReadOnlyDictionary<string, FileDocument> dbFilesByPath,
+        SqueezrConfig config,
+        bool noSemantic,
+        Action<string> warning,
+        IIndexProgress? progress = null)
+    {
+        var skipped = 0;
+        var symbolsInserted = 0;
+
+        progress?.PhaseStarted(repoDoc.Name, IndexPhase.Semantic, csFiles.Count);
+
+        foreach (var degradation in session.Warnings.Where(IsDegradationWarning))
+        {
+            warning(degradation);
+        }
+
+        var provider = new RoslynProvider(session, config);
+        var symbolsByFile = store.ListSymbolsByRepo(repoDoc.Id)
+            .GroupBy(s => s.FileId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        if (noSemantic)
+        {
+            PurgeRefs(csFiles, dbFilesByPath, symbolsByFile, store);
+        }
+
+        foreach (var file in csFiles)
+        {
+            try
             {
-                warning(degradation);
-            }
-
-            var provider = new RoslynProvider(session, config);
-            var symbolsByFile = store.ListSymbolsByRepo(repoDoc.Id)
-                .GroupBy(s => s.FileId)
-                .ToDictionary(g => g.Key, g => g.ToList());
-
-            if (noSemantic)
-            {
-                PurgeRefs(csFiles, dbFilesByPath, symbolsByFile, store);
-            }
-
-            foreach (var file in csFiles)
-            {
+                byte[] content;
                 try
                 {
-                    byte[] content;
-                    try
-                    {
-                        content = File.ReadAllBytes(file.FullPath);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        warning($"skipped '{file.RelativePath}': unreadable ({ex.Message})");
-                        skipped++;
-                        continue;
-                    }
-
-                    var warningCountBefore = provider.Warnings.Count;
-                    var result = provider.Parse(new FileRef(repoDoc.Name, file.RelativePath), content);
-                    var parseFailed = provider.Warnings.Count > warningCountBefore;
-                    if (parseFailed)
-                    {
-                        warning($"skipped '{file.RelativePath}': symbol extraction failed; previous data kept");
-                        skipped++;
-                        continue;
-                    }
-
-                    var isChanged = changedByPath.TryGetValue(file.RelativePath, out var fileDoc);
-                    if (!isChanged && dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc)
-                        && symbolsByFile.TryGetValue(existingDoc.Id, out var existingSymbols)
-                        && HasDrift(existingSymbols, result))
-                    {
-                        isChanged = true;
-                        fileDoc = existingDoc;
-                    }
-
-                    List<SymbolDocument> symbolsForRefs;
-                    if (isChanged)
-                    {
-                        CascadeFile(fileDoc!.Id, symbolsByFile, store);
-                        symbolsForRefs = SymbolPersistence.InsertSymbols(result, fileDoc, repoDoc, store);
-                        symbolsByFile[fileDoc.Id] = symbolsForRefs;
-                        SymbolPersistence.InsertChunks(result, fileDoc, repoDoc, symbolsForRefs, store);
-                        symbolsInserted += symbolsForRefs.Count;
-                    }
-                    else if (dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc2)
-                             && symbolsByFile.TryGetValue(existingDoc2.Id, out var existingSymbols2))
-                    {
-                        symbolsForRefs = existingSymbols2;
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    if (noSemantic)
-                    {
-                        continue;
-                    }
-
-                    if (!isChanged)
-                    {
-                        store.DeleteRefsByFromSymbolIds(symbolsForRefs.Select(s => s.Id).ToList());
-                    }
-
-                    InsertRefs(result, symbolsForRefs, repoRoot, dbFilesByPath, store);
+                    content = File.ReadAllBytes(file.FullPath);
                 }
-                finally
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    progress?.ItemProcessed(repoDoc.Name, file.RelativePath, symbolsInserted);
+                    warning($"skipped '{file.RelativePath}': unreadable ({ex.Message})");
+                    skipped++;
+                    continue;
                 }
+
+                var warningCountBefore = provider.Warnings.Count;
+                var result = provider.Parse(new FileRef(repoDoc.Name, file.RelativePath), content);
+                var parseFailed = provider.Warnings.Count > warningCountBefore;
+                if (parseFailed)
+                {
+                    warning($"skipped '{file.RelativePath}': symbol extraction failed; previous data kept");
+                    skipped++;
+                    continue;
+                }
+
+                var isChanged = changedByPath.TryGetValue(file.RelativePath, out var fileDoc);
+                // syntax-only signatures never match semantic ones, so drift under a degraded
+                // session is parser noise rather than a real edit — keep the stored symbols
+                if (!isChanged && session.Semantic
+                    && dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc)
+                    && symbolsByFile.TryGetValue(existingDoc.Id, out var existingSymbols)
+                    && HasDrift(existingSymbols, result))
+                {
+                    isChanged = true;
+                    fileDoc = existingDoc;
+                }
+
+                List<SymbolDocument> symbolsForRefs;
+                if (isChanged)
+                {
+                    CascadeFile(fileDoc!.Id, symbolsByFile, store);
+                    symbolsForRefs = SymbolPersistence.InsertSymbols(result, fileDoc, repoDoc, store);
+                    symbolsByFile[fileDoc.Id] = symbolsForRefs;
+                    SymbolPersistence.InsertChunks(result, fileDoc, repoDoc, symbolsForRefs, store);
+                    symbolsInserted += symbolsForRefs.Count;
+                }
+                else if (dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc2)
+                         && symbolsByFile.TryGetValue(existingDoc2.Id, out var existingSymbols2))
+                {
+                    symbolsForRefs = existingSymbols2;
+                }
+                else
+                {
+                    continue;
+                }
+
+                if (noSemantic)
+                {
+                    continue;
+                }
+
+                // a degraded session resolves no refs; refreshing an unchanged file would
+                // delete rows it cannot rebuild, so leave them for the next semantic pass
+                if (!isChanged && !session.Semantic)
+                {
+                    continue;
+                }
+
+                if (!isChanged)
+                {
+                    store.DeleteRefsByFromSymbolIds(symbolsForRefs.Select(s => s.Id).ToList());
+                }
+
+                InsertRefs(result, symbolsForRefs, repoRoot, dbFilesByPath, store);
             }
-
-            foreach (var providerWarning in provider.Warnings)
+            finally
             {
-                if (providerWarning.StartsWith("parse failed", StringComparison.OrdinalIgnoreCase))
-                {
-                    warning(providerWarning);
-                }
+                progress?.ItemProcessed(repoDoc.Name, file.RelativePath, symbolsInserted);
+            }
+        }
+
+        foreach (var providerWarning in provider.Warnings)
+        {
+            if (providerWarning.StartsWith("parse failed", StringComparison.OrdinalIgnoreCase))
+            {
+                warning(providerWarning);
             }
         }
 
@@ -198,7 +226,7 @@ public static class SemanticIndexPhase
         return false;
     }
 
-    private static void InsertRefs(
+    internal static void InsertRefs(
         ParseResult result,
         List<SymbolDocument> symbolsForRefs,
         string repoRoot,
@@ -232,6 +260,11 @@ public static class SemanticIndexPhase
             });
         }
 
-        store.InsertRefs(refDocs);
+        // a linked file backs one document per project, so the same location arrives once per
+        // owning project; the enclosing symbol keeps same-line usages distinct (field type
+        // annotation vs initializer) from collapsing into one row
+        store.InsertRefs(refDocs
+            .DistinctBy(r => (r.FromSymbolId, r.FileId, r.Line, r.Kind, r.EnclosingSymbol))
+            .ToList());
     }
 }

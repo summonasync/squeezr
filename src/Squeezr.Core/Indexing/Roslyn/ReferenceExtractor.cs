@@ -16,7 +16,8 @@ public static class ReferenceExtractor
         var refs = new List<SymbolRef>();
         var roots = new Dictionary<Document, SyntaxNode?>();
         var models = new Dictionary<Document, SemanticModel?>();
-        var scope = ImmutableHashSet.CreateRange(document.Project.Documents);
+        var scope = ImmutableHashSet.CreateRange(
+            document.Project.Solution.Projects.SelectMany(p => p.Documents));
 
         foreach (var extracted in declared)
         {

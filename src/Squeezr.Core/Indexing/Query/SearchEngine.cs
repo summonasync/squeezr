@@ -4,6 +4,8 @@ namespace Squeezr.Core.Indexing.Query;
 
 public sealed class SearchEngine
 {
+    public const string VectorStoreUnavailableWarning = "vector store is unavailable, falling back to exact search only";
+
     private readonly string _workspaceRoot;
 
     public SearchEngine(string workspaceRoot) => _workspaceRoot = Path.GetFullPath(workspaceRoot);
@@ -30,7 +32,7 @@ public sealed class SearchEngine
             {
                 if (!await vectorStore.IsAvailableAsync(ct))
                 {
-                    warnings.Add("vector store is unavailable, falling back to exact search only");
+                    warnings.Add(VectorStoreUnavailableWarning);
                 }
                 else if (await vectorStore.CountAsync(ct) > 0)
                 {

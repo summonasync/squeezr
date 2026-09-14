@@ -82,8 +82,9 @@ public class TuiSearchFlowTests
     }
 
     [Fact]
-    public async Task Search_QdrantDown_WarnsAndFallsBackToExact()
+    public async Task Search_QdrantDown_ShowsUnavailableHintOncePerSession()
     {
+        TuiSearchFlow.ResetWarningDedup();
         var workspace = NewIndexedWorkspace();
         const string apiKeyEnv = "SQUEEZR_API_KEY_TUI_SEARCH_FLOW_TEST";
         var config = ConfigFile.Load(workspace);
@@ -104,19 +105,27 @@ public class TuiSearchFlowTests
             TuiTestHarness.PushMenuChoice(console, 2);
             console.Input.PushTextWithEnter("zanzibar");
             TuiTestHarness.PushMenuChoice(console, 2);
+            TuiTestHarness.PushMenuChoice(console, 2);
+            console.Input.PushTextWithEnter("return");
+            TuiTestHarness.PushMenuChoice(console, 2);
             TuiTestHarness.PushMenuChoice(console, 6);
 
             var code = await TuiApp.RunAsync(console, workspace);
 
             code.ShouldBe(0);
-            console.Output.ShouldContain("vector store is unavailable");
+            CountOccurrences(console.Output, "vector store is unavailable").ShouldBe(1);
+            console.Output.ShouldNotContain("warning:");
             console.Output.ShouldContain("demo/src/Calc.cs");
+            console.Output.ShouldContain("return a + b;");
         }
         finally
         {
             Environment.SetEnvironmentVariable(apiKeyEnv, previousKey);
         }
     }
+
+    private static int CountOccurrences(string text, string substring) =>
+        text.Split(substring, StringSplitOptions.None).Length - 1;
 
     private static string NewIndexedWorkspace()
     {
