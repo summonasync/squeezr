@@ -25,7 +25,7 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
         Console.CancelKeyPress += onStop;
         try
         {
-            var workspaceRoot = Directory.GetCurrentDirectory();
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             if (AnsiConsole.Profile.Capabilities.Interactive)
             {
                 var status = new LiveWatchStatus(workspaceRoot);

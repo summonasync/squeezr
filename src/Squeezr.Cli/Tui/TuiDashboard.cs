@@ -1,5 +1,6 @@
 using Spectre.Console;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -17,11 +18,14 @@ public static class TuiDashboard
 
         var status = new WorkspaceManager(workspaceRoot).GetStatus();
         var warnings = EmbeddingRuntimeFactory.TryCreate(workspaceRoot, withProvider: false, out _, out var store);
+        var (provider, ollamaOptions) = ResolveEmbeddingProbeTarget(workspaceRoot);
         QdrantStatus qdrant;
         using (var metaStore = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
         {
             qdrant = await QdrantStatusProbe.ProbeAsync(store, metaStore, cancellationToken);
         }
+
+        var ollama = await OllamaStatusProbe.ProbeAsync(ollamaOptions, cancellationToken);
 
         console.MarkupLine($"[bold]Workspace:[/] {status.Name.EscapeMarkup()}");
         foreach (var repo in status.Repos)
@@ -29,13 +33,30 @@ public static class TuiDashboard
             console.MarkupLine($"  {repo.Name.EscapeMarkup()}: {repo.Files} files, {repo.Symbols} symbols, {repo.Chunks} chunks");
         }
 
-        TuiServicesStatus.Render(console, qdrant);
+        TuiServicesStatus.Render(console, qdrant, ollama, provider, ollamaOptions.Model);
         foreach (var warning in warnings)
         {
             console.MarkupLine($"[grey]{warning.EscapeMarkup()}[/]");
         }
 
         console.MarkupLine($"Index age: {FormatIndexAge(workspaceRoot)}");
+    }
+
+    private static (string Provider, OllamaOptions Options) ResolveEmbeddingProbeTarget(string workspaceRoot)
+    {
+        try
+        {
+            var config = ConfigFile.Load(workspaceRoot);
+            return (config.Embeddings.Provider.Trim(), config.Embeddings.Ollama);
+        }
+        catch (WorkspaceException)
+        {
+            return ("onnx", new OllamaOptions());
+        }
+        catch (IOException)
+        {
+            return ("onnx", new OllamaOptions());
+        }
     }
 
     private static string FormatIndexAge(string workspaceRoot)

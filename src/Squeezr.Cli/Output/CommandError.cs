@@ -1,3 +1,4 @@
+using Squeezr.Cli.Infra;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Output;
@@ -21,6 +22,7 @@ public static class CommandError
     public static string CodeFor(Exception ex) => ex switch
     {
         WorkspaceException workspace => workspace.Code,
+        ServicesException services => services.Code,
         InvalidDataException => "invalid_data",
         _ => "internal_error"
     };

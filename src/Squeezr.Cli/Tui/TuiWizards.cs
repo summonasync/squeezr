@@ -20,6 +20,7 @@ public static class TuiWizards
         {
             var result = new WorkspaceManager(workspaceRoot).Init(string.IsNullOrWhiteSpace(name) ? null : name.Trim());
             console.MarkupLine($"[green]Initialized workspace[/] {result.WorkspaceName.EscapeMarkup()} in {result.RootPath.EscapeMarkup()}");
+            console.MarkupLine($"Workspace store: {SqueezrPaths.StoreDir(workspaceRoot).EscapeMarkup()}");
             console.MarkupLine("Next: add a repository via \"Add repository\" in the main menu.");
         }
         catch (WorkspaceException ex)
@@ -62,29 +63,20 @@ public static class TuiWizards
         var storeDir = SqueezrPaths.StoreDir(workspaceRoot);
         if (!Directory.Exists(storeDir))
         {
-            console.MarkupLine("[red]error:[/] Nothing to drop: no '.squeezr' store in this directory.");
+            console.MarkupLine("[red]error:[/] Nothing to drop: no workspace store is registered for this directory.");
             return;
         }
 
         console.MarkupLine("The following will be removed:");
-        console.MarkupLine($"  [red]-[/] {SqueezrPaths.StoreDirName}{Path.DirectorySeparatorChar} ({storeDir.EscapeMarkup()})");
-        if (File.Exists(SqueezrPaths.ManifestPath(workspaceRoot)))
-        {
-            console.MarkupLine($"  [red]-[/] {SqueezrPaths.ManifestFileName}");
-        }
-
-        if (File.Exists(SqueezrPaths.ComposePath(workspaceRoot)))
-        {
-            console.MarkupLine($"  [red]-[/] {SqueezrPaths.ComposeFileName}");
-        }
+        console.MarkupLine($"  [red]-[/] {storeDir.EscapeMarkup()}");
 
         var collection = QdrantVectorStore.GetCollectionName(workspaceRoot);
         console.MarkupLine($"Qdrant collection [bold]{collection}[/] will be deleted if Qdrant is available.");
 
         var confirmed = await new ConfirmationPrompt("Drop this workspace?")
-            {
-                DefaultValue = false
-            }
+        {
+            DefaultValue = false
+        }
             .ShowAsync(console, cancellationToken);
         if (!confirmed)
         {
@@ -103,7 +95,7 @@ public static class TuiWizards
             var result = new WorkspaceManager(workspaceRoot).Drop(StaleLockWarningSink.ToStderr);
             await DeleteCollectionBestEffort(console, vectorStore, cancellationToken);
             console.MarkupLine($"[green]Removed[/] {string.Join(", ", result.Removed)}");
-            console.MarkupLine("To remove the Qdrant data volume as well, run:");
+            console.MarkupLine("To stop the shared Qdrant/Ollama services, run:");
             console.MarkupLine($"  [bold]{result.Hint}[/]");
         }
         catch (WorkspaceException ex)
@@ -128,8 +120,8 @@ public static class TuiWizards
             if (!available)
             {
                 console.MarkupLine(
-                    "[grey]Qdrant is not available; the vector collection may still exist. " +
-                    "Run 'docker compose down -v' to remove its volume.[/]");
+                    "[grey]Qdrant is not available; the vector collection may still exist in the shared volume. " +
+                    "Run 'squeezr services up' before dropping if you want it removed.[/]");
                 return;
             }
 

@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using Shouldly;
 using Squeezr.Cli.Mcp.Onboarding;
+using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp.Onboarding;
 
@@ -154,8 +156,9 @@ public sealed class McpOnboardingServiceTests
     {
         var (service, environment, workspace, binDir) = NewService();
         FakeCli.Install(binDir, "squeezr");
-        Directory.CreateDirectory(Path.Combine(workspace, ".squeezr"));
-        File.WriteAllText(Path.Combine(workspace, ".squeezr", "meta.db"), string.Empty);
+        new WorkspaceManager(workspace).Init("demo");
+        File.Exists(SqueezrPaths.MetaDbPath(workspace)).ShouldBeTrue();
+        Directory.Exists(Path.Combine(workspace, ".squeezr")).ShouldBeFalse();
         var client = McpClientRegistry.Get(McpClientId.Kimi);
         await service.InstallAsync(client, McpScope.Project, watch: true, writeInstructions: false, environment, CancellationToken.None);
 
@@ -167,6 +170,21 @@ public sealed class McpOnboardingServiceTests
         diagnostics.SqueezrInPath.ShouldBeTrue();
         diagnostics.WorkspaceIndexed.ShouldBeTrue();
         diagnostics.HeadlessStatus.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Doctor_MetaDbOnlyInProjectDirectory_IsNotReportedIndexed()
+    {
+        var (service, environment, workspace, _) = NewService();
+        new WorkspaceManager(workspace).Init("demo");
+        File.Delete(SqueezrPaths.MetaDbPath(workspace));
+        Directory.CreateDirectory(Path.Combine(workspace, ".squeezr"));
+        File.WriteAllText(Path.Combine(workspace, ".squeezr", "meta.db"), string.Empty);
+        var client = McpClientRegistry.Get(McpClientId.Kimi);
+
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+
+        diagnostics.WorkspaceIndexed.ShouldBeFalse();
     }
 
     [Fact]

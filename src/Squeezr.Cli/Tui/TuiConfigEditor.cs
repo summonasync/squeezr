@@ -1,5 +1,6 @@
 using Spectre.Console;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Tui;
@@ -42,6 +43,25 @@ public static class TuiConfigEditor
             if (!result.Save)
             {
                 continue;
+            }
+
+            if (section == "embeddings"
+                && EffectiveDimensions(config.Embeddings) is { } oldDimensions
+                && EffectiveDimensions(result.Config.Embeddings) is { } newDimensions
+                && oldDimensions != newDimensions)
+            {
+                console.MarkupLine(
+                    $"[yellow]warning:[/] embedding dimensions will change {oldDimensions} → {newDimensions}; " +
+                    "the existing vector collection is incompatible and 'squeezr index --reembed' will be required.");
+                var proceed = await new SelectionPrompt<string>()
+                    .Title("Apply anyway?")
+                    .AddChoices("Apply", "Cancel")
+                    .ShowAsync(console, cancellationToken);
+                if (proceed != "Apply")
+                {
+                    console.MarkupLine("[grey]Changes discarded.[/]");
+                    continue;
+                }
             }
 
             config = result.Config;
@@ -137,7 +157,7 @@ public static class TuiConfigEditor
                 Get = c => c.Embeddings.Provider,
                 Apply = (c, raw) => NormalizeProvider(raw) is { } provider
                     ? FieldResult.Valid(c with { Embeddings = c.Embeddings with { Provider = provider } })
-                    : FieldResult.Fail("must be 'onnx' or 'openai'"),
+                    : FieldResult.Fail("must be 'onnx', 'ollama' or 'openai'"),
             },
             new FieldDef
             {
@@ -242,6 +262,52 @@ public static class TuiConfigEditor
                     })
                     : FieldResult.Fail(error),
             },
+            new FieldDef
+            {
+                Key = "ollama.endpoint",
+                Get = c => c.Embeddings.Ollama.Endpoint,
+                Apply = (c, raw) => IsHttpUrl(raw, out var error)
+                    ? FieldResult.Valid(c with
+                    {
+                        Embeddings = c.Embeddings with { Ollama = c.Embeddings.Ollama with { Endpoint = raw } },
+                    })
+                    : FieldResult.Fail(error),
+            },
+            new FieldDef
+            {
+                Key = "ollama.model",
+                Get = c => c.Embeddings.Ollama.Model,
+                Apply = (c, raw) => FieldResult.Valid(c with
+                {
+                    Embeddings = c.Embeddings with { Ollama = c.Embeddings.Ollama with { Model = raw } },
+                }),
+            },
+            new FieldDef
+            {
+                Key = "ollama.dimensions",
+                Get = c => c.Embeddings.Ollama.Dimensions.ToString(),
+                Apply = (c, raw) => IsPositiveInt(raw, out var value, out var error)
+                    ? FieldResult.Valid(c with
+                    {
+                        Embeddings = c.Embeddings with { Ollama = c.Embeddings.Ollama with { Dimensions = value } },
+                    })
+                    : FieldResult.Fail(error),
+            },
+            new FieldDef
+            {
+                Key = "ollama.modelProfile",
+                Get = c => c.Embeddings.Ollama.ModelProfile ?? "null",
+                Apply = (c, raw) => TryNormalizeOllamaModelProfile(raw, out var profile)
+                    ? FieldResult.Valid(c with
+                    {
+                        Embeddings = c.Embeddings with
+                        {
+                            Ollama = c.Embeddings.Ollama with { ModelProfile = profile },
+                        },
+                    })
+                    : FieldResult.Fail(
+                        $"unknown model profile '{raw}'; known profiles: {string.Join(", ", EmbeddingModelProfiles.KnownIds)} (or 'null' for no profile)"),
+            },
         ],
         "chunking" =>
         [
@@ -314,8 +380,38 @@ public static class TuiConfigEditor
     private static string? NormalizeProvider(string raw)
     {
         var value = raw.ToLowerInvariant();
-        return value is "onnx" or "openai" ? value : null;
+        return value is "onnx" or "ollama" or "openai" ? value : null;
     }
+
+    private static bool TryNormalizeOllamaModelProfile(string raw, out string? profile)
+    {
+        if (raw.Equals("null", StringComparison.OrdinalIgnoreCase))
+        {
+            profile = null;
+            return true;
+        }
+
+        foreach (var id in EmbeddingModelProfiles.KnownIds)
+        {
+            if (raw.Equals(id, StringComparison.OrdinalIgnoreCase))
+            {
+                profile = id;
+                return true;
+            }
+        }
+
+        profile = null;
+        return false;
+    }
+
+    private static int? EffectiveDimensions(EmbeddingsConfig embeddings)
+        => embeddings.Provider.Trim().ToLowerInvariant() switch
+        {
+            "onnx" => embeddings.Onnx.EffectiveDimensions,
+            "ollama" => embeddings.Ollama.Dimensions,
+            "openai" => embeddings.OpenAiCompatible.Dimensions,
+            _ => null,
+        };
 
     private static bool IsHttpUrl(string raw, out string error)
     {

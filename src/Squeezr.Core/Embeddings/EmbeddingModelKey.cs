@@ -14,6 +14,13 @@ public static class EmbeddingModelKey
             return profile is null ? key : $"{key}/{profile.Id}";
         }
 
+        if (provider == "ollama")
+        {
+            var key = $"ollama/{config.Ollama.Model}/{config.Ollama.Dimensions}";
+            var profile = config.Ollama.ResolvedProfile;
+            return profile is null ? key : $"{key}/{profile.Id}";
+        }
+
         var onnx = config.Onnx;
         return $"onnx/{Path.GetFileName(onnx.ModelPath)}/{onnx.EffectiveDimensions}/{onnx.ResolvedProfile.Id}";
     }

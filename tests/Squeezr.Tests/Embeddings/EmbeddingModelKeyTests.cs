@@ -82,4 +82,37 @@ public class EmbeddingModelKeyTests
 
         EmbeddingModelKey.From(nomic).ShouldNotBe(EmbeddingModelKey.From(bge));
     }
+
+    [Fact]
+    public void From_OllamaConfig_IncludesProfileId()
+    {
+        var config = new EmbeddingsConfig { Provider = "ollama" };
+
+        var key = EmbeddingModelKey.From(config);
+
+        key.ShouldBe("ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+    }
+
+    [Fact]
+    public void From_OllamaWithoutProfile_KeepsKeyWithoutProfileId()
+    {
+        var config = new EmbeddingsConfig
+        {
+            Provider = "ollama",
+            Ollama = new OllamaOptions { ModelProfile = null }
+        };
+
+        var key = EmbeddingModelKey.From(config);
+
+        key.ShouldBe("ollama/nomic-embed-text/768");
+    }
+
+    [Fact]
+    public void From_OllamaVsOnnxSameModel_DifferentProvidersProduceDifferentKeys()
+    {
+        var ollama = new EmbeddingsConfig { Provider = "ollama" };
+        var onnx = new EmbeddingsConfig();
+
+        EmbeddingModelKey.From(ollama).ShouldNotBe(EmbeddingModelKey.From(onnx));
+    }
 }

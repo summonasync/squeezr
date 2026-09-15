@@ -35,7 +35,7 @@ public sealed class ExpandCommand : Command<ExpandCommand.Settings>
     {
         try
         {
-            var result = new SpanExpander(Directory.GetCurrentDirectory()).Expand(
+            var result = new SpanExpander(WorkspaceRootResolver.RequireWorkspaceRoot()).Expand(
                 settings.File,
                 settings.StartLine,
                 settings.EndLine,

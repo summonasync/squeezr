@@ -22,13 +22,13 @@ public static class McpServerHost
         var resolution = WorkspaceRootResolver.Resolve(startDirectory);
         if (resolution.ViaClaudeProjectDir)
         {
-            Console.Error.WriteLine($"workspace root resolved via CLAUDE_PROJECT_DIR: {resolution.Root}");
+            Console.Error.WriteLine($"workspace root resolved via CLAUDE_PROJECT_DIR: {resolution.RootPath}");
         }
 
-        Console.Error.WriteLine($"squeezr serve: workspace '{resolution.Root}'");
+        Console.Error.WriteLine($"squeezr serve: workspace '{resolution.RootPath}'");
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
-        await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.Root, ct, watch, events);
+        await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, ct, watch, events);
         await forwardTask;
     }
 

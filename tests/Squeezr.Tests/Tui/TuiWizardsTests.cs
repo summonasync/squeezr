@@ -26,6 +26,9 @@ public class TuiWizardsTests
         var manifest = WorkspaceManifestFile.Load(workspace);
         manifest.Name.ShouldBe(new DirectoryInfo(workspace).Name);
         console.Output.ShouldContain("Initialized workspace");
+        console.Output.ShouldContain("Workspace store:");
+        console.Output.ShouldNotContain("squeezr.workspace.json");
+        console.Output.ShouldNotContain("docker-compose");
     }
 
     [Fact]
@@ -100,7 +103,10 @@ public class TuiWizardsTests
         Directory.Exists(SqueezrPaths.StoreDir(workspace)).ShouldBeFalse();
         WorkspaceManifestFile.Exists(workspace).ShouldBeFalse();
         console.Output.ShouldContain("Removed");
-        console.Output.ShouldContain("docker compose down -v");
+        console.Output.ShouldContain("squeezr services down");
+        console.Output.ShouldNotContain("docker compose");
+        var flatOutput = Regex.Replace(console.Output, @"\s+", " ");
+        flatOutput.ShouldContain("vector collection may still exist in the shared volume");
     }
 
     [Fact]

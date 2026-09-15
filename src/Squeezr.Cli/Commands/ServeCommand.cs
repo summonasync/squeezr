@@ -1,5 +1,6 @@
 using Spectre.Console.Cli;
 using Squeezr.Cli.Mcp;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
 
@@ -23,8 +24,18 @@ public sealed class ServeCommand : Command<ServeCommand.Settings>
             cts.Cancel();
         };
 
-        McpServerHost.RunStdioAsync(
-            Directory.GetCurrentDirectory(), cts.Token, settings.Watch, settings.Events).GetAwaiter().GetResult();
+        try
+        {
+            McpServerHost.RunStdioAsync(
+                WorkspaceRootResolver.LaunchDirectory(),
+                cts.Token, settings.Watch, settings.Events).GetAwaiter().GetResult();
+        }
+        catch (WorkspaceException ex)
+        {
+            Console.Error.WriteLine($"error: {ex.Message}");
+            return 1;
+        }
+
         return 0;
     }
 }

@@ -24,7 +24,7 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
     {
         try
         {
-            var result = new RefLookup(Directory.GetCurrentDirectory()).Find(settings.Symbol, settings.Repo);
+            var result = new RefLookup(WorkspaceRootResolver.RequireWorkspaceRoot()).Find(settings.Symbol, settings.Repo);
 
             if (settings.Json)
             {

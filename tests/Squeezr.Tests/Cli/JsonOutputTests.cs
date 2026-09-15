@@ -4,6 +4,7 @@ using Shouldly;
 
 namespace Squeezr.Tests.Cli;
 
+[Collection("CliProcessGlobals")]
 public sealed class JsonOutputTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
@@ -98,36 +99,25 @@ public sealed class JsonOutputTests
     }
 
     [Fact]
-    public async Task WorkspaceList_Json_EmitsOneRepoPerLine_AndHumanTable()
+    public async Task WorkspaceList_Json_ListsRegisteredWorkspacesFromRegistry()
     {
         var root = TestDirs.NewTempDir();
-        (await RunCliAsync(root, "init", "--name", "jsonws", "--json")).ExitCode.ShouldBe(0);
-        Directory.CreateDirectory(Path.Combine(root, "one"));
-        Directory.CreateDirectory(Path.Combine(root, "two"));
-        (await RunCliAsync(root, "add", "one", "--name", "one", "--json")).ExitCode.ShouldBe(0);
-        (await RunCliAsync(root, "add", "two", "--name", "two", "--json")).ExitCode.ShouldBe(0);
+        var name = $"jsonws-{Guid.NewGuid():N}"[..12];
+        (await RunCliAsync(root, "init", "--name", name, "--json")).ExitCode.ShouldBe(0);
 
         var json = await RunCliAsync(root, "workspace", "list", "--json");
         json.ExitCode.ShouldBe(0);
 
         var lines = json.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        lines.Length.ShouldBe(2);
-        using (var doc = JsonDocument.Parse(lines[0]))
-        {
-            doc.RootElement.GetProperty("name").GetString().ShouldBe("one");
-            doc.RootElement.GetProperty("path").GetString().ShouldBe("one");
-        }
-
-        using (var doc = JsonDocument.Parse(lines[1]))
-        {
-            doc.RootElement.GetProperty("name").GetString().ShouldBe("two");
-            doc.RootElement.GetProperty("path").GetString().ShouldBe("two");
-        }
+        lines.Length.ShouldBeGreaterThan(0);
+        using var doc = JsonDocument.Parse(lines.Single(line => line.Contains(name)));
+        doc.RootElement.GetProperty("name").GetString().ShouldBe(name);
+        doc.RootElement.GetProperty("rootPath").GetString().ShouldBe(Path.GetFullPath(root));
+        doc.RootElement.GetProperty("stale").GetBoolean().ShouldBeFalse();
 
         var human = await RunCliAsync(root, "workspace", "list");
         human.ExitCode.ShouldBe(0);
-        human.StdOut.ShouldContain("one");
-        human.StdOut.ShouldContain("two");
+        human.StdOut.ShouldContain(name);
     }
 
     [Fact]
@@ -138,8 +128,7 @@ public sealed class JsonOutputTests
         foreach (var args in new[]
         {
             new[] { "status", "--json" },
-            new[] { "index", "--json" },
-            new[] { "workspace", "list", "--json" }
+            new[] { "index", "--json" }
         })
         {
             var result = await RunCliAsync(root, args);
@@ -150,10 +139,15 @@ public sealed class JsonOutputTests
             error.GetProperty("message").GetString()!.ShouldContain("squeezr init");
         }
 
+        var list = await RunCliAsync(root, "workspace", "list", "--json");
+        list.ExitCode.ShouldBe(0);
+
         var search = await RunCliAsync(root, "search", "Alpha", "--json");
         search.ExitCode.ShouldBe(1);
         search.StdOut.ShouldBeEmpty();
-        ParseStdErrError(search.StdErr).GetProperty("code").GetString().ShouldBe("index_not_built");
+        var searchError = ParseStdErrError(search.StdErr);
+        searchError.GetProperty("code").GetString().ShouldBe("workspace_not_initialized");
+        searchError.GetProperty("message").GetString()!.ShouldContain("squeezr init");
     }
 
     private static JsonElement ParseStdErrError(string stdErr)

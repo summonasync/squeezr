@@ -6,6 +6,7 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Cli;
 
+[Collection("CliProcessGlobals")]
 public sealed class StatusDropQdrantTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
@@ -84,7 +85,7 @@ public sealed class StatusDropQdrantTests
         Directory.Exists(SqueezrPaths.StoreDir(root)).ShouldBeFalse();
 
         using var doc = JsonDocument.Parse(drop.StdOut.Trim());
-        doc.RootElement.GetProperty("removed").GetArrayLength().ShouldBe(3);
+        doc.RootElement.GetProperty("removed").GetArrayLength().ShouldBe(1);
     }
 
     private static void PointConfigAtDeadEndpoint(string root)

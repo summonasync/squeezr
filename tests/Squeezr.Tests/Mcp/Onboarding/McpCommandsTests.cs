@@ -5,6 +5,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Spectre.Console.Testing;
 using Squeezr.Cli.Commands;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp.Onboarding;
 
@@ -83,6 +84,20 @@ public sealed class McpCommandsTests
         entry["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
         entry["cwd"]!.GetValue<string>().ShouldBe(Path.GetFullPath(workspace));
         File.ReadAllText(Path.Combine(workspace, "AGENTS.md")).ShouldContain("squeezr:instructions");
+    }
+
+    [Fact]
+    public async Task Install_FromWorkspaceSubdirectory_WritesResolvedWorkspaceRootAsCwd()
+    {
+        var workspace = TestDirs.NewTempDir();
+        new WorkspaceManager(workspace).Init("demo");
+        var nested = Directory.CreateDirectory(Path.Combine(workspace, "sub")).FullName;
+
+        var (exitCode, _, _, _) = await RunAsync(nested, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"]);
+
+        exitCode.ShouldBe(0);
+        var entry = JsonNode.Parse(File.ReadAllText(Path.Combine(workspace, ".kimi-code", "mcp.json")))!["mcpServers"]!["squeezr"]!;
+        entry["cwd"]!.GetValue<string>().ShouldBe(Path.GetFullPath(workspace));
     }
 
     [Fact]

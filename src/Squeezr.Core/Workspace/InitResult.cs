@@ -6,10 +6,8 @@ public sealed record InitResult(string WorkspaceName, string RootPath)
 {
     public string[] CreatedFiles { get; } =
     [
-        SqueezrPaths.ManifestFileName,
-        $"{SqueezrPaths.StoreDirName}/{SqueezrPaths.ConfigFileName}",
-        $"{SqueezrPaths.StoreDirName}/{SqueezrPaths.MetaDbFileName}",
-        $"{SqueezrPaths.StoreDirName}/{SqueezrPaths.StateFileName}",
-        SqueezrPaths.ComposeFileName
+        SqueezrPaths.ManifestPath(RootPath),
+        SqueezrPaths.ConfigPath(RootPath),
+        SqueezrPaths.MetaDbPath(RootPath)
     ];
 }

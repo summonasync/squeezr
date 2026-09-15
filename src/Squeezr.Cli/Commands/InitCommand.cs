@@ -20,8 +20,18 @@ public sealed class InitCommand : Command<InitCommand.Settings>
     {
         try
         {
-            var manager = new WorkspaceManager(Directory.GetCurrentDirectory());
-            var result = manager.Init(settings.Name);
+            var currentDirectory = Directory.GetCurrentDirectory();
+            var resolution = WorkspaceRootResolver.ResolveCurrentDirectory();
+            if (resolution.IsWorkspace
+                && !resolution.ViaClaudeProjectDir
+                && !IsSamePath(resolution.RootPath, currentDirectory))
+            {
+                throw new WorkspaceException(
+                    $"Cannot initialize: already inside workspace '{resolution.RootPath}'.");
+            }
+
+            var result = WorkspaceRootResolver.GuardRegistryIo(
+                () => new WorkspaceManager(currentDirectory).Init(settings.Name));
 
             if (settings.Json)
             {
@@ -42,4 +52,10 @@ public sealed class InitCommand : Command<InitCommand.Settings>
             return CommandError.Report(ex, settings.Json);
         }
     }
+
+    private static bool IsSamePath(string left, string right) =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }

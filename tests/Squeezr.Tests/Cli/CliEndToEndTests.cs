@@ -6,6 +6,7 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Cli;
 
+[Collection("CliProcessGlobals")]
 public sealed class CliEndToEndTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
@@ -22,14 +23,16 @@ public sealed class CliEndToEndTests
         {
             doc.RootElement.GetProperty("workspaceName").GetString().ShouldBe("demo");
             doc.RootElement.GetProperty("rootPath").GetString().ShouldBe(Path.GetFullPath(root));
-            doc.RootElement.GetProperty("createdFiles").GetArrayLength().ShouldBe(5);
+            doc.RootElement.GetProperty("createdFiles").GetArrayLength().ShouldBe(3);
         }
 
-        File.Exists(Path.Combine(root, "squeezr.workspace.json")).ShouldBeTrue();
+        File.Exists(Path.Combine(root, "squeezr.workspace.json")).ShouldBeFalse();
+        Directory.Exists(Path.Combine(root, ".squeezr")).ShouldBeFalse();
+        File.Exists(Path.Combine(root, "docker-compose.yml")).ShouldBeFalse();
         File.Exists(SqueezrPaths.ConfigPath(root)).ShouldBeTrue();
         File.Exists(SqueezrPaths.MetaDbPath(root)).ShouldBeTrue();
-        File.Exists(SqueezrPaths.StatePath(root)).ShouldBeTrue();
-        File.Exists(SqueezrPaths.ComposePath(root)).ShouldBeTrue();
+        File.Exists(SqueezrPaths.ManifestPath(root)).ShouldBeTrue();
+        File.Exists(Path.Combine(SqueezrPaths.StoreDir(root), SqueezrPaths.StateFileName)).ShouldBeFalse();
 
         Directory.CreateDirectory(Path.Combine(root, "services", "billing"));
         var add = await RunCliAsync(root, "add", "services/billing", "--name", "billing", "--json");
@@ -55,14 +58,15 @@ public sealed class CliEndToEndTests
             repos[0].GetProperty("chunks").GetInt32().ShouldBe(0);
         }
 
+        var storeDir = SqueezrPaths.StoreDir(root);
         var drop = await RunCliAsync(root, "drop", "--json");
         drop.ExitCode.ShouldBe(0);
 
         using (var doc = JsonDocument.Parse(drop.StdOut.Trim()))
         {
-            doc.RootElement.GetProperty("removed").GetArrayLength().ShouldBe(3);
-            doc.RootElement.GetProperty("removed")[0].GetString().ShouldBe(".squeezr");
-            doc.RootElement.GetProperty("hint").GetString().ShouldBe("docker compose down -v");
+            doc.RootElement.GetProperty("removed").GetArrayLength().ShouldBe(1);
+            doc.RootElement.GetProperty("removed")[0].GetString().ShouldBe(storeDir);
+            doc.RootElement.GetProperty("hint").GetString().ShouldBe("squeezr services down");
         }
 
         Directory.Exists(SqueezrPaths.StoreDir(root)).ShouldBeFalse();
@@ -114,7 +118,7 @@ public sealed class CliEndToEndTests
             repos[0].GetProperty("files").GetInt32().ShouldBe(1);
         }
 
-        File.Exists(Path.Combine(root, ".squeezr", "trigram.idx")).ShouldBeTrue();
+        File.Exists(SqueezrPaths.TrigramIndexPath(root)).ShouldBeTrue();
 
         var status = await RunCliAsync(root, "status", "--json");
         status.ExitCode.ShouldBe(0);
@@ -177,8 +181,8 @@ public sealed class CliEndToEndTests
         missing.ExitCode.ShouldBe(1);
         missing.StdOut.ShouldBeEmpty();
         var missingError = ParseStdErrError(missing.StdErr);
-        missingError.GetProperty("code").GetString().ShouldBe("index_not_built");
-        missingError.GetProperty("message").GetString()!.ShouldContain("squeezr index");
+        missingError.GetProperty("code").GetString().ShouldBe("workspace_not_initialized");
+        missingError.GetProperty("message").GetString()!.ShouldContain("squeezr init");
 
         var invalid = await RunCliAsync(root, "search", "[", "--regex", "--json");
         invalid.ExitCode.ShouldBe(1);
@@ -199,7 +203,7 @@ public sealed class CliEndToEndTests
         (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
         (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
         File.WriteAllBytes(
-            Path.Combine(root, ".squeezr", "trigram.idx"),
+            SqueezrPaths.TrigramIndexPath(root),
             Enumerable.Repeat((byte)0xAA, 40).ToArray());
 
         var search = await RunCliAsync(root, "search", "Delta", "--json");

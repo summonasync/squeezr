@@ -7,7 +7,8 @@ public class WorkspaceException : Exception
     public const string IndexNotBuiltCode = "index_not_built";
     public const string InvalidQueryCode = "invalid_query";
 
-    public WorkspaceException(string message, string code = DefaultCode) : base(message)
+    public WorkspaceException(string message, string code = DefaultCode, Exception? innerException = null)
+        : base(message, innerException)
     {
         Code = code;
     }

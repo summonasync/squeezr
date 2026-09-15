@@ -33,7 +33,7 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
     {
         try
         {
-            var result = new SymbolLookup(Directory.GetCurrentDirectory()).Find(
+            var result = new SymbolLookup(WorkspaceRootResolver.RequireWorkspaceRoot()).Find(
                 settings.Name,
                 settings.Repo,
                 settings.Kind,

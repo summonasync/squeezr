@@ -23,7 +23,7 @@ public sealed class AddCommand : Command<AddCommand.Settings>
     {
         try
         {
-            var manager = new WorkspaceManager(Directory.GetCurrentDirectory());
+            var manager = new WorkspaceManager(WorkspaceRootResolver.RequireWorkspaceRoot());
             var entry = manager.AddRepo(settings.RepoPath, settings.Name, StaleLockWarningSink.ToStderr);
 
             if (settings.Json)

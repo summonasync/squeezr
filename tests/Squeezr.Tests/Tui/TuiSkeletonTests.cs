@@ -54,7 +54,7 @@ public class TuiSkeletonTests
     }
 
     [Fact]
-    public async Task Dashboard_QdrantDown_ShowsStartHint()
+    public async Task Dashboard_QdrantDown_ShowsServicesUpHint()
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
@@ -62,7 +62,8 @@ public class TuiSkeletonTests
         await TuiDashboard.RenderAsync(console, workspace);
 
         console.Output.ShouldContain("Qdrant: not available");
-        console.Output.ShouldContain("qdrant is down — start it with: docker compose up -d");
+        console.Output.ShouldContain("qdrant is down — start it with: squeezr services up");
+        console.Output.ShouldNotContain("docker compose");
     }
 
     [Fact]

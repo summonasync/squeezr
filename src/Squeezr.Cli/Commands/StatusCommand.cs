@@ -20,7 +20,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
     {
         try
         {
-            var workspaceRoot = Directory.GetCurrentDirectory();
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             var manager = new WorkspaceManager(workspaceRoot);
             var status = manager.GetStatus();
 

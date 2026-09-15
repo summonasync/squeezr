@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Downloads an embedding model (ONNX) and its tokenizer files into a models
-# directory (default: src/Squeezr.Cli/Models, for bundling with the CLI).
+# directory (default: ~/.squeezr/models — the central store; pass a directory
+# to bundle with the CLI instead, e.g. src/Squeezr.Cli/Models).
 # Idempotent: files whose SHA256 already matches are skipped. Every download
 # is hash-verified against the pinned values below; a mismatch aborts with
 # the offending file deleted.
@@ -16,7 +17,6 @@
 # Usage: scripts/fetch-model.sh [--model nomic-embed-text-v1.5|bge-code-v1] [models-dir]
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 model='nomic-embed-text-v1.5'
 models_dir=''
 
@@ -59,7 +59,7 @@ case "$model" in
     ;;
 esac
 
-models_dir="${models_dir:-$repo_root/src/Squeezr.Cli/Models}"
+models_dir="${models_dir:-${SQUEEZR_HOME:-$HOME/.squeezr}/models}"
 
 sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
 

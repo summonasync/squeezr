@@ -2,7 +2,8 @@
 <#
 .SYNOPSIS
   Downloads an embedding model (ONNX) and its tokenizer files into
-  src\Squeezr.Cli\Models for bundling with the CLI.
+  ~\.squeezr\models (the central store). Pass -ModelsDir to bundle
+  with the CLI instead, e.g. src\Squeezr.Cli\Models.
 .DESCRIPTION
   Idempotent: files whose SHA256 already matches are skipped. Every download
   is hash-verified against the pinned values below; a mismatch aborts with
@@ -28,7 +29,8 @@ param(
 )
 
 if ([string]::IsNullOrEmpty($ModelsDir)) {
-    $ModelsDir = Join-Path $PSScriptRoot '..\src\Squeezr.Cli\Models'
+    $home_root = if ($env:SQUEEZR_HOME) { $env:SQUEEZR_HOME } else { Join-Path $HOME '.squeezr' }
+    $ModelsDir = Join-Path $home_root 'models'
 }
 
 $ErrorActionPreference = 'Stop'

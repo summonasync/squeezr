@@ -37,8 +37,11 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         var startedAt = Stopwatch.GetTimestamp();
         try
         {
+            events = settings.Events ? new IndexEventWriter(Console.Out) : null;
+            events?.Started(WorkspaceRootResolver.LaunchDirectory());
+
             var indexer = new WorkspaceIndexer();
-            var workspaceRoot = Directory.GetCurrentDirectory();
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
 
             var warnings = EmbeddingRuntimeFactory.TryCreate(
                 workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
@@ -46,9 +49,6 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
             {
                 Console.Error.WriteLine($"warning: {warning}");
             }
-
-            events = settings.Events ? new IndexEventWriter(Console.Out) : null;
-            events?.Started(workspaceRoot);
 
             IndexEventsRenderer? renderer = null;
             IndexResult result;

@@ -20,7 +20,13 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
         return response;
     }
 
+    protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
+        => Handle(request, cancellationToken);
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        => Task.FromResult(Handle(request, cancellationToken));
+
+    private HttpResponseMessage Handle(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = request.Content is null ? null : request.Content.ReadAsStringAsync(cancellationToken).Result;
         Requests.Add((request.Method.Method, request.RequestUri?.PathAndQuery, body));
@@ -31,6 +37,6 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
         var next = _responses.Dequeue();
         if (next is Exception error)
             throw error;
-        return Task.FromResult((HttpResponseMessage)next);
+        return (HttpResponseMessage)next;
     }
 }

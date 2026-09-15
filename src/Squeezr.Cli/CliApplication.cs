@@ -12,9 +12,10 @@ public static class CliApplication
     {
         if (args.Length == 0 && (interactive ?? AnsiConsole.Profile.Capabilities.Interactive))
         {
+            var workspaceRoot = WorkspaceRootResolver.ResolveCurrentDirectory().RootPath;
             return console is not null
-                ? TuiApp.RunAsync(console, Directory.GetCurrentDirectory())
-                : TuiApp.RunInteractiveAsync(Directory.GetCurrentDirectory());
+                ? TuiApp.RunAsync(console, workspaceRoot)
+                : TuiApp.RunInteractiveAsync(workspaceRoot);
         }
 
         var app = new CommandApp();
@@ -44,18 +45,28 @@ public static class CliApplication
             config.AddCommand<CompactCommand>("compact")
                 .WithDescription("Rewrite the trigram index dropping tombstoned segments");
             config.AddCommand<DropCommand>("drop")
-                .WithDescription("Remove the .squeezr index store");
+                .WithDescription("Remove the workspace index store (use --store-key for stale entries)");
             config.AddCommand<WatchCommand>("watch")
                 .WithDescription("Watch the workspace and re-index on file changes");
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")
                 .WithDescription("Interactive terminal UI (dashboard, search, wizards)");
+            config.AddBranch("services", services =>
+            {
+                services.SetDescription("Manage Squeezr infrastructure services (Qdrant and Ollama)");
+                services.AddCommand<ServicesUpCommand>("up")
+                    .WithDescription("Generate the compose file and start Qdrant and Ollama");
+                services.AddCommand<ServicesDownCommand>("down")
+                    .WithDescription("Stop Qdrant and Ollama (data volumes are kept)");
+                services.AddCommand<ServicesStatusCommand>("status")
+                    .WithDescription("Show the state of the Qdrant and Ollama containers");
+            });
             config.AddBranch("workspace", workspace =>
             {
                 workspace.SetDescription("Inspect the current workspace");
                 workspace.AddCommand<WorkspaceListCommand>("list")
-                    .WithDescription("List repositories in the current workspace");
+                    .WithDescription("List registered workspaces");
             });
             McpCommandRegistration.AddMcpBranch(config);
         });

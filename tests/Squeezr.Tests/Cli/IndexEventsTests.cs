@@ -4,6 +4,7 @@ using Shouldly;
 
 namespace Squeezr.Tests.Cli;
 
+[Collection("CliProcessGlobals")]
 public sealed class IndexEventsTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");

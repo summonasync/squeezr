@@ -1,4 +1,5 @@
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Infra;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Core.Workspace;
@@ -31,15 +32,31 @@ public sealed class WorkspaceManager
             : name.Trim();
         ValidateName(workspaceName, "Workspace");
 
-        Directory.CreateDirectory(SqueezrPaths.StoreDir(_root));
-        ConfigFile.Save(_root, SqueezrConfig.CreateDefault());
-        StateFile.Save(_root, new IndexState());
-        using (new MetaStore(SqueezrPaths.MetaDbPath(_root), createIfMissing: true))
-        {
-        }
+        var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(_root);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            workspaceName,
+            canonicalRoot,
+            WorkspaceStoreKeys.Create(workspaceName, canonicalRoot),
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow));
 
-        WorkspaceManifestFile.Save(_root, new WorkspaceManifest { Name = workspaceName });
-        DockerComposeFile.Write(_root);
+        // Steps below resolve paths through the registry, so a failure must roll
+        // the registration back: an entry without a store would resolve to a missing dir.
+        try
+        {
+            Directory.CreateDirectory(SqueezrPaths.StoreDir(_root));
+            ConfigFile.Save(_root, SqueezrConfig.CreateDefault());
+            using (new MetaStore(SqueezrPaths.MetaDbPath(_root), createIfMissing: true))
+            {
+            }
+
+            WorkspaceManifestFile.Save(_root, new WorkspaceManifest { Name = workspaceName });
+        }
+        catch
+        {
+            WorkspaceRegistry.RemoveByRoot(_root);
+            throw;
+        }
 
         return new InitResult(workspaceName, _root);
     }
@@ -76,7 +93,7 @@ public sealed class WorkspaceManager
             }
 
             var entry = new RepoEntry(repoName, ToStoredPath(fullPath));
-            WorkspaceManifestFile.Save(_root, manifest with { Repos = [..manifest.Repos, entry] });
+            WorkspaceManifestFile.Save(_root, manifest with { Repos = [.. manifest.Repos, entry] });
 
             using var store = new MetaStore(SqueezrPaths.MetaDbPath(_root));
             store.AddRepo(new RepoDocument { Id = store.GetNextRepoId(), Name = entry.Name, Path = entry.Path });
@@ -113,13 +130,12 @@ public sealed class WorkspaceManager
 
     public DropResult Drop(Action<string>? onStaleTakeover = null)
     {
+        var wasRegistered = WorkspaceRegistry.TryGetStoreDir(_root, out _);
         var storeDir = SqueezrPaths.StoreDir(_root);
         if (!Directory.Exists(storeDir))
         {
-            throw new WorkspaceException("Nothing to drop: no '.squeezr' store in this directory.");
+            throw new WorkspaceException("Nothing to drop: no workspace store is registered for this directory.");
         }
-
-        var removed = new List<string>();
 
         // Windows refuses to delete a directory that holds an open file,
         // so the lock is released (which removes index.lock) before the delete.
@@ -128,21 +144,30 @@ public sealed class WorkspaceManager
         }
 
         Directory.Delete(storeDir, recursive: true);
-        removed.Add(SqueezrPaths.StoreDirName);
+        var removed = new List<string> { storeDir };
 
-        if (File.Exists(SqueezrPaths.ManifestPath(_root)))
+        if (wasRegistered)
         {
-            File.Delete(SqueezrPaths.ManifestPath(_root));
-            removed.Add(SqueezrPaths.ManifestFileName);
+            WorkspaceRegistry.RemoveByRoot(_root);
+        }
+        else
+        {
+            var legacyManifest = Path.Combine(_root, SqueezrPaths.ManifestFileName);
+            if (File.Exists(legacyManifest))
+            {
+                File.Delete(legacyManifest);
+                removed.Add(legacyManifest);
+            }
+
+            var composePath = SqueezrPaths.ComposePath(_root);
+            if (ServicesComposeFile.IsSqueezrGenerated(composePath))
+            {
+                File.Delete(composePath);
+                removed.Add(composePath);
+            }
         }
 
-        if (File.Exists(SqueezrPaths.ComposePath(_root)))
-        {
-            File.Delete(SqueezrPaths.ComposePath(_root));
-            removed.Add(SqueezrPaths.ComposeFileName);
-        }
-
-        return new DropResult(removed.ToArray(), "docker compose down -v");
+        return new DropResult([.. removed], "squeezr services down");
     }
 
     private WorkspaceManifest LoadManifest() =>

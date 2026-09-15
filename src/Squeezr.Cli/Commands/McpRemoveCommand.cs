@@ -37,7 +37,8 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
         McpOnboardingEnvironment environment;
         try
         {
-            environment = McpOnboardingEnvironment.Create(Directory.GetCurrentDirectory());
+            environment = McpOnboardingEnvironment.Create(
+                WorkspaceRootResolver.ResolveCurrentDirectory().RootPath);
         }
         catch (InvalidOperationException ex)
         {

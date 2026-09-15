@@ -14,6 +14,7 @@ public sealed class TuiCommand : Command
             return 1;
         }
 
-        return TuiApp.RunInteractiveAsync(Directory.GetCurrentDirectory()).GetAwaiter().GetResult();
+        var workspaceRoot = WorkspaceRootResolver.ResolveCurrentDirectory().RootPath;
+        return TuiApp.RunInteractiveAsync(workspaceRoot).GetAwaiter().GetResult();
     }
 }

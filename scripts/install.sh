@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Builds and installs the Squeezr CLI for the current user (Linux).
 # Publishes a self-contained single-file build, copies it to the install
-# directory and symlinks it into ~/.local/bin. Checks for Docker (needed
-# from milestone M4 for Qdrant) and prints setup hints when missing.
+# directory and symlinks it into ~/.local/bin. Checks for Docker (needed for
+# `squeezr services up` — Qdrant and, optionally, Ollama) and prints setup
+# hints when missing. The central store ~/.squeezr (workspaces, models, infra)
+# is NOT touched by install or uninstall.
 #
 # Usage: scripts/install.sh [install-dir]
 # Env:   SQUEEZR_RID - override the runtime identifier (default: auto-detect).
@@ -54,20 +56,22 @@ case ":$PATH:" in
 esac
 
 if command -v docker >/dev/null 2>&1; then
-  step 'Docker detected - Qdrant (from M4) will be available'
+  step 'Docker detected - run "squeezr services up" to start Qdrant and Ollama'
 else
   cat <<'HINT' >&2
 [!] Docker not found. Squeezr works without it (trigram + symbol layers),
-    but semantic search (milestone M4+) needs Qdrant in Docker.
+    but semantic search needs Qdrant in Docker (start it with: squeezr services up;
+    provider "ollama" also uses Docker for the Ollama service).
     Install Docker Engine: https://docs.docker.com/engine/install/
 HINT
 fi
 
-if [[ ! -d "$install_dir/Models" ]]; then
+if [[ ! -d "$install_dir/Models" && ! -d "${SQUEEZR_HOME:-$HOME/.squeezr}/models" ]]; then
   cat <<HINT >&2
 
-[!] No embedding model in $install_dir/Models - semantic search (M4+) will be disabled.
-    Run scripts/fetch-model.sh to download the default embedding model, then re-run this script.
+[!] No embedding model found - semantic search will stay disabled until you fetch one.
+    Run scripts/fetch-model.sh (downloads to ~/.squeezr/models), or bundle a model
+    into $install_dir/Models via scripts/fetch-model.sh src/Squeezr.Cli/Models and re-run this script.
 HINT
 fi
 

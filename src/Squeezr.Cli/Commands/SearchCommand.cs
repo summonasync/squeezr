@@ -43,7 +43,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
     {
         try
         {
-            var workspaceRoot = Directory.GetCurrentDirectory();
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
 
             var warnings = EmbeddingRuntimeFactory.TryCreate(
                 workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);

@@ -6,11 +6,11 @@ namespace Squeezr.Cli.Embeddings;
 
 public static class EmbeddingProviderFactory
 {
-    public static IEmbeddingProvider Create(EmbeddingsConfig config, string workspaceRoot)
+    public static IEmbeddingProvider Create(EmbeddingsConfig config, string workspaceRoot, HttpMessageHandler? httpHandler = null)
     {
         try
         {
-            return CreateCore(config, workspaceRoot);
+            return CreateCore(config, workspaceRoot, httpHandler);
         }
         catch (WorkspaceException)
         {
@@ -22,7 +22,7 @@ public static class EmbeddingProviderFactory
         }
     }
 
-    private static IEmbeddingProvider CreateCore(EmbeddingsConfig config, string workspaceRoot)
+    private static IEmbeddingProvider CreateCore(EmbeddingsConfig config, string workspaceRoot, HttpMessageHandler? httpHandler)
     {
         switch (config.Provider.Trim().ToLowerInvariant())
         {
@@ -30,8 +30,11 @@ public static class EmbeddingProviderFactory
                 return CreateOnnx(config.Onnx, workspaceRoot);
             case "openai":
                 return new OpenAiCompatibleEmbeddingProvider(config.OpenAiCompatible);
+            case "ollama":
+                OllamaModelEnsurer.Ensure(config.Ollama, httpHandler);
+                return new OllamaEmbeddingProvider(config.Ollama, httpHandler);
             default:
-                throw new WorkspaceException($"Unknown embeddings provider '{config.Provider}'. Supported providers: onnx, openai.");
+                throw new WorkspaceException($"Unknown embeddings provider '{config.Provider}'. Supported providers: onnx, ollama, openai.");
         }
     }
 

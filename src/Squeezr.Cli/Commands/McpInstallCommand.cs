@@ -46,7 +46,8 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         McpOnboardingEnvironment environment;
         try
         {
-            environment = McpOnboardingEnvironment.Create(Directory.GetCurrentDirectory());
+            environment = McpOnboardingEnvironment.Create(
+                WorkspaceRootResolver.ResolveCurrentDirectory().RootPath);
         }
         catch (InvalidOperationException ex)
         {

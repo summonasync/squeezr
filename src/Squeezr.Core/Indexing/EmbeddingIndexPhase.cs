@@ -39,7 +39,6 @@ public static class EmbeddingIndexPhase
         }
 
         var embedded = 0;
-        var vectorsByHash = new Dictionary<string, float[]>(StringComparer.Ordinal);
         var totalPending = store.CountPendingChunks(repoDoc.Id, modelKey);
         if (totalPending == 0)
         {
@@ -56,25 +55,36 @@ public static class EmbeddingIndexPhase
                 break;
             }
 
-            try
+            var vectorsByHash = new Dictionary<string, float[]>(StringComparer.Ordinal);
+            for (var i = 0; i < pending.Count; i += EmbedBatchSize)
             {
-                EmbedNewHashes(pending, vectorsByHash, provider);
-                UpsertPending(pending, vectorsByHash, vectorStore);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
-            {
-                warning($"embeddings skipped for repo '{repoDoc.Name}': {ex.Message}");
-                return new EmbeddingPhaseResult(embedded);
-            }
-
-            store.MarkChunksEmbedded(pending.Select(c => c.Id), modelKey);
-            embedded += pending.Count;
-
-            if (progress is not null)
-            {
-                foreach (var chunk in pending)
+                var count = Math.Min(EmbedBatchSize, pending.Count - i);
+                var batch = new List<ChunkDocument>(count);
+                for (var j = i; j < i + count; j++)
                 {
-                    progress.ItemProcessed(repoDoc.Name, chunk.ChunkHash);
+                    batch.Add(pending[j]);
+                }
+
+                try
+                {
+                    EmbedNewHashes(batch, vectorsByHash, provider);
+                    UpsertBatch(batch, vectorsByHash, vectorStore);
+                    store.MarkChunksEmbedded(batch.Select(c => c.Id), modelKey);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException and not VectorDimensionMismatchException)
+                {
+                    warning($"embeddings skipped for repo '{repoDoc.Name}': {ex.Message}");
+                    return new EmbeddingPhaseResult(embedded);
+                }
+
+                embedded += batch.Count;
+
+                if (progress is not null)
+                {
+                    foreach (var chunk in batch)
+                    {
+                        progress.ItemProcessed(repoDoc.Name, chunk.ChunkHash);
+                    }
                 }
             }
         }
@@ -102,13 +112,13 @@ public static class EmbeddingIndexPhase
     }
 
     private static void EmbedNewHashes(
-        IReadOnlyList<ChunkDocument> pending,
+        IReadOnlyList<ChunkDocument> batch,
         Dictionary<string, float[]> vectorsByHash,
         IEmbeddingProvider provider)
     {
         var newHashes = new List<string>();
         var texts = new List<string>();
-        foreach (var chunk in pending)
+        foreach (var chunk in batch)
         {
             if (vectorsByHash.ContainsKey(chunk.ChunkHash))
             {
@@ -120,25 +130,25 @@ public static class EmbeddingIndexPhase
             texts.Add(chunk.Text);
         }
 
-        for (var i = 0; i < texts.Count; i += EmbedBatchSize)
+        if (texts.Count == 0)
         {
-            var count = Math.Min(EmbedBatchSize, texts.Count - i);
-            var batch = texts.GetRange(i, count);
-            var vectors = provider.EmbedAsync(batch, EmbeddingUsage.Document, CancellationToken.None).GetAwaiter().GetResult();
-            for (var j = 0; j < count; j++)
-            {
-                vectorsByHash[newHashes[i + j]] = vectors[j];
-            }
+            return;
+        }
+
+        var vectors = provider.EmbedAsync(texts, EmbeddingUsage.Document, CancellationToken.None).GetAwaiter().GetResult();
+        for (var j = 0; j < texts.Count; j++)
+        {
+            vectorsByHash[newHashes[j]] = vectors[j];
         }
     }
 
-    private static void UpsertPending(
-        IReadOnlyList<ChunkDocument> pending,
+    private static void UpsertBatch(
+        IReadOnlyList<ChunkDocument> batch,
         IReadOnlyDictionary<string, float[]> vectorsByHash,
         IVectorStore vectorStore)
     {
         var pointsByHash = new Dictionary<string, VectorPoint>(StringComparer.Ordinal);
-        foreach (var chunk in pending)
+        foreach (var chunk in batch)
         {
             pointsByHash.TryAdd(chunk.ChunkHash, new VectorPoint(
                 ChunkPointId.FromHash(chunk.ChunkHash),

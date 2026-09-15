@@ -251,6 +251,172 @@ public class ConfigFileTests
         loaded.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("bge-code-v1");
     }
 
+    [Fact]
+    public void Load_ConfigWithoutOllamaSection_UsesOllamaDefaults()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "gitAware": true
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Embeddings.Ollama.Endpoint.ShouldBe("http://localhost:11434");
+        config.Embeddings.Ollama.Model.ShouldBe("nomic-embed-text");
+        config.Embeddings.Ollama.Dimensions.ShouldBe(768);
+        config.Embeddings.Ollama.ModelProfile.ShouldBe("nomic-embed-text-v1.5");
+        config.Embeddings.Ollama.ResolvedProfile.ShouldNotBeNull();
+        config.Embeddings.Ollama.ResolvedProfile!.Id.ShouldBe("nomic-embed-text-v1.5");
+    }
+
+    [Fact]
+    public void Load_OllamaExplicitNullModelProfile_ResolvesToNoProfile()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": {
+                "provider": "ollama",
+                "ollama": {
+                  "endpoint": "http://localhost:11434",
+                  "model": "nomic-embed-text",
+                  "dimensions": 768,
+                  "modelProfile": null
+                }
+              },
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "gitAware": true
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Embeddings.Provider.ShouldBe("ollama");
+        config.Embeddings.Ollama.ModelProfile.ShouldBeNull();
+        config.Embeddings.Ollama.ResolvedProfile.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Save_ThenLoad_RoundTripsOllamaSection()
+    {
+        var root = TestDirs.NewTempDir();
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Embeddings = new EmbeddingsConfig
+            {
+                Provider = "ollama",
+                Ollama = new OllamaOptions
+                {
+                    Endpoint = "http://127.0.0.1:11434",
+                    Model = "all-minilm",
+                    Dimensions = 384,
+                    ModelProfile = null
+                }
+            }
+        };
+
+        ConfigFile.Save(root, config);
+        var loaded = ConfigFile.Load(root);
+
+        loaded.Embeddings.Provider.ShouldBe("ollama");
+        loaded.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
+        loaded.Embeddings.Ollama.Model.ShouldBe("all-minilm");
+        loaded.Embeddings.Ollama.Dimensions.ShouldBe(384);
+        loaded.Embeddings.Ollama.ModelProfile.ShouldBeNull();
+        loaded.Embeddings.Ollama.ResolvedProfile.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Load_UnknownOllamaModelProfile_ThrowsWorkspaceExceptionListingKnownIds()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": {
+                "provider": "ollama",
+                "ollama": { "modelProfile": "no-such-profile" }
+              },
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "gitAware": true
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+
+        error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
+        error.Message.ShouldContain("'no-such-profile'");
+        error.Message.ShouldContain("nomic-embed-text-v1.5");
+        error.Message.ShouldContain("bge-code-v1");
+    }
+
+    [Fact]
+    public void Load_UnknownOpenAiModelProfile_ThrowsWorkspaceExceptionListingKnownIds()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": {
+                "provider": "openai",
+                "openAiCompatible": { "modelProfile": "no-such-profile" }
+              },
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "gitAware": true
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+
+        error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
+        error.Message.ShouldContain("'no-such-profile'");
+    }
+
     private static string NewWorkspaceWithConfig(string json)
     {
         var root = TestDirs.NewTempDir();

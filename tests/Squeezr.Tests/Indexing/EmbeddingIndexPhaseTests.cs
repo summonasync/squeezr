@@ -241,6 +241,142 @@ public class EmbeddingIndexPhaseTests
             e.StartsWith("phase:demo:Embeddings:", StringComparison.Ordinal) && !e.EndsWith(":0", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Run_HundredPendingChunks_UpsertsAndMarksPerBatch()
+    {
+        var dbPath = NewMetaDb(out var repoId, 100);
+        using var store = new MetaStore(dbPath);
+        var vectorStore = new FakeVectorStore();
+
+        var result = EmbeddingIndexPhase.Run(
+            store.FindRepo("demo")!, store, TestModelKey, new FakeEmbeddingProvider(), vectorStore, _ => { });
+
+        result.Embedded.ShouldBe(100);
+        vectorStore.UpsertCallCount.ShouldBe(4);
+        vectorStore.UpsertBatchSizes.ShouldAllBe(size => size > 0 && size <= 32);
+        CountChunkStates(store, repoId).ShouldBe((Total: 100, Pending: 0));
+    }
+
+    [Fact]
+    public void Run_UpsertFailureAfterSecondBatch_MarksOnlyCompletedBatches()
+    {
+        var dbPath = NewMetaDb(out var repoId, 100);
+        var vectorStore = new FakeVectorStore { FailUpsertOnCall = 3 };
+        var warnings = new List<string>();
+
+        EmbeddingPhaseResult result;
+        using (var store = new MetaStore(dbPath))
+        {
+            result = EmbeddingIndexPhase.Run(
+                store.FindRepo("demo")!, store, TestModelKey, new FakeEmbeddingProvider(), vectorStore, warnings.Add);
+        }
+
+        result.Embedded.ShouldBe(64);
+        warnings.ShouldContain(w => w.Contains("embeddings skipped", StringComparison.OrdinalIgnoreCase));
+        vectorStore.UpsertCallCount.ShouldBe(3);
+        using (var store = new MetaStore(dbPath))
+        {
+            CountChunkStates(store, repoId).ShouldBe((Total: 100, Pending: 36));
+        }
+    }
+
+    [Fact]
+    public void Run_AfterFailedRun_ResumesEmbeddingOnlyRemainingChunks()
+    {
+        var dbPath = NewMetaDb(out var repoId, 100);
+        var vectorStore = new FakeVectorStore { FailUpsertOnCall = 3 };
+        using (var store = new MetaStore(dbPath))
+        {
+            EmbeddingIndexPhase.Run(
+                store.FindRepo("demo")!, store, TestModelKey, new FakeEmbeddingProvider(), vectorStore, _ => { });
+        }
+
+        vectorStore.FailUpsertOnCall = null;
+        var resumeProvider = new FakeEmbeddingProvider();
+        EmbeddingPhaseResult resumed;
+        using (var store = new MetaStore(dbPath))
+        {
+            resumed = EmbeddingIndexPhase.Run(
+                store.FindRepo("demo")!, store, TestModelKey, resumeProvider, vectorStore, _ => { });
+        }
+
+        resumed.Embedded.ShouldBe(36);
+        resumeProvider.EmbeddedTextCount.ShouldBe(36);
+        vectorStore.UpsertedPointCount.ShouldBe(100);
+        vectorStore.Points.Count.ShouldBe(100);
+        using (var store = new MetaStore(dbPath))
+        {
+            CountChunkStates(store, repoId).ShouldBe((Total: 100, Pending: 0));
+        }
+    }
+
+    [Fact]
+    public void Run_ReportsCumulativeEmbeddedProgressAgainstTotal()
+    {
+        var dbPath = NewMetaDb(out var repoId, 100);
+        using var store = new MetaStore(dbPath);
+        var progress = new RecordingProgress();
+
+        EmbeddingIndexPhase.Run(
+            store.FindRepo("demo")!, store, TestModelKey, new FakeEmbeddingProvider(), new FakeVectorStore(), _ => { }, progress);
+
+        progress.EmbeddingsTotal.ShouldBe(100);
+        progress.EmbeddedSteps.ShouldBe(Enumerable.Range(1, 100).ToList());
+    }
+
+    [Fact]
+    public void Run_DuplicateChunkHashAcrossBatches_EmbedsOnceAndMarksBothChunks()
+    {
+        var dbPath = NewMetaDb(out var repoId, 33, i => i == 33 ? "hash-0001" : $"hash-{i:D4}");
+        using var store = new MetaStore(dbPath);
+        var provider = new FakeEmbeddingProvider();
+        var vectorStore = new FakeVectorStore();
+
+        var result = EmbeddingIndexPhase.Run(
+            store.FindRepo("demo")!, store, TestModelKey, provider, vectorStore, _ => { });
+
+        result.Embedded.ShouldBe(33);
+        provider.EmbedCallCount.ShouldBe(1);
+        provider.EmbeddedTextCount.ShouldBe(32);
+        vectorStore.UpsertCallCount.ShouldBe(2);
+        vectorStore.UpsertBatchSizes.ShouldBe([32, 1]);
+        vectorStore.Points.Count.ShouldBe(32);
+        CountChunkStates(store, repoId).ShouldBe((Total: 33, Pending: 0));
+    }
+
+    private const string TestModelKey = "test/model/4";
+
+    private static string NewMetaDb(out uint repoId, int chunkCount, Func<int, string>? hashSelector = null)
+    {
+        var dir = TestDirs.NewTempDir();
+        var dbPath = Path.Combine(dir, "meta.db");
+        using (var store = new MetaStore(dbPath, createIfMissing: true))
+        {
+            var repo = new RepoDocument { Id = 1, Name = "demo", Path = Path.Combine(dir, "repo") };
+            store.AddRepo(repo);
+            store.InsertChunks(Enumerable.Range(1, chunkCount).Select(i =>
+            {
+                var hash = hashSelector?.Invoke(i) ?? $"hash-{i:D4}";
+                return new ChunkDocument
+                {
+                    Id = i,
+                    FileId = 1,
+                    RepoId = repo.Id,
+                    StartLine = 1,
+                    EndLine = 5,
+                    Text = $"chunk text {hash}",
+                    ChunkHash = hash,
+                };
+            }));
+            repoId = repo.Id;
+        }
+
+        return dbPath;
+    }
+
+    private static (int Total, int Pending) CountChunkStates(MetaStore store, uint repoId) =>
+        (store.CountChunks(repoId), store.CountPendingChunks(repoId, TestModelKey));
+
     private static string NewWorkspace()
     {
         var workspace = TestDirs.NewTempDir();
@@ -271,8 +407,14 @@ public class EmbeddingIndexPhaseTests
     {
         public int Dimensions { get; init; } = 4;
 
+        public int EmbedCallCount { get; private set; }
+
+        public int EmbeddedTextCount { get; private set; }
+
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct)
         {
+            EmbedCallCount++;
+            EmbeddedTextCount += texts.Count;
             return Task.FromResult(texts.Select(text =>
             {
                 var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
@@ -303,6 +445,12 @@ public class EmbeddingIndexPhaseTests
 
         public int UpsertedPointCount { get; private set; }
 
+        public int UpsertCallCount { get; private set; }
+
+        public List<int> UpsertBatchSizes { get; } = [];
+
+        public int? FailUpsertOnCall { get; set; }
+
         public Task<bool> IsAvailableAsync(CancellationToken ct) => Task.FromResult(Available);
 
         public Task EnsureCollectionAsync(int dimensions, CancellationToken ct)
@@ -320,6 +468,13 @@ public class EmbeddingIndexPhaseTests
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct)
         {
+            UpsertCallCount++;
+            if (FailUpsertOnCall == UpsertCallCount)
+            {
+                return Task.FromException(new HttpRequestException("qdrant is down"));
+            }
+
+            UpsertBatchSizes.Add(points.Count);
             UpsertedPointCount += points.Count;
             foreach (var point in points)
             {
@@ -355,18 +510,46 @@ public class EmbeddingIndexPhaseTests
             return Task.CompletedTask;
         }
 
-        public void ResetCounters() => UpsertedPointCount = 0;
+        public void ResetCounters()
+        {
+            UpsertedPointCount = 0;
+            UpsertCallCount = 0;
+            UpsertBatchSizes.Clear();
+        }
     }
 
     private sealed class RecordingProgress : IIndexProgress
     {
         public List<string> Events { get; } = [];
 
-        public void PhaseStarted(string repoName, IndexPhase phase, int totalItems) =>
-            Events.Add($"phase:{repoName}:{phase}:{totalItems}");
+        public List<int> EmbeddedSteps { get; } = [];
 
-        public void ItemProcessed(string repoName, string currentItem, int? symbolsInserted = null) =>
+        public int EmbeddingsTotal { get; private set; }
+
+        private bool _inEmbeddings;
+        private int _embeddedItems;
+
+        public void PhaseStarted(string repoName, IndexPhase phase, int totalItems)
+        {
+            _inEmbeddings = phase == IndexPhase.Embeddings;
+            if (_inEmbeddings)
+            {
+                EmbeddingsTotal = totalItems;
+                _embeddedItems = 0;
+            }
+
+            Events.Add($"phase:{repoName}:{phase}:{totalItems}");
+        }
+
+        public void ItemProcessed(string repoName, string currentItem, int? symbolsInserted = null)
+        {
             Events.Add($"item:{repoName}:{currentItem}");
+            if (_inEmbeddings)
+            {
+                _embeddedItems++;
+                EmbeddedSteps.Add(_embeddedItems);
+            }
+        }
 
         public void RepoCompleted(string repoName) =>
             Events.Add($"done:{repoName}");

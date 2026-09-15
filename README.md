@@ -29,7 +29,7 @@
 - **Символьный слой (JS/TS/TSX)** — tree-sitter извлекает функции, классы, интерфейсы, type-alias'ы и import-граф; прочий текст (Markdown, YAML, JSON…) — fallback-чанкер скользящим окном, тоже участвует в поиске.
 - **Токен-бюджет first-class** — каждая команда уважает `--max-tokens`: набирает результаты по рангу, честно говорит `truncated: true`, когда бюджет кончился.
 - **MCP-сервер** — агент ходит по картам и сниппетам, а не по простыням: `repo_map` → `code_search` → `find_references` → `expand_span`.
-- **Всё локально** — LiteDB + файлы в `.squeezr/`, Qdrant в Docker для векторов, ONNX-эмбеддинги на CPU. Ни одного байта кода не уходит наружу.
+- **Всё локально** — LiteDB + файлы в центральном сторе `~/.squeezr/`, Qdrant и Ollama в Docker под управлением `squeezr services`, эмбеддинги: локальный ONNX на CPU или ollama/OpenAI-compatible по конфигу. Ни одного байта кода не уходит наружу.
 
 ## Быстрый старт
 
@@ -50,9 +50,13 @@ pwsh -File scripts\install.ps1
 Дальше одинаково на обеих платформах:
 
 ```bash
-# создать workspace в корне твоего проекта
+# создать workspace в корне твоего проекта (в проекте НОЛЬ файлов squeezr —
+# манифест, конфиг и индекс живут в центральном сторе ~/.squeezr/)
 squeezr init --name my-project
 squeezr add /path/to/repo
+
+# поднять инфраструктуру (Qdrant + Ollama в Docker, см. раздел про services)
+squeezr services up
 
 # проиндексировать и искать
 squeezr index          # live-прогресс по фазам; --reembed для полного переэмбеддинга
@@ -65,18 +69,62 @@ squeezr symbol WorkspaceManager               # точный lookup символ
 squeezr expand src/Foo.cs 42 87               # раскрыть спан из живого файла
 squeezr compact                               # компактификация триграммного индекса
 squeezr drop                                  # полное удаление индекса workspace
-squeezr workspace list                        # состав workspace: репозитории из манифеста
+squeezr workspace list                        # реестр воркспейсов из центрального стора
 ```
 
-Машиночитаемый вывод (`--json`): `status --json` — один JSON-объект (camelCase, включая `staleFiles`/`indexAge`); `search --json` и `workspace list --json` — NDJSON (один объект на строку, флаш на строку; у search финальная строка — `{"type":"summary"}`). Ошибки в JSON-режиме — `{"error":{"code","message"}}` на stderr + ненулевой exit code, коды стабильные (`not_initialized`, `index_not_built`, `invalid_query`, ...). Человекочитаемый вывод при этом не меняется.
+Машиночитаемый вывод (`--json`): `status --json` — один JSON-объект (camelCase, включая `staleFiles`/`indexAge`); `search --json` и `workspace list --json` — NDJSON (один объект на строку, флаш на строку; у search финальная строка — `{"type":"summary"}`). Ошибки в JSON-режиме — `{"error":{"code","message"}}` на stderr + ненулевой exit code, коды стабильные (`workspace_not_initialized`, `index_not_built`, `invalid_query`, ...). Человекочитаемый вывод при этом не меняется.
 
 Прогресс-ивенты (`--events`): `squeezr index --events` и `squeezr serve --watch --events` стримят NDJSON-ивенты индексации — по одному на строку, флаш на строку: `started` (workspace; у watch-проходов ещё `changedPaths`) → `fileIndexed` (`{repo, path, files}` — кумулятивный счётчик за прогон) → `progress` (`{repo, phase, total}` для фаз semantic/embeddings/trigram) → `completed` (`durationMs`, итоги `files/added/modified/deleted`, `symbols?`, разбивка по репо) или терминальный `error` (`code`, `message`). Транспорт: у `index` — stdout, у `serve --watch` — stderr (stdout занят MCP JSON-RPC). Тихий инкрементный прогон даёт ровно `started → fileIndexed×N → completed`. Композиция с `--json`: сначала завершённая последовательность ивентов, затем финальный `--json`-объект; ошибки дублируются энвелопом 035 на stderr + exit 1.
 
-Эмбеддинги по умолчанию — локальная ONNX-модель **nomic-embed-text-v1.5** (официальный int8-экспорт, ~131 МБ, 768d, CPU — на порядок легче и быстрее прежней bge-code-v1 на 1.7 ГБ; WordPiece-токенизатор, mean pooling + L2, контекст модели 8192 токенов — squeezr по умолчанию режет последовательность до 512, настраивается через `maxSequenceLength`; служебные префиксы `search_document:` / `search_query:` добавляет сам squeezr). Скачать: `scripts/fetch-model.sh` на Linux, `pwsh -File scripts\fetch-model.ps1` на Windows. Обратно на bge-code-v1 (1536d, кодовая специализация): `scripts/fetch-model.sh --model bge-code-v1` (в pwsh: `-Model bge-code-v1`) + `"model": "bge-code-v1"` в секции `embeddings` `.squeezr/config.json`; на существующем workspace смена модели честно ругнётся «collection vector size 768 ≠ 1536» — лечится `squeezr index --reembed`, молча перетереть коллекцию не выйдет. OpenAI-совместимый endpoint включается той же секцией `embeddings` в `.squeezr/config.json` (ключ — только через env `SQUEEZR_API_KEY`). Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
+Эмбеддинги — три провайдера, выбираются секцией `embeddings` конфига воркспейса (лежит в сторе: `~/.squeezr/workspaces/<storeKey>/config.json`, правится удобнее через `squeezr tui` → Config):
 
-Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `pwsh -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится только с M4.
+| Провайдер | Когда выбирать | Конфиг |
+|---|---|---|
+| `onnx` (дефолт) | Локально на CPU, ничего не поднимать | Локальная ONNX-модель **nomic-embed-text-v1.5** (официальный int8-экспорт, ~131 МБ, 768d; WordPiece, mean pooling + L2, контекст модели 8192, squeezr режет до 512 — `maxSequenceLength`; префиксы `search_document:`/`search_query:` добавляет сам squeezr) |
+| `ollama` | Заметно быстрее на больших репо; на AMD-GPU считает через ROCm (см. раздел про services) | `embeddings.provider: "ollama"` + секция `embeddings.ollama`: endpoint `http://localhost:11434`, модель `nomic-embed-text` (768d, профиль `nomic-embed-text-v1.5` — префикс-симметрия с onnx по семантике (одинаковые `search_document: `/`search_query: ` на стороне squeezr; сами вектора onnx≠ollama, поэтому смена провайдера переэмбеддит чанки). Нативный `/api/embed`, API-ключа нет. Модель подтянется сама при первой индексации (auto-pull); ollama не запущен — явная ошибка с подсказкой `squeezr services up` |
+| `openai` | OpenAI-совместимый endpoint (OpenAI, Azure, vLLM) | Секция `embeddings.openAiCompatible` + ключ только через env `SQUEEZR_API_KEY` |
 
-Переехали со старой Windows-машины? Миграционный чек-лист — [docs/migration-windows-to-linux.md](docs/migration-windows-to-linux.md).
+Скачать ONNX-модель: `scripts/fetch-model.sh` на Linux, `pwsh -File scripts\fetch-model.ps1` на Windows. Порядок резолва модели: явный путь в конфиге → `~/.squeezr/models/` → bundled-копия рядом с бинарём. Обратно на bge-code-v1 (1536d, кодовая специализация): `scripts/fetch-model.sh --model bge-code-v1` (в pwsh: `-Model bge-code-v1`) + `"model": "bge-code-v1"` в секции `embeddings.onnx`; на существующем workspace смена модели честно ругнётся «collection vector size 768 ≠ 1536» — лечится `squeezr index --reembed`, молча перетереть коллекцию не выйдет. Смена провайдера/модели меняет ключ чанков — затронутые чанки переэмбеддятся автоматически. Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
+
+## Центральный стор воркспейсов
+
+Squeezr не мусорит в проекте: `squeezr init` не создаёт в текущей папке ни одного файла — ни `.squeezr/`, ни манифеста, ни compose. Всё живёт в центральном сторе:
+
+```
+~/.squeezr/                          # стор (override: env SQUEEZR_HOME)
+├── workspaces.json               # реестр: name/rootPath/storeKey/createdAt/lastUsedAt
+├── workspaces/<storeKey>/          # index store одного workspace
+│   ├── workspace.json               # манифест (репозитории)
+│   ├── config.json                  # конфиг (embeddings, watch, ...)
+│   ├── meta.db                      # LiteDB
+│   ├── trigram.idx                  # триграммный индекс
+│   └── index.lock
+├── models/                         # ONNX-модели эмбеддингов
+└── infra/docker-compose.yml        # qdrant + ollama (генерируется `squeezr services up`)
+```
+
+- **Discovery как у git:** любая команда, запущенная из любого сабдиректория воркспейса, находит его сама (поиск вверх по реестру). «Зашёл не в ту папку» исчезло как класс.
+- **Реестр:** `squeezr workspace list` показывает все воркспейсы из `workspaces.json`; записи, чей rootPath исчез с диска, помечаются `stale` и удаляются через `squeezr drop --store-key <key>`.
+- **Легаси-миграция автоматическая:** проекты со старым layout (`.squeezr/` + `squeezr.workspace.json` в корне) переезжают в стор при первом же обращении — переносится содержимое `.squeezr/` и манифест, squeezr-сгенерированный `docker-compose.yml` и мёртвый `state.json` удаляются. Детали — [docs/migration-central-store.md](docs/migration-central-store.md). Qdrant-коллекции (имя зависит от пути воркспейса, а не стора) переживают миграцию, вектора не теряются.
+
+## Managed services: `squeezr services`
+
+Docker-инфраструктура — qdrant и ollama — управляется одной командой, руками compose не трогаешь:
+
+```bash
+squeezr services up       # сгенерировать compose и поднять оба сервиса
+squeezr services status   # таблица контейнеров (+ --json, rocm, версия compose)
+squeezr services down     # остановить (данные в volume'ах НЕ удаляются)
+```
+
+- Compose-файл — `~/.squeezr/infra/docker-compose.yml`, перегенерируется на каждый `up` (первой строкой — маркер `# managed by squeezr`); project `squeezr`.
+- Сервисы: **qdrant** (`qdrant/qdrant:latest`, 6333/6334, volume `squeezr-qdrant`) и **ollama** (`ollama/ollama:latest`, 11434, volume `squeezr-ollama`), restart `unless-stopped`.
+- **AMD GPU (ROCm):** если на хосте видны `/dev/kfd` и `/dev/dri` (например, Radeon RX 7900 XTX), ollama получает проброс этих устройств и считает на GPU; без них — CPU-режим.
+- Команда глобальна: работает из любой директории, workspace не нужен. Без Docker — понятная ошибка со ссылкой на установку.
+
+Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `pwsh -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится для `squeezr services up` (Qdrant и, опционально, Ollama). Важно: ни установка, ни удаление не трогают стор `~/.squeezr` — воркспейсы и модели переживают переустановку бинаря.
+
+Переехали со старой Windows-машины? Миграционный чек-лист — [docs/migration-windows-to-linux.md](docs/migration-windows-to-linux.md). Проект ещё на старом layout с `.squeezr/` в корне? Миграция в центральный стор происходит сама — [docs/migration-central-store.md](docs/migration-central-store.md).
 
 ## TUI: человеческий интерфейс
 
@@ -84,17 +132,17 @@ squeezr workspace list                        # состав workspace: репо
 
 Меню контекстное — зависит от состояния workspace:
 
-- **Папка без workspace** (нет `squeezr.workspace.json`) — сразу предложение «No workspace found here. Initialize now?» (дефолт — да) → форма `init`. Отказ — не тупик: остаётся меню из двух пунктов — Initialize workspace / Exit, можно передумать без рестарта.
+- **Папка без workspace** (воркспейс не найден — squeezr ищет его вверх по дереву от текущей папки) — сразу предложение «No workspace found here. Initialize now?» (дефолт — да) → форма `init`. Отказ — не тупик: остаётся меню из двух пунктов — Initialize workspace / Exit, можно передумать без рестарта.
 - **Workspace инициализирован** — полный круг: Dashboard / Search / Map / Index / Add repository / Config / Drop workspace / Exit.
 
 Пункты верхнего уровня:
 
-- **Dashboard** — сводка: счётчики файлов/символов/чанков по репо, состояние сервисов, pending-эмбеддинги, возраст индекса. Qdrant лежит — под статусом явный хинт `qdrant is down — start it with: docker compose up -d`. Репозиториев ещё нет — в конце предложение «No repositories yet. Add one now?» (дефолт — да) → форма Add repository.
+- **Dashboard** — сводка: счётчики файлов/символов/чанков по репо, состояние обоих сервисов (qdrant — points/pending, ollama — running + модель провайдера установлена/нет), pending-эмбеддинги, возраст индекса. Сервис лежит — под статусом явный хинт `qdrant is down — start it with: squeezr services up` (для ollama — аналогично). Репозиториев ещё нет — в конце предложение «No repositories yet. Add one now?» (дефолт — да) → форма Add repository.
 - **Search** — вводишь запрос, получаешь хиты с флагами `[exact]`/`[semantic]`/`[both]` (repo, file:line, сниппет — без тел). Выбор хита раскрывает спан с контекстом из живого файла; «More context (×2)» раздувает контекст, пока хватает бюджета. Qdrant лежит — видишь warning и exact-only выдачу.
 - **Map** — браузер карты: репо → директории → файл → символы с сигнатурами (тел нет). Из символа — тот же expand его спана.
 - **Index** — инкремент, полный реиндекс или `--reembed` с live-прогрессом по фазам.
 - **Add repository** — форма `add` вместо флагов.
-- **Config** — формы поверх `.squeezr/config.json`: qdrant, embeddings (onnx/openai), chunking, indexing. Валидация на вводе (URL, int > 0, provider), diff-сводка «было → станет» перед сохранением, после смены embeddings — напоминание про `index --reembed`.
+- **Config** — формы поверх конфига воркспейса (в сторе: `~/.squeezr/workspaces/<storeKey>/config.json`): qdrant, embeddings (onnx/ollama/openai), chunking, indexing. Валидация на вводе (URL, int > 0, provider), diff-сводка «было → станет» перед сохранением, после смены embeddings — напоминание про `index --reembed`.
 - **Drop workspace** — подтверждение и полное удаление индекса workspace (`drop`).
 
 Всё то же самое через CLI-флаги остаётся доступным — TUI это надстройка, не замена.
@@ -199,11 +247,11 @@ squeezr watch            # человек: демон в терминале, Ctr
 squeezr serve --watch    # агент: тот же движок внутри MCP-сервера
 ```
 
-Как работает: `FileSystemWatcher` на корнях репо → фильтрация (те же ignore-глобы и расширения, что у индексации; записи в `.squeezr/` не считаются) → изменённые пути копятся в changed-сет → после окна тишины один инкрементальный проход по всему накопленному. «Save-all из 50 файлов» = один проход. Индекс занят (ручной `index`, TUI, второй serve) — движок ждёт с экспоненциальным backoff и никогда не отбирает лок. Живой статус: в терминале — Live-грид (workspace / status / last pass / error), в pipe — строки `pass started: N changed paths` / `pass completed: +A ~M -D` в stdout. Для программного потребления — `serve --watch --events`: NDJSON-ивенты проходов (`started` с `changedPaths` → `fileIndexed` → `completed`) на stderr, JSON-RPC на stdout не тронут (схема — в разделе про `--json` выше).
+Как работает: `FileSystemWatcher` на корнях репо → фильтрация (те же ignore-глобы и расширения, что у индексации; служебные файлы стора не считаются — они живут вне проекта) → изменённые пути копятся в changed-сет → после окна тишины один инкрементальный проход по всему накопленному. «Save-all из 50 файлов» = один проход. Индекс занят (ручной `index`, TUI, второй serve) — движок ждёт с экспоненциальным backoff и никогда не отбирает лок. Живой статус: в терминале — Live-грид (workspace / status / last pass / error), в pipe — строки `pass started: N changed paths` / `pass completed: +A ~M -D` в stdout. Для программного потребления — `serve --watch --events`: NDJSON-ивенты проходов (`started` с `changedPaths` → `fileIndexed` → `completed`) на stderr, JSON-RPC на stdout не тронут (схема — в разделе про `--json` выше).
 
 Удаления — полный жизненный цикл (tombstone триграмм, чистка документов/чанков, drop Qdrant-точек файла): после `git checkout`/`git clean` выдача не содержит призраков. `serve --watch` не блокирует JSON-RPC — тулы отвечают и во время фонового прохода, конверт не меняется. FreshnessGuard остаётся страховкой: пока watch не догнал, конверт честно показывает `staleFiles`.
 
-Конфиг — секция `watch` в `.squeezr/config.json`:
+Конфиг — секция `watch` в конфиге воркспейса (`~/.squeezr/workspaces/<storeKey>/config.json`):
 
 ```json
 {
@@ -228,7 +276,7 @@ squeezr serve --watch    # агент: тот же движок внутри MCP
 
 ## Стек
 
-.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · tree-sitter (JS/TS) · Qdrant · ONNX Runtime · xUnit + Shouldly
+.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · tree-sitter (JS/TS) · Qdrant · Ollama · ONNX Runtime · xUnit + Shouldly
 
 ---
 
@@ -238,17 +286,18 @@ squeezr serve --watch    # агент: тот же движок внутри MCP
 
 Born from a simple observation: agents waste 30–80k tokens navigating code by reading whole files. Squeezr gives them what senior devs actually use — a repo **map**, **symbol** lookup, **references**, and precise **span expansion** — as fast local queries and MCP tools.
 
-The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: LiteDB + Qdrant (Docker) + ONNX embeddings — nothing leaves your machine. Default embedding model: local ONNX nomic-embed-text-v1.5 (int8, ~131 MB, 768d, CPU; legacy bge-code-v1, 1536d, stays a supported option via `scripts/fetch-model.sh --model bge-code-v1` + `embeddings.onnx.model` in `.squeezr/config.json` — switching models on an existing workspace requires `squeezr index --reembed`).
+The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: central workspace store in `~/.squeezr` (registry + per-workspace store dirs, zero files in your project, `SQUEEZR_HOME` override; legacy in-project `.squeezr/` auto-migrates) + Qdrant/Ollama in Docker managed by `squeezr services up|down|status` (ROCm device passthrough on AMD GPUs) + embeddings: local ONNX by default (nomic-embed-text-v1.5, int8, ~131 MB, 768d, CPU), optional ollama provider (nomic-embed-text via native `/api/embed`, auto-pull, GPU-capable) or any OpenAI-compatible endpoint — nothing leaves your machine. Default embedding model: local ONNX nomic-embed-text-v1.5 (legacy bge-code-v1, 1536d, stays a supported option via `scripts/fetch-model.sh --model bge-code-v1` + `embeddings.onnx.model` in the workspace config — switching models on an existing workspace requires `squeezr index --reembed`).
 
 An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client onboarding is one command: `squeezr mcp install` detects supported agent CLIs (Claude Code, Kimi Code, Qwen Code, Codex), registers a `serve --watch` entry via the client's own CLI (direct config merge for Kimi), and optionally writes an idempotent instruction block into the client's instruction file; `squeezr mcp doctor` verifies the setup per client (exit 0/1), `squeezr mcp remove` undoes it. Flags: `--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--yes`, `--json`. Workspace root = server process cwd, with a `CLAUDE_PROJECT_DIR` fallback for Claude Code (no cwd key in its config); manual config paths (e.g. `~/.claude.json` / `.mcp.json`, `~/.codex/config.toml`) are listed in the RU section above. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits. For programmatic progress, `index --events` / `serve --watch --events` stream NDJSON events (`started` → `fileIndexed` → `progress` → `completed`/`error`), flushed per line — stdout for `index`, stderr for `serve` (stdout carries MCP JSON-RPC); a quiet incremental run emits exactly `started` → `fileIndexed`×N → `completed`.
 
 ```bash
 dotnet build Squeezr.slnx
 squeezr init --name my-project && squeezr add /path/to/repo
+squeezr services up
 squeezr index && squeezr search "WorkspaceManager"
 ```
 
-Linux install (self-contained binary + `~/.local/bin` symlink, no .NET required): `scripts/install.sh`. Uninstall: `scripts/uninstall.sh`.
+Linux install (self-contained binary + `~/.local/bin` symlink, no .NET required): `scripts/install.sh`. Uninstall: `scripts/uninstall.sh` (the `~/.squeezr` store with workspaces and models is left intact — remove it manually if you really want it gone).
 
 Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `pwsh -File scripts\uninstall.ps1`.
 

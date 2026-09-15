@@ -4,8 +4,10 @@
   Builds and installs Squeezr CLI for the current user.
 .DESCRIPTION
   Publishes a self-contained single-file win-x64 build, copies it to the install
-  directory and registers it on the user PATH. Checks for Docker (needed from
-  milestone M4 for Qdrant) and prints setup hints when missing.
+  directory and registers it on the user PATH. Checks for Docker (needed for
+  `squeezr services up` - Qdrant and, optionally, Ollama) and prints setup
+  hints when missing. The central store %USERPROFILE%\.squeezr (workspaces,
+  models, infra) is NOT touched by install or uninstall.
 .PARAMETER InstallDir
   Target directory. Default: %LOCALAPPDATA%\Programs\Squeezr
 .PARAMETER SkipBuild
@@ -54,11 +56,12 @@ if ($pathParts -notcontains $InstallDir) {
 }
 
 if (Get-Command docker -ErrorAction SilentlyContinue) {
-    Write-Step 'Docker detected - Qdrant (from M4) will be available'
+    Write-Step 'Docker detected - run "squeezr services up" to start Qdrant and Ollama'
 } else {
     Write-Host @'
 [!] Docker not found. Squeezr works without it (trigram + symbol layers),
-    but semantic search (milestone M4+) needs Qdrant in Docker.
+    but semantic search needs Qdrant in Docker (start it with: squeezr services up;
+    provider "ollama" also uses Docker for the Ollama service).
     Install Docker Desktop: https://docs.docker.com/desktop/setup/install/windows-install/
     or via winget: winget install Docker.DockerDesktop
 '@ -ForegroundColor Yellow

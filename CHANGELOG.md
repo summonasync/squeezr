@@ -44,6 +44,26 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 - Zero-repos offer on the dashboard: «No repositories yet. Add one now?» (default yes) → add-repository form
 - Dashboard services status: when Qdrant is down, the status line is followed by an explicit hint — `qdrant is down — start it with: docker compose up -d`
 
+### Added (039, central workspace store + managed services)
+- Central workspace store `~/.squeezr/` (override env `SQUEEZR_HOME`): registry `workspaces.json` (`name/rootPath/storeKey/createdAt/lastUsedAt`), per-workspace store dirs `workspaces/<storeKey>/` (manifest `workspace.json`, `config.json`, `meta.db`, `trigram.idx`, `index.lock`), `models/` for ONNX models, `infra/` for the managed compose file
+- `squeezr init` leaves zero files in the project — no `.squeezr/`, no in-project manifest, no compose
+- Git-like workspace discovery: every command resolves the workspace upward from the current directory via the registry (any subdirectory works); legacy in-project workspaces (`.squeezr/` + `squeezr.workspace.json`) migrate to the central store automatically on first access (idempotent, stderr notice)
+- `squeezr services up|down|status [--json]`: managed Qdrant + Ollama stack from `~/.squeezr/infra/docker-compose.yml` (regenerated on every `up`, marker `# managed by squeezr`); ROCm device passthrough (`/dev/kfd`, `/dev/dri`) for AMD GPUs; `down` stops containers but keeps data volumes; works outside any workspace
+- Ollama embedding provider (`embeddings.provider: "ollama"`): native `/api/embed`, default model `nomic-embed-text` (768d) with the `nomic-embed-text-v1.5` profile (prefix-symmetric with the ONNX provider), no API key, automatic model pull on index preflight, explicit error pointing at `squeezr services up` when Ollama is unreachable
+- `squeezr drop --store-key <KEY>`: removes a stale registry entry and its store dir when the workspace root no longer exists
+- DF-11: embedding upsert + chunk marking now commit per batch (32) instead of per 4096-chunk window — a crash mid-run loses at most one batch, and the next `index` run resumes with the remaining pending chunks; progress is reported cumulatively (`embedded/total`)
+- TUI dashboard shows both services (Qdrant points/pending, Ollama availability + model installed) with `squeezr services up` hints
+
+### Changed (039, central workspace store + managed services)
+- **Breaking:** `workspace list` now reads the central registry instead of the current workspace's manifest; `--json` entries carry `name/rootPath/storeKey/createdAt/lastUsedAt/stale` — the repo-level `path` field is replaced by `rootPath` (accepted without compat alias, review-039-03 W1; pre-release 0.9.0)
+- **Breaking:** `search` (and other workspace commands) outside any workspace now fail with error code `workspace_not_initialized` (was `index_not_built`); `index_not_built` is kept for "inside a workspace without an index" (review-039-03 W2)
+- `drop` removes the workspace's store dir + registry entry + Qdrant collection; the post-drop hint now points at `squeezr services down` (shared volumes are never removed by `down`)
+- Dead `state.json` format removed: init no longer creates it, migration deletes it (live state remains LiteDB `index_state`)
+- `scripts/fetch-model.sh`/`fetch-model.ps1` default download target is now `~/.squeezr/models` (spec 039 D11; pass a directory to bundle with the CLI instead); `install.sh` model hint checks both the central store and the bundled copy
+
+### Fixed (039, central workspace store + managed services)
+- Workspace registry read-modify-write is serialized cross-process (`workspaces.lock`), so concurrent CLI runs can't lose each other's entries
+
 ## [0.9.0-pre] — 2026-09-13
 
 Pre-release for dogfooding. v1 MVP (M1–M6) closed, post-MVP features landed.

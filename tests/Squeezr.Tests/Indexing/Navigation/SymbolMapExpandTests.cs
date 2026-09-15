@@ -8,6 +8,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing.Navigation;
 
+[Collection("CliProcessGlobals")]
 public class SymbolMapExpandTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");

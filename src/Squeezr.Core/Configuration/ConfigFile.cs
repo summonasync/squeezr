@@ -25,6 +25,8 @@ public static class ConfigFile
         try
         {
             _ = config.Embeddings.Onnx.ResolvedProfile;
+            _ = config.Embeddings.Ollama.ResolvedProfile;
+            _ = config.Embeddings.OpenAiCompatible.ResolvedProfile;
         }
         catch (ArgumentException ex)
         {

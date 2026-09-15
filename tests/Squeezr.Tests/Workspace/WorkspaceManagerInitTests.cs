@@ -9,7 +9,7 @@ namespace Squeezr.Tests.Workspace;
 public class WorkspaceManagerInitTests
 {
     [Fact]
-    public void Init_CreatesWorkspaceLayout()
+    public void Init_CreatesCentralStoreAndLeavesProjectClean()
     {
         var root = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(root);
@@ -19,12 +19,15 @@ public class WorkspaceManagerInitTests
         result.WorkspaceName.ShouldBe(new DirectoryInfo(root).Name);
         result.RootPath.ShouldBe(Path.GetFullPath(root));
 
-        File.Exists(Path.Combine(root, "squeezr.workspace.json")).ShouldBeTrue();
+        File.Exists(Path.Combine(root, SqueezrPaths.ManifestFileName)).ShouldBeFalse();
+        Directory.Exists(Path.Combine(root, SqueezrPaths.StoreDirName)).ShouldBeFalse();
+        File.Exists(SqueezrPaths.ComposePath(root)).ShouldBeFalse();
+
+        var storeDir = SqueezrPaths.StoreDir(root);
+        Directory.Exists(storeDir).ShouldBeTrue();
+        File.Exists(Path.Combine(storeDir, SqueezrPaths.StoreManifestFileName)).ShouldBeTrue();
         File.Exists(SqueezrPaths.ConfigPath(root)).ShouldBeTrue();
         File.Exists(SqueezrPaths.MetaDbPath(root)).ShouldBeTrue();
-        File.Exists(SqueezrPaths.StatePath(root)).ShouldBeTrue();
-        File.Exists(SqueezrPaths.ComposePath(root)).ShouldBeTrue();
-        Directory.Exists(SqueezrPaths.StoreDir(root)).ShouldBeTrue();
     }
 
     [Fact]
@@ -61,14 +64,12 @@ public class WorkspaceManagerInitTests
     }
 
     [Fact]
-    public void Init_WritesSpecCompliantStateFile()
+    public void Init_DoesNotCreateStateFile()
     {
         var root = TestDirs.NewTempDir();
         new WorkspaceManager(root).Init(null);
 
-        var state = StateFile.Load(root);
-        state.Version.ShouldBe(1);
-        state.Repos.ShouldBeEmpty();
+        File.Exists(Path.Combine(SqueezrPaths.StoreDir(root), SqueezrPaths.StateFileName)).ShouldBeFalse();
     }
 
     [Fact]
@@ -102,15 +103,40 @@ public class WorkspaceManagerInitTests
     }
 
     [Fact]
-    public void Init_GeneratesQdrantComposeFile()
+    public void Init_DoesNotWriteComposeFile()
     {
         var root = TestDirs.NewTempDir();
         new WorkspaceManager(root).Init(null);
 
-        var compose = File.ReadAllText(SqueezrPaths.ComposePath(root));
-        compose.ShouldContain("qdrant/qdrant:latest");
-        compose.ShouldContain("6333:6333");
-        compose.ShouldContain("6334:6334");
-        compose.ShouldContain("squeezr-qdrant:/qdrant/storage");
+        File.Exists(SqueezrPaths.ComposePath(root)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Init_CreatedFiles_ListsStorePaths()
+    {
+        var root = TestDirs.NewTempDir();
+        var result = new WorkspaceManager(root).Init(null);
+
+        var storeDir = SqueezrPaths.StoreDir(root);
+        result.CreatedFiles.ShouldBe(
+        [
+            Path.Combine(storeDir, SqueezrPaths.StoreManifestFileName),
+            Path.Combine(storeDir, SqueezrPaths.ConfigFileName),
+            Path.Combine(storeDir, SqueezrPaths.MetaDbFileName)
+        ]);
+        result.CreatedFiles.ShouldAllBe(file => File.Exists(file));
+    }
+
+    [Fact]
+    public void Init_RegistersWorkspaceInRegistry()
+    {
+        var root = TestDirs.NewTempDir();
+        var result = new WorkspaceManager(root).Init("my-system");
+
+        var entry = WorkspaceRegistry.FindByRootPath(root);
+        entry.ShouldNotBeNull();
+        entry!.Name.ShouldBe("my-system");
+        entry.RootPath.ShouldBe(Path.GetFullPath(root));
+        entry.StoreKey.ShouldBe(WorkspaceStore.Resolve(root).StoreKey);
     }
 }

@@ -27,7 +27,7 @@ public sealed class MapCommand : Command<MapCommand.Settings>
     {
         try
         {
-            var result = new RepoMapper(Directory.GetCurrentDirectory()).Build(
+            var result = new RepoMapper(WorkspaceRootResolver.RequireWorkspaceRoot()).Build(
                 settings.Repo,
                 settings.Depth ?? RepoMapper.DefaultDepth,
                 settings.MaxTokens ?? RepoMapper.DefaultMaxTokens);
