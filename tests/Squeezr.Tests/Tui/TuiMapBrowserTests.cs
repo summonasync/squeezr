@@ -13,14 +13,14 @@ public class TuiMapBrowserTests
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 1);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -36,12 +36,12 @@ public class TuiMapBrowserTests
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 2);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -55,7 +55,7 @@ public class TuiMapBrowserTests
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 1);
@@ -64,7 +64,7 @@ public class TuiMapBrowserTests
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 1);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -102,12 +102,12 @@ public class TuiMapBrowserTests
     {
         var workspace = NewBracketWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 1);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

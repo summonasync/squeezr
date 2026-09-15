@@ -14,10 +14,9 @@ public class TuiWizardsTests
     {
         var workspace = TestDirs.NewTempDir();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 5);
-        TuiTestHarness.PushMenuChoice(console, 0);
+        console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -35,14 +34,10 @@ public class TuiWizardsTests
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 5);
-        TuiTestHarness.PushMenuChoice(console, 0);
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 6);
 
-        var code = await TuiApp.RunAsync(console, workspace);
+        await TuiWizards.InitAsync(console, workspace, CancellationToken.None);
 
-        code.ShouldBe(0);
         console.Output.ShouldContain("already initialized");
         WorkspaceManifestFile.Exists(workspace).ShouldBeTrue();
     }
@@ -54,12 +49,11 @@ public class TuiWizardsTests
         new WorkspaceManager(workspace).Init("demo");
         Directory.CreateDirectory(Path.Combine(workspace, "repolib"));
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 5);
-        TuiTestHarness.PushMenuChoice(console, 1);
+        TuiTestHarness.PushMenuChoice(console, 4);
         console.Input.PushTextWithEnter("does-not-exist");
         console.Input.PushTextWithEnter("repolib");
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -77,10 +71,9 @@ public class TuiWizardsTests
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 5);
-        TuiTestHarness.PushMenuChoice(console, 2);
-        console.Input.PushKey(ConsoleKey.Enter);
         TuiTestHarness.PushMenuChoice(console, 6);
+        console.Input.PushKey(ConsoleKey.Enter);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -97,10 +90,9 @@ public class TuiWizardsTests
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 5);
-        TuiTestHarness.PushMenuChoice(console, 2);
-        console.Input.PushTextWithEnter("y");
         TuiTestHarness.PushMenuChoice(console, 6);
+        console.Input.PushTextWithEnter("y");
+        TuiTestHarness.PushMenuChoice(console, 1);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -112,14 +104,14 @@ public class TuiWizardsTests
     }
 
     [Fact]
-    public async Task Wizard_CancelledToken_AbortsWithoutSideEffects()
+    public async Task Run_CancelledToken_AbortsWithoutSideEffects()
     {
         var workspace = TestDirs.NewTempDir();
         var console = TuiTestHarness.InteractiveConsole();
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Should.NotThrowAsync(() => TuiApp.RunWizardAsync(console, workspace, cts.Token));
+        await Should.NotThrowAsync(() => TuiApp.RunAsync(console, workspace, cts.Token));
 
         WorkspaceManifestFile.Exists(workspace).ShouldBeFalse();
         console.Output.ShouldNotContain("Initialized workspace");

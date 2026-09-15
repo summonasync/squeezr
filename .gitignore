@@ -486,3 +486,6 @@ $RECYCLE.BIN/
 squeezr.workspace.json
 docker-compose.yml
 src/Squeezr.Cli/Models/
+
+# Agent tooling local state
+.claude/

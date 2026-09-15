@@ -14,10 +14,10 @@ public class TuiSearchFlowTests
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 2);
+        TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("zanzibar");
         TuiTestHarness.PushMenuChoice(console, 2);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -32,11 +32,11 @@ public class TuiSearchFlowTests
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 2);
+        TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("zanzibar");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 3);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -50,14 +50,14 @@ public class TuiSearchFlowTests
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 2);
+        TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("zanzibar");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("return");
         TuiTestHarness.PushMenuChoice(console, 2);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -71,9 +71,9 @@ public class TuiSearchFlowTests
     {
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 2);
+        TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushKey(ConsoleKey.Enter);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -102,13 +102,11 @@ public class TuiSearchFlowTests
         try
         {
             var console = TuiTestHarness.InteractiveConsole();
-            TuiTestHarness.PushMenuChoice(console, 2);
+            TuiTestHarness.PushMenuChoice(console, 1);
             console.Input.PushTextWithEnter("zanzibar");
-            TuiTestHarness.PushMenuChoice(console, 2);
-            TuiTestHarness.PushMenuChoice(console, 2);
-            console.Input.PushTextWithEnter("return");
-            TuiTestHarness.PushMenuChoice(console, 2);
-            TuiTestHarness.PushMenuChoice(console, 6);
+            TuiTestHarness.PushMenuChoice(console, 0);
+            TuiTestHarness.PushMenuChoice(console, 3);
+            TuiTestHarness.PushMenuChoice(console, 7);
 
             var code = await TuiApp.RunAsync(console, workspace);
 

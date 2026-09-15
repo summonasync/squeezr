@@ -82,14 +82,20 @@ squeezr workspace list                        # состав workspace: репо
 
 Не любишь помнить флаги — просто запусти `squeezr tui` (или голый `squeezr` в интерактивном терминале: без аргументов он открывает TUI). Если терминал неинтерактивный (pipe, CI) — бинарь честно падает в справку вместо меню.
 
-Меню — семь пунктов, круг полностью покрывает жизненный цикл workspace:
+Меню контекстное — зависит от состояния workspace:
 
-- **Dashboard** — сводка: счётчики файлов/символов/чанков по репо, состояние Qdrant, pending-эмбеддинги, возраст индекса.
-- **Wizards** — `init` / `add` / `drop` с формами вместо флагов.
-- **Index** — инкремент, полный реиндекс или `--reembed` с live-прогрессом по фазам.
+- **Папка без workspace** (нет `squeezr.workspace.json`) — сразу предложение «No workspace found here. Initialize now?» (дефолт — да) → форма `init`. Отказ — не тупик: остаётся меню из двух пунктов — Initialize workspace / Exit, можно передумать без рестарта.
+- **Workspace инициализирован** — полный круг: Dashboard / Search / Map / Index / Add repository / Config / Drop workspace / Exit.
+
+Пункты верхнего уровня:
+
+- **Dashboard** — сводка: счётчики файлов/символов/чанков по репо, состояние сервисов, pending-эмбеддинги, возраст индекса. Qdrant лежит — под статусом явный хинт `qdrant is down — start it with: docker compose up -d`. Репозиториев ещё нет — в конце предложение «No repositories yet. Add one now?» (дефолт — да) → форма Add repository.
 - **Search** — вводишь запрос, получаешь хиты с флагами `[exact]`/`[semantic]`/`[both]` (repo, file:line, сниппет — без тел). Выбор хита раскрывает спан с контекстом из живого файла; «More context (×2)» раздувает контекст, пока хватает бюджета. Qdrant лежит — видишь warning и exact-only выдачу.
 - **Map** — браузер карты: репо → директории → файл → символы с сигнатурами (тел нет). Из символа — тот же expand его спана.
+- **Index** — инкремент, полный реиндекс или `--reembed` с live-прогрессом по фазам.
+- **Add repository** — форма `add` вместо флагов.
 - **Config** — формы поверх `.squeezr/config.json`: qdrant, embeddings (onnx/openai), chunking, indexing. Валидация на вводе (URL, int > 0, provider), diff-сводка «было → станет» перед сохранением, после смены embeddings — напоминание про `index --reembed`.
+- **Drop workspace** — подтверждение и полное удаление индекса workspace (`drop`).
 
 Всё то же самое через CLI-флаги остаётся доступным — TUI это надстройка, не замена.
 

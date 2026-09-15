@@ -29,10 +29,7 @@ public static class TuiDashboard
             console.MarkupLine($"  {repo.Name.EscapeMarkup()}: {repo.Files} files, {repo.Symbols} symbols, {repo.Chunks} chunks");
         }
 
-        console.MarkupLine($"Embeddings pending: {qdrant.PendingChunks}");
-        console.MarkupLine(qdrant.Available
-            ? $"Qdrant: available ({qdrant.Points} points)"
-            : "Qdrant: not available");
+        TuiServicesStatus.Render(console, qdrant);
         foreach (var warning in warnings)
         {
             console.MarkupLine($"[grey]{warning.EscapeMarkup()}[/]");

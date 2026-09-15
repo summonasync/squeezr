@@ -14,19 +14,23 @@ public class TuiSkeletonTests
     [Fact]
     public async Task Menu_RendersAndExit_ReturnsZero()
     {
+        var workspace = TestDirs.NewTempDir();
+        new WorkspaceManager(workspace).Init("demo");
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
-        var code = await TuiApp.RunAsync(console, TestDirs.NewTempDir());
+        var code = await TuiApp.RunAsync(console, workspace);
 
         code.ShouldBe(0);
         console.Output.ShouldContain("Dashboard");
-        console.Output.ShouldContain("Index");
         console.Output.ShouldContain("Search");
         console.Output.ShouldContain("Map");
+        console.Output.ShouldContain("Index");
+        console.Output.ShouldContain("Add repository");
         console.Output.ShouldContain("Config");
-        console.Output.ShouldContain("Wizards");
+        console.Output.ShouldContain("Drop workspace");
         console.Output.ShouldContain("Exit");
+        console.Output.ShouldNotContain("Wizards");
     }
 
     [Fact]
@@ -35,7 +39,7 @@ public class TuiSkeletonTests
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 0);
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -47,6 +51,18 @@ public class TuiSkeletonTests
         console.Output.ShouldContain("Embeddings pending:");
         console.Output.ShouldContain("Qdrant: not available");
         console.Output.ShouldContain("Index age:");
+    }
+
+    [Fact]
+    public async Task Dashboard_QdrantDown_ShowsStartHint()
+    {
+        var workspace = NewIndexedWorkspace();
+        var console = TuiTestHarness.InteractiveConsole();
+
+        await TuiDashboard.RenderAsync(console, workspace);
+
+        console.Output.ShouldContain("Qdrant: not available");
+        console.Output.ShouldContain("qdrant is down — start it with: docker compose up -d");
     }
 
     [Fact]
@@ -73,13 +89,25 @@ public class TuiSkeletonTests
     [Fact]
     public async Task BareRun_Interactive_StartsTui()
     {
-        var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 6);
+        var previousDirectory = Directory.GetCurrentDirectory();
+        var workspace = TestDirs.NewTempDir();
+        Directory.SetCurrentDirectory(workspace);
+        try
+        {
+            var console = TuiTestHarness.InteractiveConsole();
+            console.Input.PushTextWithEnter("n");
+            TuiTestHarness.PushMenuChoice(console, 1);
 
-        var code = await CliApplication.RunAsync([], console, interactive: true);
+            var code = await CliApplication.RunAsync([], console, interactive: true);
 
-        code.ShouldBe(0);
-        console.Output.ShouldContain("Dashboard");
+            code.ShouldBe(0);
+            console.Output.ShouldContain("No workspace found here. Initialize now?");
+            console.Output.ShouldContain("Initialize workspace");
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previousDirectory);
+        }
     }
 
     [Fact]

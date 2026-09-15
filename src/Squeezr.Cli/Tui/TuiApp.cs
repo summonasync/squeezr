@@ -4,7 +4,19 @@ namespace Squeezr.Cli.Tui;
 
 public static class TuiApp
 {
-    private static readonly string[] MenuItems = ["Dashboard", "Index", "Search", "Map", "Config", "Wizards", "Exit"];
+    private static readonly string[] MainMenuItems =
+    [
+        "Dashboard",
+        "Search",
+        "Map",
+        "Index",
+        "Add repository",
+        "Config",
+        "Drop workspace",
+        "Exit",
+    ];
+
+    private static readonly string[] UninitializedMenuItems = ["Initialize workspace", "Exit"];
 
     public static async Task<int> RunInteractiveAsync(string workspaceRoot)
     {
@@ -27,75 +39,133 @@ public static class TuiApp
 
     public static async Task<int> RunAsync(IAnsiConsole console, string workspaceRoot, CancellationToken cancellationToken = default)
     {
+        try
+        {
+            await OfferInitializationOnEntryAsync(console, workspaceRoot, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return 0;
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
+            var state = TuiWorkspaceStateDetector.Detect(workspaceRoot);
             string choice;
             try
             {
-                choice = await new SelectionPrompt<string>()
-                    .Title("Squeezr")
-                    .PageSize(10)
-                    .AddChoices(MenuItems)
-                    .ShowAsync(console, cancellationToken);
+                choice = await PromptMenuAsync(console, state, cancellationToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return 0;
+            }
+
+            if (choice == "Exit")
             {
                 return 0;
             }
 
             try
             {
-                switch (choice)
-                {
-                    case "Dashboard":
-                        await TuiDashboard.RenderAsync(console, workspaceRoot, cancellationToken);
-                        break;
-                    case "Index":
-                        await TuiIndexRunner.RunAsync(console, workspaceRoot, cancellationToken);
-                        break;
-                    case "Search":
-                        await TuiSearchFlow.RunAsync(console, workspaceRoot, cancellationToken);
-                        break;
-                    case "Map":
-                        await TuiMapBrowser.RunAsync(console, workspaceRoot, cancellationToken);
-                        break;
-                    case "Config":
-                        await TuiConfigEditor.RunAsync(console, workspaceRoot, cancellationToken);
-                        break;
-                    case "Wizards":
-                        await RunWizardAsync(console, workspaceRoot, cancellationToken);
-                        break;
-                    case "Exit":
-                        return 0;
-                }
+                await ExecuteAsync(console, workspaceRoot, choice, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return 0;
+                continue;
             }
         }
 
         return 0;
     }
 
-    internal static async Task RunWizardAsync(IAnsiConsole console, string workspaceRoot, CancellationToken cancellationToken)
+    private static async Task OfferInitializationOnEntryAsync(
+        IAnsiConsole console,
+        string workspaceRoot,
+        CancellationToken cancellationToken)
     {
-        var wizard = await new SelectionPrompt<string>()
-            .Title("Wizards")
-            .AddChoices("init", "add", "drop", "Back")
-            .ShowAsync(console, cancellationToken);
-
-        switch (wizard)
+        if (TuiWorkspaceStateDetector.Detect(workspaceRoot) != TuiWorkspaceState.Uninitialized)
         {
-            case "init":
+            return;
+        }
+
+        var accepted = await new ConfirmationPrompt("No workspace found here. Initialize now?")
+        {
+            DefaultValue = true,
+        }
+            .ShowAsync(console, cancellationToken);
+        if (accepted)
+        {
+            await TuiWizards.InitAsync(console, workspaceRoot, cancellationToken);
+        }
+    }
+
+    private static async Task<string> PromptMenuAsync(
+        IAnsiConsole console,
+        TuiWorkspaceState state,
+        CancellationToken cancellationToken)
+    {
+        var items = state == TuiWorkspaceState.Uninitialized ? UninitializedMenuItems : MainMenuItems;
+        return await new SelectionPrompt<string>()
+            .Title("Squeezr")
+            .PageSize(10)
+            .AddChoices(items)
+            .ShowAsync(console, cancellationToken);
+    }
+
+    private static async Task ExecuteAsync(
+        IAnsiConsole console,
+        string workspaceRoot,
+        string choice,
+        CancellationToken cancellationToken)
+    {
+        switch (choice)
+        {
+            case "Dashboard":
+                await TuiDashboard.RenderAsync(console, workspaceRoot, cancellationToken);
+                if (TuiWorkspaceStateDetector.Detect(workspaceRoot) == TuiWorkspaceState.NoRepositories)
+                {
+                    await OfferAddRepositoryAsync(console, workspaceRoot, cancellationToken);
+                }
+
+                break;
+            case "Search":
+                await TuiSearchFlow.RunAsync(console, workspaceRoot, cancellationToken);
+                break;
+            case "Map":
+                await TuiMapBrowser.RunAsync(console, workspaceRoot, cancellationToken);
+                break;
+            case "Index":
+                await TuiIndexRunner.RunAsync(console, workspaceRoot, cancellationToken);
+                break;
+            case "Initialize workspace":
                 await TuiWizards.InitAsync(console, workspaceRoot, cancellationToken);
                 break;
-            case "add":
+            case "Add repository":
                 await TuiWizards.AddAsync(console, workspaceRoot, cancellationToken);
                 break;
-            case "drop":
+            case "Config":
+                await TuiConfigEditor.RunAsync(console, workspaceRoot, cancellationToken);
+                break;
+            case "Drop workspace":
                 await TuiWizards.DropAsync(console, workspaceRoot, cancellationToken);
                 break;
+        }
+    }
+
+    private static async Task OfferAddRepositoryAsync(
+        IAnsiConsole console,
+        string workspaceRoot,
+        CancellationToken cancellationToken)
+    {
+        var accepted = await new ConfirmationPrompt("No repositories yet. Add one now?")
+        {
+            DefaultValue = true,
+        }
+            .ShowAsync(console, cancellationToken);
+        if (accepted)
+        {
+            await TuiWizards.AddAsync(console, workspaceRoot, cancellationToken);
         }
     }
 }

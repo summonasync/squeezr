@@ -36,6 +36,14 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 ### Fixed
 - Post-install hint in `scripts/install.sh` no longer hardcodes the legacy model name "bge-code-v1" (review-040-01 W4); it now points at the default model from `fetch-model.sh`
 
+### Changed (038, TUI onboarding)
+- TUI main menu is now contextual and action-named: a folder without a workspace (no `squeezr.workspace.json`) gets a two-item menu (Initialize workspace / Exit), an initialized workspace gets the full cycle — Dashboard / Search / Map / Index / Add repository / Config / Drop workspace / Exit; the «Wizards» submenu is gone, init/add/drop are top-level items
+
+### Added (038, TUI onboarding)
+- Init offer when entering TUI in a folder without a workspace: «No workspace found here. Initialize now?» (default yes) → init form; declining keeps the two-item menu open (no restart needed)
+- Zero-repos offer on the dashboard: «No repositories yet. Add one now?» (default yes) → add-repository form
+- Dashboard services status: when Qdrant is down, the status line is followed by an explicit hint — `qdrant is down — start it with: docker compose up -d`
+
 ## [0.9.0-pre] — 2026-09-13
 
 Pre-release for dogfooding. v1 MVP (M1–M6) closed, post-MVP features landed.

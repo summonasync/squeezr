@@ -14,7 +14,7 @@ public static class TuiIndexRunner
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
-            console.MarkupLine("[yellow]Workspace not initialized.[/] Run 'init' from the Wizards menu first.");
+            console.MarkupLine("[yellow]Workspace not initialized.[/] Run 'squeezr init' first.");
             return;
         }
 

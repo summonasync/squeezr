@@ -8,7 +8,7 @@ namespace Squeezr.Tests.Tui;
 public class TuiEndToEndTests
 {
     [Fact]
-    public async Task FullCircle_WizardInitAdd_Index_Dashboard_Search_Map_Config_Exit()
+    public async Task FullCircle_InitOffer_Add_Index_Dashboard_Search_Map_Config_Exit()
     {
         var workspace = TestDirs.NewTempDir();
         WriteFile(workspace, "repo/src/Calc.cs", """
@@ -26,27 +26,25 @@ public class TuiEndToEndTests
 
         var console = TuiTestHarness.InteractiveConsole();
 
-        TuiTestHarness.PushMenuChoice(console, 5);
-        TuiTestHarness.PushMenuChoice(console, 0);
+        console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushKey(ConsoleKey.Enter);
 
-        TuiTestHarness.PushMenuChoice(console, 5);
-        TuiTestHarness.PushMenuChoice(console, 1);
+        TuiTestHarness.PushMenuChoice(console, 4);
         console.Input.PushTextWithEnter("repo");
         console.Input.PushKey(ConsoleKey.Enter);
 
+        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 0);
+
+        TuiTestHarness.PushMenuChoice(console, 0);
+
         TuiTestHarness.PushMenuChoice(console, 1);
-        TuiTestHarness.PushMenuChoice(console, 0);
-
-        TuiTestHarness.PushMenuChoice(console, 0);
-
-        TuiTestHarness.PushMenuChoice(console, 2);
         console.Input.PushTextWithEnter("zanzibar");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 2);
 
-        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 2);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 0);
@@ -54,17 +52,18 @@ public class TuiEndToEndTests
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 1);
 
-        TuiTestHarness.PushMenuChoice(console, 4);
+        TuiTestHarness.PushMenuChoice(console, 5);
         TuiTestHarness.PushMenuChoice(console, 0);
         console.Input.PushTextWithEnter("http://localhost:9999");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 4);
 
-        TuiTestHarness.PushMenuChoice(console, 6);
+        TuiTestHarness.PushMenuChoice(console, 7);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
         code.ShouldBe(0);
+        console.Output.ShouldContain("No workspace found here. Initialize now?");
         console.Output.ShouldContain("Initialized workspace");
         console.Output.ShouldContain("Added repo");
         console.Output.ShouldContain("1 files");

@@ -20,7 +20,7 @@ public static class TuiWizards
         {
             var result = new WorkspaceManager(workspaceRoot).Init(string.IsNullOrWhiteSpace(name) ? null : name.Trim());
             console.MarkupLine($"[green]Initialized workspace[/] {result.WorkspaceName.EscapeMarkup()} in {result.RootPath.EscapeMarkup()}");
-            console.MarkupLine("Next: add a repository from the Wizards menu.");
+            console.MarkupLine("Next: add a repository via \"Add repository\" in the main menu.");
         }
         catch (WorkspaceException ex)
         {
