@@ -84,9 +84,7 @@ public sealed class QdrantVectorStore : IVectorStore
         var existing = info.Config.Params.VectorsConfig?.Params?.Size;
         if (existing.HasValue && existing.Value != (ulong)dimensions)
         {
-            throw new WorkspaceException(
-                $"Qdrant collection '{_collection}' has vector size {existing.Value}, but the embedding model produces {dimensions}. " +
-                "Run 'squeezr index --reembed' to rebuild the index with the new model.");
+            throw new VectorDimensionMismatchException(_collection, existing.Value, dimensions);
         }
     }
 

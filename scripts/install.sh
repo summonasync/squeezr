@@ -67,7 +67,7 @@ if [[ ! -d "$install_dir/Models" ]]; then
   cat <<HINT >&2
 
 [!] No embedding model in $install_dir/Models - semantic search (M4+) will be disabled.
-    Run scripts/fetch-model.sh to download bge-code-v1, then re-run this script.
+    Run scripts/fetch-model.sh to download the default embedding model, then re-run this script.
 HINT
 fi
 

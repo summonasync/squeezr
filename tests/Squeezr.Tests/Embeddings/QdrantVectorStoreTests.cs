@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Qdrant.Client;
@@ -7,6 +8,7 @@ using Qdrant.Client.Grpc;
 using Shouldly;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -118,6 +120,104 @@ public class QdrantVectorStoreTests
             () => store.DeleteCollectionAsync(new CancellationToken(canceled: true)));
     }
 
+    [Fact]
+    public async Task EnsureCollectionAsync_ExistingCollectionDifferentVectorSize_ThrowsWithReembedInstruction()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Collections/CollectionExists"] = new CollectionExistsResponse
+            {
+                Result = new CollectionExists { Exists = true }
+            },
+            ["/qdrant.Collections/Get"] = new GetCollectionInfoResponse
+            {
+                Result = new CollectionInfo
+                {
+                    Config = new CollectionConfig
+                    {
+                        Params = new CollectionParams
+                        {
+                            VectorsConfig = new VectorsConfig { Params = new VectorParams { Size = 1536 } }
+                        }
+                    }
+                }
+            },
+        });
+        var store = StubbedStore(handler);
+
+        var ex = await Should.ThrowAsync<VectorDimensionMismatchException>(
+            () => store.EnsureCollectionAsync(768, CancellationToken.None));
+
+        ex.CollectionSize.ShouldBe(1536UL);
+        ex.ModelDimensions.ShouldBe(768);
+        ex.Message.ShouldContain("1536");
+        ex.Message.ShouldContain("768");
+        ex.Message.ShouldContain("\u2260");
+        ex.Message.ShouldContain("squeezr index --reembed");
+    }
+
+    [Fact]
+    public async Task EnsureCollectionAsync_MatchingVectorSize_DoesNotRecreateCollection()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Collections/CollectionExists"] = new CollectionExistsResponse
+            {
+                Result = new CollectionExists { Exists = true }
+            },
+            ["/qdrant.Collections/Get"] = new GetCollectionInfoResponse
+            {
+                Result = new CollectionInfo
+                {
+                    Config = new CollectionConfig
+                    {
+                        Params = new CollectionParams
+                        {
+                            VectorsConfig = new VectorsConfig { Params = new VectorParams { Size = 768 } }
+                        }
+                    }
+                }
+            },
+        });
+        var store = StubbedStore(handler);
+
+        await store.EnsureCollectionAsync(768, CancellationToken.None);
+
+        handler.Requests.ShouldNotContain(r => r.Path == "/qdrant.Collections/Create");
+    }
+
+    [Fact]
+    public async Task EnsureCollectionAsync_MissingCollection_CreatesCollectionWithRequestedVectorSize()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Collections/CollectionExists"] = new CollectionExistsResponse
+            {
+                Result = new CollectionExists { Exists = false }
+            },
+            ["/qdrant.Collections/Create"] = new CollectionOperationResponse { Result = true },
+        });
+        var store = StubbedStore(handler);
+
+        await store.EnsureCollectionAsync(768, CancellationToken.None);
+
+        var create = handler.Requests.Single(r => r.Path == "/qdrant.Collections/Create");
+        var request = CreateCollection.Parser.ParseFrom(create.Body.AsSpan(5));
+        request.CollectionName.ShouldBe("squeezr-test");
+        request.VectorsConfig.Params.Size.ShouldBe(768UL);
+    }
+
+    private static QdrantVectorStore StubbedStore(HttpMessageHandler handler)
+    {
+        var channel = GrpcChannel.ForAddress("http://localhost:1", new GrpcChannelOptions
+        {
+            HttpHandler = handler,
+            Credentials = ChannelCredentials.Insecure
+        });
+
+        return new QdrantVectorStore(new QdrantClient(new QdrantGrpcClient(channel)), "squeezr-test");
+    }
+
     private static QdrantVectorStore StubbedStore(int grpcStatus)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK)
@@ -127,13 +227,6 @@ public class QdrantVectorStoreTests
         response.Headers.TryAddWithoutValidation("content-type", "application/grpc");
         response.Headers.TryAddWithoutValidation("grpc-status", grpcStatus.ToString());
 
-        var handler = new StubHttpMessageHandler(response);
-        var channel = GrpcChannel.ForAddress("http://localhost:1", new GrpcChannelOptions
-        {
-            HttpHandler = handler,
-            Credentials = ChannelCredentials.Insecure
-        });
-
-        return new QdrantVectorStore(new QdrantClient(new QdrantGrpcClient(channel)), "squeezr-test");
+        return StubbedStore(new StubHttpMessageHandler(response));
     }
 }

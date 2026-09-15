@@ -28,11 +28,14 @@ public sealed class OpenAiCompatibleEmbeddingProvider : IEmbeddingProvider
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
     }
 
-    public async Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct)
+    public async Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage = EmbeddingUsage.Document, CancellationToken ct = default)
     {
+        var prefix = _options.ResolvedProfile?.PrefixFor(usage);
+        var inputs = prefix is null ? texts : texts.Select(text => prefix + text).ToList();
+
         for (var attempt = 0; ; attempt++)
         {
-            var payload = new EmbeddingRequest(texts, _options.Model);
+            var payload = new EmbeddingRequest(inputs, _options.Model);
             HttpResponseMessage response;
             try
             {

@@ -173,7 +173,7 @@ public class HybridSearchTests
     {
         public int Dimensions => 4;
 
-        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct) =>
+        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(text =>
             {
                 var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));

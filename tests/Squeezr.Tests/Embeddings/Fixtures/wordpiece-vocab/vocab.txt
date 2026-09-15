@@ -1,0 +1,14 @@
+[PAD]
+[UNK]
+[CLS]
+[SEP]
+[MASK]
+hello
+world
+search
+document
+query
+un
+##aff
+##able
+code

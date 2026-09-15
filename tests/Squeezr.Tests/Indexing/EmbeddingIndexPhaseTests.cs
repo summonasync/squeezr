@@ -40,7 +40,7 @@ public class EmbeddingIndexPhaseTests
 
         var chunks = ListChunks(workspace);
         chunks.Count.ShouldBeGreaterThanOrEqualTo(2);
-        chunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "onnx/bge-code-v1.onnx/1536");
+        chunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
 
         var distinctHashes = chunks.Select(c => c.ChunkHash).Distinct().ToList();
         vectorStore.UpsertedPointCount.ShouldBe(distinctHashes.Count);
@@ -77,6 +77,46 @@ public class EmbeddingIndexPhaseTests
 
         result.Warnings.ShouldContain(w => w.Contains("embeddings skipped", StringComparison.OrdinalIgnoreCase));
         ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "pending");
+    }
+
+    [Fact]
+    public void Index_DimensionMismatch_ThrowsWithReembedInstruction()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var vectorStore = new FakeVectorStore { CollectionSize = 1536 };
+
+        var ex = Should.Throw<VectorDimensionMismatchException>(() =>
+            new WorkspaceIndexer().Index(
+                workspace, embeddings: new FakeEmbeddingProvider { Dimensions = 768 }, vectorStore: vectorStore));
+
+        ex.CollectionSize.ShouldBe(1536UL);
+        ex.ModelDimensions.ShouldBe(768);
+        ex.Message.ShouldContain("1536");
+        ex.Message.ShouldContain("768");
+        ex.Message.ShouldContain("squeezr index --reembed");
+        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "pending");
+    }
+
+    [Fact]
+    public void Index_Reembed_RecreatesCollectionWithNewDimensions()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider { Dimensions = 768 }, vectorStore: vectorStore);
+        vectorStore.CollectionSize.ShouldBe(768);
+        var hashCount = ListChunks(workspace).Select(c => c.ChunkHash).Distinct().Count();
+
+        vectorStore.ResetCounters();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider { Dimensions = 1536 }, vectorStore: vectorStore, reembed: true);
+
+        vectorStore.DeleteCollectionCallCount.ShouldBe(1);
+        vectorStore.CollectionSize.ShouldBe(1536);
+        vectorStore.DimensionsEnsured.ShouldBe(1536);
+        vectorStore.UpsertedPointCount.ShouldBe(hashCount);
+        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
     }
 
     [Fact]
@@ -118,7 +158,7 @@ public class EmbeddingIndexPhaseTests
         indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
 
         vectorStore.UpsertedPointCount.ShouldBeGreaterThan(0);
-        ListChunks(workspace).ShouldAllBe(c => c.ModelKey == "onnx/bge-code-v1.onnx/1536");
+        ListChunks(workspace).ShouldAllBe(c => c.ModelKey == "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -229,20 +269,20 @@ public class EmbeddingIndexPhaseTests
 
     private sealed class FakeEmbeddingProvider : IEmbeddingProvider
     {
-        public int Dimensions => 4;
+        public int Dimensions { get; init; } = 4;
 
-        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct)
+        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct)
         {
             return Task.FromResult(texts.Select(text =>
             {
                 var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
-                return new[]
+                var vector = new float[Dimensions];
+                for (var i = 0; i < Dimensions; i++)
                 {
-                    bytes[0] / 255f,
-                    bytes[1] / 255f,
-                    bytes[2] / 255f,
-                    bytes[3] / 255f
-                };
+                    vector[i] = bytes[i % bytes.Length] / 255f;
+                }
+
+                return vector;
             }).ToArray());
         }
     }
@@ -255,6 +295,10 @@ public class EmbeddingIndexPhaseTests
 
         public bool FailDelete { get; set; }
 
+        public int? CollectionSize { get; set; }
+
+        public int DeleteCollectionCallCount { get; private set; }
+
         public int DimensionsEnsured { get; private set; }
 
         public int UpsertedPointCount { get; private set; }
@@ -263,6 +307,13 @@ public class EmbeddingIndexPhaseTests
 
         public Task EnsureCollectionAsync(int dimensions, CancellationToken ct)
         {
+            if (CollectionSize.HasValue && CollectionSize.Value != dimensions)
+            {
+                return Task.FromException(new VectorDimensionMismatchException(
+                    "squeezr-fake", (ulong)CollectionSize.Value, dimensions));
+            }
+
+            CollectionSize = dimensions;
             DimensionsEnsured = dimensions;
             return Task.CompletedTask;
         }
@@ -298,7 +349,9 @@ public class EmbeddingIndexPhaseTests
 
         public Task DeleteCollectionAsync(CancellationToken ct)
         {
+            DeleteCollectionCallCount++;
             Points.Clear();
+            CollectionSize = null;
             return Task.CompletedTask;
         }
 

@@ -26,6 +26,16 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 - Composes with `--json`: events form a complete sequence first, then the final `--json` result object; errors emit a terminal `error` event plus the uniform `{"error":{"code","message"}}` envelope on stderr with exit code 1
 - A quiet incremental `index --events` run emits exactly `started` → `fileIndexed`×N → `completed`; human-readable output and watch/MCP behavior are unchanged
 
+### Changed (041, default embedding model)
+- Default local ONNX embeddings: nomic-embed-text-v1.5 (official int8 ONNX from nomic-ai, ~131 MB, 768d, WordPiece tokenizer, mean pooling + L2 normalization) instead of bge-code-v1 (1.7 GB Q4, 1536d) — an order of magnitude lighter and faster on CPU; bge-code-v1 remains a supported option (`scripts/fetch-model.sh --model bge-code-v1` / `fetch-model.ps1 -Model`, `"model": "bge-code-v1"` in `embeddings.onnx` of `.squeezr/config.json`)
+
+### Added (041, embedding model profiles)
+- Embedding model profiles (`EmbeddingModelProfiles`): known models resolve dimensions, pooling, tokenizer kind and per-usage prefixes from one place instead of ad-hoc config values; squeezr applies the nomic `search_document:` / `search_query:` prefixes itself, so indexed text and queries stay prefixed consistently
+- DF-12 dimension guard: switching the embedding model on an existing workspace fails fast with an explicit `dimension_mismatch` error ("Qdrant collection ... has vector size X ... produces Y ... run 'squeezr index --reembed'") instead of silently upserting wrong-dimension vectors
+
+### Fixed
+- Post-install hint in `scripts/install.sh` no longer hardcodes the legacy model name "bge-code-v1" (review-040-01 W4); it now points at the default model from `fetch-model.sh`
+
 ## [0.9.0-pre] — 2026-09-13
 
 Pre-release for dogfooding. v1 MVP (M1–M6) closed, post-MVP features landed.

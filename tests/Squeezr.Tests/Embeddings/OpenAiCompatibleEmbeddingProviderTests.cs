@@ -2,6 +2,7 @@ using System.Net;
 using Shouldly;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -31,7 +32,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
                 """{"data":[{"index":1,"embedding":[4.0,5.0,6.0]},{"index":0,"embedding":[1.0,2.0,3.0]}]}"""));
         var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
 
-        var vectors = await provider.EmbedAsync(["first text", "second text"], CancellationToken.None);
+        var vectors = await provider.EmbedAsync(["first text", "second text"], EmbeddingUsage.Document, CancellationToken.None);
 
         vectors.Length.ShouldBe(2);
         vectors[0].ShouldBe([1f, 2f, 3f]);
@@ -46,7 +47,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
                 """{"data":[{"index":0,"embedding":[1.0]}]}"""));
         var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
 
-        await provider.EmbedAsync(["hello"], CancellationToken.None);
+        await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
         handler.Requests.Count.ShouldBe(1);
         var request = handler.Requests[0];
@@ -64,7 +65,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
         var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
 
-        var vectors = await provider.EmbedAsync(["hello"], CancellationToken.None);
+        var vectors = await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
         vectors[0].ShouldBe([1f]);
         handler.Requests.Count.ShouldBe(2);
@@ -77,7 +78,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
             StubHttpMessageHandler.Json(HttpStatusCode.BadRequest, """{"error":"bad request"}"""));
         var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
 
-        var error = await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], CancellationToken.None));
+        var error = await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None));
 
         error.Message.ShouldContain("400");
         handler.Requests.Count.ShouldBe(1);
@@ -92,7 +93,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
             StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"));
         var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
 
-        await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], CancellationToken.None));
+        await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None));
 
         handler.Requests.Count.ShouldBe(3);
     }
@@ -105,10 +106,61 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[7.0]}]}"""));
         var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
 
-        var vectors = await provider.EmbedAsync(["hello"], CancellationToken.None);
+        var vectors = await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
         vectors[0].ShouldBe([7f]);
         handler.Requests.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task EmbedAsync_NomicProfile_SendsDocumentPrefixForDocuments()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
+        var options = Options() with { ModelProfile = "nomic-embed-text-v1.5" };
+        var provider = new OpenAiCompatibleEmbeddingProvider(options, handler);
+
+        await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
+
+        handler.Requests[0].Body.ShouldNotBeNull().ShouldContain("\"input\":[\"search_document: hello\"]");
+    }
+
+    [Fact]
+    public async Task EmbedAsync_NomicProfile_SendsQueryPrefixForQueries()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
+        var options = Options() with { ModelProfile = "nomic-embed-text-v1.5" };
+        var provider = new OpenAiCompatibleEmbeddingProvider(options, handler);
+
+        await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
+
+        handler.Requests[0].Body.ShouldNotBeNull().ShouldContain("\"input\":[\"search_query: hello\"]");
+    }
+
+    [Fact]
+    public async Task EmbedAsync_WithoutProfile_SendsNoPrefixForQueries()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+
+        await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
+
+        handler.Requests[0].Body.ShouldNotBeNull().ShouldContain("\"input\":[\"hello\"]");
+    }
+
+    [Fact]
+    public async Task EmbedAsync_BgeProfile_SendsRawTextWithoutPrefix()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
+        var options = Options() with { ModelProfile = "bge-code-v1" };
+        var provider = new OpenAiCompatibleEmbeddingProvider(options, handler);
+
+        await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
+
+        handler.Requests[0].Body.ShouldNotBeNull().ShouldContain("\"input\":[\"hello\"]");
     }
 
     [Fact]

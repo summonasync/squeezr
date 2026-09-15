@@ -1,14 +1,28 @@
+using System.Text.Json.Serialization;
+using Squeezr.Core.Embeddings;
+
 namespace Squeezr.Core.Configuration;
 
 public sealed record OnnxEmbeddingOptions
 {
-    public string ModelPath { get; init; } = "~/.squeezr/models/bge-code-v1.onnx";
+    public string? Model { get; init; }
 
-    public string TokenizerPath { get; init; } = "~/.squeezr/models/bge-code-v1/tokenizer.json";
+    public string ModelPath { get; init; } = "~/.squeezr/models/nomic-embed-text-v1.5.onnx";
 
-    public int Dimensions { get; init; } = 1536;
+    public string TokenizerPath { get; init; } = "~/.squeezr/models/nomic-embed-text-v1.5/tokenizer.json";
 
-    public int MaxSequenceLength { get; init; } = 512;
+    public int? Dimensions { get; init; }
+
+    public int? MaxSequenceLength { get; init; }
 
     public int BatchSize { get; init; } = 32;
+
+    [JsonIgnore]
+    public EmbeddingModelProfile ResolvedProfile => EmbeddingModelProfiles.Resolve(Model);
+
+    [JsonIgnore]
+    public int EffectiveDimensions => Dimensions ?? ResolvedProfile.Dimensions;
+
+    [JsonIgnore]
+    public int EffectiveMaxSequenceLength => MaxSequenceLength ?? ResolvedProfile.DefaultMaxSequenceLength;
 }

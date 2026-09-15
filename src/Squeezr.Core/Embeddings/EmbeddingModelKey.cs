@@ -7,8 +7,14 @@ public static class EmbeddingModelKey
     public static string From(EmbeddingsConfig config)
     {
         var provider = config.Provider.Trim().ToLowerInvariant();
-        return provider == "openai"
-            ? $"openai/{config.OpenAiCompatible.Model}/{config.OpenAiCompatible.Dimensions}"
-            : $"onnx/{Path.GetFileName(config.Onnx.ModelPath)}/{config.Onnx.Dimensions}";
+        if (provider == "openai")
+        {
+            var key = $"openai/{config.OpenAiCompatible.Model}/{config.OpenAiCompatible.Dimensions}";
+            var profile = config.OpenAiCompatible.ResolvedProfile;
+            return profile is null ? key : $"{key}/{profile.Id}";
+        }
+
+        var onnx = config.Onnx;
+        return $"onnx/{Path.GetFileName(onnx.ModelPath)}/{onnx.EffectiveDimensions}/{onnx.ResolvedProfile.Id}";
     }
 }

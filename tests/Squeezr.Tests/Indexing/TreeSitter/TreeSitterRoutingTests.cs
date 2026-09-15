@@ -66,7 +66,7 @@ public class TreeSitterRoutingTests
         {
             var repoId = store.FindRepo("demo")!.Id;
             var allChunks = store.ListFiles(repoId).SelectMany(f => store.ListChunksByFile(f.Id)).ToList();
-            allChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "onnx/bge-code-v1.onnx/1536");
+            allChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
         }
     }
 
@@ -261,7 +261,7 @@ public class TreeSitterRoutingTests
     {
         public int Dimensions => 4;
 
-        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct) =>
+        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(text =>
             {
                 var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));

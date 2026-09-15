@@ -48,23 +48,26 @@ public static class EmbeddingProviderFactory
         }
 
         var tokenizerDir = ResolveTokenizerDir(options.TokenizerPath, workspaceRoot);
-        return new OnnxEmbeddingProvider(modelPath, tokenizerDir, options.Dimensions, options.MaxSequenceLength, options.BatchSize);
+        return new OnnxEmbeddingProvider(modelPath, tokenizerDir, options.ResolvedProfile, options.Dimensions, options.EffectiveMaxSequenceLength, options.BatchSize);
     }
 
     private static string ResolveTokenizerDir(string tokenizerPath, string workspaceRoot)
     {
         var resolved = ResolveFile(tokenizerPath, workspaceRoot);
         var dir = Path.GetDirectoryName(resolved)!;
-        if (File.Exists(Path.Combine(dir, "vocab.json")))
+        if (HasTokenizerFiles(dir))
             return dir;
 
         var anchorName = Path.GetFileName(dir);
         var bundled = Path.Combine(AppContext.BaseDirectory, "Models", anchorName);
-        if (File.Exists(Path.Combine(bundled, "vocab.json")))
+        if (HasTokenizerFiles(bundled))
             return bundled;
 
         throw new WorkspaceException($"Tokenizer files not found at '{dir}' and no bundled copy exists. Run scripts/fetch-model.sh (Linux/macOS) or scripts/fetch-model.ps1 (Windows) to download them.");
     }
+
+    private static bool HasTokenizerFiles(string dir)
+        => File.Exists(Path.Combine(dir, "vocab.json")) || File.Exists(Path.Combine(dir, "vocab.txt"));
 
     private static string ResolveFile(string path, string workspaceRoot)
     {

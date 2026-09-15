@@ -160,7 +160,7 @@ public static class TuiConfigEditor
             new FieldDef
             {
                 Key = "onnx.dimensions",
-                Get = c => c.Embeddings.Onnx.Dimensions.ToString(),
+                Get = c => c.Embeddings.Onnx.EffectiveDimensions.ToString(),
                 Apply = (c, raw) => IsPositiveInt(raw, out var value, out var error)
                     ? FieldResult.Valid(c with
                     {
@@ -171,7 +171,7 @@ public static class TuiConfigEditor
             new FieldDef
             {
                 Key = "onnx.maxSequenceLength",
-                Get = c => c.Embeddings.Onnx.MaxSequenceLength.ToString(),
+                Get = c => c.Embeddings.Onnx.EffectiveMaxSequenceLength.ToString(),
                 Apply = (c, raw) => IsPositiveInt(raw, out var value, out var error)
                     ? FieldResult.Valid(c with
                     {

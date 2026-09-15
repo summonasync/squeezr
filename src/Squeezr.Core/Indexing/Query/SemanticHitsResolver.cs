@@ -28,7 +28,7 @@ public static class SemanticHitsResolver
             repoId = repo.Id;
         }
 
-        var vectors = await embeddings.EmbedAsync([query.Query], ct);
+        var vectors = await embeddings.EmbedAsync([query.Query], EmbeddingUsage.Query, ct);
         if (vectors.Length == 0)
         {
             return [];

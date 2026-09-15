@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using Squeezr.Core.Embeddings;
+
 namespace Squeezr.Core.Configuration;
 
 public sealed record OpenAiCompatibleOptions
@@ -9,4 +12,10 @@ public sealed record OpenAiCompatibleOptions
     public string Model { get; init; } = "text-embedding-3-large";
 
     public int Dimensions { get; init; } = 1024;
+
+    public string? ModelProfile { get; init; }
+
+    [JsonIgnore]
+    public EmbeddingModelProfile? ResolvedProfile =>
+        ModelProfile is null ? null : EmbeddingModelProfiles.Resolve(ModelProfile);
 }

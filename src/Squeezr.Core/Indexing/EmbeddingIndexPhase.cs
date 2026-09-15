@@ -28,6 +28,10 @@ public static class EmbeddingIndexPhase
         {
             vectorStore.EnsureCollectionAsync(provider.Dimensions, CancellationToken.None).GetAwaiter().GetResult();
         }
+        catch (VectorDimensionMismatchException)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
         {
             warning($"embeddings skipped for repo '{repoDoc.Name}': {ex.Message}");
@@ -120,7 +124,7 @@ public static class EmbeddingIndexPhase
         {
             var count = Math.Min(EmbedBatchSize, texts.Count - i);
             var batch = texts.GetRange(i, count);
-            var vectors = provider.EmbedAsync(batch, CancellationToken.None).GetAwaiter().GetResult();
+            var vectors = provider.EmbedAsync(batch, EmbeddingUsage.Document, CancellationToken.None).GetAwaiter().GetResult();
             for (var j = 0; j < count; j++)
             {
                 vectorsByHash[newHashes[i + j]] = vectors[j];

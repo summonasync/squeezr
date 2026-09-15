@@ -1,22 +1,30 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Downloads the bge-code-v1 embedding model (Q4-quantized ONNX) and its
-  tokenizer files into src\Squeezr.Cli\Models for bundling with the CLI.
+  Downloads an embedding model (ONNX) and its tokenizer files into
+  src\Squeezr.Cli\Models for bundling with the CLI.
 .DESCRIPTION
   Idempotent: files whose SHA256 already matches are skipped. Every download
   is hash-verified against the pinned values below; a mismatch aborts with
   the offending file deleted.
 
-  Source:  disisnoturbusiness/bge-code-v1-onnx @ 27c6fd89
-           (4-bit block-32 weight-only MatMulNBits quantization of BAAI/bge-code-v1,
-           validation report in the source repo: cosine_mean 0.9519 vs fp32)
+  Default model: nomic-embed-text-v1.5
+  (nomic-ai/nomic-embed-text-v1.5 @ e9b67630, official int8 ONNX).
+  Use -Model bge-code-v1 for the legacy set
+  (disisnoturbusiness/bge-code-v1-onnx @ 27c6fd89, 4-bit block-32 weight-only
+  MatMulNBits quantization of BAAI/bge-code-v1, validation report in the
+  source repo: cosine_mean 0.9519 vs fp32).
 .EXAMPLE
   pwsh -File scripts\fetch-model.ps1
+.EXAMPLE
+  pwsh -File scripts\fetch-model.ps1 -Model bge-code-v1
 #>
 [CmdletBinding()]
 param(
-    [string]$ModelsDir
+    [string]$ModelsDir,
+
+    [ValidateSet('nomic-embed-text-v1.5', 'bge-code-v1')]
+    [string]$Model = 'nomic-embed-text-v1.5'
 )
 
 if ([string]::IsNullOrEmpty($ModelsDir)) {
@@ -25,15 +33,27 @@ if ([string]::IsNullOrEmpty($ModelsDir)) {
 
 $ErrorActionPreference = 'Stop'
 
-$revision = '27c6fd890be9078373a45dcc5221e20fcf357553'
-$baseUrl = "https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx/resolve/$revision"
-
-$files = @(
-    @{ Source = 'model_q4.onnx';     Target = 'bge-code-v1.onnx';              Sha256 = '2e4ca36ddd82f37fa6d33187fc8a24dbdbee3374b38c406aec382c7c87cec2fa' },
-    @{ Source = 'vocab.json';        Target = 'bge-code-v1\vocab.json';        Sha256 = 'ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910' },
-    @{ Source = 'merges.txt';        Target = 'bge-code-v1\merges.txt';        Sha256 = '8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5' },
-    @{ Source = 'added_tokens.json'; Target = 'bge-code-v1\added_tokens.json'; Sha256 = '59122dc49ad6df74c3b16a679c55cfd7cdf23760b50a4d14171d66363c5d4899' }
-)
+switch ($Model) {
+    'nomic-embed-text-v1.5' {
+        $revision = 'e9b6763023c676ca8431644204f50c2b100d9aab'
+        $baseUrl = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/$revision"
+        $files = @(
+            @{ Source = 'onnx/model_quantized.onnx'; Target = 'nomic-embed-text-v1.5.onnx';           Sha256 = 'b4342336debaea79de872370664b0aaeb67dea4605513d00ee236ea871a81f27' },
+            @{ Source = 'tokenizer.json';            Target = 'nomic-embed-text-v1.5\tokenizer.json'; Sha256 = 'd241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66' },
+            @{ Source = 'vocab.txt';                 Target = 'nomic-embed-text-v1.5\vocab.txt';      Sha256 = '07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3' }
+        )
+    }
+    'bge-code-v1' {
+        $revision = '27c6fd890be9078373a45dcc5221e20fcf357553'
+        $baseUrl = "https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx/resolve/$revision"
+        $files = @(
+            @{ Source = 'model_q4.onnx';     Target = 'bge-code-v1.onnx';              Sha256 = '2e4ca36ddd82f37fa6d33187fc8a24dbdbee3374b38c406aec382c7c87cec2fa' },
+            @{ Source = 'vocab.json';        Target = 'bge-code-v1\vocab.json';        Sha256 = 'ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910' },
+            @{ Source = 'merges.txt';        Target = 'bge-code-v1\merges.txt';        Sha256 = '8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5' },
+            @{ Source = 'added_tokens.json'; Target = 'bge-code-v1\added_tokens.json'; Sha256 = '59122dc49ad6df74c3b16a679c55cfd7cdf23760b50a4d14171d66363c5d4899' }
+        )
+    }
+}
 
 function Get-FileHash256([string]$path) {
     (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLowerInvariant()
