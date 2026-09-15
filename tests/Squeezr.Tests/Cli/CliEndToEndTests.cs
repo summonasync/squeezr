@@ -302,6 +302,39 @@ public sealed class CliEndToEndTests
         }
     }
 
+    [Fact]
+    public async Task Index_TakesOverStaleLock_WarnsOnStderr()
+    {
+        var root = TestDirs.NewTempDir();
+
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        Directory.CreateDirectory(Path.Combine(root, "code"));
+        File.WriteAllText(Path.Combine(root, "code", "Kappa.cs"), "class Kappa { }");
+        (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
+
+        var deadPid = await ExitedProcessIdAsync();
+        File.WriteAllText(
+            Path.Combine(SqueezrPaths.StoreDir(root), SqueezrPaths.LockFileName),
+            deadPid.ToString());
+
+        var index = await RunCliAsync(root, "index", "--json");
+
+        index.ExitCode.ShouldBe(0);
+        index.StdErr.ShouldContain($"warning: stale lock from pid {deadPid} removed");
+        File.Exists(Path.Combine(SqueezrPaths.StoreDir(root), SqueezrPaths.LockFileName)).ShouldBeFalse();
+    }
+
+    private static async Task<int> ExitedProcessIdAsync()
+    {
+        using var process = Process.Start(new ProcessStartInfo("dotnet", "--version")
+        {
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        })!;
+        await process.WaitForExitAsync();
+        return process.Id;
+    }
+
     private static JsonElement ParseStdErrError(string stdErr)
     {
         var lines = stdErr.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);

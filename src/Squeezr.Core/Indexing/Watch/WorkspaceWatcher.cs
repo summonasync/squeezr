@@ -23,6 +23,7 @@ public sealed class WorkspaceWatcher
     private readonly WorkspaceIndexer _indexer = new();
     private readonly IWatchStatus? _status;
     private readonly IIndexProgress? _progress;
+    private readonly Action<string>? _onStaleTakeover;
     private readonly object _gate = new();
     private readonly HashSet<string> _pending = [];
 
@@ -37,10 +38,14 @@ public sealed class WorkspaceWatcher
     private bool _forcePass;
     private bool _running;
 
-    public WorkspaceWatcher(IWatchStatus? status = null, IIndexProgress? progress = null)
+    public WorkspaceWatcher(
+        IWatchStatus? status = null,
+        IIndexProgress? progress = null,
+        Action<string>? onStaleTakeover = null)
     {
         _status = status;
         _progress = progress;
+        _onStaleTakeover = onStaleTakeover;
     }
 
     public Task StartAsync(string workspaceRoot, CancellationToken cancellationToken)
@@ -243,7 +248,7 @@ public sealed class WorkspaceWatcher
         {
             try
             {
-                var result = _indexer.Index(_workspaceRoot, progress: _progress);
+                var result = _indexer.Index(_workspaceRoot, progress: _progress, onStaleTakeover: _onStaleTakeover);
                 _status?.PassCompleted(result);
                 return;
             }

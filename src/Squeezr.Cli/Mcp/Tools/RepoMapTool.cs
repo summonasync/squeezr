@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Workspace;
@@ -86,7 +87,8 @@ public sealed class RepoMapTool
 
         return FreshnessGuard.CheckAndRefresh(
             root,
-            candidates.Distinct().Take(GuardCandidateLimit).ToList());
+            candidates.Distinct().Take(GuardCandidateLimit).ToList(),
+            StaleLockWarningSink.ToStderr);
     }
 
     private sealed record MapLineData(

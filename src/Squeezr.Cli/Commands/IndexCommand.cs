@@ -63,14 +63,16 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                         new SpinnerColumn())
                     .Start(ctx => indexer.Index(
                         workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
-                        new IndexProgressRenderer(ctx), embeddings, vectorStore, settings.Reembed));
+                        new IndexProgressRenderer(ctx), embeddings, vectorStore, settings.Reembed,
+                        StaleLockWarningSink.ToStderr));
             }
             else
             {
                 renderer = settings.Events ? new IndexEventsRenderer(events!) : null;
                 result = indexer.Index(
                     workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
-                    renderer, embeddings, vectorStore, settings.Reembed);
+                    renderer, embeddings, vectorStore, settings.Reembed,
+                    StaleLockWarningSink.ToStderr);
             }
 
             events?.Completed(

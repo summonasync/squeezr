@@ -18,7 +18,8 @@ public sealed class CompactCommand : Command<CompactCommand.Settings>
     {
         try
         {
-            var result = WorkspaceCompactor.Compact(Directory.GetCurrentDirectory());
+            var result = WorkspaceCompactor.Compact(
+                Directory.GetCurrentDirectory(), StaleLockWarningSink.ToStderr);
 
             if (settings.Json)
             {

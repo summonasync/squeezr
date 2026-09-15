@@ -12,7 +12,7 @@ public sealed record CompactResult(
 
 public static class WorkspaceCompactor
 {
-    public static CompactResult Compact(string workspaceRoot)
+    public static CompactResult Compact(string workspaceRoot, Action<string>? onStaleTakeover = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -29,7 +29,7 @@ public static class WorkspaceCompactor
                 WorkspaceException.IndexNotBuiltCode);
         }
 
-        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot)))
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot), onStaleTakeover))
         {
             var sizeBefore = new FileInfo(trigramPath).Length;
             var tempPath = trigramPath + ".compact.tmp";

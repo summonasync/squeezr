@@ -20,7 +20,8 @@ public sealed class WorkspaceIndexer
         IIndexProgress? progress = null,
         IEmbeddingProvider? embeddings = null,
         IVectorStore? vectorStore = null,
-        bool reembed = false)
+        bool reembed = false,
+        Action<string>? onStaleTakeover = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -41,7 +42,7 @@ public sealed class WorkspaceIndexer
             throw new WorkspaceException($"Repository '{repoName}' is not in the workspace.");
         }
 
-        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot)))
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot), onStaleTakeover))
         using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
         {
             var warnings = new List<string>();
@@ -194,7 +195,8 @@ public sealed class WorkspaceIndexer
         string repoName,
         string relativePath,
         IEmbeddingProvider? embeddings = null,
-        IVectorStore? vectorStore = null)
+        IVectorStore? vectorStore = null,
+        Action<string>? onStaleTakeover = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -208,7 +210,7 @@ public sealed class WorkspaceIndexer
         var repo = manifest.Repos.FirstOrDefault(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase))
                    ?? throw new WorkspaceException($"Repository '{repoName}' is not in the workspace.");
 
-        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot)))
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot), onStaleTakeover))
         using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
         {
             var warnings = new List<string>();

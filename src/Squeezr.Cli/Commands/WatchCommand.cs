@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Spectre.Console.Rendering;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Workspace;
@@ -59,7 +60,7 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
         CancellationToken cancellationToken,
         Action? onReady = null)
     {
-        var watcher = new WorkspaceWatcher(status);
+        var watcher = new WorkspaceWatcher(status, onStaleTakeover: StaleLockWarningSink.ToStderr);
         watcher.StartAsync(workspaceRoot, cancellationToken).GetAwaiter().GetResult();
         onReady?.Invoke();
         cancellationToken.WaitHandle.WaitOne();

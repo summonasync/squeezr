@@ -16,7 +16,7 @@ public sealed class IndexLock : IDisposable
         _path = path;
     }
 
-    public static IndexLock Acquire(string storeDir)
+    public static IndexLock Acquire(string storeDir, Action<string>? onStaleTakeover = null)
     {
         var path = Path.Combine(storeDir, SqueezrPaths.LockFileName);
         FileStream stream;
@@ -26,14 +26,14 @@ public sealed class IndexLock : IDisposable
         }
         catch (IOException)
         {
-            return TakeOverStale(path);
+            return TakeOverStale(path, onStaleTakeover);
         }
 
         WriteOwnerPid(stream);
         return new IndexLock(stream, path);
     }
 
-    private static IndexLock TakeOverStale(string path)
+    private static IndexLock TakeOverStale(string path, Action<string>? onStaleTakeover)
     {
         int? ownerPid;
         try
@@ -63,7 +63,7 @@ public sealed class IndexLock : IDisposable
         var owner = ownerPid is int deadPid
             ? deadPid.ToString(CultureInfo.InvariantCulture)
             : "unknown";
-        Console.Error.WriteLine($"warning: stale lock from pid {owner} removed");
+        onStaleTakeover?.Invoke($"stale lock from pid {owner} removed");
         WriteOwnerPid(stream);
         return new IndexLock(stream, path);
     }

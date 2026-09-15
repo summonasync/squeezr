@@ -29,7 +29,7 @@ public sealed class DropCommand : Command<DropCommand.Settings>
             }
 
             var manager = new WorkspaceManager(workspaceRoot);
-            var result = manager.Drop();
+            var result = manager.Drop(StaleLockWarningSink.ToStderr);
 
             DeleteCollectionBestEffort(vectorStore, cancellationToken);
 

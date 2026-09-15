@@ -1,5 +1,6 @@
 using Spectre.Console;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -44,7 +45,10 @@ public static class TuiWizards
         try
         {
             var entry = new WorkspaceManager(workspaceRoot)
-                .AddRepo(fullPath, string.IsNullOrWhiteSpace(name) ? null : name.Trim());
+                .AddRepo(
+                    fullPath,
+                    string.IsNullOrWhiteSpace(name) ? null : name.Trim(),
+                    StaleLockWarningSink.ToStderr);
             console.MarkupLine($"[green]Added repo[/] {entry.Name.EscapeMarkup()} at {entry.Path.EscapeMarkup()}");
         }
         catch (WorkspaceException ex)
@@ -96,7 +100,7 @@ public static class TuiWizards
 
         try
         {
-            var result = new WorkspaceManager(workspaceRoot).Drop();
+            var result = new WorkspaceManager(workspaceRoot).Drop(StaleLockWarningSink.ToStderr);
             await DeleteCollectionBestEffort(console, vectorStore, cancellationToken);
             console.MarkupLine($"[green]Removed[/] {string.Join(", ", result.Removed)}");
             console.MarkupLine("To remove the Qdrant data volume as well, run:");

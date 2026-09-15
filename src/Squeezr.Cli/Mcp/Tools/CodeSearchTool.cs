@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
@@ -88,7 +89,8 @@ public sealed class CodeSearchTool
     private static FreshnessResult Guard(string root, SearchResponse response) =>
         FreshnessGuard.CheckAndRefresh(
             root,
-            response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList());
+            response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
+            StaleLockWarningSink.ToStderr);
 
     private void ResolveRuntime(string root, List<string> warnings)
     {

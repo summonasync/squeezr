@@ -130,11 +130,12 @@ public static class McpServerHost
                 var writer = new IndexEventWriter(Console.Error);
                 var renderer = new IndexEventsRenderer(writer);
                 watcher = new WorkspaceWatcher(
-                    new WatchEventsStatus(writer, workspace.Root, renderer), renderer);
+                    new WatchEventsStatus(writer, workspace.Root, renderer), renderer,
+                    StaleLockWarningSink.ToStderr);
             }
             else
             {
-                watcher = new WorkspaceWatcher();
+                watcher = new WorkspaceWatcher(onStaleTakeover: StaleLockWarningSink.ToStderr);
             }
 
             await watcher.StartAsync(workspace.Root, ct);

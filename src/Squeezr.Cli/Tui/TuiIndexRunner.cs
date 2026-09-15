@@ -50,7 +50,8 @@ public static class TuiIndexRunner
                     new SpinnerColumn())
                 .Start(ctx => indexer.Index(
                     workspaceRoot, null, full, false,
-                    new IndexProgressRenderer(ctx), embeddings, vectorStore, reembed));
+                    new IndexProgressRenderer(ctx), embeddings, vectorStore, reembed,
+                    StaleLockWarningSink.ToStderr));
         }
         catch (WorkspaceException ex)
         {

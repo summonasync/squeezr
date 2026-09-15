@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
@@ -115,7 +116,8 @@ public sealed class FindReferencesTool
                 .SelectMany(g => g.Refs.Select(r => (g.Repo, r.File)).Append((g.Repo, g.File)))
                 .Distinct()
                 .Take(GuardCandidateLimit)
-                .ToList());
+                .ToList(),
+            StaleLockWarningSink.ToStderr);
 
     private sealed record RefData(
         [property: JsonPropertyName("file")] string File,

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Workspace;
@@ -80,7 +81,8 @@ public sealed class SymbolLookupTool
     private static FreshnessResult Guard(string root, SymbolLookupResult result) =>
         FreshnessGuard.CheckAndRefresh(
             root,
-            result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList());
+            result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
+            StaleLockWarningSink.ToStderr);
 
     private sealed record SymbolHitData(
         [property: JsonPropertyName("repo")] string Repo,

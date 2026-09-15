@@ -5,7 +5,6 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Storage;
 
-[Collection("CliProcessGlobals")]
 public class IndexLockTests
 {
     private readonly string _storeDir;
@@ -29,61 +28,54 @@ public class IndexLockTests
     }
 
     [Fact]
-    public void Acquire_DeadOwnerPid_TakesOverLock_AndWarnsOnStderr()
+    public void Acquire_FreshLock_DoesNotReportStaleTakeover()
+    {
+        var messages = new List<string>();
+
+        using var acquired = IndexLock.Acquire(_storeDir, messages.Add);
+
+        messages.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Acquire_DeadOwnerPid_TakesOverLock_AndReportsStaleTakeover()
     {
         var deadPid = FindDeadPid();
         File.WriteAllText(LockPath, deadPid.ToString());
+        var messages = new List<string>();
 
-        var stderr = CaptureStderr(() =>
+        using (var acquired = IndexLock.Acquire(_storeDir, messages.Add))
         {
-            using var acquired = IndexLock.Acquire(_storeDir);
             Should.Throw<WorkspaceLockedException>(() => IndexLock.Acquire(_storeDir));
-        });
+        }
 
-        stderr.ShouldContain($"warning: stale lock from pid {deadPid} removed");
+        messages.ShouldBe([$"stale lock from pid {deadPid} removed"]);
     }
 
     [Fact]
     public void Acquire_EmptyLockFile_FromKilledLegacyProcess_IsTakenOver()
     {
         File.WriteAllText(LockPath, string.Empty);
+        var messages = new List<string>();
 
-        var stderr = CaptureStderr(() =>
-        {
-            using var acquired = IndexLock.Acquire(_storeDir);
-            Should.Throw<WorkspaceLockedException>(() => IndexLock.Acquire(_storeDir));
-        });
+        using var acquired = IndexLock.Acquire(_storeDir, messages.Add);
 
-        stderr.ShouldContain("warning: stale lock from pid unknown removed");
+        messages.ShouldBe(["stale lock from pid unknown removed"]);
     }
 
     [Fact]
     public void Acquire_LiveOwnerPid_Refuses()
     {
         File.WriteAllText(LockPath, Environment.ProcessId.ToString());
+        var messages = new List<string>();
 
-        Should.Throw<WorkspaceLockedException>(() => IndexLock.Acquire(_storeDir));
+        Should.Throw<WorkspaceLockedException>(() => IndexLock.Acquire(_storeDir, messages.Add));
+
+        messages.ShouldBeEmpty();
         File.ReadAllText(LockPath).ShouldBe(Environment.ProcessId.ToString());
     }
 
     private string LockPath => Path.Combine(_storeDir, SqueezrPaths.LockFileName);
-
-    private static string CaptureStderr(Action action)
-    {
-        var captured = new StringWriter();
-        var original = Console.Error;
-        Console.SetError(captured);
-        try
-        {
-            action();
-        }
-        finally
-        {
-            Console.SetError(original);
-        }
-
-        return captured.ToString();
-    }
 
     private static int FindDeadPid()
     {

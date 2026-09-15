@@ -44,7 +44,7 @@ public sealed class WorkspaceManager
         return new InitResult(workspaceName, _root);
     }
 
-    public RepoEntry AddRepo(string path, string? name)
+    public RepoEntry AddRepo(string path, string? name, Action<string>? onStaleTakeover = null)
     {
         var manifest = LoadManifest();
         if (string.IsNullOrWhiteSpace(path))
@@ -63,7 +63,7 @@ public sealed class WorkspaceManager
             : name.Trim();
         ValidateName(repoName, "Repository");
 
-        using (IndexLock.Acquire(SqueezrPaths.StoreDir(_root)))
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(_root), onStaleTakeover))
         {
             if (manifest.Repos.Any(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase)))
             {
@@ -111,7 +111,7 @@ public sealed class WorkspaceManager
         return manifest.Repos;
     }
 
-    public DropResult Drop()
+    public DropResult Drop(Action<string>? onStaleTakeover = null)
     {
         var storeDir = SqueezrPaths.StoreDir(_root);
         if (!Directory.Exists(storeDir))
@@ -123,7 +123,7 @@ public sealed class WorkspaceManager
 
         // Windows refuses to delete a directory that holds an open file,
         // so the lock is released (which removes index.lock) before the delete.
-        using (IndexLock.Acquire(storeDir))
+        using (IndexLock.Acquire(storeDir, onStaleTakeover))
         {
         }
 

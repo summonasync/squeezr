@@ -8,7 +8,10 @@ public sealed record FreshnessResult(IReadOnlyList<string> Refreshed, IReadOnlyL
 
 public static class FreshnessGuard
 {
-    public static FreshnessResult CheckAndRefresh(string workspaceRoot, IReadOnlyList<(string Repo, string Path)> candidates)
+    public static FreshnessResult CheckAndRefresh(
+        string workspaceRoot,
+        IReadOnlyList<(string Repo, string Path)> candidates,
+        Action<string>? onStaleTakeover = null)
     {
         var refreshed = new List<string>();
         var stale = new List<string>();
@@ -32,7 +35,8 @@ public static class FreshnessGuard
                     continue;
                 }
 
-                new WorkspaceIndexer().IndexFile(workspaceRoot, candidate.Repo, candidate.Path);
+                new WorkspaceIndexer().IndexFile(
+                    workspaceRoot, candidate.Repo, candidate.Path, onStaleTakeover: onStaleTakeover);
                 refreshed.Add(Key(candidate));
             }
             catch (Exception ex) when (IsRecoverable(ex))
