@@ -157,6 +157,7 @@ public sealed class McpOnboardingServiceTests
         var (service, environment, workspace, binDir) = NewService();
         FakeCli.Install(binDir, "squeezr");
         new WorkspaceManager(workspace).Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         File.Exists(SqueezrPaths.MetaDbPath(workspace)).ShouldBeTrue();
         Directory.Exists(Path.Combine(workspace, ".squeezr")).ShouldBeFalse();
         var client = McpClientRegistry.Get(McpClientId.Kimi);
@@ -177,6 +178,7 @@ public sealed class McpOnboardingServiceTests
     {
         var (service, environment, workspace, _) = NewService();
         new WorkspaceManager(workspace).Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         File.Delete(SqueezrPaths.MetaDbPath(workspace));
         Directory.CreateDirectory(Path.Combine(workspace, ".squeezr"));
         File.WriteAllText(Path.Combine(workspace, ".squeezr", "meta.db"), string.Empty);

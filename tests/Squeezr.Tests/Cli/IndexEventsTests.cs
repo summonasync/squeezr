@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
 
@@ -7,8 +6,6 @@ namespace Squeezr.Tests.Cli;
 [Collection("CliProcessGlobals")]
 public sealed class IndexEventsTests
 {
-    private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
-
     [Fact]
     public async Task Index_Events_FirstRun_EmitsStartedFilesCompletedWithPhaseProgress()
     {
@@ -179,21 +176,6 @@ public sealed class IndexEventsTests
         (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
     }
 
-    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(string workingDir, params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {string.Join(" ", args)}")
-        {
-            WorkingDirectory = workingDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        using var process = Process.Start(startInfo)!;
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return (process.ExitCode, await stdoutTask, await stderrTask);
-    }
+    private static Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
+        string workingDir, params string[] args) => CliTestProcess.RunAsync(workingDir, args);
 }

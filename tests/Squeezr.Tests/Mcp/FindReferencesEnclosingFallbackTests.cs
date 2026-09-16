@@ -39,6 +39,7 @@ public class FindReferencesEnclosingFallbackTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/src/Outer.cs", """
             namespace Demo;
 
@@ -109,6 +110,7 @@ public class FindReferencesEnclosingFallbackTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/src/Calc.cs", """
             namespace Demo;
 

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 
 namespace Squeezr.Cli.Infra;
 
@@ -13,8 +14,11 @@ public sealed class ProcessRunner : IProcessRunner
             EnableRaisingEvents = true
         };
         process.Start();
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        var stdoutBuilder = new StringBuilder();
+        var stderrBuilder = new StringBuilder();
+        var stdoutTask = PumpAsync(process.StandardOutput, stdoutBuilder, invocation.ProgressHandler);
+        var stderrTask = PumpAsync(process.StandardError, stderrBuilder, invocation.ProgressHandler);
         try
         {
             using var timeout = new CancellationTokenSource(invocation.Timeout);
@@ -34,9 +38,33 @@ public sealed class ProcessRunner : IProcessRunner
             throw;
         }
 
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        return new ProcessRunResult(process.ExitCode, stdout, stderr);
+        await Task.WhenAll(stdoutTask, stderrTask);
+        return new ProcessRunResult(process.ExitCode, stdoutBuilder.ToString(), stderrBuilder.ToString());
+    }
+
+    private static async Task PumpAsync(StreamReader reader, StringBuilder builder, Action<string>? progressHandler)
+    {
+        var buffer = new char[4096];
+        while (true)
+        {
+            int read;
+            try
+            {
+                read = await reader.ReadAsync(buffer);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException)
+            {
+                return;
+            }
+
+            if (read == 0)
+            {
+                return;
+            }
+
+            builder.Append(buffer, 0, read);
+            progressHandler?.Invoke(new string(buffer, 0, read));
+        }
     }
 
     // Killed processes can tear the redirected streams, aborting the pending reads;

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Indexing;
@@ -11,8 +10,6 @@ namespace Squeezr.Tests.Indexing.Navigation;
 [Collection("CliProcessGlobals")]
 public class SymbolMapExpandTests
 {
-    private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
-
     [Fact]
     public void Symbol_ExactName_ReturnsSignatureSpanDocAndBody()
     {
@@ -328,21 +325,6 @@ public class SymbolMapExpandTests
         File.WriteAllText(fullPath, content);
     }
 
-    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(string workingDir, params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {string.Join(" ", args)}")
-        {
-            WorkingDirectory = workingDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        using var process = Process.Start(startInfo)!;
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return (process.ExitCode, await stdoutTask, await stderrTask);
-    }
+    private static Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
+        string workingDir, params string[] args) => CliTestProcess.RunAsync(workingDir, args);
 }

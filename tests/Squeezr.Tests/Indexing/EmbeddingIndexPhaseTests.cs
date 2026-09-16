@@ -383,6 +383,7 @@ public class EmbeddingIndexPhaseTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         return workspace;
     }

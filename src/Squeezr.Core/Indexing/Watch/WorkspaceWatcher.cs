@@ -1,4 +1,5 @@
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Indexing.Watch;
@@ -31,6 +32,7 @@ public sealed class WorkspaceWatcher
     private WatchEventFilter? _filter;
     private CancellationTokenSource? _stopping;
     private Task _runTask = Task.CompletedTask;
+    private DaemonHeartbeatWriter? _heartbeat;
     private string _workspaceRoot = string.Empty;
     private TimeSpan _debounceWindow;
     private TimeSpan _backoffCap;
@@ -48,7 +50,10 @@ public sealed class WorkspaceWatcher
         _onStaleTakeover = onStaleTakeover;
     }
 
-    public Task StartAsync(string workspaceRoot, CancellationToken cancellationToken)
+    public Task StartAsync(
+        string workspaceRoot,
+        CancellationToken cancellationToken,
+        string daemonKind = DaemonHeartbeat.DefaultKind)
     {
         if (_running)
         {
@@ -78,6 +83,11 @@ public sealed class WorkspaceWatcher
         _watchers = CreateWatchers();
         _stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _running = true;
+        _heartbeat = new DaemonHeartbeatWriter(
+            SqueezrPaths.StoreDir(_workspaceRoot),
+            daemonKind,
+            onWarning: _status is null ? null : message => _status.Faulted(message));
+        _heartbeat.Start();
         _runTask = RunAsync(_stopping.Token);
         return Task.CompletedTask;
     }
@@ -107,6 +117,7 @@ public sealed class WorkspaceWatcher
         finally
         {
             stopping.Dispose();
+            Interlocked.Exchange(ref _heartbeat, null)?.Dispose();
         }
     }
 
@@ -250,6 +261,7 @@ public sealed class WorkspaceWatcher
             {
                 var result = _indexer.Index(_workspaceRoot, progress: _progress, onStaleTakeover: _onStaleTakeover);
                 _status?.PassCompleted(result);
+                _heartbeat?.Beat();
                 return;
             }
             catch (WorkspaceLockedException)

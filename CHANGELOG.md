@@ -64,6 +64,18 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 ### Fixed (039, central workspace store + managed services)
 - Workspace registry read-modify-write is serialized cross-process (`workspaces.lock`), so concurrent CLI runs can't lose each other's entries
 
+### Changed (042, dogfood wave 2)
+- `squeezr services up` shows stage progress (`Pulling images (first run may download ~3.6 GB)…`, `Starting containers…`) instead of sitting silent during the first image pull; raw docker output is available under `--verbose` (stderr; `--json` stdout stays clean)
+- Repeat `up` calls pull only missing images (`docker compose pull --policy missing` on compose v2.24+; plain pull with a stderr note on v2.21–2.23) — offline restarts with cached images work again
+- The pull phase of `services up` no longer has any timeout (previously: an idle watchdog killing after 5 minutes of total output silence plus a 60-minute wall-clock cap) — a stalled or unwanted download is interrupted with Ctrl+C, which kills the compose process cleanly; pull failure errors still carry the manual resume command (`docker compose -f ~/.squeezr/infra/docker-compose.yml -p squeezr pull`)
+- README: managed-services section now documents first-run realities (image sizes, resume, compose version requirements)
+
+### Added (043, watch fleet + daemon heartbeats)
+- Running watch daemons (`squeezr watch`, `serve --watch`) now write a heartbeat file into the workspace store dir — `<storeDir>/<kind>.heartbeat`, kind = `watch` / `serve-watch`: `{pid, kind, startedAt, lastBeatAt}`, refreshed every 5 s and after each successful catch-up pass, atomically, removed on clean exit
+- `squeezr fleet [--json]`: registry-wide daemon overview — per workspace, both daemon kinds (alive: pid + uptime; dead: marker kept and shown, never cleaned), pending chunks and last full index from meta.db (best-effort, `n/a` when unavailable), stale rootPath warnings on stderr; works from any CWD, no workspace required
+- `squeezr fleet stop <storeKey>`: stops both daemon kinds (SIGTERM → 5 s grace → SIGKILL on Unix, process-tree kill on Windows); heartbeat pids are verified before signaling — process must look like squeezr (name/cmdline match + start time vs heartbeat `startedAt`), refusing to touch foreign or reused pids; no alive daemons → `not-running`, exit 0
+- `squeezr fleet restart <storeKey>`: restarts the CLI `watch` daemon only — stops it if alive, then spawns a detached `squeezr watch` with cwd = workspace root; a live `serve --watch` errors with the MCP hint (the MCP client owns it); stop/restart accept `--json` (NDJSON result, clean stdout per the 035 contract)
+
 ## [0.9.0-pre] — 2026-09-13
 
 Pre-release for dogfooding. v1 MVP (M1–M6) closed, post-MVP features landed.

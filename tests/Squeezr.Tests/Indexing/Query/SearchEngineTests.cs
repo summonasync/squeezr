@@ -138,6 +138,7 @@ public class SearchEngineTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/src/Contests.cs", $"class Contests {{ /* {FixtureContent} */ }}\n");
         WriteFile(workspace, "repo/src/FooTests.cs", $"class FooTests {{ /* {FixtureContent} */ }}\n");
         manager.AddRepo("repo", "demo");
@@ -159,6 +160,7 @@ public class SearchEngineTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         var longLine = $"// {new string('x', 250)} {FixtureContent} {new string('y', 250)}";
         WriteFile(workspace, "repo/a.cs", longLine + "\n");
         manager.AddRepo("repo", "demo");
@@ -190,6 +192,7 @@ public class SearchEngineTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/padded.cs", new string('a', 1500) + "X");
         manager.AddRepo("repo", "demo");
         new WorkspaceIndexer().Index(workspace);
@@ -205,6 +208,7 @@ public class SearchEngineTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/src/WorkspaceManager.cs", "public class WorkspaceManager\n{\n}\n");
         WriteFile(workspace, "repo/src/worker.cs", $"// uses {FixtureContent} internally\nvar helper = \"{FixtureContent}\";\n");
         WriteFile(workspace, "repo/src/WidgetTests.cs", $"class WidgetTests {{ /* {FixtureContent} */ }}\n");

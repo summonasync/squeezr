@@ -36,14 +36,58 @@ public sealed class ServicesCommandTests
         compose.ShouldContain("qdrant/qdrant:latest");
         compose.ShouldContain("ollama/ollama:latest");
         var calls = docker.ReadCalls();
-        calls.Count.ShouldBe(2);
+        calls.Count.ShouldBe(3);
         calls[0].ShouldBe("compose version");
         calls[1].ShouldStartWith("compose -f ");
-        calls[1].ShouldContain(" -p squeezr up -d");
+        calls[1].ShouldContain(" -p squeezr pull");
+        calls[2].ShouldContain(" -p squeezr up -d");
         result.StdErr.ShouldNotContain("not initialized");
+        result.StdOut.ShouldContain("Pulling images");
+        result.StdOut.ShouldContain("Starting containers");
         result.StdOut.ShouldContain("Qdrant");
         result.StdOut.ShouldContain("Ollama");
         result.StdOut.ShouldContain("ROCm");
+    }
+
+    [Fact]
+    public async Task Up_Verbose_StreamsRawPullOutputToStderr()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var cwd = TestDirs.NewTempDir();
+        var home = TestDirs.NewTempDir();
+        var docker = FakeDocker.Install(pullProgressLines: ["PULL-QDRANT-PROGRESS", "PULL-OLLAMA-PROGRESS"]);
+        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+
+        var result = await RunCliAsync(cwd, home, path, "services", "up", "--verbose");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdErr.ShouldContain("PULL-QDRANT-PROGRESS");
+        result.StdErr.ShouldContain("PULL-OLLAMA-PROGRESS");
+    }
+
+    [Fact]
+    public async Task Up_WithoutVerbose_KeepsRawPullOutputHidden()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var cwd = TestDirs.NewTempDir();
+        var home = TestDirs.NewTempDir();
+        var docker = FakeDocker.Install(pullProgressLines: ["PULL-QDRANT-PROGRESS"]);
+        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+
+        var result = await RunCliAsync(cwd, home, path, "services", "up");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldNotContain("PULL-QDRANT-PROGRESS");
+        result.StdErr.ShouldNotContain("PULL-QDRANT-PROGRESS");
+        result.StdOut.ShouldContain("Pulling images");
     }
 
     [Fact]
@@ -62,7 +106,8 @@ public sealed class ServicesCommandTests
         var result = await RunCliAsync(cwd, home, path, "services", "up", "--json");
 
         result.ExitCode.ShouldBe(0);
-        result.StdErr.ShouldBe(string.Empty);
+        result.StdErr.ShouldContain("Pulling images");
+        result.StdErr.ShouldContain("Starting containers");
         result.StdOut.Trim().Split('\n').Length.ShouldBe(1);
         using var json = JsonDocument.Parse(result.StdOut.Trim());
         json.RootElement.GetProperty("composeFile").GetString().ShouldBe(Path.Combine(home, "infra", "docker-compose.yml"));
@@ -71,6 +116,50 @@ public sealed class ServicesCommandTests
         json.RootElement.GetProperty("ollamaEndpoint").GetString().ShouldBe("http://localhost:11434");
         json.RootElement.GetProperty("rocm").ValueKind.ShouldBeOneOf(JsonValueKind.True, JsonValueKind.False);
         json.RootElement.GetProperty("composeVersion").GetString().ShouldStartWith("v2.29.2");
+    }
+
+    [Fact]
+    public async Task Up_OfflineWithLocalImages_PullsOnlyMissingImagesAndStarts()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var cwd = TestDirs.NewTempDir();
+        var home = TestDirs.NewTempDir();
+        var docker = FakeDocker.Install(pullFailsWithoutPolicyMissing: true);
+        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+
+        var result = await RunCliAsync(cwd, home, path, "services", "up");
+
+        result.ExitCode.ShouldBe(0);
+        var calls = docker.ReadCalls();
+        calls.Count.ShouldBe(3);
+        calls[1].ShouldContain(" -p squeezr pull --policy missing");
+        calls[2].ShouldContain(" -p squeezr up -d");
+    }
+
+    [Fact]
+    public async Task Up_OldComposeWithoutPolicySupport_PrintsFallbackNote()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var cwd = TestDirs.NewTempDir();
+        var home = TestDirs.NewTempDir();
+        var docker = FakeDocker.Install(composeVersion: "v2.21.0");
+        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+
+        var result = await RunCliAsync(cwd, home, path, "services", "up");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdErr.ShouldContain("'pull --policy missing'");
+        var pullCall = docker.ReadCalls()[1];
+        pullCall.ShouldContain(" -p squeezr pull");
+        pullCall.ShouldNotContain("--policy");
     }
 
     [Fact]

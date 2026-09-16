@@ -1,7 +1,5 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
-using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Cli;
@@ -88,30 +86,9 @@ public sealed class StatusDropQdrantTests
         doc.RootElement.GetProperty("removed").GetArrayLength().ShouldBe(1);
     }
 
-    private static void PointConfigAtDeadEndpoint(string root)
-    {
-        var config = ConfigFile.Load(root) with
-        {
-            Qdrant = new QdrantConfig { Endpoint = "http://localhost:1" }
-        };
-        ConfigFile.Save(root, config);
-    }
+    private static void PointConfigAtDeadEndpoint(string root) =>
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(root);
 
-    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(string workingDir, params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {string.Join(" ", args)}")
-        {
-            WorkingDirectory = workingDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        using var process = Process.Start(startInfo)!;
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return (process.ExitCode, await stdoutTask, await stderrTask);
-    }
+    private static Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
+        string workingDir, params string[] args) => CliTestProcess.RunAsync(workingDir, args);
 }

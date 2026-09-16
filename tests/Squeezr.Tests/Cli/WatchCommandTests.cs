@@ -166,23 +166,8 @@ public sealed class WatchCommandTests
         return Process.Start(startInfo)!;
     }
 
-    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(string workingDir, params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {string.Join(" ", args)}")
-        {
-            WorkingDirectory = workingDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        using var process = Process.Start(startInfo)!;
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return (process.ExitCode, await stdoutTask, await stderrTask);
-    }
+    private static Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
+        string workingDir, params string[] args) => CliTestProcess.RunAsync(workingDir, args);
 
     private static string NewWatchWorkspace()
     {
@@ -190,6 +175,7 @@ public sealed class WatchCommandTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
         {

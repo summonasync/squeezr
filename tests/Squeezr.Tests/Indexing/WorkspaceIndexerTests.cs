@@ -111,6 +111,7 @@ public class WorkspaceIndexerTests
         WriteFile(workspace, "two/b.cs", "class B { }");
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("one", "one");
         manager.AddRepo("two", "two");
 
@@ -163,6 +164,7 @@ public class WorkspaceIndexerTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         return workspace;
     }

@@ -52,6 +52,18 @@ public sealed class MetaStore : IDisposable
         _db.GetCollection(ChunksCollection).EnsureIndex("repoId");
     }
 
+    public static MetaStore? TryOpen(string dbPath)
+    {
+        try
+        {
+            return new MetaStore(dbPath);
+        }
+        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException or LiteException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     public void AddRepo(RepoDocument repo)
     {
         var repos = _db.GetCollection<RepoDocument>(ReposCollection);
@@ -211,6 +223,10 @@ public sealed class MetaStore : IDisposable
 
     public IndexStateDocument? GetIndexState(string repoName) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).FindById(repoName);
+
+    public DateTime? GetLatestFullIndexAt() =>
+        _db.GetCollection<IndexStateDocument>(IndexStateCollection).FindAll()
+            .Max(state => (DateTime?)state.LastFullIndexAt);
 
     public void SaveIndexState(IndexStateDocument state) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).Upsert(state);

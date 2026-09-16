@@ -8,10 +8,16 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
 {
+    private const string PullingStage = "Pulling images (first run may download ~3.6 GB)…";
+    private const string StartingStage = "Starting containers…";
+
     public sealed class Settings : CommandSettings
     {
         [CommandOption("--json")]
         public bool Json { get; set; }
+
+        [CommandOption("--verbose")]
+        public bool Verbose { get; set; }
     }
 
     protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -33,6 +39,9 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
             }
 
             var installation = await cli.DetectAsync(cancellationToken);
+            WriteStage(PullingStage, settings.Json);
+            await cli.PullAsync(installation, composePath, ProgressHandler(settings), cancellationToken);
+            WriteStage(StartingStage, settings.Json);
             await cli.RunCheckedAsync(installation, composePath, ["up", "-d"], DockerComposeCli.UpTimeout, cancellationToken);
 
             if (settings.Json)
@@ -57,5 +66,19 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
         {
             return CommandError.Report(ex, settings.Json);
         }
+    }
+
+    private static Action<string>? ProgressHandler(Settings settings) =>
+        settings.Verbose ? chunk => Console.Error.Write(chunk) : null;
+
+    private static void WriteStage(string message, bool json)
+    {
+        if (json)
+        {
+            Console.Error.WriteLine(message);
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[grey]{message}[/]");
     }
 }

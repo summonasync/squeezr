@@ -204,6 +204,7 @@ public class TreeSitterRoutingTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/src/a.cs", "class Calc {\n    int Add(int a, int b) {\n        return a + b;\n    }\n}\n");
         WriteFile(workspace, "repo/src/app.js", """

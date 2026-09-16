@@ -138,7 +138,7 @@ public static class McpServerHost
                 watcher = new WorkspaceWatcher(onStaleTakeover: StaleLockWarningSink.ToStderr);
             }
 
-            await watcher.StartAsync(workspace.Root, ct);
+            await watcher.StartAsync(workspace.Root, ct, daemonKind: DaemonHeartbeat.ServeWatchKind);
             Console.Error.WriteLine("squeezr serve: watch engine running");
             return watcher;
         }

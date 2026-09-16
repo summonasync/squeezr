@@ -52,6 +52,15 @@ public static class CliApplication
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")
                 .WithDescription("Interactive terminal UI (dashboard, search, wizards)");
+            config.AddBranch("fleet", fleet =>
+            {
+                fleet.SetDescription("Show and manage watch/serve-watch daemons across all registered workspaces");
+                fleet.SetDefaultCommand<FleetCommand>();
+                fleet.AddCommand<FleetStopCommand>("stop")
+                    .WithDescription("Stop the watch and serve-watch daemons of a workspace (exact store key)");
+                fleet.AddCommand<FleetRestartCommand>("restart")
+                    .WithDescription("Restart the watch daemon of a workspace (exact store key)");
+            });
             config.AddBranch("services", services =>
             {
                 services.SetDescription("Manage Squeezr infrastructure services (Qdrant and Ollama)");

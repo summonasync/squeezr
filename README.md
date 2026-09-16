@@ -98,7 +98,9 @@ Squeezr не мусорит в проекте: `squeezr init` не создаё�
 │   ├── config.json                  # конфиг (embeddings, watch, ...)
 │   ├── meta.db                      # LiteDB
 │   ├── trigram.idx                  # триграммный индекс
-│   └── index.lock
+│   ├── index.lock
+│   ├── watch.heartbeat              # пока жив демон `watch` (флот, см. раздел про fleet)
+│   └── serve-watch.heartbeat        # ...или `serve --watch` от MCP-клиента
 ├── models/                         # ONNX-модели эмбеддингов
 └── infra/docker-compose.yml        # qdrant + ollama (генерируется `squeezr services up`)
 ```
@@ -121,6 +123,15 @@ squeezr services down     # остановить (данные в volume'ах Н
 - Сервисы: **qdrant** (`qdrant/qdrant:latest`, 6333/6334, volume `squeezr-qdrant`) и **ollama** (`ollama/ollama:latest`, 11434, volume `squeezr-ollama`), restart `unless-stopped`.
 - **AMD GPU (ROCm):** если на хосте видны `/dev/kfd` и `/dev/dri` (например, Radeon RX 7900 XTX), ollama получает проброс этих устройств и считает на GPU; без них — CPU-режим.
 - Команда глобальна: работает из любой директории, workspace не нужен. Без Docker — понятная ошибка со ссылкой на установку.
+
+**Первый запуск — будь готов к загрузке.** Первый `services up` тянет образы из registry: qdrant ~70 МБ, ollama ~3.6 ГБ — на средней сети это минуты, на медленной — десятки минут. Команда показывает этапы (`Pulling images…`, `Starting containers…`; сырой docker-вывод — под `--verbose`). Таймаута у загрузки нет — если она застынет или надоест, прерви Ctrl+C: процесс compose будет остановлен, выход чистый. Скачанные слои кэшируются — докачай с видимым прогрессом и повтори:
+
+```bash
+docker compose -f ~/.squeezr/infra/docker-compose.yml -p squeezr pull   # resume, слои докачаются
+squeezr services up                                                     # повторный up
+```
+
+Повторные `up` ходят в registry только за отсутствующими образами (`pull --policy missing`, compose v2.24+; на v2.21–2.23 — полный pull) — офлайн-перезапуск с уже скачанными образами работает. Требования: Docker Engine + compose plugin v2.21+ (`status` использует `ps --format json`); поддерживается и standalone `docker-compose`. `down` останавливает контейнеры, но **никогда** не трогает volume'ы — данные qdrant/ollama переживают циклы down/up.
 
 Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `pwsh -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится для `squeezr services up` (Qdrant и, опционально, Ollama). Важно: ни установка, ни удаление не трогают стор `~/.squeezr` — воркспейсы и модели переживают переустановку бинаря.
 
@@ -265,6 +276,36 @@ squeezr serve --watch    # агент: тот же движок внутри MCP
 
 `enabled` включает движок у `serve` без флага (флаг главнее конфига); явный `squeezr watch` — всегда намерение пользователя, конфиг не консультируется. Отсутствие секции или невалидные значения = дефолты.
 
+## Fleet: все демоны разом
+
+Watch-демоны рассыпаны по воркспейсам, и помнить, где что крутится, — работа для машины. `squeezr fleet` показывает каждый воркспейс реестра и состояние демонов на нём (работает из любой директории, сам воркспейс не нужен):
+
+```bash
+squeezr fleet         # таблица: демоны, pending, свежесть индекса, stale
+squeezr fleet --json  # NDJSON, по одному объекту на воркспейс (контракт 035)
+```
+
+```
+Name      Root path            Store key  WATCH                 SERVE-WATCH    Pending  Last indexed      Status
+squeezr   /home/dev/squeezr    squeezr    pid 4217, up 2h 14m   —              0        2026-09-16 10:31  ok
+old-proj  /home/dev/old-proj   old-proj   dead (pid 9021)       —              n/a      n/a               stale
+```
+
+Колонки `WATCH` / `SERVE-WATCH` — демоны двух kind: `squeezr watch` (терминал) и `serve --watch` (MCP-клиент); живой показывает `pid N, up …`, мёртвый — `dead (pid N)` (файл heartbeat остался, а пид/бит протух), нет файла — `—`. `Pending` — необработанные чанки, `Last indexed` — время последнего полного прохода; оба best-effort из `meta.db` воркспейса (`n/a`, если БД недоступна — fleet не падает). Записи с исчезнувшим rootPath помечаются `stale` и дают warning в stderr с хинтом на `squeezr drop --store-key`.
+
+Как демон объявляет себя: каждый живой демон пишет heartbeat-файл в store-дире воркспейса — `~/.squeezr/workspaces/<storeKey>/<kind>.heartbeat`, kind = `watch` или `serve-watch`. Внутри JSON `{pid, kind, startedAt, lastBeatAt}`: бит раз в 5 с и после каждого успешного прохода, запись атомарная (tmp + move), при чистом выходе файл удаляется. Демон «жив» = `lastBeatAt` свежее 30 с И pid реально существует. Два kind живут независимо: на одном воркспейсе спокойно крутятся и терминальный `watch`, и `serve --watch` от MCP-клиента — два файла, друг другу не мешают. Мёртвые heartbeat-файлы никто не чистит: они видны как `dead` — это маркер «демон умер некрасиво», а не мусор.
+
+Управление — по точному storeKey (как у `drop --store-key`, без fuzzy-резолва):
+
+```bash
+squeezr fleet stop <storeKey>     # остановить демонов обоих kind
+squeezr fleet restart <storeKey>  # перезапустить watch-демон
+```
+
+- `stop` читает heartbeat обоих kind и останавливает живых: SIGTERM → 5 секунд грейса → SIGKILL (на Windows — kill всего дерева процессов). Пид из heartbeat перед сигналом верифицируется: процесс должен выглядеть как squeezr (имя/командная строка + сверка времени старта с `startedAt` heartbeat) — чужой процесс или переиспользованный пид не тронут, будет понятная ошибка. Живых нет — `not-running`, exit 0.
+- `restart` работает только с `watch`: живой демон аккуратно останавливается, затем detached-процесс `squeezr watch` спавнится с cwd = rootPath воркспейса (rootPath исчез — ошибка с хинтом на `drop`). Живой `serve --watch` не трогается: им владеет MCP-клиент, и попытка его перезапуска честно ошибается с хинтом (`squeezr mcp install` или рестарт агента).
+- Обе команды умеют `--json`: один NDJSON-объект результата, stdout чистый (контракт 035).
+
 ## Roadmap
 
 - [x] **M1** — каркас CLI, LiteDB-схемы, конфиг, workspace
@@ -288,7 +329,7 @@ Born from a simple observation: agents waste 30–80k tokens navigating code by 
 
 The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: central workspace store in `~/.squeezr` (registry + per-workspace store dirs, zero files in your project, `SQUEEZR_HOME` override; legacy in-project `.squeezr/` auto-migrates) + Qdrant/Ollama in Docker managed by `squeezr services up|down|status` (ROCm device passthrough on AMD GPUs) + embeddings: local ONNX by default (nomic-embed-text-v1.5, int8, ~131 MB, 768d, CPU), optional ollama provider (nomic-embed-text via native `/api/embed`, auto-pull, GPU-capable) or any OpenAI-compatible endpoint — nothing leaves your machine. Default embedding model: local ONNX nomic-embed-text-v1.5 (legacy bge-code-v1, 1536d, stays a supported option via `scripts/fetch-model.sh --model bge-code-v1` + `embeddings.onnx.model` in the workspace config — switching models on an existing workspace requires `squeezr index --reembed`).
 
-An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client onboarding is one command: `squeezr mcp install` detects supported agent CLIs (Claude Code, Kimi Code, Qwen Code, Codex), registers a `serve --watch` entry via the client's own CLI (direct config merge for Kimi), and optionally writes an idempotent instruction block into the client's instruction file; `squeezr mcp doctor` verifies the setup per client (exit 0/1), `squeezr mcp remove` undoes it. Flags: `--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--yes`, `--json`. Workspace root = server process cwd, with a `CLAUDE_PROJECT_DIR` fallback for Claude Code (no cwd key in its config); manual config paths (e.g. `~/.claude.json` / `.mcp.json`, `~/.codex/config.toml`) are listed in the RU section above. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits. For programmatic progress, `index --events` / `serve --watch --events` stream NDJSON events (`started` → `fileIndexed` → `progress` → `completed`/`error`), flushed per line — stdout for `index`, stderr for `serve` (stdout carries MCP JSON-RPC); a quiet incremental run emits exactly `started` → `fileIndexed`×N → `completed`.
+An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client onboarding is one command: `squeezr mcp install` detects supported agent CLIs (Claude Code, Kimi Code, Qwen Code, Codex), registers a `serve --watch` entry via the client's own CLI (direct config merge for Kimi), and optionally writes an idempotent instruction block into the client's instruction file; `squeezr mcp doctor` verifies the setup per client (exit 0/1), `squeezr mcp remove` undoes it. Flags: `--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--yes`, `--json`. Workspace root = server process cwd, with a `CLAUDE_PROJECT_DIR` fallback for Claude Code (no cwd key in its config); manual config paths (e.g. `~/.claude.json` / `.mcp.json`, `~/.codex/config.toml`) are listed in the RU section above. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits. Every running daemon writes a heartbeat file (`<storeDir>/<kind>.heartbeat`, refreshed every 5 s, removed on clean exit), so `squeezr fleet` shows all workspaces' daemons at a glance — pid, uptime, stale root paths, pending chunks — and `squeezr fleet stop|restart <storeKey>` manages them: stop covers both daemon kinds (SIGTERM → 5 s grace → SIGKILL, heartbeat pids verified as squeezr processes), restart respawns the CLI watch daemon only (`serve --watch` is owned by the MCP client); `--json` is NDJSON per the 035 contract. For programmatic progress, `index --events` / `serve --watch --events` stream NDJSON events (`started` → `fileIndexed` → `progress` → `completed`/`error`), flushed per line — stdout for `index`, stderr for `serve` (stdout carries MCP JSON-RPC); a quiet incremental run emits exactly `started` → `fileIndexed`×N → `completed`.
 
 ```bash
 dotnet build Squeezr.slnx

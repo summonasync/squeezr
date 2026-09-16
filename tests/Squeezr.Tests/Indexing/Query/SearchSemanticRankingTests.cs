@@ -13,6 +13,7 @@ public class SearchSemanticRankingTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/sig.cs", """
             public class Api
             {

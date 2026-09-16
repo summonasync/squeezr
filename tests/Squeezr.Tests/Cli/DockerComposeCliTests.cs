@@ -155,6 +155,76 @@ public sealed class DockerComposeCliTests
     }
 
     [Fact]
+    public async Task PullAsync_InvokesPullWithoutAnyTimeout()
+    {
+        var runner = new StubProcessRunner(
+            ("docker", new ProcessRunResult(0, "Docker Compose version v2.29.7", string.Empty), false),
+            ("docker", new ProcessRunResult(0, string.Empty, string.Empty), false));
+        var cli = new DockerComposeCli(runner);
+        var installation = await cli.DetectAsync(CancellationToken.None);
+
+        await cli.PullAsync(installation, "/compose.yml", progressHandler: null, CancellationToken.None);
+
+        var call = runner.Calls.Last();
+        call.Arguments.ShouldBe(["compose", "-f", "/compose.yml", "-p", "squeezr", "pull", "--policy", "missing"]);
+        call.Timeout.ShouldBe(Timeout.InfiniteTimeSpan);
+    }
+
+    [Theory]
+    [InlineData("2.24.0", true)]
+    [InlineData("2.29.7", true)]
+    [InlineData("2.23.3", false)]
+    [InlineData("2.21.0", false)]
+    [InlineData(null, false)]
+    public async Task PullAsync_PolicyMissingFlagDependsOnComposeVersion(string? version, bool expectPolicyMissing)
+    {
+        var runner = new StubProcessRunner(
+            ("docker", new ProcessRunResult(0, string.Empty, string.Empty), false));
+        var cli = new DockerComposeCli(runner);
+        var installation = new DockerComposeInstallation(
+            "docker", Plugin: true, version is null ? null : Version.Parse(version));
+
+        await cli.PullAsync(installation, "/compose.yml", progressHandler: null, CancellationToken.None);
+
+        var expected = expectPolicyMissing
+            ? new[] { "compose", "-f", "/compose.yml", "-p", "squeezr", "pull", "--policy", "missing" }
+            : new[] { "compose", "-f", "/compose.yml", "-p", "squeezr", "pull" };
+        runner.Calls.Single().Arguments.ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task PullAsync_CancelledDuringPull_PropagatesOperationCanceledWithoutTimeoutWording()
+    {
+        var cli = new DockerComposeCli(new ThrowingStubProcessRunner(new OperationCanceledException()));
+        var installation = new DockerComposeInstallation("docker", Plugin: true, Version: null);
+
+        var ex = await Should.ThrowAsync<OperationCanceledException>(
+            () => cli.PullAsync(installation, "/compose.yml", progressHandler: null, CancellationToken.None));
+
+        ex.Message.ShouldNotContain("timed out");
+        ex.Message.ShouldNotContain("stalled");
+    }
+
+    [Fact]
+    public async Task PullAsync_NonZeroExit_ThrowsComposeFailedWithStderrDetail()
+    {
+        var runner = new StubProcessRunner(
+            ("docker", new ProcessRunResult(0, "Docker Compose version v2.29.7", string.Empty), false),
+            ("docker", new ProcessRunResult(7, string.Empty, "pull denied"), false));
+        var cli = new DockerComposeCli(runner);
+        var installation = await cli.DetectAsync(CancellationToken.None);
+
+        var ex = await Should.ThrowAsync<ServicesException>(
+            () => cli.PullAsync(installation, "/compose.yml", progressHandler: null, CancellationToken.None));
+
+        ex.Code.ShouldBe(ServicesException.ComposeCommandFailedCode);
+        ex.Message.ShouldContain("exit code 7");
+        ex.Message.ShouldContain("pull denied");
+        ex.Message.ShouldContain("docker compose -f /compose.yml -p squeezr pull");
+        ex.Message.ShouldContain("squeezr services up");
+    }
+
+    [Fact]
     public void ParseServiceStates_ValidJsonArray_ReturnsStates()
     {
         const string psOutput =
@@ -191,6 +261,19 @@ public sealed class DockerComposeCliTests
         var ex = Should.Throw<ServicesException>(() => DockerComposeCli.ParseServiceStates("{}"));
 
         ex.Code.ShouldBe(ServicesException.ComposeCommandFailedCode);
+    }
+
+    private sealed class ThrowingStubProcessRunner : IProcessRunner
+    {
+        private readonly Exception _exception;
+
+        public ThrowingStubProcessRunner(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public Task<ProcessRunResult> RunAsync(ProcessInvocation invocation, CancellationToken cancellationToken) =>
+            Task.FromException<ProcessRunResult>(_exception);
     }
 
     private sealed class StubProcessRunner : IProcessRunner

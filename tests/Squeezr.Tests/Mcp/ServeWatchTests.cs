@@ -129,6 +129,7 @@ public sealed class ServeWatchTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         ApplyWatchConfig(workspace, watchEnabled);
         WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"uniqneedle\"; }");
@@ -143,6 +144,7 @@ public sealed class ServeWatchTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         ApplyWatchConfig(workspace, watchEnabled: false);
         for (var i = 0; i < StormFiles; i++)

@@ -28,6 +28,11 @@ public class TuiEndToEndTests
 
         console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushKey(ConsoleKey.Enter);
+        TuiTestHarness.PushMenuChoice(console, 7);
+
+        (await TuiApp.RunAsync(console, workspace)).ShouldBe(0);
+
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
 
         TuiTestHarness.PushMenuChoice(console, 4);
         console.Input.PushTextWithEnter("repo");

@@ -150,6 +150,7 @@ public class McpToolsTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         foreach (var i in Enumerable.Range(1, 100))
         {
@@ -216,6 +217,7 @@ public class McpToolsTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"uniqneedle\"; }");
         new WorkspaceIndexer().Index(workspace);

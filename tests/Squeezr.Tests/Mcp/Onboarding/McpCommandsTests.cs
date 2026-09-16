@@ -91,6 +91,7 @@ public sealed class McpCommandsTests
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         var nested = Directory.CreateDirectory(Path.Combine(workspace, "sub")).FullName;
 
         var (exitCode, _, _, _) = await RunAsync(nested, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"]);

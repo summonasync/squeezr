@@ -143,6 +143,7 @@ public class IncrementalIndexTests
         Directory.CreateDirectory(Path.Combine(workspace, "two"));
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "one/a.cs", "class A { string Term = \"orphanneedle\"; }");
         WriteFile(workspace, "two/b.cs", "class B { }");
         manager.AddRepo("one", "one");
@@ -183,6 +184,7 @@ public class IncrementalIndexTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         return workspace;
     }

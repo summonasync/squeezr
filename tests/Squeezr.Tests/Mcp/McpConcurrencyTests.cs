@@ -71,6 +71,7 @@ public class McpConcurrencyTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"uniqneedle\"; void Run() { } }");
         WriteFile(workspace, "repo/b.cs", "class Beta { Alpha Make() { return new Alpha(); } }");

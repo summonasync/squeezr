@@ -89,6 +89,7 @@ public class TuiMapBrowserTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         var console = TuiTestHarness.InteractiveConsole();
 
@@ -122,6 +123,7 @@ public class TuiMapBrowserTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/data[2024].cs", """
             namespace Demo;
@@ -144,6 +146,7 @@ public class TuiMapBrowserTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/src/Calc.cs", """
             namespace Demo;

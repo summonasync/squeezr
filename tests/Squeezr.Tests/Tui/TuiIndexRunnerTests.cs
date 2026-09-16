@@ -87,6 +87,7 @@ public class TuiIndexRunnerTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/src/Calc.cs", """
             namespace Demo;

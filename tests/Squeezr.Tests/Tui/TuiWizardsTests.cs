@@ -36,6 +36,7 @@ public class TuiWizardsTests
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         var console = TuiTestHarness.InteractiveConsole();
         console.Input.PushTextWithEnter(string.Empty);
 
@@ -50,6 +51,7 @@ public class TuiWizardsTests
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         Directory.CreateDirectory(Path.Combine(workspace, "repolib"));
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 4);
@@ -73,6 +75,7 @@ public class TuiWizardsTests
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 6);
         console.Input.PushKey(ConsoleKey.Enter);
@@ -92,6 +95,7 @@ public class TuiWizardsTests
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 6);
         console.Input.PushTextWithEnter("y");

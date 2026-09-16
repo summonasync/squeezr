@@ -106,6 +106,7 @@ public class McpPolyglotToolsTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/src/Calc.cs", "class Calc {\n    int Add(int a, int b) {\n        return a + b;\n    }\n}\n");
         WriteFile(workspace, "repo/src/util.js", "export function mul(a, b) {\n  return a * b;\n}\n");
         WriteFile(workspace, "repo/src/app.js", """
