@@ -22,6 +22,7 @@ public sealed class DockerComposeCli
         "so re-running 'squeezr services up' without network access may fail.";
 
     private static readonly Version PolicyMissingMinVersion = new(2, 24);
+    private static readonly Version PsJsonMinVersion = new(2, 21);
     private static readonly string[] PullArguments = ["pull"];
     private static readonly string[] PolicyMissingPullArguments = ["pull", "--policy", "missing"];
 
@@ -124,31 +125,68 @@ public sealed class DockerComposeCli
         }
     }
 
-    public static IReadOnlyList<ComposeServiceState> ParseServiceStates(string psOutput)
+    public static IReadOnlyList<ComposeServiceState> ParseServiceStates(string psOutput, Version? composeVersion = null)
     {
         if (string.IsNullOrWhiteSpace(psOutput))
         {
             return [];
         }
 
-        using var document = ParsePsDocument(psOutput);
+        return psOutput.TrimStart().StartsWith('[')
+            ? ParseArrayServiceStates(psOutput, composeVersion)
+            : ParseLineDelimitedServiceStates(psOutput, composeVersion);
+    }
+
+    private static IReadOnlyList<ComposeServiceState> ParseArrayServiceStates(string psOutput, Version? composeVersion)
+    {
+        using var document = ParsePsDocument(psOutput, composeVersion);
         if (document.RootElement.ValueKind != JsonValueKind.Array)
         {
-            throw UnsupportedPsFormat();
+            throw UnsupportedPsFormat(composeVersion);
         }
 
         var states = new List<ComposeServiceState>();
         foreach (var element in document.RootElement.EnumerateArray())
         {
-            states.Add(new ComposeServiceState(
-                PropertyOrEmpty(element, "Service"),
-                PropertyOrEmpty(element, "Name"),
-                PropertyOrEmpty(element, "State"),
-                PropertyOrEmpty(element, "Status")));
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                throw UnsupportedPsFormat(composeVersion);
+            }
+
+            states.Add(ToServiceState(element));
         }
 
         return states;
     }
+
+    private static IReadOnlyList<ComposeServiceState> ParseLineDelimitedServiceStates(string psOutput, Version? composeVersion)
+    {
+        var states = new List<ComposeServiceState>();
+        foreach (var line in psOutput.Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            using var document = ParsePsDocument(line, composeVersion);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw UnsupportedPsFormat(composeVersion);
+            }
+
+            states.Add(ToServiceState(document.RootElement));
+        }
+
+        return states;
+    }
+
+    private static ComposeServiceState ToServiceState(JsonElement element) =>
+        new(
+            PropertyOrEmpty(element, "Service"),
+            PropertyOrEmpty(element, "Name"),
+            PropertyOrEmpty(element, "State"),
+            PropertyOrEmpty(element, "Status"));
 
     private async Task<DockerComposeInstallation?> TryDetectAsync(
         string executable,
@@ -194,7 +232,7 @@ public sealed class DockerComposeCli
             $"'{DisplayCommand(installation, arguments)}' failed with exit code {result.ExitCode}: {FailureDetail(result)}",
             ServicesException.ComposeCommandFailedCode);
 
-    private static JsonDocument ParsePsDocument(string psOutput)
+    private static JsonDocument ParsePsDocument(string psOutput, Version? composeVersion)
     {
         try
         {
@@ -202,16 +240,29 @@ public sealed class DockerComposeCli
         }
         catch (JsonException ex)
         {
-            throw UnsupportedPsFormat(ex);
+            throw UnsupportedPsFormat(composeVersion, ex);
         }
     }
 
-    private static ServicesException UnsupportedPsFormat(Exception? innerException = null) =>
-        new(
-            "'docker compose ps --format json' returned unexpected output; " +
-            "it requires Docker Compose v2.21 or newer. Upgrade Docker Engine: https://docs.docker.com/engine/install/",
-            ServicesException.ComposeCommandFailedCode,
-            innerException);
+    private static ServicesException UnsupportedPsFormat(Version? composeVersion, Exception? innerException = null) =>
+        composeVersion switch
+        {
+            null => new ServicesException(
+                "'docker compose ps --format json' returned unexpected output and the Docker Compose version " +
+                "could not be determined; the output shape was not recognized.",
+                ServicesException.ComposeCommandFailedCode,
+                innerException),
+            var version when version < PsJsonMinVersion => new ServicesException(
+                "'docker compose ps --format json' returned unexpected output; " +
+                "it requires Docker Compose v2.21 or newer. Upgrade Docker Engine: https://docs.docker.com/engine/install/",
+                ServicesException.ComposeCommandFailedCode,
+                innerException),
+            _ => new ServicesException(
+                $"'docker compose ps --format json' returned unexpected output despite Docker Compose v{composeVersion}; " +
+                "the output shape was not recognized.",
+                ServicesException.ComposeCommandFailedCode,
+                innerException)
+        };
 
     private static string PropertyOrEmpty(JsonElement element, string name) =>
         element.TryGetProperty(name, out var property) ? property.GetString() ?? string.Empty : string.Empty;

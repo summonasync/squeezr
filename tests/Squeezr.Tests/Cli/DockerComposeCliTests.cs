@@ -231,11 +231,41 @@ public sealed class DockerComposeCliTests
             "[{\"Name\":\"squeezr-qdrant-1\",\"Service\":\"qdrant\",\"State\":\"running\",\"Status\":\"Up 2 minutes\"}," +
             "{\"Name\":\"squeezr-ollama-1\",\"Service\":\"ollama\",\"State\":\"exited\",\"Status\":\"Exit 0\"}]";
 
-        var states = DockerComposeCli.ParseServiceStates(psOutput);
+        var states = DockerComposeCli.ParseServiceStates(psOutput, new Version(2, 29, 2));
 
         states.Count.ShouldBe(2);
         states[0].ShouldBe(new ComposeServiceState("qdrant", "squeezr-qdrant-1", "running", "Up 2 minutes"));
         states[1].ShouldBe(new ComposeServiceState("ollama", "squeezr-ollama-1", "exited", "Exit 0"));
+    }
+
+    [Fact]
+    public void ParseServiceStates_NdjsonLines_ComposeV5_ReturnsStates()
+    {
+        const string psOutput =
+            "{\"Command\":\"\\\"./entrypoint.sh\\\"\",\"ID\":\"7d58dd5a8634\",\"Name\":\"squeezr-qdrant-1\"," +
+            "\"Project\":\"squeezr\",\"Publishers\":[{\"URL\":\"0.0.0.0\",\"TargetPort\":6334,\"PublishedPort\":6334," +
+            "\"Protocol\":\"tcp\"}],\"Service\":\"qdrant\",\"State\":\"running\",\"Status\":\"Up 53 minutes\"}\n" +
+            "{\"Command\":\"\\\"/bin/ollama serve\\\"\",\"ID\":\"75eb08d6ded5\",\"Name\":\"squeezr-ollama-1\"," +
+            "\"Project\":\"squeezr\",\"Publishers\":[],\"Service\":\"ollama\",\"State\":\"running\"," +
+            "\"Status\":\"Up 53 minutes\"}\n";
+
+        var states = DockerComposeCli.ParseServiceStates(psOutput, new Version(5, 5, 1));
+
+        states.Count.ShouldBe(2);
+        states[0].ShouldBe(new ComposeServiceState("qdrant", "squeezr-qdrant-1", "running", "Up 53 minutes"));
+        states[1].ShouldBe(new ComposeServiceState("ollama", "squeezr-ollama-1", "running", "Up 53 minutes"));
+    }
+
+    [Fact]
+    public void ParseServiceStates_SingleNdjsonObject_ReturnsSingleState()
+    {
+        const string psOutput =
+            "{\"Name\":\"squeezr-qdrant-1\",\"Service\":\"qdrant\",\"State\":\"running\",\"Status\":\"Up 2 minutes\"}";
+
+        var states = DockerComposeCli.ParseServiceStates(psOutput, new Version(5, 5, 1));
+
+        states.Count.ShouldBe(1);
+        states.Single().ShouldBe(new ComposeServiceState("qdrant", "squeezr-qdrant-1", "running", "Up 2 minutes"));
     }
 
     [Theory]
@@ -246,19 +276,39 @@ public sealed class DockerComposeCliTests
         DockerComposeCli.ParseServiceStates(psOutput).ShouldBeEmpty();
     }
 
-    [Fact]
-    public void ParseServiceStates_NonJsonOutput_ThrowsComposeFailed()
+    [Theory]
+    [InlineData(null, "could not be determined")]
+    [InlineData("2.20.7", "requires Docker Compose v2.21 or newer")]
+    [InlineData("2.21.0", "despite Docker Compose v2.21")]
+    [InlineData("5.5.1", "despite Docker Compose v5.5.1")]
+    public void ParseServiceStates_NonJsonOutput_GateMessageDependsOnComposeVersion(string? version, string expectedFragment)
     {
-        var ex = Should.Throw<ServicesException>(() => DockerComposeCli.ParseServiceStates("no configuration file"));
+        var composeVersion = version is null ? null : Version.Parse(version);
+
+        var ex = Should.Throw<ServicesException>(
+            () => DockerComposeCli.ParseServiceStates("no configuration file", composeVersion));
 
         ex.Code.ShouldBe(ServicesException.ComposeCommandFailedCode);
-        ex.Message.ShouldContain("Docker Compose v2.21");
+        ex.Message.ShouldContain(expectedFragment);
+        if (version is null || Version.Parse(version) >= new Version(2, 21, 0))
+        {
+            ex.Message.ShouldNotContain("requires Docker Compose v2.21 or newer");
+        }
     }
 
     [Fact]
-    public void ParseServiceStates_NonArrayJson_ThrowsComposeFailed()
+    public void ParseServiceStates_NonObjectNdjsonLine_ThrowsComposeFailed()
     {
-        var ex = Should.Throw<ServicesException>(() => DockerComposeCli.ParseServiceStates("{}"));
+        var ex = Should.Throw<ServicesException>(() => DockerComposeCli.ParseServiceStates("42", new Version(5, 5, 1)));
+
+        ex.Code.ShouldBe(ServicesException.ComposeCommandFailedCode);
+        ex.Message.ShouldContain("despite Docker Compose v5.5.1");
+    }
+
+    [Fact]
+    public void ParseServiceStates_ArrayOfNonObjects_ThrowsComposeFailed()
+    {
+        var ex = Should.Throw<ServicesException>(() => DockerComposeCli.ParseServiceStates("[1,2]", new Version(2, 29, 2)));
 
         ex.Code.ShouldBe(ServicesException.ComposeCommandFailedCode);
     }

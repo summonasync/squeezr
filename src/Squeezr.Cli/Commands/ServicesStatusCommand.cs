@@ -29,7 +29,7 @@ public sealed class ServicesStatusCommand : AsyncCommand<ServicesStatusCommand.S
                 composeVersion = FormatComposeVersion(installation);
                 var result = await cli.RunCheckedAsync(
                     installation, composePath, ["ps", "--format", "json"], DockerComposeCli.StatusTimeout, cancellationToken);
-                states = DockerComposeCli.ParseServiceStates(result.StdOut);
+                states = DockerComposeCli.ParseServiceStates(result.StdOut, installation.Version);
             }
             catch (ServicesException ex)
             {

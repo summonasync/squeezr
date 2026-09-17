@@ -242,6 +242,39 @@ public sealed class ServicesCommandTests
     }
 
     [Fact]
+    public async Task Status_Json_NdjsonPsOutput_ComposeV5_ParsesContainerStates()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var cwd = TestDirs.NewTempDir();
+        var home = TestDirs.NewTempDir();
+        const string psNdjson =
+            "{\"Command\":\"\\\"./entrypoint.sh\\\"\",\"ID\":\"7d58dd5a8634\",\"Name\":\"squeezr-qdrant-1\"," +
+            "\"Service\":\"qdrant\",\"State\":\"running\",\"Status\":\"Up 53 minutes\"}\n" +
+            "{\"Command\":\"\\\"/bin/ollama serve\\\"\",\"ID\":\"75eb08d6ded5\",\"Name\":\"squeezr-ollama-1\"," +
+            "\"Service\":\"ollama\",\"State\":\"running\",\"Status\":\"Up 53 minutes\"}";
+        var docker = FakeDocker.Install(psJson: psNdjson, composeVersion: "v5.5.1");
+        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+        var up = await RunCliAsync(cwd, home, path, "services", "up");
+        up.ExitCode.ShouldBe(0);
+
+        var status = await RunCliAsync(cwd, home, path, "services", "status", "--json");
+
+        status.ExitCode.ShouldBe(0);
+        using var json = JsonDocument.Parse(status.StdOut.Trim());
+        var services = json.RootElement.GetProperty("services");
+        services.GetArrayLength().ShouldBe(2);
+        services[0].GetProperty("service").GetString().ShouldBe("qdrant");
+        services[0].GetProperty("name").GetString().ShouldBe("squeezr-qdrant-1");
+        services[0].GetProperty("state").GetString().ShouldBe("running");
+        services[1].GetProperty("service").GetString().ShouldBe("ollama");
+        json.RootElement.GetProperty("composeVersion").GetString().ShouldBe("v5.5.1 (plugin)");
+    }
+
+    [Fact]
     public async Task Up_WithoutDocker_PrintsInstallHintInsteadOfStackTrace()
     {
         var cwd = TestDirs.NewTempDir();
