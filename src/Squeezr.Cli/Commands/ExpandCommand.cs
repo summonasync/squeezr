@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -35,13 +37,20 @@ public sealed class ExpandCommand : Command<ExpandCommand.Settings>
     {
         try
         {
-            var result = new SpanExpander(WorkspaceRootResolver.RequireWorkspaceRoot()).Expand(
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var sw = Stopwatch.StartNew();
+            var result = new SpanExpander(workspaceRoot).Expand(
                 settings.File,
                 settings.StartLine,
                 settings.EndLine,
                 settings.Context ?? SpanExpander.DefaultContextLines,
                 settings.Repo,
                 settings.MaxTokens ?? SpanExpander.DefaultMaxTokens);
+
+            QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "expand",
+                new { file = settings.File, startLine = settings.StartLine, endLine = settings.EndLine, context = settings.Context },
+                result.TokensUsed, result.Truncated, result.Span.Count,
+                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
 
             if (settings.Json)
             {

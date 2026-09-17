@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -24,14 +27,22 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
     {
         try
         {
-            var result = new RefLookup(WorkspaceRootResolver.RequireWorkspaceRoot()).Find(settings.Symbol, settings.Repo);
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var sw = Stopwatch.StartNew();
+            var result = new RefLookup(workspaceRoot).Find(settings.Symbol, settings.Repo);
+            var refs = result.Groups.SelectMany(g => g.Refs).ToList();
+
+            QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "refs",
+                new { symbol = settings.Symbol, repo = settings.Repo },
+                refs.Sum(r => TokenCounter.Estimate($"{r.File}:{r.Line} {r.Kind}")), false, refs.Count,
+                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
 
             if (settings.Json)
             {
                 JsonOutput.Write(new
                 {
                     symbol = result.Symbol,
-                    refs = result.Groups.SelectMany(g => g.Refs).ToList()
+                    refs
                 });
             }
             else

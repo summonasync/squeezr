@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
@@ -6,6 +7,7 @@ using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp.Tools;
@@ -19,15 +21,17 @@ public sealed class CodeSearchTool
 
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
+    private readonly ToolResponseCache? _cache;
     private readonly object _resolveLock = new();
     private IEmbeddingProvider? _embeddings;
     private IVectorStore? _vectorStore;
     private bool _resolved;
 
-    public CodeSearchTool(McpWorkspace workspace, McpToolGate gate)
+    public CodeSearchTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
     {
         _workspace = workspace;
         _gate = gate;
+        _cache = cache;
     }
 
     [Description("Hybrid exact/semantic search over the indexed workspace. Returns file:line matches with snippets (no full bodies); use expand_span (when available) to reveal a body around a hit. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
@@ -49,10 +53,21 @@ public sealed class CodeSearchTool
         int? topK,
         CancellationToken cancellationToken)
     {
+        var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
+            var parameters = Params(query, repo, maxTokens, topK);
+            if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
+            {
+                var hit = (ToolEnvelope)cached!;
+                QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
+                    hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                return hit;
+            }
+
             var warnings = new List<string>();
             ResolveRuntime(root, warnings);
 
@@ -78,7 +93,12 @@ public sealed class CodeSearchTool
             var data = response.Matches.Select(m => new SearchHitData(
                 m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet)).ToList();
 
-            return ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
+            var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
+            QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
+                response.TokensUsed, response.Truncated, data.Count,
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+            _cache?.Put("code_search", parameters, envelope);
+            return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -91,6 +111,9 @@ public sealed class CodeSearchTool
             root,
             response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
+
+    private static object Params(string query, string? repo, int? maxTokens, int? topK) =>
+        new { query, repo, maxTokens, topK };
 
     private void ResolveRuntime(string root, List<string> warnings)
     {

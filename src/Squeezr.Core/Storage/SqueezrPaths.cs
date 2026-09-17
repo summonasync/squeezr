@@ -11,6 +11,7 @@ public static class SqueezrPaths
     public const string LockFileName = "index.lock";
     public const string ComposeFileName = "docker-compose.yml";
     public const string TrigramIndexFileName = "trigram.idx";
+    public const string QueriesLogFileName = "queries.jsonl";
     public const string WorkspacesDirName = "workspaces";
     public const string InfraDirName = "infra";
     public const string RegistryFileName = "workspaces.json";
@@ -31,6 +32,8 @@ public static class SqueezrPaths
     public static string MetaDbPath(string root) => Path.Combine(StoreDir(root), MetaDbFileName);
 
     public static string TrigramIndexPath(string root) => Path.Combine(StoreDir(root), TrigramIndexFileName);
+
+    public static string QueriesLogPath(string root) => Path.Combine(StoreDir(root), QueriesLogFileName);
 
     public static string ComposePath(string root) => Path.Combine(root, ComposeFileName);
 }

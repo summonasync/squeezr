@@ -1,9 +1,11 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp.Tools;
@@ -15,11 +17,13 @@ public sealed class RepoMapTool
 
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
+    private readonly ToolResponseCache? _cache;
 
-    public RepoMapTool(McpWorkspace workspace, McpToolGate gate)
+    public RepoMapTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
     {
         _workspace = workspace;
         _gate = gate;
+        _cache = cache;
     }
 
     [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members). Never returns bodies — use expand_span on coordinates from other tools to read code. Good entry point for navigating an unfamiliar workspace. Signatures are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
@@ -29,10 +33,21 @@ public sealed class RepoMapTool
 
     private object BuildCore(string? repo, int? depth, int? maxTokens)
     {
+        var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
+            var parameters = Params(repo, depth, maxTokens);
+            if (_cache is not null && _cache.TryGet("repo_map", parameters, out var cached))
+            {
+                var hit = (ToolEnvelope)cached!;
+                QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
+                    hit.TokensUsed, hit.Truncated, ((List<MapLineData>)hit.Data!).Count,
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                return hit;
+            }
+
             var warnings = new List<string>();
             var resolvedDepth = depth ?? RepoMapper.DefaultDepth;
             var resolvedMaxTokens = maxTokens ?? RepoMapper.DefaultMaxTokens;
@@ -53,7 +68,12 @@ public sealed class RepoMapTool
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();
 
-            return ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
+                result.TokensUsed, result.Truncated, data.Count,
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+            _cache?.Put("repo_map", parameters, envelope);
+            return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -90,6 +110,9 @@ public sealed class RepoMapTool
             candidates.Distinct().Take(GuardCandidateLimit).ToList(),
             StaleLockWarningSink.ToStderr);
     }
+
+    private static object Params(string? repo, int? depth, int? maxTokens) =>
+        new { repo, depth, maxTokens };
 
     private sealed record MapLineData(
         [property: JsonPropertyName("depth")] int Depth,

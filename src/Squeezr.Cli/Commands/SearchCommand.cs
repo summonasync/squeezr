@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -45,6 +47,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         try
         {
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var sw = Stopwatch.StartNew();
 
             var warnings = EmbeddingRuntimeFactory.TryCreate(
                 workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
@@ -79,6 +82,11 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
                 ReportWarning(warning);
             }
+
+            QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "search",
+                new { query = settings.Query, repo = settings.Repo, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK },
+                response.TokensUsed, response.Truncated, response.Matches.Count,
+                sw.ElapsedMilliseconds, indexAge: ResolveIndexAge(workspaceRoot));
 
             if (settings.Json)
             {
@@ -126,6 +134,14 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         {
             return CommandError.Report(ex, settings.Json);
         }
+    }
+
+    internal static TimeSpan? ResolveIndexAge(string workspaceRoot)
+    {
+        var lastIndexedAt = new WorkspaceManager(workspaceRoot).GetStatus().Repos
+            .Select(r => r.LastIndexedAt)
+            .Max();
+        return lastIndexedAt is null ? null : DateTime.UtcNow - lastIndexedAt.Value.ToUniversalTime();
     }
 
     private static void ReportWarning(string message) =>

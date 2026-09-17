@@ -59,6 +59,7 @@ public static class McpServerHost
         }
 
         var gate = new McpToolGate();
+        var cache = new ToolResponseCache(workspaceRoot);
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.None));
         services.AddSingleton(workspace);
@@ -75,11 +76,11 @@ public static class McpServerHost
                     "Squeezr: local code index for AI agents. Hybrid exact/semantic search over indexed repositories.";
             })
             .WithStreamServerTransport(input, output)
-            .WithTools(new CodeSearchTool(workspace, gate))
+            .WithTools(new CodeSearchTool(workspace, gate, cache))
             .WithTools(new IndexStatusTool(workspace, gate))
-            .WithTools(new SymbolLookupTool(workspace, gate))
-            .WithTools(new FindReferencesTool(workspace, gate))
-            .WithTools(new RepoMapTool(workspace, gate))
+            .WithTools(new SymbolLookupTool(workspace, gate, cache))
+            .WithTools(new FindReferencesTool(workspace, gate, cache))
+            .WithTools(new RepoMapTool(workspace, gate, cache))
             .WithTools(new ExpandSpanTool(workspace, gate));
 
         await using var provider = services.BuildServiceProvider();

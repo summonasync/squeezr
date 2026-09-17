@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Output;
@@ -17,11 +18,13 @@ public sealed class FindReferencesTool
 
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
+    private readonly ToolResponseCache? _cache;
 
-    public FindReferencesTool(McpWorkspace workspace, McpToolGate gate)
+    public FindReferencesTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
     {
         _workspace = workspace;
         _gate = gate;
+        _cache = cache;
     }
 
     [Description("Find all references to a symbol in the index: every call site as file:line with the reference kind and the enclosing symbol (captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture). Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
@@ -31,10 +34,21 @@ public sealed class FindReferencesTool
 
     private object FindCore(string symbol, string? repo)
     {
+        var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
+            var parameters = Params(symbol, repo);
+            if (_cache is not null && _cache.TryGet("find_references", parameters, out var cached))
+            {
+                var hit = (ToolEnvelope)cached!;
+                QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
+                    hit.TokensUsed, hit.Truncated, ((List<RefData>)hit.Data!).Count,
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                return hit;
+            }
+
             var warnings = new List<string>();
             var lookup = new RefLookup(root);
 
@@ -50,7 +64,12 @@ public sealed class FindReferencesTool
 
             var tokensUsed = data.Sum(d => TokenCounter.Estimate($"{d.File}:{d.Line} {d.Kind}"));
 
-            return ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale);
+            var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale);
+            QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
+                tokensUsed, false, data.Count,
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+            _cache?.Put("find_references", parameters, envelope);
+            return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -118,6 +137,9 @@ public sealed class FindReferencesTool
                 .Take(GuardCandidateLimit)
                 .ToList(),
             StaleLockWarningSink.ToStderr);
+
+    private static object Params(string symbol, string? repo) =>
+        new { symbol, repo };
 
     private sealed record RefData(
         [property: JsonPropertyName("file")] string File,

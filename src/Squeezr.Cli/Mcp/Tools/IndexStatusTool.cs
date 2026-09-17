@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
@@ -29,6 +30,7 @@ public sealed class IndexStatusTool
 
     private async Task<object> GetCore(CancellationToken cancellationToken)
     {
+        var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
@@ -54,7 +56,11 @@ public sealed class IndexStatusTool
                 new EmbeddingsData(qdrant.PendingChunks),
                 new QdrantData(qdrant.Available, qdrant.Points));
 
-            return ToolEnvelope.Wrap(data, 0, false, warnings, root, staleFiles: null);
+            var envelope = ToolEnvelope.Wrap(data, 0, false, warnings, root, staleFiles: null);
+            QueryTelemetry.Record(root, _workspace.SessionId, "index_status",
+                null, envelope.TokensUsed, envelope.Truncated, 1,
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+            return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

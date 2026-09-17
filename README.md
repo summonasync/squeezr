@@ -100,7 +100,8 @@ Squeezr не мусорит в проекте: `squeezr init` не создаё�
 │   ├── trigram.idx                  # триграммный индекс
 │   ├── index.lock
 │   ├── watch.heartbeat              # пока жив демон `watch` (флот, см. раздел про fleet)
-│   └── serve-watch.heartbeat        # ...или `serve --watch` от MCP-клиента
+│   ├── serve-watch.heartbeat        # ...или `serve --watch` от MCP-клиента
+│   └── queries.jsonl                # телеметрия запросов для `stats` (локально, drop сносит)
 ├── models/                         # ONNX-модели эмбеддингов
 └── infra/docker-compose.yml        # qdrant + ollama (генерируется `squeezr services up`)
 ```
@@ -247,6 +248,8 @@ Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`
 - `warnings` — мягкая деградация (например, «vector store unavailable, falling back to exact search only») и подсказки при обрезке.
 - `indexAge` / `staleFiles` — свежесть. Изменённые файлы освежаются inline при чтении; то, что освежить не удалось, честно попадает в `staleFiles` — агент видит, что данные по этим файлам протухли, и может предложить `squeezr index`. Окончательное решение о реиндексе — за хозяином workspace.
 
+Повторные запросы почти бесплатны: дорогие тулы (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) кэшируют ответы внутри serve-сессии — LRU на 100 записей, ключ по каноническому JSON параметров (порядок свойств и null-и-absent на ключ не влияют). Идентичный запрос в той же сессии = мгновенный повтор сохранённого конверта, телеметрия помечает его `cacheHit: true` (и он виден в hit-rate у `squeezr stats`). Любая переиндексация — watch-проход или внешний `squeezr index` — меняет поколение кэша (mtime meta.db), все ключи выбиваются, агент получает свежие данные. `expand_span` не кэшируется (читает живой файл с диска), `index_status` дешёвый сам по себе.
+
 ## Watch-режим: индекс догоняет рабочее дерево сам
 
 Индекс по требованию — это компромисс: правишь файл, а `code_search` ещё отвечает про старую версию. FreshnessGuard освежает точечно при чтении, но полный догоняющий проход запускаешь руками. Watch-режим убирает и это.
@@ -306,6 +309,33 @@ squeezr fleet restart <storeKey>  # перезапустить watch-демон
 - `restart` работает только с `watch`: живой демон аккуратно останавливается, затем detached-процесс `squeezr watch` спавнится с cwd = rootPath воркспейса (rootPath исчез — ошибка с хинтом на `drop`). Живой `serve --watch` не трогается: им владеет MCP-клиент, и попытка его перезапуска честно ошибается с хинтом (`squeezr mcp install` или рестарт агента).
 - Обе команды умеют `--json`: один NDJSON-объект результата, stdout чистый (контракт 035).
 
+## Stats: экономия токенов в цифрах
+
+«А он правда экономит?» — `squeezr stats` отвечает числами, а не обещаниями. Каждая навигационная команда (CLI: `search`/`symbol`/`refs`/`map`/`expand`; MCP: все шесть тулов) пишет одну строку телеметрии в `queries.jsonl` в сторе воркспейса, stats считает по ней сводку:
+
+```bash
+squeezr stats           # таблица по тулам + savings + кэш
+squeezr stats --json    # один JSON-объект (контракт 035)
+squeezr stats --reset   # очистить телеметрию
+```
+
+```
+Tool     Count  Avg tokens  Truncation
+expand   3      486.0       0.0 %
+search   1      7086.0      0.0 %
+
+Savings: 8544 actual vs 10617 counterfactual tokens — saved 2073 (×1.2)
+Cache hit-rate: 0.0 % across 0 session(s)
+Period: 2026-09-17 14:57 — 2026-09-17 14:58 (4 records)
+```
+
+- **Таблица по тулам** — вызовы, средний `tokensUsed` и доля обрезанных бюджетом ответов.
+- **Savings** — counterfactual-сравнение: actual — сумма `tokensUsed` всех ответов; counterfactual — сколько токенов ушло бы, если бы каждый раскрытый через expand файл читался целиком (файл считается один раз, оценка по размеру — та же формула, что у чанкера; файлы, которых уже нет в индексе, честно исключаются с отдельной строкой). `saved` — разница, `×N.N` — во сколько раз меньше.
+- **Cache hit-rate** — доля повторных ответов из кэша serve-сессий (см. семантику ответа ниже) и число сессий, где кэш срабатывал; CLI-запуски кэш не используют — каждый запуск и есть своя сессия.
+- **Period** — окно записей и их количество; больше 50 000 записей — серый хинт на `--reset` (авточистки нет, осознанно).
+
+Приватность: телеметрия — это локальный `queries.jsonl` в store-каталоге воркспейса (`~/.squeezr/workspaces/<storeKey>/`). В проекте и в git её нет, наружу не уходит, с воркспейсом и умирает — `squeezr drop` сносит вместе со всем стором.
+
 ## Roadmap
 
 - [x] **M1** — каркас CLI, LiteDB-схемы, конфиг, workspace
@@ -330,6 +360,8 @@ Born from a simple observation: agents waste 30–80k tokens navigating code by 
 The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: central workspace store in `~/.squeezr` (registry + per-workspace store dirs, zero files in your project, `SQUEEZR_HOME` override; legacy in-project `.squeezr/` auto-migrates) + Qdrant/Ollama in Docker managed by `squeezr services up|down|status` (ROCm device passthrough on AMD GPUs) + embeddings: local ONNX by default (nomic-embed-text-v1.5, int8, ~131 MB, 768d, CPU), optional ollama provider (nomic-embed-text via native `/api/embed`, auto-pull, GPU-capable) or any OpenAI-compatible endpoint — nothing leaves your machine. Default embedding model: local ONNX nomic-embed-text-v1.5 (legacy bge-code-v1, 1536d, stays a supported option via `scripts/fetch-model.sh --model bge-code-v1` + `embeddings.onnx.model` in the workspace config — switching models on an existing workspace requires `squeezr index --reembed`).
 
 An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client onboarding is one command: `squeezr mcp install` detects supported agent CLIs (Claude Code, Kimi Code, Qwen Code, Codex), registers a `serve --watch` entry via the client's own CLI (direct config merge for Kimi), and optionally writes an idempotent instruction block into the client's instruction file; `squeezr mcp doctor` verifies the setup per client (exit 0/1), `squeezr mcp remove` undoes it. Flags: `--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--yes`, `--json`. Workspace root = server process cwd, with a `CLAUDE_PROJECT_DIR` fallback for Claude Code (no cwd key in its config); manual config paths (e.g. `~/.claude.json` / `.mcp.json`, `~/.codex/config.toml`) are listed in the RU section above. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits. Every running daemon writes a heartbeat file (`<storeDir>/<kind>.heartbeat`, refreshed every 5 s, removed on clean exit), so `squeezr fleet` shows all workspaces' daemons at a glance — pid, uptime, stale root paths, pending chunks — and `squeezr fleet stop|restart <storeKey>` manages them: stop covers both daemon kinds (SIGTERM → 5 s grace → SIGKILL, heartbeat pids verified as squeezr processes), restart respawns the CLI watch daemon only (`serve --watch` is owned by the MCP client); `--json` is NDJSON per the 035 contract. For programmatic progress, `index --events` / `serve --watch --events` stream NDJSON events (`started` → `fileIndexed` → `progress` → `completed`/`error`), flushed per line — stdout for `index`, stderr for `serve` (stdout carries MCP JSON-RPC); a quiet incremental run emits exactly `started` → `fileIndexed`×N → `completed`.
+
+Token economics are measurable: every navigation command (CLI and all six MCP tools) appends a local telemetry line to `queries.jsonl` in the workspace store dir, and `squeezr stats [--json|--reset]` turns it into a per-tool table plus counterfactual savings — actual tokens spent vs reading every expanded file whole — and the serve-cache hit-rate; telemetry never leaves the machine and is removed with the workspace. The four expensive MCP tools cache responses per serve session (LRU 100, canonical-JSON key), and any reindex invalidates the cache generation, so identical requests replay instantly only while the index is unchanged.
 
 ```bash
 dotnet build Squeezr.slnx

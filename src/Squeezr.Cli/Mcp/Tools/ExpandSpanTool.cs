@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp.Tools;
@@ -35,6 +37,7 @@ public sealed class ExpandSpanTool
         int? contextLines,
         int? maxTokens)
     {
+        var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
@@ -57,7 +60,12 @@ public sealed class ExpandSpanTool
                 result.Span.ToList(),
                 result.After.ToList());
 
-            return ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, staleFiles: null);
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, staleFiles: null);
+            QueryTelemetry.Record(root, _workspace.SessionId, "expand_span",
+                new { file, startLine, endLine, contextLines },
+                result.TokensUsed, result.Truncated, data.Span.Count,
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+            return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

@@ -30,6 +30,8 @@ public static class CliApplication
                 .WithDescription("Add a repository to the workspace");
             config.AddCommand<StatusCommand>("status")
                 .WithDescription("Show workspace and index status");
+            config.AddCommand<StatsCommand>("stats")
+                .WithDescription("Show query telemetry: per-tool stats, token savings, cache hit-rate");
             config.AddCommand<IndexCommand>("index")
                 .WithDescription("Index workspace repositories into the trigram index");
             config.AddCommand<SearchCommand>("search")

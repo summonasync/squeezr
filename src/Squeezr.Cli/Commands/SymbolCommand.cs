@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -33,12 +35,19 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
     {
         try
         {
-            var result = new SymbolLookup(WorkspaceRootResolver.RequireWorkspaceRoot()).Find(
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var sw = Stopwatch.StartNew();
+            var result = new SymbolLookup(workspaceRoot).Find(
                 settings.Name,
                 settings.Repo,
                 settings.Kind,
                 settings.MaxTokens ?? SymbolLookup.DefaultMaxTokens,
                 settings.Body);
+
+            QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "symbol",
+                new { name = settings.Name, kind = settings.Kind, repo = settings.Repo },
+                result.TokensUsed, result.Truncated, result.Matches.Count,
+                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
 
             if (settings.Json)
             {

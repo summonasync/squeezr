@@ -1,9 +1,11 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp.Tools;
@@ -16,11 +18,13 @@ public sealed class SymbolLookupTool
 
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
+    private readonly ToolResponseCache? _cache;
 
-    public SymbolLookupTool(McpWorkspace workspace, McpToolGate gate)
+    public SymbolLookupTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
     {
         _workspace = workspace;
         _gate = gate;
+        _cache = cache;
     }
 
     [Description("Find symbol definitions by name across the indexed workspace: signature, doc comment, file:span, and body within the token budget (maxTokens, default 300). Not-found returns an empty result, not an error. Use expand_span (when available) for wider context around a hit.")]
@@ -38,10 +42,21 @@ public sealed class SymbolLookupTool
         string? repo,
         int? maxTokens)
     {
+        var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
+            var parameters = Params(name, kind, repo);
+            if (_cache is not null && _cache.TryGet("symbol_lookup", parameters, out var cached))
+            {
+                var hit = (ToolEnvelope)cached!;
+                QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
+                    hit.TokensUsed, hit.Truncated, ((List<SymbolHitData>)hit.Data!).Count,
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                return hit;
+            }
+
             var warnings = new List<string>();
             var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
             var lookup = new SymbolLookup(root);
@@ -53,7 +68,11 @@ public sealed class SymbolLookupTool
             }
             catch (WorkspaceException ex) when (ex.Message.StartsWith(NotFoundPrefix, StringComparison.Ordinal))
             {
-                return ToolEnvelope.Wrap(Array.Empty<object>(), 0, false, warnings, root, staleFiles: null);
+                var miss = ToolEnvelope.Wrap(Array.Empty<object>(), 0, false, warnings, root, staleFiles: null);
+                QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
+                    miss.TokensUsed, miss.Truncated, 0,
+                    sw.ElapsedMilliseconds, indexAge: miss.IndexAge);
+                return miss;
             }
 
             var freshness = Guard(root, result);
@@ -70,7 +89,12 @@ public sealed class SymbolLookupTool
             var data = result.Matches.Select(m => new SymbolHitData(
                 m.Repo, m.File, $"{m.StartLine}-{m.EndLine}", m.Signature, m.DocComment, m.Body)).ToList();
 
-            return ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
+                result.TokensUsed, result.Truncated, data.Count,
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+            _cache?.Put("symbol_lookup", parameters, envelope);
+            return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -83,6 +107,9 @@ public sealed class SymbolLookupTool
             root,
             result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
+
+    private static object Params(string name, string? kind, string? repo) =>
+        new { name, kind, repo };
 
     private sealed record SymbolHitData(
         [property: JsonPropertyName("repo")] string Repo,

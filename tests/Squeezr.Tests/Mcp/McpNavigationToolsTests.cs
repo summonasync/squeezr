@@ -72,6 +72,27 @@ public class McpNavigationToolsTests
     }
 
     [Fact]
+    public async Task SymbolLookup_NotFound_RecordsTelemetryWithZeroHits()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "symbol_lookup",
+            new Dictionary<string, object?> { ["name"] = "Nope" },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+
+        var entry = QueryTelemetry.ReadAll(workspace).ShouldHaveSingleItem();
+        entry.Tool.ShouldBe("symbol_lookup");
+        entry.Hits.ShouldBe(0);
+        entry.TokensUsed.ShouldBe(envelope.GetProperty("tokensUsed").GetInt32());
+        entry.Truncated.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task FindReferences_ReturnsAllCallSites()
     {
         var workspace = NewIndexedWorkspace();

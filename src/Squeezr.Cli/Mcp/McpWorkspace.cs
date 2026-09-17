@@ -7,6 +7,8 @@ public sealed class McpWorkspace
 {
     public McpWorkspace(string root) => Root = Path.GetFullPath(root);
 
+    public Guid SessionId { get; } = Guid.NewGuid();
+
     public string Root { get; }
 
     public bool IsWorkspace => File.Exists(SqueezrPaths.ManifestPath(Root));
