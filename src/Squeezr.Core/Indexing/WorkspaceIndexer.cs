@@ -63,6 +63,11 @@ public sealed class WorkspaceIndexer
 
             var modelKey = embeddings is not null ? EmbeddingModelKey.From(config.Embeddings) : null;
 
+            if (!reembed && embeddings is not null && vectorStore is not null)
+            {
+                EnsureVectorCompatibility(embeddings, vectorStore, warnings);
+            }
+
             var works = targets
                 .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache, progress, embeddings, vectorStore, modelKey))
                 .ToList();
@@ -448,6 +453,27 @@ public sealed class WorkspaceIndexer
             new RepoIndexResult(repo.Name, added, modified, deleted.Count, skipped, totalFiles),
             changed,
             deleted);
+    }
+
+    private static void EnsureVectorCompatibility(IEmbeddingProvider embeddings, IVectorStore vectorStore, List<string> warnings)
+    {
+        try
+        {
+            if (!vectorStore.IsAvailableAsync(CancellationToken.None).GetAwaiter().GetResult())
+            {
+                return;
+            }
+
+            vectorStore.EnsureCollectionAsync(embeddings.Dimensions, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (VectorDimensionMismatchException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
+        {
+            warnings.Add($"vector preflight skipped: {ex.Message}");
+        }
     }
 
     internal static void CascadeSemanticRecords(uint fileId, MetaStore store)

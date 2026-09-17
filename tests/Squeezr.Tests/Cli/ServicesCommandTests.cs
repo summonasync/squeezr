@@ -45,6 +45,8 @@ public sealed class ServicesCommandTests
         result.StdOut.ShouldContain("Pulling images");
         result.StdOut.ShouldContain("Starting containers");
         result.StdOut.ShouldContain("Qdrant");
+        result.StdOut.ShouldContain("http://localhost:6334");
+        result.StdOut.ShouldContain("gRPC");
         result.StdOut.ShouldContain("Ollama");
         result.StdOut.ShouldContain("ROCm");
     }
@@ -112,7 +114,8 @@ public sealed class ServicesCommandTests
         using var json = JsonDocument.Parse(result.StdOut.Trim());
         json.RootElement.GetProperty("composeFile").GetString().ShouldBe(Path.Combine(home, "infra", "docker-compose.yml"));
         json.RootElement.GetProperty("project").GetString().ShouldBe("squeezr");
-        json.RootElement.GetProperty("qdrantEndpoint").GetString().ShouldBe("http://localhost:6333");
+        json.RootElement.GetProperty("qdrantEndpoint").GetString().ShouldBe("http://localhost:6334");
+        json.RootElement.GetProperty("qdrantRestEndpoint").GetString().ShouldBe("http://localhost:6333");
         json.RootElement.GetProperty("ollamaEndpoint").GetString().ShouldBe("http://localhost:11434");
         json.RootElement.GetProperty("rocm").ValueKind.ShouldBeOneOf(JsonValueKind.True, JsonValueKind.False);
         json.RootElement.GetProperty("composeVersion").GetString().ShouldStartWith("v2.29.2");

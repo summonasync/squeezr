@@ -5,5 +5,6 @@ public sealed record ServicesUpReport(
     string Project,
     bool Rocm,
     string QdrantEndpoint,
+    string QdrantRestEndpoint,
     string OllamaEndpoint,
     string? ComposeVersion);

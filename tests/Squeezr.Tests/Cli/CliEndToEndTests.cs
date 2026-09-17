@@ -305,6 +305,68 @@ public sealed class CliEndToEndTests
     }
 
     [Fact]
+    public async Task Search_QdrantEndpointOnRestPort_PrintsGrpcHint()
+    {
+        var root = TestDirs.NewTempDir();
+        const string apiKeyEnv = "SQUEEZR_API_KEY_SEARCH_RESTPORT_E2E";
+
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        Directory.CreateDirectory(Path.Combine(root, "code"));
+        File.WriteAllText(Path.Combine(root, "code", "Rho.cs"), "class Rho { string Term = \"rhobody\"; }");
+        (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
+        (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
+
+        var config = ConfigFile.Load(root);
+        ConfigFile.Save(root, config with
+        {
+            Embeddings = config.Embeddings with
+            {
+                Provider = "openai",
+                OpenAiCompatible = config.Embeddings.OpenAiCompatible with { ApiKeyEnv = apiKeyEnv }
+            },
+            Qdrant = config.Qdrant with { Endpoint = "http://localhost:6333" }
+        });
+
+        var previousKey = Environment.GetEnvironmentVariable(apiKeyEnv);
+        Environment.SetEnvironmentVariable(apiKeyEnv, "test-key");
+        try
+        {
+            var run = await RunCliAsync(root, "search", "rhobody");
+
+            run.ExitCode.ShouldBe(0);
+            run.StdOut.ShouldContain("vector store is unavailable");
+            run.StdOut.ShouldContain("gRPC");
+            run.StdOut.ShouldContain("http://localhost:6334");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(apiKeyEnv, previousKey);
+        }
+    }
+
+    [Fact]
+    public async Task Status_QdrantEndpointOnRestPort_PrintsGrpcHint()
+    {
+        var root = TestDirs.NewTempDir();
+
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        Directory.CreateDirectory(Path.Combine(root, "code"));
+        File.WriteAllText(Path.Combine(root, "code", "Tau.cs"), "class Tau { }");
+        (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
+        (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
+
+        var config = ConfigFile.Load(root);
+        ConfigFile.Save(root, config with { Qdrant = config.Qdrant with { Endpoint = "http://localhost:6333" } });
+
+        var run = await RunCliAsync(root, "status");
+
+        run.ExitCode.ShouldBe(0);
+        run.StdOut.ShouldContain("Qdrant: unavailable");
+        run.StdOut.ShouldContain("gRPC");
+        run.StdOut.ShouldContain("http://localhost:6334");
+    }
+
+    [Fact]
     public async Task Index_TakesOverStaleLock_WarnsOnStderr()
     {
         var root = TestDirs.NewTempDir();

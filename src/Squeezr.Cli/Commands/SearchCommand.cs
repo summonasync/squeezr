@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
 
@@ -112,6 +113,11 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             if (vectorStoreUnavailable)
             {
                 AnsiConsole.MarkupLine($"[grey]{SearchEngine.VectorStoreUnavailableWarning}[/]");
+                var hint = QdrantEndpointHint.RestPortMisconfiguration(ConfigFile.Load(workspaceRoot).Qdrant.Endpoint);
+                if (hint is not null)
+                {
+                    AnsiConsole.MarkupLine($"[grey]{hint.EscapeMarkup()}[/]");
+                }
             }
 
             return 0;

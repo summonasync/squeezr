@@ -99,6 +99,36 @@ public class EmbeddingIndexPhaseTests
     }
 
     [Fact]
+    public void Index_DimensionMismatch_PreflightFailsBeforeAnyRepoWork()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var provider = new FakeEmbeddingProvider { Dimensions = 768 };
+        var vectorStore = new FakeVectorStore { CollectionSize = 1536 };
+
+        Should.Throw<VectorDimensionMismatchException>(() =>
+            new WorkspaceIndexer().Index(workspace, embeddings: provider, vectorStore: vectorStore));
+
+        provider.EmbedCallCount.ShouldBe(0);
+        using var store = OpenStore(workspace);
+        store.ListAllFiles().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Index_PreflightVectorStoreUnavailable_SkipsSilentlyAndIndexes()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var vectorStore = new FakeVectorStore { Available = false };
+
+        var result = new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        result.Warnings.ShouldNotContain(w => w.Contains("vector preflight", StringComparison.OrdinalIgnoreCase));
+        result.Warnings.ShouldContain(w => w.Contains("embeddings skipped", StringComparison.OrdinalIgnoreCase));
+        ListChunks(workspace).ShouldNotBeEmpty();
+    }
+
+    [Fact]
     public void Index_Reembed_RecreatesCollectionWithNewDimensions()
     {
         var workspace = NewWorkspace();

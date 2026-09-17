@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -78,6 +79,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             else
             {
                 AnsiConsole.MarkupLine($"Qdrant: [red]unavailable[/] — {qdrant.PendingChunks} pending chunk(s)");
+                var hint = QdrantEndpointHint.RestPortMisconfiguration(ConfigFile.Load(workspaceRoot).Qdrant.Endpoint);
+                if (hint is not null)
+                {
+                    AnsiConsole.MarkupLine($"[grey]{hint.EscapeMarkup()}[/]");
+                }
             }
 
             return 0;

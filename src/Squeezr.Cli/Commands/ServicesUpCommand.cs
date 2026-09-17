@@ -50,14 +50,16 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
                     composePath,
                     ServicesComposeFile.ProjectName,
                     rocm,
-                    ServicesComposeFile.QdrantEndpoint,
+                    ServicesComposeFile.QdrantGrpcEndpoint,
+                    ServicesComposeFile.QdrantRestEndpoint,
                     ServicesComposeFile.OllamaEndpoint,
                     installation.Version is null ? null : $"v{installation.Version}"));
                 return 0;
             }
 
             AnsiConsole.MarkupLine(
-                $"[green]Squeezr services are up[/] — Qdrant: {ServicesComposeFile.QdrantEndpoint}, " +
+                $"[green]Squeezr services are up[/] — Qdrant: {ServicesComposeFile.QdrantGrpcEndpoint} " +
+                $"(gRPC — use this in qdrant.endpoint), REST: {ServicesComposeFile.QdrantRestEndpoint}, " +
                 $"Ollama: {ServicesComposeFile.OllamaEndpoint} (ROCm {(rocm ? "enabled" : "disabled — running on CPU")})");
             AnsiConsole.MarkupLine($"Compose file: {composePath.EscapeMarkup()}");
             return 0;
