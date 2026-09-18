@@ -30,6 +30,7 @@ public sealed record SqueezrConfig
                     "**/bin/**",
                     "**/obj/**",
                     "**/dist/**",
+                    "**/.next/**",
                     "**/.vs/**",
                     "**/.idea/**",
                     "**/*.min.js"
