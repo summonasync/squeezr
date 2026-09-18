@@ -8,6 +8,34 @@ namespace Squeezr.Tests.Configuration;
 public class ConfigFileTests
 {
     [Fact]
+    public void Load_LegacyGitAwareKey_Ignored()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "gitAware": true
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Indexing.MaxFileSizeKb.ShouldBe(512);
+        config.Indexing.NoSemantic.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Load_ConfigWithoutEmbeddingsSection_UsesOnnxDefaults()
     {
         var root = NewWorkspaceWithConfig(
@@ -20,8 +48,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [ "**/node_modules/**" ],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -60,8 +87,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 128,
-                "gitAware": false
+                "maxFileSizeKb": 128
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -135,8 +161,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -173,8 +198,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -207,8 +231,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -264,8 +287,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -305,8 +327,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -368,8 +389,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -402,8 +422,7 @@ public class ConfigFileTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"

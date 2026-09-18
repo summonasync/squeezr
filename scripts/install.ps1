@@ -3,21 +3,27 @@
 .SYNOPSIS
   Builds and installs Squeezr CLI for the current user.
 .DESCRIPTION
-  Publishes a self-contained single-file win-x64 build, copies it to the install
+  Publishes a self-contained single-file build, copies it to the install
   directory and registers it on the user PATH. Checks for Docker (needed for
   `squeezr services up` - Qdrant and, optionally, Ollama) and prints setup
   hints when missing. The central store %USERPROFILE%\.squeezr (workspaces,
   models, infra) is NOT touched by install or uninstall.
 .PARAMETER InstallDir
   Target directory. Default: %LOCALAPPDATA%\Programs\Squeezr
+.PARAMETER Rid
+  Runtime identifier: win-x64 (default) or win-arm64 for ARM devices.
 .PARAMETER SkipBuild
   Use the already published output in artifacts\publish instead of publishing.
 .EXAMPLE
   pwsh -File scripts\install.ps1
+.EXAMPLE
+  pwsh -File scripts\install.ps1 -Rid win-arm64
 #>
 [CmdletBinding()]
 param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\Squeezr'),
+    [ValidateSet('win-x64', 'win-arm64')]
+    [string]$Rid = 'win-x64',
     [switch]$SkipBuild
 )
 
@@ -28,9 +34,12 @@ $publishDir = Join-Path $repoRoot 'artifacts\publish'
 function Write-Step([string]$msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
 if (-not $SkipBuild) {
-    Write-Step 'Publishing self-contained win-x64 single-file build'
+    Write-Step "Publishing self-contained $Rid single-file build"
+    # dotnet publish does not clean -o; leftovers from a previous publish with
+    # another RID would leak into the install dir.
+    if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
     dotnet publish (Join-Path $repoRoot 'src\Squeezr.Cli\Squeezr.Cli.csproj') `
-        -c Release -r win-x64 --self-contained true `
+        -c Release -r $Rid --self-contained true `
         -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
         -p:DebugType=none -p:DebugSymbols=false `
         -o $publishDir
@@ -64,6 +73,15 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     provider "ollama" also uses Docker for the Ollama service).
     Install Docker Desktop: https://docs.docker.com/desktop/setup/install/windows-install/
     or via winget: winget install Docker.DockerDesktop
+'@ -ForegroundColor Yellow
+}
+
+$storeHome = if ($env:SQUEEZR_HOME) { $env:SQUEEZR_HOME } else { Join-Path $env:USERPROFILE '.squeezr' }
+if (-not (Test-Path (Join-Path $InstallDir 'Models')) -and -not (Test-Path (Join-Path $storeHome 'models'))) {
+    Write-Host @'
+[!] No embedding model found - semantic search will stay disabled until you fetch one.
+    Run scripts\fetch-model.ps1 (downloads to ~\.squeezr\models), or bundle a model
+    with the CLI via scripts\fetch-model.ps1 -ModelsDir src\Squeezr.Cli\Models and re-run this script.
 '@ -ForegroundColor Yellow
 }
 

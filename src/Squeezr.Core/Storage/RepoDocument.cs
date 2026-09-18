@@ -13,9 +13,6 @@ public sealed class RepoDocument
     [BsonField("path")]
     public string Path { get; set; } = string.Empty;
 
-    [BsonField("lastIndexedCommit")]
-    public string? LastIndexedCommit { get; set; }
-
     [BsonField("lastIndexedAt")]
     public DateTime? LastIndexedAt { get; set; }
 }

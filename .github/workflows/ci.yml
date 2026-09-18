@@ -21,6 +21,26 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-          cache: true
       - run: dotnet build Squeezr.slnx -warnaserror
       - run: dotnet test Squeezr.slnx --no-build
+
+  publish-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: win-x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet publish src/Squeezr.Cli/Squeezr.Cli.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o artifacts/publish-smoke
+      - name: Smoke-run published binary
+        working-directory: artifacts/publish-smoke
+        shell: bash
+        run: ./squeezr${{ matrix.rid == 'win-x64' && '.exe' || '' }} --version

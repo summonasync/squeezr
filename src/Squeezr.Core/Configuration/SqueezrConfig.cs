@@ -35,7 +35,6 @@ public sealed record SqueezrConfig
                     "**/*.min.js"
                 ],
                 MaxFileSizeKb = 512,
-                GitAware = true,
                 NoSemantic = false
             },
             Qdrant = new QdrantConfig

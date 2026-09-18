@@ -22,8 +22,7 @@ public class WatchConfigTests
               },
               "indexing": {
                 "ignore": [],
-                "maxFileSizeKb": 512,
-                "gitAware": true
+                "maxFileSizeKb": 512
               },
               "qdrant": {
                 "endpoint": "http://localhost:6334"
@@ -140,7 +139,7 @@ public class WatchConfigTests
             $$"""
             {
               "chunking": { "maxTokensPerChunk": 512, "fallbackWindowLines": 60, "fallbackOverlapLines": 15 },
-              "indexing": { "ignore": [], "maxFileSizeKb": 512, "gitAware": true },
+              "indexing": { "ignore": [], "maxFileSizeKb": 512 },
               "qdrant": { "endpoint": "http://localhost:6334" },
               "watch": {{watchValue}}
             }

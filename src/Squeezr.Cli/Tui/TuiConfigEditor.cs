@@ -348,14 +348,6 @@ public static class TuiConfigEditor
             },
             new FieldDef
             {
-                Key = "gitAware",
-                Get = c => c.Indexing.GitAware.ToString().ToLowerInvariant(),
-                Apply = (c, raw) => bool.TryParse(raw, out var value)
-                    ? FieldResult.Valid(c with { Indexing = c.Indexing with { GitAware = value } })
-                    : FieldResult.Fail("must be 'true' or 'false'"),
-            },
-            new FieldDef
-            {
                 Key = "noSemantic",
                 Get = c => c.Indexing.NoSemantic.ToString().ToLowerInvariant(),
                 Apply = (c, raw) => bool.TryParse(raw, out var value)

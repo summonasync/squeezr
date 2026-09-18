@@ -98,7 +98,6 @@ public class WorkspaceManagerInitTests
         config.Chunking.FallbackOverlapLines.ShouldBe(15);
         config.Indexing.Ignore.ShouldBe(["**/node_modules/**", "**/bin/**", "**/obj/**", "**/dist/**", "**/.vs/**", "**/.idea/**", "**/*.min.js"]);
         config.Indexing.MaxFileSizeKb.ShouldBe(512);
-        config.Indexing.GitAware.ShouldBeTrue();
         config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
     }
 

@@ -81,6 +81,15 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 - `squeezr stats [--json] [--reset]`: per-tool table (count, avg tokens, truncation rate), counterfactual savings — actual `tokensUsed` vs reading every expanded file whole (each file counted once, size-based estimate consistent with the chunker, files missing from the index reported separately), serve-cache hit-rate across sessions, covered period; `--json` emits a single camelCase object (035 contract), `--reset` truncates telemetry (`{"reset":true,"recordsRemoved":N}` in JSON mode, human line `Cleared N telemetry record(s).`); retention hint past 50k records, no auto-rotation by design
 - MCP response caching: `repo_map`, `code_search`, `symbol_lookup`, `find_references` cache responses per serve session — LRU 100, canonical-JSON key (recursive property sorting, null-vs-absent equivalence); the cache generation is derived from meta.db mtime, so any reindex (watch pass or external `squeezr index`) invalidates all keys; hits return the stored envelope unchanged and are marked `cacheHit: true` in telemetry; `expand_span` (live file reads) and `index_status` are not cached
 
+### Removed (029, dead config)
+- `gitAware` config key and its TUI editor field removed — the key existed since M2 but was never read by any code path (indexing is always a full SHA-256 diff walk, freshness is handled by the read-time guard and watch mode); the dead `lastIndexedCommit` LiteDB field in `RepoDocument` is gone with it; existing configs that still carry `"gitAware": ...` keep loading (unknown keys are skipped, covered by a regression test)
+
+### Changed (030, install hardening)
+- `scripts/install.ps1` accepts `-Rid win-x64|win-arm64` (default win-x64) and wipes `artifacts\publish` before publishing, so switching RIDs can't leak binaries from a previous publish into the install dir (parity with install.sh); post-install embedding-model check now matches install.sh — warns to run `fetch-model.ps1` when no model is found in the central store or the install dir
+
+### Added (031, CI publish smoke)
+- CI `publish-smoke` job: single-file self-contained publish for linux-x64 and win-x64 on every push to main and on PRs, then a smoke run of the published binary (`squeezr --version`) on the matching runner — publish regressions surface on regular pushes instead of during a release cut; `cache: true` dropped from both CI jobs (setup-dotnet cache needs `packages.lock.json`, which the repo does not use — review-029-030-031-01 W1)
+
 ## [0.9.0-pre] — 2026-09-13
 
 Pre-release for dogfooding. v1 MVP (M1–M6) closed, post-MVP features landed.
