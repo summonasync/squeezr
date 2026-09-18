@@ -4,6 +4,13 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-18
+
+First stable release. v1 MVP (M1–M6) plus the post-MVP feature set: central workspace store with managed services, watch fleet, MCP client onboarding, machine-readable CLI with progress events, token stats, live-validated semantic search (e2e on a real repo, Linux), cross-platform install and CI.
+
+### Fixed
+- Default ignore globs now exclude Next.js build output (`**/.next/**`) — before, a Next.js repo indexed its `.next` bundles, and minified vendor chunks dominated semantic search results (e2e-028 finding F1; existing workspaces can add the glob to `indexing.ignore` themselves)
+
 ### Added
 - `squeezr mcp install/remove/doctor`: one-command onboarding of the MCP server into agent CLIs — Claude Code, Kimi Code, Qwen Code, Codex CLI (`--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--yes`, `--json`; feature 034)
 - Onboarding extras: `serve --watch` entry by default, idempotent marker-block agent instructions in the client's instruction file (Claude — CLAUDE.md, Kimi/Codex — AGENTS.md, Qwen — QWEN.md), `CLAUDE_PROJECT_DIR` fallback in `serve` workspace-root resolution (Claude Code has no cwd config key)

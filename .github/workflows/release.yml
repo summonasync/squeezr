@@ -1,0 +1,45 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      # Archives carry the whole publish output, not just the binary:
+      # MSBuildWorkspace ships out-of-proc BuildHost folders next to the exe,
+      # required for semantic indexing (single-file bundle does not embed them).
+      - name: Publish linux-x64
+        run: |
+          dotnet publish src/Squeezr.Cli/Squeezr.Cli.csproj -c Release -r linux-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none -p:DebugSymbols=false -o dist/squeezr-linux-x64
+      - name: Publish win-x64 (cross-compile)
+        run: |
+          dotnet publish src/Squeezr.Cli/Squeezr.Cli.csproj -c Release -r win-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none -p:DebugSymbols=false -o dist/squeezr-win-x64
+      # tar.gz for both RIDs: plain tar exists on every runner image, and
+      # Windows 10+ extracts tar.gz natively (bsdtar) - no zip dependency.
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          tar -czf "squeezr-$version-linux-x64.tar.gz" -C dist squeezr-linux-x64
+          tar -czf "squeezr-$version-win-x64.tar.gz" -C dist squeezr-win-x64
+          ls -lh squeezr-*
+      # Gitea Actions serves the GitHub-compatible release API, so the
+      # gh-release action works against it with the built-in GITHUB_TOKEN.
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            squeezr-*-linux-x64.tar.gz
+            squeezr-*-win-x64.tar.gz
+          generate_release_notes: true
