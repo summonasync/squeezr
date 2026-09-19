@@ -32,6 +32,7 @@ public sealed class McpCommandsTests
         exitCode.ShouldBe(0);
         var combined = console.Output + output;
         combined.ShouldContain("--client");
+        combined.ShouldContain("--all");
         combined.ShouldContain("--scope");
         combined.ShouldContain("--no-watch");
         combined.ShouldContain("--no-instructions");
@@ -50,13 +51,75 @@ public sealed class McpCommandsTests
     }
 
     [Fact]
-    public async Task Install_NonInteractiveWithoutScope_ExitsWithHint()
+    public async Task Install_NonInteractiveYesWithoutScope_DefaultsToUserAndPrintsDecision()
     {
         var workspace = TestDirs.NewTempDir();
-        var (exitCode, _, _, error) = await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--yes"]);
+        string? homeDir = null;
+
+        var (exitCode, console, _, error) = await RunAsync(
+            workspace,
+            ["mcp", "install", "--client", "kimi", "--yes"],
+            configureHome: home => homeDir = home);
+
+        exitCode.ShouldBe(0);
+        console.Output.ShouldContain("scope: user (--yes default");
+        error.ShouldBeEmpty();
+        var entry = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".kimi-code", "mcp.json")))!["mcpServers"]!["squeezr"]!;
+        entry["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
+    }
+
+    [Fact]
+    public async Task Install_NonInteractiveWithoutYesOrScope_ExitsWithHint()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var (exitCode, _, _, error) = await RunAsync(workspace, ["mcp", "install", "--client", "kimi"]);
 
         exitCode.ShouldBe(1);
         error.ShouldContain("--scope");
+    }
+
+    [Fact]
+    public async Task Install_InvalidScope_ExitsWithValidationError()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var (exitCode, _, _, error) = await RunAsync(
+            workspace, ["mcp", "install", "--client", "kimi", "--scope", "team", "--yes"]);
+
+        exitCode.ShouldBe(1);
+        error.ShouldContain("Invalid --scope");
+        error.ShouldContain("'team'");
+    }
+
+    [Fact]
+    public async Task Install_AllScopeUserYes_InstallsDetectedClientsWithoutPrompts()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var overrideDir = TestDirs.NewTempDir();
+        var previousOverride = Environment.GetEnvironmentVariable("KIMI_CODE_HOME");
+        Environment.SetEnvironmentVariable("KIMI_CODE_HOME", overrideDir);
+        string? homeDir = null;
+        try
+        {
+            var (exitCode, console, _, _) = await RunAsync(
+                workspace,
+                ["mcp", "install", "--all", "--scope", "user", "--yes"],
+                configureHome: home =>
+                {
+                    homeDir = home;
+                    File.WriteAllText(Path.Combine(home, ".claude.json"), "{}");
+                });
+
+            exitCode.ShouldBe(0);
+            console.Output.ShouldContain("detected: claude, kimi");
+            var claude = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".claude.json")))!["mcpServers"]!["squeezr"]!;
+            claude["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
+            JsonNode.Parse(File.ReadAllText(Path.Combine(overrideDir, "mcp.json")))!["mcpServers"]!["squeezr"]!["args"]!
+                .ToJsonString().ShouldBe("""["serve","--watch"]""");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("KIMI_CODE_HOME", previousOverride);
+        }
     }
 
     [Fact]

@@ -24,6 +24,9 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         [CommandOption("--client")]
         public string[]? Client { get; set; }
 
+        [CommandOption("--all")]
+        public bool All { get; set; }
+
         [CommandOption("--scope")]
         public string? Scope { get; set; }
 
@@ -55,17 +58,36 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             return 1;
         }
 
+        var clientValues = settings.Client;
+        if (settings.All)
+        {
+            clientValues = clientValues is { Length: > 0 } ? [.. clientValues, "all"] : ["all"];
+        }
+
+        var scopeValue = settings.Scope;
+        var scopeDefaultedToUser = false;
+        if (scopeValue is null && settings.Yes && !interactive)
+        {
+            scopeValue = "user";
+            scopeDefaultedToUser = true;
+        }
+
         IReadOnlyList<McpClientDescriptor> clients;
         McpScope scope;
         try
         {
-            clients = await McpCommandSupport.ResolveClientsAsync(settings.Client, interactive, environment, _locator, cancellationToken);
-            scope = await McpCommandSupport.ResolveScopeAsync(settings.Scope, interactive, cancellationToken);
+            clients = await McpCommandSupport.ResolveClientsAsync(clientValues, interactive, environment, _locator, cancellationToken);
+            scope = await McpCommandSupport.ResolveScopeAsync(scopeValue, interactive, cancellationToken);
         }
         catch (McpUsageException ex)
         {
             Console.Error.WriteLine($"error: {ex.Message}");
             return 1;
+        }
+
+        if (scopeDefaultedToUser && !settings.Json)
+        {
+            AnsiConsole.MarkupLine("[grey]scope: user (--yes default; pass --scope project to override)[/]");
         }
 
         var writeInstructions = await McpCommandSupport.ResolveWriteInstructionsAsync(
@@ -104,7 +126,7 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         }
         else
         {
-            if (McpCommandSupport.RequestsAllClients(settings.Client))
+            if (McpCommandSupport.RequestsAllClients(clientValues))
             {
                 AnsiConsole.MarkupLine(
                     $"[grey]detected: {string.Join(", ", clients.Select(client => client.Id.ToString().ToLowerInvariant()))}[/]");

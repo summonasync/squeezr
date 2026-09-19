@@ -4,6 +4,12 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added (045, install from release + agent onboarding)
+- `scripts/install-release.sh`: one-command installer for machines without a Squeezr checkout — `curl -fsSL <raw-url> | bash` resolves the latest Gitea release via its API (or `--version <tag>` to pin/roll back), downloads the linux-x64 tar.gz, checks archive integrity, unpacks into `~/apps/squeezr/<tag>/` and atomically repoints the `~/.local/bin/squeezr` symlink; idempotent (re-run refreshes the symlink only, `--force` re-downloads), no sudo, env overrides `SQUEEZR_GITEA`/`SQUEEZR_INSTALL_DIR`/`SQUEEZR_BIN_DIR`; arm64/Windows get an explicit refusal with a manual hint
+- `squeezr mcp install --all --scope user --yes`: fully non-interactive registration — new `--all` flag (every detected client, alongside the existing `--client`), `--yes` skips all prompts (`--yes` without `--scope` defaults to user and prints the decision); the flagless interactive flow is unchanged
+- `skills/squeezr/SKILL.md`: agent onboarding skill — install-from-release ritual, services, workspace init/index, MCP registration, six-tool cheat-sheet with token budgets, troubleshooting (gRPC 6334 endpoint, dimension mismatch → `index --reembed`, fleet); installs only on an explicit human request; distributed as the Overmind kit «squeezr» (manual import from `skills/squeezr/`, phase 1)
+- README «For AI agents» section: the one-conversation setup ritual with a link to the skill
+
 ## [1.0.0] — 2026-09-18
 
 First stable release. v1 MVP (M1–M6) plus the post-MVP feature set: central workspace store with managed services, watch fleet, MCP client onboarding, machine-readable CLI with progress events, token stats, live-validated semantic search (e2e on a real repo, Linux), cross-platform install and CI.

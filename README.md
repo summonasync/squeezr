@@ -86,6 +86,26 @@ squeezr workspace list                        # реестр воркспейс�
 
 Скачать ONNX-модель: `scripts/fetch-model.sh` на Linux, `pwsh -File scripts\fetch-model.ps1` на Windows. Порядок резолва модели: явный путь в конфиге → `~/.squeezr/models/` → bundled-копия рядом с бинарём. Обратно на bge-code-v1 (1536d, кодовая специализация): `scripts/fetch-model.sh --model bge-code-v1` (в pwsh: `-Model bge-code-v1`) + `"model": "bge-code-v1"` в секции `embeddings.onnx`; на существующем workspace смена модели честно ругнётся «collection vector size 768 ≠ 1536» — лечится `squeezr index --reembed`, молча перетереть коллекцию не выйдет. Смена провайдера/модели меняет ключ чанков — затронутые чанки переэмбеддятся автоматически. Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
 
+## For AI agents
+
+An AI agent told to "use squeezr here" gets productive in one conversation. Run this only on an explicit human request — never install squeezr proactively. The full ritual with guardrails, tool cheat-sheet and troubleshooting lives in [`skills/squeezr/SKILL.md`](skills/squeezr/SKILL.md); short version:
+
+```bash
+curl -fsSL http://REDACTED-LAN-HOST:3000/REDACTED-FORGE-NS/Squeezr/raw/main/scripts/install-release.sh | bash
+squeezr services up
+squeezr init && squeezr add . && squeezr index --events
+squeezr mcp install --all --scope user --yes
+```
+
+1. The installer resolves the latest published Gitea release, unpacks it into `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if that dir is not on PATH, the script says so — fix the shell profile and open a new terminal). Pin or roll back with `--version <tag>`.
+2. Starts the managed Qdrant + Ollama stack; the first run pulls ~3.6 GB of images. If docker is missing, stop and ask the human — do not improvise.
+3. Creates a workspace in the current directory and indexes everything (zero files land in the project).
+4. Registers the MCP server in every detected client at user scope, non-interactive. Restart the agent session afterwards — MCP clients read configs at startup.
+
+From then on navigate via the six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — instead of reading whole files.
+
+The skill content lives in this repo at `skills/squeezr/` and imports into Overmind as the kit «squeezr» (phase 1: manual kit import through the Overmind UI), so agent teams can onboard without reading this README.
+
 ## Центральный стор воркспейсов
 
 Squeezr не мусорит в проекте: `squeezr init` не создаёт в текущей папке ни одного файла — ни `.squeezr/`, ни манифеста, ни compose. Всё живёт в центральном сторе:
