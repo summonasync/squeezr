@@ -27,9 +27,31 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           tar -czf "squeezr-$version-linux-x64.tar.gz" -C dist squeezr-linux-x64
           ls -lh squeezr-*
-      # Gitea's fork of action-gh-release adapted to the Gitea API
-      # (softprops itself fails release creation with 405 here).
-      - uses: https://gitea.com/actions/release-action@main
-        with:
-          files: |
-            squeezr-*-linux-x64.tar.gz
+      # Release via the native Gitea API: third-party release actions are
+      # a runtime lottery here (softprops 405s, the gitea fork needs go).
+      - name: Create release and upload assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+          auth="Authorization: token ${GITHUB_TOKEN}"
+
+          code=$(curl -s -o /tmp/rel.json -w '%{http_code}' -H "$auth" "$api/releases/tags/$tag")
+          if [ "$code" = "200" ]; then
+            id=$(grep -o '"id":[0-9]*' /tmp/rel.json | head -n1 | cut -d: -f2)
+            echo "reusing release id $id"
+          else
+            resp=$(curl -sf -X POST "$api/releases" -H "$auth" -H 'Content-Type: application/json' \
+              -d "{\"tag_name\":\"$tag\",\"name\":\"$tag\",\"body\":\"See CHANGELOG.md in the repository.\"}")
+            id=$(printf '%s' "$resp" | grep -o '"id":[0-9]*' | head -n1 | cut -d: -f2)
+            echo "created release id $id"
+          fi
+
+          for f in squeezr-*-linux-x64.tar.gz; do
+            curl -sf -X POST "$api/releases/$id/assets?name=$(basename "$f")" \
+              -H "$auth" -H 'Content-Type: application/octet-stream' \
+              --data-binary "@$f"
+            echo "uploaded: $f"
+          done
