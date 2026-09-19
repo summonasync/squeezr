@@ -26,14 +26,13 @@ jobs:
       - run: dotnet test Squeezr.slnx --no-build
 
   publish-smoke:
+    # win-x64 parked until a windows runner exists
     strategy:
       fail-fast: false
       matrix:
         include:
           - rid: linux-x64
             os: ubuntu-latest
-          - rid: win-x64
-            os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
