@@ -22,23 +22,14 @@ jobs:
           dotnet publish src/Squeezr.Cli/Squeezr.Cli.csproj -c Release -r linux-x64 --self-contained true \
             -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
             -p:DebugType=none -p:DebugSymbols=false -o dist/squeezr-linux-x64
-      - name: Publish win-x64 (cross-compile)
-        run: |
-          dotnet publish src/Squeezr.Cli/Squeezr.Cli.csproj -c Release -r win-x64 --self-contained true \
-            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
-            -p:DebugType=none -p:DebugSymbols=false -o dist/squeezr-win-x64
-      # tar.gz for both RIDs: plain tar exists on every runner image, and
-      # Windows 10+ extracts tar.gz natively (bsdtar) - no zip dependency.
       - name: Package
         run: |
           version="${GITHUB_REF_NAME#v}"
           tar -czf "squeezr-$version-linux-x64.tar.gz" -C dist squeezr-linux-x64
-          tar -czf "squeezr-$version-win-x64.tar.gz" -C dist squeezr-win-x64
           ls -lh squeezr-*
       # Gitea's fork of action-gh-release adapted to the Gitea API
       # (softprops itself fails release creation with 405 here).
-      - uses: https://gitea.com/actions/release-action@v1
+      - uses: https://gitea.com/actions/release-action@main
         with:
           files: |
             squeezr-*-linux-x64.tar.gz
-            squeezr-*-win-x64.tar.gz

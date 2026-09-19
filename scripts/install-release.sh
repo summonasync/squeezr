@@ -58,7 +58,7 @@ done
 case "$(uname -s)" in
   Linux) ;;
   MINGW*|MSYS*|CYGWIN*)
-    die "native Windows detected - this installer is Linux-only. Download squeezr-<version>-win-x64.tar.gz from $releases_page, extract it with the built-in tar (Windows 10+) and put the folder on your PATH."
+    die "native Windows detected - releases are Linux-only. Build from source with scripts/install.ps1 from the repository."
     ;;
   *) die "unsupported OS $(uname -s) - this installer covers Linux only" ;;
 esac
@@ -66,7 +66,7 @@ esac
 case "$(uname -m)" in
   x86_64) rid='linux-x64' ;;
   aarch64|arm64)
-    die "no linux-arm64 builds are published (linux-x64 and win-x64 only); on arm64 hardware build from source with scripts/install.sh"
+    die "no linux-arm64 builds are published (linux-x64 only); on arm64 hardware build from source with scripts/install.sh"
     ;;
   *) die "unsupported architecture $(uname -m)" ;;
 esac
