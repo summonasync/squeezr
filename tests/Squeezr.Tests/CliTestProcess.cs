@@ -1,8 +1,9 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace Squeezr.Tests;
 
-internal static class CliTestProcess
+internal static partial class CliTestProcess
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
 
@@ -16,13 +17,14 @@ internal static class CliTestProcess
             RedirectStandardError = true,
             UseShellExecute = false
         };
+        startInfo.Environment["NO_COLOR"] = "1";
 
         using var process = Process.Start(startInfo)!;
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
 
-        var result = (process.ExitCode, await stdoutTask, await stderrTask);
+        var result = (process.ExitCode, StripAnsi(await stdoutTask), StripAnsi(await stderrTask));
         if (result.ExitCode == 0 && args.Length > 0 && args[0] == "init")
         {
             // init writes the default config pointing at the developer's real Qdrant;
@@ -32,4 +34,9 @@ internal static class CliTestProcess
 
         return result;
     }
+
+    [GeneratedRegex("\\u001B\\[[0-9;?]*[ -/]*[@-~]")]
+    private static partial Regex AnsiSequence();
+
+    private static string StripAnsi(string output) => AnsiSequence().Replace(output, string.Empty);
 }

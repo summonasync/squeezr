@@ -37,7 +37,7 @@ jobs:
           ls -lh squeezr-*
       # Gitea's fork of action-gh-release adapted to the Gitea API
       # (softprops itself fails release creation with 405 here).
-      - uses: gitea.com/actions/release-action@v1
+      - uses: https://gitea.com/actions/release-action@v1
         with:
           files: |
             squeezr-*-linux-x64.tar.gz
