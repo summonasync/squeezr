@@ -50,8 +50,8 @@ jobs:
           fi
 
           for f in squeezr-*-linux-x64.tar.gz; do
-            curl -sf -X POST "$api/releases/$id/assets?name=$(basename "$f")" \
-              -H "$auth" -H 'Content-Type: application/octet-stream' \
-              --data-binary "@$f"
+            curl -sf -H 'Expect:' -X POST "$api/releases/$id/assets?name=$(basename "$f")" \
+              -H "$auth" \
+              -F "attachment=@$f"
             echo "uploaded: $f"
           done
