@@ -48,6 +48,7 @@ public sealed class McpCommandsTests
 
         exitCode.ShouldBe(1);
         error.ShouldContain("--client");
+        error.ShouldContain("--all");
     }
 
     [Fact]

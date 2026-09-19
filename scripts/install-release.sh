@@ -73,6 +73,7 @@ esac
 
 install_dir="${SQUEEZR_INSTALL_DIR:-$HOME/apps/squeezr}"
 bin_dir="${SQUEEZR_BIN_DIR:-$HOME/.local/bin}"
+bin_dir="${bin_dir%/}"
 mkdir -p "$install_dir" "$bin_dir"
 install_dir="$(cd "$install_dir" && pwd)"
 
@@ -88,9 +89,11 @@ fetch_json() {
 
 json="$(mktemp)"
 staging=''
+incoming=''
 link_tmp=''
 cleanup() {
   [[ -n "${staging:-}" ]] && rm -rf "$staging"
+  [[ -n "${incoming:-}" ]] && rm -rf "$incoming"
   [[ -n "${link_tmp:-}" ]] && rm -f "$link_tmp"
   rm -f "$json"
 }
@@ -106,7 +109,7 @@ else
 fi
 
 tag=$(sed -n 's/.*"tag_name"[^:]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$json" | head -n 1)
-[[ -n "$tag" ]] || die "could not parse tag_name from the release response"
+[[ "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "refusing suspicious tag_name '$tag' from the release response"
 asset_pattern="-${rid}[.]tar[.]gz$"
 asset_url=$(tr -d '\n' < "$json" \
   | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
@@ -137,8 +140,15 @@ else
     die "archive layout changed - expected a squeezr-$rid/squeezr binary inside $archive_name"
   fi
   chmod +x "$staging/extract/squeezr-$rid/squeezr"
+  # Park the unpacked tree beside the target first: the destructive part of
+  # the swap becomes a back-to-back rm+rename, and a hard crash mid-window
+  # leaves .incoming.$$ recoverable instead of wiping the only copy.
+  incoming="$install_dir/.incoming.$$"
+  rm -rf "$incoming"
+  mv "$staging/extract/squeezr-$rid" "$incoming"
   rm -rf "$target"
-  mv "$staging/extract/squeezr-$rid" "$target"
+  mv "$incoming" "$target"
+  incoming=''
 fi
 
 step 'Switching squeezr symlink'
@@ -155,5 +165,8 @@ case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *) echo "  Note     : $bin_dir is not on your PATH - add it to your shell profile, then open a NEW terminal." ;;
 esac
-installed_version="$("$bin_dir/squeezr" --version)"
-echo "  Version  : $installed_version"
+if installed_version="$("$bin_dir/squeezr" --version)"; then
+  echo "  Version  : $installed_version"
+else
+  echo "  Note     : $bin_dir/squeezr failed to run on this machine (check glibc); the install itself completed."
+fi

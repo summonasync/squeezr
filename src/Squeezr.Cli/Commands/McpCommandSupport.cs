@@ -21,7 +21,7 @@ public static class McpCommandSupport
         if (!interactive)
         {
             throw new McpUsageException(
-                $"Specify at least one client with --client ({ClientValues}). " +
+                $"Specify at least one client with --client ({ClientValues}), or --all to onboard every detected client. " +
                 "Scope and client prompts require an interactive terminal.");
         }
         var detected = McpClientRegistry.All
