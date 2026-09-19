@@ -17,8 +17,8 @@ public sealed class IndexEventWriter
     public void FileIndexed(string repo, string path, int files) =>
         Write(new IndexFileLine("fileIndexed", repo, path, files));
 
-    public void Progress(string repo, IndexPhase phase, int total) =>
-        Write(new IndexProgressLine("progress", repo, PhaseName(phase), total));
+    public void Progress(string repo, IndexPhase phase, int total, int? done = null) =>
+        Write(new IndexProgressLine("progress", repo, PhaseName(phase), total, done));
 
     public void Completed(IndexResult result, int durationMs, int? symbols) =>
         Write(IndexCompletedLine.FromResult(result, durationMs, symbols));

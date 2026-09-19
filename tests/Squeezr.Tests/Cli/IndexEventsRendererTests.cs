@@ -71,6 +71,83 @@ public sealed class IndexEventsRendererTests
     }
 
     [Fact]
+    public void ItemProcessed_DuringEmbeddings_EmitsPeriodicProgressWithDoneAndNoPerChunkLines()
+    {
+        var writer = new StringWriter();
+        var renderer = new IndexEventsRenderer(new IndexEventWriter(writer));
+
+        renderer.PhaseStarted("demo", IndexPhase.Embeddings, 1024);
+        for (var i = 0; i < 1025; i++)
+        {
+            renderer.ItemProcessed("demo", $"chunk{i}");
+        }
+
+        var lines = Lines(writer);
+        lines.Length.ShouldBe(3);
+        lines[0].ShouldBe("""{"type":"progress","repo":"demo","phase":"embeddings","total":1024}""");
+        lines[1].ShouldBe("""{"type":"progress","repo":"demo","phase":"embeddings","total":1024,"done":512}""");
+        lines[2].ShouldBe("""{"type":"progress","repo":"demo","phase":"embeddings","total":1024,"done":1024}""");
+    }
+
+    [Fact]
+    public void ItemProcessed_DuringFiles_EmitsLegacyFileIndexedLinesByteForByte()
+    {
+        var writer = new StringWriter();
+        var renderer = new IndexEventsRenderer(new IndexEventWriter(writer));
+
+        renderer.PhaseStarted("demo", IndexPhase.Files, 2);
+        renderer.ItemProcessed("demo", "a.cs");
+        renderer.ItemProcessed("demo", "b.cs");
+
+        var lines = Lines(writer);
+        lines.Length.ShouldBe(2);
+        lines[0].ShouldBe("""{"type":"fileIndexed","repo":"demo","path":"a.cs","files":1}""");
+        lines[1].ShouldBe("""{"type":"fileIndexed","repo":"demo","path":"b.cs","files":2}""");
+    }
+
+    [Fact]
+    public void ItemProcessed_DuringEmbeddings_ResetsDoneCounterPerRepo()
+    {
+        var writer = new StringWriter();
+        var renderer = new IndexEventsRenderer(new IndexEventWriter(writer));
+
+        renderer.PhaseStarted("alpha", IndexPhase.Embeddings, 600);
+        for (var i = 0; i < 600; i++)
+        {
+            renderer.ItemProcessed("alpha", $"a{i}");
+        }
+
+        renderer.PhaseStarted("beta", IndexPhase.Embeddings, 600);
+        for (var i = 0; i < 512; i++)
+        {
+            renderer.ItemProcessed("beta", $"b{i}");
+        }
+
+        var lines = Lines(writer);
+        lines.Length.ShouldBe(4);
+        AssertLine(lines[0], "progress", e =>
+        {
+            e.GetProperty("repo").GetString().ShouldBe("alpha");
+            e.TryGetProperty("done", out _).ShouldBeFalse();
+        });
+        AssertLine(lines[1], "progress", e =>
+        {
+            e.GetProperty("repo").GetString().ShouldBe("alpha");
+            e.GetProperty("done").GetInt32().ShouldBe(512);
+        });
+        AssertLine(lines[2], "progress", e =>
+        {
+            e.GetProperty("repo").GetString().ShouldBe("beta");
+            e.TryGetProperty("done", out _).ShouldBeFalse();
+        });
+        AssertLine(lines[3], "progress", e =>
+        {
+            e.GetProperty("repo").GetString().ShouldBe("beta");
+            e.GetProperty("done").GetInt32().ShouldBe(512);
+        });
+    }
+
+    [Fact]
     public void Symbols_AccumulateAcrossPerPhaseCumulativeCountersWithoutDoubleCounting()
     {
         var writer = new StringWriter();

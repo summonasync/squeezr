@@ -59,7 +59,7 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
             if (watchAlive)
             {
                 DaemonProcessGuard.EnsureSqueezrProcess(watch!);
-                previousStatus = await DaemonTerminator.StopAsync(watch.Pid, cancellationToken);
+                previousStatus = await DaemonTerminator.StopAsync(watch!.Pid, cancellationToken);
                 previousPid = watch.Pid;
             }
             else

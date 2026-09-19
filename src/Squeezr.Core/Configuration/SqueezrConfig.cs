@@ -33,7 +33,8 @@ public sealed record SqueezrConfig
                     "**/.next/**",
                     "**/.vs/**",
                     "**/.idea/**",
-                    "**/*.min.js"
+                    "**/*.min.js",
+                    "**/*.tsbuildinfo"
                 ],
                 MaxFileSizeKb = 512,
                 NoSemantic = false
