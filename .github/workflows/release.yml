@@ -35,11 +35,10 @@ jobs:
           tar -czf "squeezr-$version-linux-x64.tar.gz" -C dist squeezr-linux-x64
           tar -czf "squeezr-$version-win-x64.tar.gz" -C dist squeezr-win-x64
           ls -lh squeezr-*
-      # Gitea Actions serves the GitHub-compatible release API, so the
-      # gh-release action works against it with the built-in GITHUB_TOKEN.
-      - uses: softprops/action-gh-release@v2
+      # Gitea's fork of action-gh-release adapted to the Gitea API
+      # (softprops itself fails release creation with 405 here).
+      - uses: gitea.com/actions/release-action@v1
         with:
           files: |
             squeezr-*-linux-x64.tar.gz
             squeezr-*-win-x64.tar.gz
-          generate_release_notes: true
