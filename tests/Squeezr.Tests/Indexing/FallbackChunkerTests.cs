@@ -168,6 +168,7 @@ public class FallbackChunkerTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
+        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/docs/guide.md", Lines(20, "md line"));
         WriteFile(workspace, "repo/app/settings.yml", Lines(5, "yml line"));

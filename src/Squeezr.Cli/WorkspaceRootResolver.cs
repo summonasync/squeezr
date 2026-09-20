@@ -16,7 +16,7 @@ public static class WorkspaceRootResolver
         }
         catch (IOException ex)
         {
-            throw new WorkspaceException(RegistryBusyMessage, innerException: ex);
+            throw new WorkspaceException(RegistryBusyMessage, WorkspaceException.RegistryBusyCode, ex);
         }
 
         if (resolution.MigratedFromLegacy)
@@ -55,7 +55,7 @@ public static class WorkspaceRootResolver
         }
         catch (IOException ex)
         {
-            throw new WorkspaceException(RegistryBusyMessage, innerException: ex);
+            throw new WorkspaceException(RegistryBusyMessage, WorkspaceException.RegistryBusyCode, ex);
         }
     }
 }

@@ -1,5 +1,4 @@
 [mcp_servers.squeezr]
 command = "/opt/squeezr/bin/squeezr"
 args = ["serve", "--watch"]
-cwd = "/work/demo"
 startup_timeout_sec = 30

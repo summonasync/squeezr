@@ -12,9 +12,13 @@ public sealed record McpClientDescriptor
 
     public required McpWriteStrategy WriteStrategy { get; init; }
 
-    public required bool SupportsCurrentDirectory { get; init; }
-
     public bool SupportsCliScope { get; init; } = true;
+
+    public bool UsesArgumentSeparator { get; init; } = true;
+
+    public bool ExpectsOptionsBeforeName { get; init; }
+
+    public bool UsesTrustFlag { get; init; }
 
     public string? HomeEnvironmentVariable { get; init; }
 

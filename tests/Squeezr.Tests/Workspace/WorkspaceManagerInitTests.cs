@@ -80,7 +80,7 @@ public class WorkspaceManagerInitTests
 
         var config = ConfigFile.Load(root);
 
-        config.Embeddings.Provider.ShouldBe("onnx");
+        config.Embeddings.Provider.ShouldBe("auto");
         config.Embeddings.Onnx.Dimensions.ShouldBeNull();
         config.Embeddings.Onnx.MaxSequenceLength.ShouldBeNull();
         config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
@@ -96,7 +96,7 @@ public class WorkspaceManagerInitTests
         config.Chunking.MaxTokensPerChunk.ShouldBe(512);
         config.Chunking.FallbackWindowLines.ShouldBe(60);
         config.Chunking.FallbackOverlapLines.ShouldBe(15);
-        config.Indexing.Ignore.ShouldBe(["**/node_modules/**", "**/bin/**", "**/obj/**", "**/dist/**", "**/.next/**", "**/.vs/**", "**/.idea/**", "**/*.min.js", "**/*.tsbuildinfo"]);
+        config.Indexing.Ignore.ShouldBe(["**/node_modules/**", "**/bin/**", "**/obj/**", "**/dist/**", "**/.next/**", "**/.vs/**", "**/.idea/**", "**/.claude/worktrees/**", "**/*.min.js", "**/*.tsbuildinfo"]);
         config.Indexing.MaxFileSizeKb.ShouldBe(512);
         config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
     }

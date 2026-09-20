@@ -2,7 +2,25 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
-## [Unreleased]
+## [1.0.1] — 2026-09-20
+
+Dogfood hardening wave (2026-09-20 rollout): GPU-first embeddings, agent-experience overhaul, MCP registration fixes. Full suite 910 → 956.
+
+### Added (047, embedding provider auto)
+- `embeddings.provider: "auto"` — the default for new workspaces: per-run resolution prefers ollama (GPU) when the endpoint answers a 2s `GET /api/tags` probe, falls back to onnx (CPU) with a logged reason; no mid-run switching (failures keep the existing error + resume path)
+- One log line per run (`embeddings provider: ollama` / `embeddings provider: onnx (ollama unreachable: <reason>)`, stderr in all modes so `--json`/`--events` stdout stays clean); `index --events` `started`/`completed` carry the resolved `provider` (additive, skip-null); `status --json` gains `embeddingsProvider`; TUI accepts `auto`
+- Stable `workspace_registry_busy` error code (registry busy → terminal `error` without `started`, same code in `--json` envelopes); `--reembed --no-semantic` warns instead of silently doing nothing; probe skipped for effective no-semantic runs
+- Measured on RX 7900 XTX (ollama/Vulkan): 12465 chunks in 6.9 min at ~170% CPU vs 30.3 min on onnx int8 at ~1400-1600% CPU
+
+### Added (048, agent experience)
+- Instructions block rewritten from slogans to a scenario matrix (repo_map for unfamiliar repos; symbol_lookup for exact symbols; find_references before edits; code_search hybrid; expand_span for spans; exact strings / unindexed repos → grep is correct; cross-repo via `squeezr add` + index_status guidance) and inserted after the first heading on fresh installs; existing marker positions replaced in place
+- Six MCP tool descriptions rewritten scenario-first, hedges removed and outlawed by a pin test; SKILL.md documents the qwen deferred-tools (`tool_search select`) behavior
+- `squeezr hook pre-read`: advisory PreToolUse hook payload producer for Claude Code — stdin hook JSON → `additionalContext` nudge when a Read targets a large file (≥256 KB) or wide range (limit ≥400) inside a registered workspace; silent no-op otherwise (fail-open, exit 0, no network); wiring snippet in README/SKILL, applied by hand to `~/.claude/settings.json`
+
+### Fixed (045 wave)
+- qwen MCP registration: `qwen mcp add` no longer passes the `--` separator (its yargs fork counts positionals differently) and passes `--trust` before the name — registration succeeds and the server is trusted (no per-call confirmations); claude/kimi/codex command shapes unchanged
+- Default ignore globs now exclude Claude Code worktrees (`**/.claude/worktrees/**`) — a repo with agent worktrees indexed full copies of itself (Mindlash dogfood: 11 124 extra files, ~5x chunk inflation)
+- MCP config entries written by squeezr no longer pin `cwd` — the stdio server inherits the session's working directory and resolves the workspace itself (a pinned cwd made kimi serve the Squeezr repo index in every project); `SupportsCurrentDirectory` removed with the emission
 
 ### Added (045, install from release + agent onboarding)
 - `scripts/install-release.sh`: one-command installer for machines without a Squeezr checkout — `curl -fsSL <raw-url> | bash` resolves the latest Gitea release via its API (or `--version <tag>` to pin/roll back), downloads the linux-x64 tar.gz, checks archive integrity, unpacks into `~/apps/squeezr/<tag>/` and atomically repoints the `~/.local/bin/squeezr` symlink; idempotent (re-run refreshes the symlink only, `--force` re-downloads), no sudo, env overrides `SQUEEZR_GITEA`/`SQUEEZR_INSTALL_DIR`/`SQUEEZR_BIN_DIR`; arm64/Windows get an explicit refusal with a manual hint

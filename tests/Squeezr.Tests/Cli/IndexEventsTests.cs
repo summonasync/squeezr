@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Cli;
 
@@ -151,10 +153,150 @@ public sealed class IndexEventsTests
         index.StdOut.TrimStart().StartsWith('{').ShouldBeFalse();
     }
 
+    [Fact]
+    public async Task Index_Events_AutoProviderWithDeadOllama_FallsBackToOnnxAndCarriesProvider()
+    {
+        var root = TestDirs.NewTempDir();
+        await InitAddAsync(root, ("a.txt", "alpha body"));
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
+
+        var index = await RunCliAsync(root, "index", "--events");
+
+        index.ExitCode.ShouldBe(0);
+        var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        using (var started = JsonDocument.Parse(lines[0]))
+        {
+            started.RootElement.GetProperty("type").GetString().ShouldBe("started");
+            started.RootElement.GetProperty("provider").GetString().ShouldBe("onnx");
+        }
+
+        using (var completed = JsonDocument.Parse(FindLine(lines, "completed")))
+        {
+            completed.RootElement.GetProperty("type").GetString().ShouldBe("completed");
+            completed.RootElement.GetProperty("provider").GetString().ShouldBe("onnx");
+        }
+
+        index.StdErr.ShouldContain("embeddings provider: onnx (ollama unreachable:");
+    }
+
+    [Fact]
+    public async Task Index_NoSemanticFlag_SkipsProviderResolutionEntirely()
+    {
+        var root = TestDirs.NewTempDir();
+        await InitAddAsync(root, ("a.txt", "alpha body"));
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
+
+        var index = await RunCliAsync(root, "index", "--no-semantic", "--events");
+
+        index.ExitCode.ShouldBe(0);
+        index.StdErr.ShouldNotContain("embeddings provider:");
+        var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        using (var started = JsonDocument.Parse(lines[0]))
+        {
+            started.RootElement.GetProperty("type").GetString().ShouldBe("started");
+            started.RootElement.TryGetProperty("provider", out _).ShouldBeFalse();
+        }
+
+        ParseType(lines[^1]).ShouldBe("completed");
+    }
+
+    [Fact]
+    public async Task Index_NoSemanticFromConfig_SkipsProviderResolutionEntirely()
+    {
+        var root = TestDirs.NewTempDir();
+        await InitAddAsync(root, ("a.txt", "alpha body"));
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
+        var config = ConfigFile.Load(root);
+        ConfigFile.Save(root, config with { Indexing = config.Indexing with { NoSemantic = true } });
+
+        var index = await RunCliAsync(root, "index", "--events");
+
+        index.ExitCode.ShouldBe(0);
+        index.StdErr.ShouldNotContain("embeddings provider:");
+        var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        using (var started = JsonDocument.Parse(lines[0]))
+        {
+            started.RootElement.GetProperty("type").GetString().ShouldBe("started");
+            started.RootElement.TryGetProperty("provider", out _).ShouldBeFalse();
+        }
+
+        ParseType(lines[^1]).ShouldBe("completed");
+    }
+
+    [Fact]
+    public async Task Index_Events_RegistryBusy_EmitsSingleErrorEventWithBusyCodeAndNoStarted()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = TestDirs.NewTempDir();
+        await InitAddWithHomeAsync(home, root, ("a.txt", "alpha body"));
+
+        using (LockRegistry(home))
+        {
+            var index = await CliTestProcess.RunWithHomeAsync(home, root, "index", "--events");
+
+            index.ExitCode.ShouldBe(1);
+            var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            lines.Length.ShouldBe(1);
+            using var error = JsonDocument.Parse(lines[0]);
+            error.RootElement.GetProperty("type").GetString().ShouldBe("error");
+            error.RootElement.GetProperty("code").GetString().ShouldBe("workspace_registry_busy");
+            ParseStdErrError(index.StdErr).GetProperty("code").GetString().ShouldBe("workspace_registry_busy");
+        }
+    }
+
+    [Fact]
+    public async Task Index_ReembedWithNoSemantic_WarnsOnStderrAndIgnoresReembed()
+    {
+        var root = TestDirs.NewTempDir();
+        await InitAddAsync(root, ("a.txt", "alpha body"));
+
+        var index = await RunCliAsync(root, "index", "--reembed", "--no-semantic", "--events");
+
+        index.ExitCode.ShouldBe(0);
+        index.StdErr.ShouldContain("warning: --reembed requires semantic indexing; ignored");
+        var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        ParseType(lines[0]).ShouldBe("started");
+        ParseType(lines[^1]).ShouldBe("completed");
+    }
+
+    private static FileStream LockRegistry(string home) =>
+        new(
+            Path.Combine(home, SqueezrPaths.RegistryFileName),
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None);
+
+    private static async Task InitAddWithHomeAsync(
+        string home, string root, params (string Path, string Content)[] files)
+    {
+        (await CliTestProcess.RunWithHomeAsync(home, root, "init", "--json")).ExitCode.ShouldBe(0);
+        Directory.CreateDirectory(Path.Combine(root, "code"));
+        foreach (var (path, content) in files)
+        {
+            File.WriteAllText(Path.Combine(root, "code", path), content);
+        }
+
+        (await CliTestProcess.RunWithHomeAsync(home, root, "add", "code", "--name", "code", "--json"))
+            .ExitCode.ShouldBe(0);
+    }
+
     private static string ParseType(string line)
     {
         using var doc = JsonDocument.Parse(line);
         return doc.RootElement.GetProperty("type").GetString()!;
+    }
+
+    private static string FindLine(string[] lines, string type)
+    {
+        foreach (var line in lines)
+        {
+            if (ParseType(line) == type)
+            {
+                return line;
+            }
+        }
+
+        throw new InvalidOperationException($"No '{type}' event in the stream.");
     }
 
     private static JsonElement ParseStdErrError(string stdErr)

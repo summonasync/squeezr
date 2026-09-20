@@ -7,7 +7,6 @@ namespace Squeezr.Tests.Mcp.Onboarding;
 public class JsonMcpConfigWriterTests
 {
     private const string CommandPath = "/opt/squeezr/bin/squeezr";
-    private const string WorkspaceRoot = "/work/demo";
     private const string ServerName = "squeezr";
 
     private static string FixturesDir => Path.Combine(AppContext.BaseDirectory, "Mcp", "Onboarding", "Fixtures", "json");
@@ -182,7 +181,7 @@ public class JsonMcpConfigWriterTests
     }
 
     private static JsonObject BuildEntry(McpClientId clientId) =>
-        ServerEntryBuilder.Build(McpClientRegistry.Get(clientId), WorkspaceRoot, CommandPath, watch: true);
+        ServerEntryBuilder.Build(McpClientRegistry.Get(clientId), CommandPath, watch: true);
 
     private static string CopyToTemp(string fixtureName)
     {

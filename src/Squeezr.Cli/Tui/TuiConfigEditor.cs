@@ -157,7 +157,7 @@ public static class TuiConfigEditor
                 Get = c => c.Embeddings.Provider,
                 Apply = (c, raw) => NormalizeProvider(raw) is { } provider
                     ? FieldResult.Valid(c with { Embeddings = c.Embeddings with { Provider = provider } })
-                    : FieldResult.Fail("must be 'onnx', 'ollama' or 'openai'"),
+                    : FieldResult.Fail("must be 'auto', 'onnx', 'ollama' or 'openai'"),
             },
             new FieldDef
             {
@@ -372,7 +372,7 @@ public static class TuiConfigEditor
     private static string? NormalizeProvider(string raw)
     {
         var value = raw.ToLowerInvariant();
-        return value is "onnx" or "ollama" or "openai" ? value : null;
+        return value is "auto" or "onnx" or "ollama" or "openai" ? value : null;
     }
 
     private static bool TryNormalizeOllamaModelProfile(string raw, out string? profile)
@@ -399,7 +399,7 @@ public static class TuiConfigEditor
     private static int? EffectiveDimensions(EmbeddingsConfig embeddings)
         => embeddings.Provider.Trim().ToLowerInvariant() switch
         {
-            "onnx" => embeddings.Onnx.EffectiveDimensions,
+            "auto" or "onnx" => embeddings.Onnx.EffectiveDimensions,
             "ollama" => embeddings.Ollama.Dimensions,
             "openai" => embeddings.OpenAiCompatible.Dimensions,
             _ => null,

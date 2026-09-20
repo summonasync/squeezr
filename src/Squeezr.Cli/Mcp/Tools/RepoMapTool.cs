@@ -26,7 +26,7 @@ public sealed class RepoMapTool
         _cache = cache;
     }
 
-    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members). Never returns bodies — use expand_span on coordinates from other tools to read code. Good entry point for navigating an unfamiliar workspace. Signatures are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
+    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Signatures are refreshed on read: modified files are reindexed inline or reported in staleFiles; expand_span reads code on coordinates from other tools.")]
     [McpServerTool(Name = "repo_map", Title = "Repository map")]
     public object Build(string? repo = null, int? depth = null, int? maxTokens = null) =>
         _gate.Run(() => BuildCore(repo, depth, maxTokens));

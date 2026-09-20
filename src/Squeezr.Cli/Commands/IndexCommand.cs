@@ -3,6 +3,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
 
@@ -38,17 +39,41 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         try
         {
             events = settings.Events ? new IndexEventWriter(Console.Out) : null;
-            events?.Started(WorkspaceRootResolver.LaunchDirectory());
+
+            EmbeddingProviderResolution? providerResolution = null;
+            IEmbeddingProvider? embeddings = null;
+            IVectorStore? vectorStore = null;
+            var rootResolution = WorkspaceRootResolver.ResolveCurrentDirectory();
+            if (rootResolution.IsWorkspace)
+            {
+                var effectiveNoSemantic = IndexingMode.EffectiveNoSemantic(
+                    rootResolution.RootPath, settings.NoSemantic);
+                if (settings.Reembed && effectiveNoSemantic)
+                {
+                    Console.Error.WriteLine("warning: --reembed requires semantic indexing; ignored");
+                }
+
+                var warnings = EmbeddingRuntimeFactory.TryCreate(
+                    rootResolution.RootPath, withProvider: !effectiveNoSemantic,
+                    out embeddings, out vectorStore, out providerResolution);
+                var providerLine = EmbeddingProviderLogLine.Describe(providerResolution);
+                if (providerLine is not null)
+                {
+                    Console.Error.WriteLine(providerLine);
+                }
+
+                foreach (var warning in warnings)
+                {
+                    Console.Error.WriteLine($"warning: {warning}");
+                }
+            }
+
+            events?.Started(WorkspaceRootResolver.LaunchDirectory(), provider: providerResolution?.Provider);
 
             var indexer = new WorkspaceIndexer();
-            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
-
-            var warnings = EmbeddingRuntimeFactory.TryCreate(
-                workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
-            foreach (var warning in warnings)
-            {
-                Console.Error.WriteLine($"warning: {warning}");
-            }
+            var workspaceRoot = rootResolution.IsWorkspace
+                ? rootResolution.RootPath
+                : WorkspaceRootResolver.RequireWorkspaceRoot();
 
             IndexEventsRenderer? renderer = null;
             IndexResult result;
@@ -64,7 +89,7 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                     .Start(ctx => indexer.Index(
                         workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
                         new IndexProgressRenderer(ctx), embeddings, vectorStore, settings.Reembed,
-                        StaleLockWarningSink.ToStderr));
+                        StaleLockWarningSink.ToStderr, providerResolution));
             }
             else
             {
@@ -72,11 +97,12 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                 result = indexer.Index(
                     workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
                     renderer, embeddings, vectorStore, settings.Reembed,
-                    StaleLockWarningSink.ToStderr);
+                    StaleLockWarningSink.ToStderr, providerResolution);
             }
 
             events?.Completed(
-                result, (int)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, renderer?.Symbols);
+                result, (int)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, renderer?.Symbols,
+                provider: providerResolution?.Provider);
 
             if (settings.Json)
             {

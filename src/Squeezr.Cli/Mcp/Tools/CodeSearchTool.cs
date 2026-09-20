@@ -34,7 +34,7 @@ public sealed class CodeSearchTool
         _cache = cache;
     }
 
-    [Description("Hybrid exact/semantic search over the indexed workspace. Returns file:line matches with snippets (no full bodies); use expand_span (when available) to reveal a body around a hit. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
+    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,

@@ -17,7 +17,6 @@
         "serve",
         "--watch"
       ],
-      "cwd": "/work/demo",
       "versionNegotiation": "auto"
     }
   }

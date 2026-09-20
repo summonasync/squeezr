@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
@@ -165,6 +166,83 @@ public class EmbeddingIndexPhaseTests
 
         vectorStore.UpsertedPointCount.ShouldBe(hashCount);
         ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+    }
+
+    [Fact]
+    public void Index_AutoProviderWithResolution_ComputesModelKeyFromResolvedProvider()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with
+        {
+            Embeddings = config.Embeddings with { Provider = "auto" }
+        });
+
+        new WorkspaceIndexer().Index(
+            workspace,
+            embeddings: new FakeEmbeddingProvider(),
+            vectorStore: new FakeVectorStore(),
+            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+
+        ListChunks(workspace).ShouldAllBe(c =>
+            c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+    }
+
+    [Fact]
+    public void Index_AutoProviderWithoutResolution_ThrowsInsteadOfComputingAutoModelKey()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with
+        {
+            Embeddings = config.Embeddings with { Provider = "auto" }
+        });
+
+        var error = Should.Throw<WorkspaceException>(() =>
+            new WorkspaceIndexer().Index(
+                workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore()));
+
+        error.Message.ShouldContain("must be resolved");
+    }
+
+    [Fact]
+    public void IndexFile_AutoProviderWithResolution_ComputesModelKeyFromResolvedProvider()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with
+        {
+            Embeddings = config.Embeddings with { Provider = "auto" }
+        });
+
+        new WorkspaceIndexer().IndexFile(
+            workspace, "demo", "a.cs",
+            new FakeEmbeddingProvider(), new FakeVectorStore(),
+            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+
+        ListChunks(workspace).ShouldAllBe(c =>
+            c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+    }
+
+    [Fact]
+    public void IndexFile_AutoProviderWithoutResolution_ThrowsInsteadOfComputingAutoModelKey()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with
+        {
+            Embeddings = config.Embeddings with { Provider = "auto" }
+        });
+
+        var error = Should.Throw<WorkspaceException>(() =>
+            new WorkspaceIndexer().IndexFile(
+                workspace, "demo", "a.cs", new FakeEmbeddingProvider(), new FakeVectorStore()));
+
+        error.Message.ShouldContain("must be resolved");
     }
 
     [Fact]
@@ -414,6 +492,7 @@ public class EmbeddingIndexPhaseTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         return workspace;
     }

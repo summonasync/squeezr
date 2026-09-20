@@ -62,6 +62,42 @@ public class TuiIndexRunnerTests
     }
 
     [Fact]
+    public async Task Index_NoSemanticFromConfig_SkipsProviderResolution()
+    {
+        var workspace = NewWorkspaceWithRepo();
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(workspace);
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with { Indexing = config.Indexing with { NoSemantic = true } });
+
+        var console = TuiTestHarness.InteractiveConsole();
+        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 0);
+        TuiTestHarness.PushMenuChoice(console, 7);
+
+        var code = await TuiApp.RunAsync(console, workspace);
+
+        code.ShouldBe(0);
+        console.Output.ShouldNotContain("embeddings provider:");
+    }
+
+    [Fact]
+    public async Task Index_SemanticEnabled_ReportsResolvedProvider()
+    {
+        var workspace = NewWorkspaceWithRepo();
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(workspace);
+
+        var console = TuiTestHarness.InteractiveConsole();
+        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 0);
+        TuiTestHarness.PushMenuChoice(console, 7);
+
+        var code = await TuiApp.RunAsync(console, workspace);
+
+        code.ShouldBe(0);
+        console.Output.ShouldContain("embeddings provider: onnx (ollama unreachable:");
+    }
+
+    [Fact]
     public void Index_ProgressRenderer_RendersPhasesInTestConsole()
     {
         var workspace = NewWorkspaceWithRepo();

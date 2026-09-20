@@ -9,7 +9,7 @@ namespace Squeezr.Tests.Mcp.Onboarding;
 public sealed class McpOnboardingServiceTests
 {
     [Fact]
-    public async Task Install_KimiProjectScope_WritesEntryWithCwdAndWatchArgs()
+    public async Task Install_KimiProjectScope_WritesEntryWithWatchArgsAndNoCwd()
     {
         var (service, environment, workspace, _) = NewService();
         var client = McpClientRegistry.Get(McpClientId.Kimi);
@@ -21,7 +21,7 @@ public sealed class McpOnboardingServiceTests
         var entry = ReadSqueezrEntry(Path.Combine(workspace, ".kimi-code", "mcp.json"));
         entry["command"]!.GetValue<string>().ShouldBe(Path.GetFullPath(environment.CommandPath));
         entry["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
-        entry["cwd"]!.GetValue<string>().ShouldBe(Path.GetFullPath(workspace));
+        entry.ContainsKey("cwd").ShouldBeFalse();
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class McpOnboardingServiceTests
         result.Warning.ShouldNotBeNull().ShouldContain("qwen");
         var entry = ReadSqueezrEntry(Path.Combine(environment.HomeDir, ".qwen", "settings.json"));
         entry["versionNegotiation"]!.GetValue<string>().ShouldBe("auto");
-        entry["cwd"]!.GetValue<string>().ShouldBe(Path.GetFullPath(environment.WorkspaceRoot));
+        entry.ContainsKey("cwd").ShouldBeFalse();
     }
 
     [Fact]

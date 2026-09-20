@@ -19,10 +19,7 @@ public static class InstructionsWriter
         var start = content.IndexOf(SqueezrInstructions.StartMarker, StringComparison.Ordinal);
         if (start < 0)
         {
-            var prefix = content.Length == 0
-                ? string.Empty
-                : content.EndsWith("\n", StringComparison.Ordinal) ? content + "\n" : content + "\n\n";
-            Write(path, prefix + SqueezrInstructions.Block + "\n", hadBom);
+            Write(path, InsertFresh(content), hadBom);
             return;
         }
 
@@ -75,6 +72,69 @@ public static class InstructionsWriter
                 ? prefix
                 : prefix + (content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n") + suffix;
         Write(path, result, hadBom);
+    }
+
+    private static string InsertFresh(string content)
+    {
+        var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var headingEnd = EndOfFirstHeading(content);
+        if (headingEnd < 0)
+        {
+            var prefix = content.Length == 0
+                ? string.Empty
+                : content.EndsWith("\n", StringComparison.Ordinal) ? content + "\n" : content + "\n\n";
+            return prefix + SqueezrInstructions.Block + "\n";
+        }
+
+        var head = content[..headingEnd];
+        if (!head.EndsWith("\n", StringComparison.Ordinal))
+        {
+            head += newline;
+        }
+        var tail = content[headingEnd..].TrimStart('\r', '\n');
+        return tail.Length == 0
+            ? head + newline + SqueezrInstructions.Block + newline
+            : head + newline + SqueezrInstructions.Block + newline + newline + tail;
+    }
+
+    private static int EndOfFirstHeading(string content)
+    {
+        var lineStart = 0;
+        while (lineStart < content.Length)
+        {
+            var lineEnd = content.IndexOf('\n', lineStart);
+            var exclusiveEnd = lineEnd < 0 ? content.Length : lineEnd;
+            if (exclusiveEnd > lineStart && content[exclusiveEnd - 1] == '\r')
+            {
+                exclusiveEnd--;
+            }
+            if (IsAtxHeading(content, lineStart, exclusiveEnd))
+            {
+                return lineEnd < 0 ? content.Length : lineEnd + 1;
+            }
+            if (lineEnd < 0)
+            {
+                break;
+            }
+            lineStart = lineEnd + 1;
+        }
+        return -1;
+    }
+
+    private static bool IsAtxHeading(string content, int start, int exclusiveEnd)
+    {
+        var hashes = 0;
+        var i = start;
+        while (i < exclusiveEnd && content[i] == '#' && hashes < 6)
+        {
+            hashes++;
+            i++;
+        }
+        if (hashes == 0)
+        {
+            return false;
+        }
+        return i == exclusiveEnd || content[i] is ' ' or '\t';
     }
 
     private static (string Content, bool HadBom) Read(string path)

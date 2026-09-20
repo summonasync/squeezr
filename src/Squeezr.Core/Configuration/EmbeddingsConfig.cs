@@ -2,7 +2,7 @@ namespace Squeezr.Core.Configuration;
 
 public sealed record EmbeddingsConfig
 {
-    public string Provider { get; init; } = "onnx";
+    public string Provider { get; init; } = "auto";
 
     public OnnxEmbeddingOptions Onnx { get; init; } = new();
 

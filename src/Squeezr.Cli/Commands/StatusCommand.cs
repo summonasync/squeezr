@@ -24,6 +24,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             var manager = new WorkspaceManager(workspaceRoot);
             var status = manager.GetStatus();
+            var config = LoadConfigIfReadable(workspaceRoot);
 
             var warnings = EmbeddingRuntimeFactory.TryCreate(
                 workspaceRoot, withProvider: false, out _, out var vectorStore);
@@ -43,7 +44,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             if (settings.Json)
             {
                 var staleFiles = StaleFileDetector.Detect(workspaceRoot);
-                JsonOutput.Write(WorkspaceStatusReport.Create(status, staleFiles));
+                JsonOutput.Write(WorkspaceStatusReport.Create(status, staleFiles, config?.Embeddings.Provider));
                 return 0;
             }
 
@@ -71,6 +72,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
 
             AnsiConsole.Write(table);
 
+            if (config is not null)
+            {
+                AnsiConsole.MarkupLine($"Embeddings provider: {config.Embeddings.Provider.EscapeMarkup()}");
+            }
+
             if (qdrant.Available)
             {
                 AnsiConsole.MarkupLine(
@@ -79,7 +85,9 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             else
             {
                 AnsiConsole.MarkupLine($"Qdrant: [red]unavailable[/] — {qdrant.PendingChunks} pending chunk(s)");
-                var hint = QdrantEndpointHint.RestPortMisconfiguration(ConfigFile.Load(workspaceRoot).Qdrant.Endpoint);
+                var hint = config is null
+                    ? null
+                    : QdrantEndpointHint.RestPortMisconfiguration(config.Qdrant.Endpoint);
                 if (hint is not null)
                 {
                     AnsiConsole.MarkupLine($"[grey]{hint.EscapeMarkup()}[/]");
@@ -91,6 +99,23 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         catch (WorkspaceException ex)
         {
             return CommandError.Report(ex, settings.Json);
+        }
+    }
+
+    private static SqueezrConfig? LoadConfigIfReadable(string workspaceRoot)
+    {
+        if (!File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
+        {
+            return null;
+        }
+
+        try
+        {
+            return ConfigFile.Load(workspaceRoot);
+        }
+        catch (WorkspaceException)
+        {
+            return null;
         }
     }
 }

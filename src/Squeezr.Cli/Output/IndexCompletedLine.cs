@@ -10,9 +10,10 @@ public sealed record IndexCompletedLine(
     int Modified,
     int Deleted,
     int? Symbols,
-    IReadOnlyList<RepoIndexResult> Repos)
+    IReadOnlyList<RepoIndexResult> Repos,
+    string? Provider = null)
 {
-    public static IndexCompletedLine FromResult(IndexResult result, int durationMs, int? symbols) =>
+    public static IndexCompletedLine FromResult(IndexResult result, int durationMs, int? symbols, string? provider = null) =>
         new(
             "completed",
             durationMs,
@@ -21,5 +22,6 @@ public sealed record IndexCompletedLine(
             result.Repos.Sum(repo => repo.Modified),
             result.Repos.Sum(repo => repo.Deleted),
             symbols is > 0 ? symbols : null,
-            result.Repos);
+            result.Repos,
+            provider);
 }

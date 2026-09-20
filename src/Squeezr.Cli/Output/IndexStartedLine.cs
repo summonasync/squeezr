@@ -1,3 +1,3 @@
 namespace Squeezr.Cli.Output;
 
-public sealed record IndexStartedLine(string Type, string Workspace, int? ChangedPaths);
+public sealed record IndexStartedLine(string Type, string Workspace, int? ChangedPaths, string? Provider);

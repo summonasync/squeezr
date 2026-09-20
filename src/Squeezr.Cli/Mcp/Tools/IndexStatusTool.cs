@@ -23,7 +23,7 @@ public sealed class IndexStatusTool
         _gate = gate;
     }
 
-    [Description("Workspace freshness: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability and point count, index age. Call before code_search to decide whether a reindex is needed.")]
+    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability and point count, index age. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed.")]
     [McpServerTool(Name = "index_status", Title = "Index status")]
     public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
         _gate.RunAsync(GetCore, cancellationToken);

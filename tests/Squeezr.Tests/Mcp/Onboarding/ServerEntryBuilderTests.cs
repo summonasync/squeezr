@@ -29,15 +29,16 @@ public class ServerEntryBuilderTests
     }
 
     [Theory]
+    [InlineData(McpClientId.Claude)]
     [InlineData(McpClientId.Kimi)]
     [InlineData(McpClientId.Qwen)]
     [InlineData(McpClientId.Codex)]
-    public void Build_CwdSupportingClients_AbsoluteCurrentDirectory(McpClientId clientId)
+    public void Build_AnyClient_NeverPinsWorkingDirectory(McpClientId clientId)
     {
         var entry = ServerEntryBuilder.Build(
-            McpClientRegistry.Get(clientId), "relative-ws", CommandPath, watch: true);
+            McpClientRegistry.Get(clientId), CommandPath, watch: true);
 
-        entry["cwd"]!.GetValue<string>().ShouldBe(Path.GetFullPath("relative-ws"));
+        entry.ContainsKey("cwd").ShouldBeFalse();
     }
 
     [Fact]
@@ -60,7 +61,7 @@ public class ServerEntryBuilderTests
     public void Build_RelativeCommandPath_IsMadeAbsolute()
     {
         var entry = ServerEntryBuilder.Build(
-            McpClientRegistry.Get(McpClientId.Claude), "/work/demo", "squeezr", watch: true);
+            McpClientRegistry.Get(McpClientId.Claude), "squeezr", watch: true);
 
         Command(entry).ShouldBe(Path.GetFullPath("squeezr"));
     }
@@ -68,8 +69,7 @@ public class ServerEntryBuilderTests
     [Fact]
     public void Build_ForCurrentProcess_CommandIsAbsolutePath()
     {
-        var entry = ServerEntryBuilder.Build(
-            McpClientRegistry.Get(McpClientId.Claude), "/work/demo", watch: true);
+        var entry = ServerEntryBuilder.Build(McpClientRegistry.Get(McpClientId.Claude), watch: true);
 
         var command = Command(entry);
         Path.IsPathRooted(command).ShouldBeTrue();
@@ -77,7 +77,7 @@ public class ServerEntryBuilderTests
     }
 
     private static JsonObject Build(McpClientId clientId, bool watch) =>
-        ServerEntryBuilder.Build(McpClientRegistry.Get(clientId), "/work/demo", CommandPath, watch);
+        ServerEntryBuilder.Build(McpClientRegistry.Get(clientId), CommandPath, watch);
 
     private static string Command(JsonObject entry) => entry["command"]!.GetValue<string>();
 

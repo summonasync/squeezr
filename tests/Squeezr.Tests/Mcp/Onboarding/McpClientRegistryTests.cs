@@ -86,16 +86,6 @@ public class McpClientRegistryTests
             .ShouldBe(Path.Combine([Root, .. projectRelative.Split('/')]));
     }
 
-    [Theory]
-    [InlineData(McpClientId.Claude, false)]
-    [InlineData(McpClientId.Kimi, true)]
-    [InlineData(McpClientId.Qwen, true)]
-    [InlineData(McpClientId.Codex, true)]
-    public void SupportsCurrentDirectory_MatchesClientFacts(McpClientId id, bool expected)
-    {
-        McpClientRegistry.Get(id).SupportsCurrentDirectory.ShouldBe(expected);
-    }
-
     [Fact]
     public void ConfigFormat_QwenAndKimiAndClaudeAreJson_CodexIsToml()
     {

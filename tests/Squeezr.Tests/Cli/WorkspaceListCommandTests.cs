@@ -62,6 +62,27 @@ public sealed class WorkspaceListCommandTests
         human.StdErr.ShouldContain(Path.GetFullPath(gone));
     }
 
+    [Fact]
+    public async Task Json_RegistryBusy_ReportsBusyCodeInErrorEnvelope()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = TestDirs.NewTempDir();
+        (await CliTestProcess.RunWithHomeAsync(home, root, "init", "--json")).ExitCode.ShouldBe(0);
+
+        using (new FileStream(
+            Path.Combine(home, SqueezrPaths.RegistryFileName),
+            FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var result = await CliTestProcess.RunWithHomeAsync(home, root, "workspace", "list", "--json");
+
+            result.ExitCode.ShouldBe(1);
+            var envelopeLine = result.StdErr.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1];
+            using var envelope = JsonDocument.Parse(envelopeLine);
+            envelope.RootElement.GetProperty("error").GetProperty("code").GetString()
+                .ShouldBe("workspace_registry_busy");
+        }
+    }
+
     private static async Task<string> NewInitializedWorkspaceAsync(string name)
     {
         var root = TestDirs.NewTempDir();

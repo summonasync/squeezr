@@ -40,7 +40,27 @@ public class ClientCliBridgeTests
             McpClientRegistry.Get(McpClientId.Qwen), McpScope.Project, CommandPath, watch: false, CancellationToken.None);
 
         fake.ReadCapturedArguments().ShouldBe(
-            ["mcp", "add", "squeezr", "-s", "project", "--", CommandPath, "serve"]);
+            ["mcp", "add", "-s", "project", "--trust", "squeezr", CommandPath, "serve"]);
+    }
+
+    [Fact]
+    public async Task AddAsync_QwenUserScopeWithWatch_TrustsServerWithoutSeparator()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var binDir = TestDirs.NewTempDir();
+        var fake = FakeCli.Install(binDir, "qwen");
+        var bridge = new ClientCliBridge(new ClientCliLocator(binDir));
+
+        await bridge.AddAsync(
+            McpClientRegistry.Get(McpClientId.Qwen), McpScope.User, CommandPath, watch: true, CancellationToken.None);
+
+        var argv = fake.ReadCapturedArguments();
+        argv.ShouldBe(
+            ["mcp", "add", "-s", "user", "--trust", "squeezr", CommandPath, "serve", "--watch"]);
+        argv.ShouldNotContain("--");
     }
 
     [Fact]

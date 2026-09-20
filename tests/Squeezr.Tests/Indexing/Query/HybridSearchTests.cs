@@ -156,6 +156,7 @@ public class HybridSearchTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
 
         var fullPath = Path.Combine(workspace, "repo", "Calc.cs");

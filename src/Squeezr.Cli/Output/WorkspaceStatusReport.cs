@@ -10,9 +10,11 @@ public sealed record WorkspaceStatusReport(
     IReadOnlyList<string> StaleFiles,
     TimeSpan? IndexAge,
     IReadOnlyList<RepoStatusReport> Repos,
-    QdrantStatus? Qdrant)
+    QdrantStatus? Qdrant,
+    string? EmbeddingsProvider = null)
 {
-    public static WorkspaceStatusReport Create(WorkspaceStatus status, IReadOnlyList<string> staleFiles)
+    public static WorkspaceStatusReport Create(
+        WorkspaceStatus status, IReadOnlyList<string> staleFiles, string? embeddingsProvider = null)
     {
         var repos = status.Repos
             .Select(r => new RepoStatusReport(
@@ -35,7 +37,8 @@ public sealed record WorkspaceStatusReport(
             staleFiles,
             Age(lastIndexedAt),
             repos,
-            status.Qdrant);
+            status.Qdrant,
+            embeddingsProvider);
     }
 
     private static TimeSpan? Age(DateTime? indexedAt) =>

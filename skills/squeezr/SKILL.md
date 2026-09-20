@@ -49,7 +49,9 @@ only one of them is for squeezr:
 
 The embedding model needs no manual step: the default onnx model ships inside the
 release archive, and the ollama provider pulls its model automatically on first
-`squeezr index`.
+`squeezr index`. New workspaces default to `embeddings.provider: "auto"`: every
+indexing run picks ollama (GPU) when the endpoint is reachable, otherwise the
+bundled onnx model on CPU — no provider configuration needed.
 
 If docker is missing or the daemon is down, do not install docker and do not
 improvise — stop and ask the human how they want the services hosted.
@@ -75,7 +77,8 @@ squeezr index --events
   progress bar. Other switches: `--full` (complete rebuild), `--no-semantic`
   (literal-only), `--reembed` (re-embed everything after a model change).
 
-`squeezr status` shows per-repo file/symbol/chunk counts and Qdrant state.
+`squeezr status` shows per-repo file/symbol/chunk counts, the configured
+embeddings provider and Qdrant state.
 
 ## 4. MCP registration
 
@@ -90,11 +93,36 @@ load server configs at startup, not live. Six tools then appear: `code_search`,
 `symbol_lookup`, `find_references`, `repo_map`, `expand_span`, `index_status`.
 `squeezr mcp doctor` verifies the registration later; `squeezr mcp remove` undoes it.
 
+Claude Code also has an optional advisory hook. `squeezr hook pre-read` reads the
+PreToolUse payload from stdin and, when the Read targets a large file or wide
+range inside a registered workspace, adds `additionalContext` pointing at
+`expand_span` / `symbol_lookup`; otherwise it prints nothing and exits 0. It is
+advisory only (never sets `permissionDecision`). The wiring is human-applied —
+never edit hook configs from an agent session. Other clients (qwen, kimi) can
+wire the same pattern when their hook surface allows. In
+`~/.claude/settings.json` (project scope: `.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          { "type": "command", "command": "squeezr hook pre-read" }
+        ]
+      }
+    ]
+  }
+}
+```
+
 ## 5. Tool cheat-sheet (MCP)
 
 Navigation flow: `repo_map` first for orientation → `code_search` /
 `symbol_lookup` to locate → `find_references` before changing anything →
-`expand_span` to read. Do not read whole files until the index is exhausted.
+`expand_span` to read. Exact string search or a repo outside the index —
+plain grep/read is correct, not a violation.
 
 - `repo_map(repo?, depth?, maxTokens?)` — directory tree with type/member
   signatures, no bodies. Cheapest first contact with an unfamiliar workspace.
@@ -132,6 +160,11 @@ Every tool also has a CLI twin (`squeezr search`, `map`, `symbol`, `refs`,
   embedding model produces Y": the embedding model changed. Fix is
   `squeezr index --reembed`; warn the human first, re-embedding a large
   workspace takes a while.
+- **Tools missing in qwen** — some clients (qwen) deliver MCP tools deferred
+  via `tool_search select`: the squeezr tools stay unloaded until the client
+  activates them by name. That is the client's mechanism, not a broken squeezr
+  registration (`squeezr mcp doctor` still reports the server healthy); check
+  the client settings for auto-activation options.
 - **Daemons** — `squeezr fleet` lists watch/serve-watch daemons across all
   registered workspaces (pid, uptime, staleness); `squeezr fleet stop <storeKey>`
   and `squeezr fleet restart <storeKey>` manage one (exact store key from the

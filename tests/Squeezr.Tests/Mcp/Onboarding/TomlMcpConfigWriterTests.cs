@@ -7,7 +7,6 @@ namespace Squeezr.Tests.Mcp.Onboarding;
 public class TomlMcpConfigWriterTests
 {
     private const string CommandPath = "/opt/squeezr/bin/squeezr";
-    private const string WorkspaceRoot = "/work/demo";
     private const string ServerName = "squeezr";
 
     private static string FixturesDir => Path.Combine(AppContext.BaseDirectory, "Mcp", "Onboarding", "Fixtures", "toml");
@@ -161,7 +160,7 @@ public class TomlMcpConfigWriterTests
     }
 
     private static JsonObject BuildEntry() =>
-        ServerEntryBuilder.Build(McpClientRegistry.Get(McpClientId.Codex), WorkspaceRoot, CommandPath, watch: true);
+        ServerEntryBuilder.Build(McpClientRegistry.Get(McpClientId.Codex), CommandPath, watch: true);
 
     private static string CopyToTemp(string fixtureName)
     {

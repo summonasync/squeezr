@@ -69,6 +69,33 @@ public sealed class StatusDropQdrantTests
     }
 
     [Fact]
+    public async Task Status_Json_IncludesConfiguredEmbeddingsProvider()
+    {
+        var root = TestDirs.NewTempDir();
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        PointConfigAtDeadEndpoint(root);
+
+        var status = await RunCliAsync(root, "status", "--json");
+
+        status.ExitCode.ShouldBe(0);
+        using var doc = JsonDocument.Parse(status.StdOut.Trim());
+        doc.RootElement.GetProperty("embeddingsProvider").GetString().ShouldBe("auto");
+    }
+
+    [Fact]
+    public async Task Status_Pretty_ShowsConfiguredEmbeddingsProvider()
+    {
+        var root = TestDirs.NewTempDir();
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        PointConfigAtDeadEndpoint(root);
+
+        var status = await RunCliAsync(root, "status");
+
+        status.ExitCode.ShouldBe(0);
+        status.StdOut.ShouldContain("Embeddings provider: auto");
+    }
+
+    [Fact]
     public async Task Drop_QdrantDown_DropsLocally_WithWarning_AndExit0()
     {
         var root = TestDirs.NewTempDir();

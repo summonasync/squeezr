@@ -4,10 +4,10 @@ namespace Squeezr.Cli.Mcp.Onboarding;
 
 public static class ServerEntryBuilder
 {
-    public static JsonObject Build(McpClientDescriptor client, string workspaceRoot, bool watch) =>
-        Build(client, workspaceRoot, ResolveCurrentExecutable(), watch);
+    public static JsonObject Build(McpClientDescriptor client, bool watch) =>
+        Build(client, ResolveCurrentExecutable(), watch);
 
-    public static JsonObject Build(McpClientDescriptor client, string workspaceRoot, string commandPath, bool watch)
+    public static JsonObject Build(McpClientDescriptor client, string commandPath, bool watch)
     {
         var entry = new JsonObject
         {
@@ -16,10 +16,6 @@ public static class ServerEntryBuilder
                 ? new JsonArray("serve", "--watch")
                 : new JsonArray("serve"),
         };
-        if (client.SupportsCurrentDirectory)
-        {
-            entry["cwd"] = Path.GetFullPath(workspaceRoot);
-        }
         if (client.RequiredVersionNegotiation is not null)
         {
             entry["versionNegotiation"] = client.RequiredVersionNegotiation;

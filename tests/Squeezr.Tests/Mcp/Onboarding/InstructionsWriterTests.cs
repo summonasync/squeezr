@@ -20,7 +20,7 @@ public class InstructionsWriterTests
     }
 
     [Fact]
-    public void Upsert_FileWithForeignContent_AppendsBlockAndPreservesContent()
+    public void Upsert_FileWithForeignContent_PlacesBlockAfterFirstHeading()
     {
         var path = Path.Combine(TestDirs.NewTempDir(), "CLAUDE.md");
         const string foreign = "# Project Guide\n\nFollow the conventions.\n";
@@ -30,8 +30,36 @@ public class InstructionsWriterTests
 
         var content = File.ReadAllText(path);
         CountBlocks(content).ShouldBe(1);
+        content.ShouldStartWith("# Project Guide\n\n" + SqueezrInstructions.StartMarker);
+        content.ShouldEndWith(SqueezrInstructions.EndMarker + "\n\nFollow the conventions.\n");
+    }
+
+    [Fact]
+    public void Upsert_FileWithoutHeading_AppendsBlockAtEnd()
+    {
+        var path = Path.Combine(TestDirs.NewTempDir(), "AGENTS.md");
+        const string foreign = "Just prose, no heading.\n";
+        File.WriteAllText(path, foreign);
+
+        InstructionsWriter.Upsert(path);
+
+        var content = File.ReadAllText(path);
+        CountBlocks(content).ShouldBe(1);
         content.ShouldStartWith(foreign);
         content.ShouldContain(foreign + "\n" + SqueezrInstructions.StartMarker);
+    }
+
+    [Fact]
+    public void Upsert_HeadingOnlyFile_PlacesBlockAfterHeading()
+    {
+        var path = Path.Combine(TestDirs.NewTempDir(), "AGENTS.md");
+        File.WriteAllText(path, "# Guide");
+
+        InstructionsWriter.Upsert(path);
+
+        var content = File.ReadAllText(path);
+        CountBlocks(content).ShouldBe(1);
+        content.ShouldBe("# Guide\n\n" + SqueezrInstructions.Block + "\n");
     }
 
     [Fact]
@@ -64,6 +92,24 @@ public class InstructionsWriterTests
         content.ShouldNotContain("old text");
         content.ShouldContain(foreign);
         content.ShouldContain(SqueezrInstructions.Block);
+    }
+
+    [Fact]
+    public void Upsert_BlockDeepInFile_ReplacesInPlaceWithoutMovingOrDuplicating()
+    {
+        var path = Path.Combine(TestDirs.NewTempDir(), "QWEN.md");
+        const string before = "# Rules\n\n## Identity\n\nBe terse.\n\n";
+        const string after = "\n\n## Tools\n\nPrefer the index.\n";
+        File.WriteAllText(path,
+            before + SqueezrInstructions.StartMarker + "\nold text\n" + SqueezrInstructions.EndMarker + after);
+
+        InstructionsWriter.Upsert(path);
+        InstructionsWriter.Upsert(path);
+
+        var content = File.ReadAllText(path);
+        CountBlocks(content).ShouldBe(1);
+        content.ShouldNotContain("old text");
+        content.ShouldBe(before + SqueezrInstructions.Block + after);
     }
 
     [Fact]

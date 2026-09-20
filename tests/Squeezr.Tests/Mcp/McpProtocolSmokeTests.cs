@@ -32,6 +32,7 @@ public class McpProtocolSmokeTests
         foreach (var tool in tools)
         {
             tool.Description.ShouldNotBeNullOrWhiteSpace($"{tool.Name} must expose a non-empty description");
+            tool.Description.ShouldNotContain("when available");
             tool.JsonSchema.ValueKind.ShouldBe(JsonValueKind.Object);
             tool.JsonSchema.GetProperty("type").GetString().ShouldBe("object");
         }

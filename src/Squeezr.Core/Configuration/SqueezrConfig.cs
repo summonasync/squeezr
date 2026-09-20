@@ -33,6 +33,7 @@ public sealed record SqueezrConfig
                     "**/.next/**",
                     "**/.vs/**",
                     "**/.idea/**",
+                    "**/.claude/worktrees/**",
                     "**/*.min.js",
                     "**/*.tsbuildinfo"
                 ],

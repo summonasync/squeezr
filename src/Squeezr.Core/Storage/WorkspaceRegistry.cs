@@ -72,6 +72,33 @@ public static class WorkspaceRegistry
         }
     }
 
+    public static WorkspaceRegistryEntry? FindContainingPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var parent = Path.GetDirectoryName(full);
+        if (parent is null)
+        {
+            return null;
+        }
+
+        var directory = WorkspaceCanonicalPath.Canonicalize(parent);
+        lock (Sync)
+        {
+            InvalidateCacheIfHomeChanged();
+            foreach (var entry in Load())
+            {
+                var root = entry.RootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (string.Equals(directory, root, Comparison)
+                    || directory.StartsWith(root + Path.DirectorySeparatorChar, Comparison))
+                {
+                    return entry;
+                }
+            }
+        }
+
+        return null;
+    }
+
     public static void Add(WorkspaceRegistryEntry entry)
     {
         lock (Sync)

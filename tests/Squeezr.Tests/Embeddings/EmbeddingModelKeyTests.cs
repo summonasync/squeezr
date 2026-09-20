@@ -1,15 +1,26 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Embeddings;
 
 public class EmbeddingModelKeyTests
 {
     [Fact]
+    public void From_AutoProvider_ThrowsUnresolvedProvider()
+    {
+        var config = new EmbeddingsConfig { Provider = "auto" };
+
+        var error = Should.Throw<WorkspaceException>(() => EmbeddingModelKey.From(config));
+
+        error.Message.ShouldContain("auto");
+    }
+
+    [Fact]
     public void From_DefaultOnnxConfig_IncludesResolvedProfileId()
     {
-        var key = EmbeddingModelKey.From(new EmbeddingsConfig());
+        var key = EmbeddingModelKey.From(new EmbeddingsConfig { Provider = "onnx" });
 
         key.ShouldBe("onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
     }
@@ -19,6 +30,7 @@ public class EmbeddingModelKeyTests
     {
         var config = new EmbeddingsConfig
         {
+            Provider = "onnx",
             Onnx = new OnnxEmbeddingOptions
             {
                 Model = "bge-code-v1",
@@ -73,10 +85,12 @@ public class EmbeddingModelKeyTests
     {
         var nomic = new EmbeddingsConfig
         {
+            Provider = "onnx",
             Onnx = new OnnxEmbeddingOptions { Dimensions = 768 }
         };
         var bge = new EmbeddingsConfig
         {
+            Provider = "onnx",
             Onnx = new OnnxEmbeddingOptions { Model = "bge-code-v1", Dimensions = 768 }
         };
 
@@ -111,7 +125,7 @@ public class EmbeddingModelKeyTests
     public void From_OllamaVsOnnxSameModel_DifferentProvidersProduceDifferentKeys()
     {
         var ollama = new EmbeddingsConfig { Provider = "ollama" };
-        var onnx = new EmbeddingsConfig();
+        var onnx = new EmbeddingsConfig { Provider = "onnx" };
 
         EmbeddingModelKey.From(ollama).ShouldNotBe(EmbeddingModelKey.From(onnx));
     }

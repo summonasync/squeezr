@@ -39,7 +39,7 @@ public sealed class McpOnboardingService
         }
         else
         {
-            var entry = ServerEntryBuilder.Build(client, environment.WorkspaceRoot, environment.CommandPath, watch);
+            var entry = ServerEntryBuilder.Build(client, environment.CommandPath, watch);
             await WriteEntryAsync(client, configPath, entry, cancellationToken);
         }
         var instructionsWritten = false;

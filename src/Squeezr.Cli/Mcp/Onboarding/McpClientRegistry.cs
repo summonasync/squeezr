@@ -12,7 +12,6 @@ public static class McpClientRegistry
             ConfigFormat = McpConfigFormat.Json,
             WriteStrategy = McpWriteStrategy.CliFirst,
             SupportsCliScope = true,
-            SupportsCurrentDirectory = false,
             ConfigPathResolver = static (home, root, scope) => scope == McpScope.User
                 ? Path.Combine(home, ".claude.json")
                 : Path.Combine(root, ".mcp.json"),
@@ -28,7 +27,6 @@ public static class McpClientRegistry
             ConfigFormat = McpConfigFormat.Json,
             WriteStrategy = McpWriteStrategy.WriterOnly,
             SupportsCliScope = false,
-            SupportsCurrentDirectory = true,
             HomeEnvironmentVariable = "KIMI_CODE_HOME",
             ConfigPathResolver = static (home, root, scope) => scope == McpScope.User
                 ? Path.Combine(home, ".kimi-code", "mcp.json")
@@ -44,9 +42,11 @@ public static class McpClientRegistry
             BinaryName = "qwen",
             ConfigFormat = McpConfigFormat.Json,
             WriteStrategy = McpWriteStrategy.CliFirst,
-            SupportsCurrentDirectory = true,
             RequiredVersionNegotiation = "auto",
             SupportsCliScope = true,
+            UsesArgumentSeparator = false,
+            ExpectsOptionsBeforeName = true,
+            UsesTrustFlag = true,
             ConfigPathResolver = static (home, root, scope) => scope == McpScope.User
                 ? Path.Combine(home, ".qwen", "settings.json")
                 : Path.Combine(root, ".qwen", "settings.json"),
@@ -61,7 +61,6 @@ public static class McpClientRegistry
             BinaryName = "codex",
             ConfigFormat = McpConfigFormat.Toml,
             WriteStrategy = McpWriteStrategy.CliFirst,
-            SupportsCurrentDirectory = true,
             SupportsCliScope = false,
             StartupTimeoutSeconds = 30,
             ConfigPathResolver = static (home, root, scope) => scope == McpScope.User

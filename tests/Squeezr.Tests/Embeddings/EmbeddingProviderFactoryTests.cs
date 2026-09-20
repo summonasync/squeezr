@@ -55,6 +55,7 @@ public class EmbeddingProviderFactoryTests
         var root = TestDirs.NewTempDir();
         var config = new EmbeddingsConfig
         {
+            Provider = "onnx",
             Onnx = new OnnxEmbeddingOptions
             {
                 ModelPath = Path.Combine(root, "no-such-model.onnx"),

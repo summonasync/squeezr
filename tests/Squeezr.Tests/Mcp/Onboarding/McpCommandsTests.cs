@@ -146,12 +146,12 @@ public sealed class McpCommandsTests
         File.Exists(configPath).ShouldBeTrue();
         var entry = JsonNode.Parse(File.ReadAllText(configPath))!["mcpServers"]!["squeezr"]!;
         entry["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
-        entry["cwd"]!.GetValue<string>().ShouldBe(Path.GetFullPath(workspace));
+        entry.AsObject().Select(static property => property.Key).Order().ShouldBe(["args", "command"]);
         File.ReadAllText(Path.Combine(workspace, "AGENTS.md")).ShouldContain("squeezr:instructions");
     }
 
     [Fact]
-    public async Task Install_FromWorkspaceSubdirectory_WritesResolvedWorkspaceRootAsCwd()
+    public async Task Install_FromWorkspaceSubdirectory_WritesEntryWithoutCwd()
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
@@ -162,7 +162,7 @@ public sealed class McpCommandsTests
 
         exitCode.ShouldBe(0);
         var entry = JsonNode.Parse(File.ReadAllText(Path.Combine(workspace, ".kimi-code", "mcp.json")))!["mcpServers"]!["squeezr"]!;
-        entry["cwd"]!.GetValue<string>().ShouldBe(Path.GetFullPath(workspace));
+        entry.AsObject().ContainsKey("cwd").ShouldBeFalse();
     }
 
     [Fact]

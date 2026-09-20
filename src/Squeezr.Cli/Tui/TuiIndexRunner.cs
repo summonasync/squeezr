@@ -29,9 +29,17 @@ public static class TuiIndexRunner
 
         var full = mode == "Full reindex";
         var reembed = mode == "Reembed vectors";
+        var noSemantic = IndexingMode.EffectiveNoSemantic(workspaceRoot);
 
         var warnings = EmbeddingRuntimeFactory.TryCreate(
-            workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
+            workspaceRoot, withProvider: reembed || !noSemantic,
+            out var embeddings, out var vectorStore, out var providerResolution);
+        var providerLine = EmbeddingProviderLogLine.Describe(providerResolution);
+        if (providerLine is not null)
+        {
+            console.MarkupLine($"[grey]{providerLine.EscapeMarkup()}[/]");
+        }
+
         foreach (var warning in warnings)
         {
             console.MarkupLine($"[grey]{warning.EscapeMarkup()}[/]");
@@ -51,7 +59,7 @@ public static class TuiIndexRunner
                 .Start(ctx => indexer.Index(
                     workspaceRoot, null, full, false,
                     new IndexProgressRenderer(ctx), embeddings, vectorStore, reembed,
-                    StaleLockWarningSink.ToStderr));
+                    StaleLockWarningSink.ToStderr, providerResolution));
         }
         catch (WorkspaceException ex)
         {

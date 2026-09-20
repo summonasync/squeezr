@@ -36,7 +36,7 @@ public class ConfigFileTests
     }
 
     [Fact]
-    public void Load_ConfigWithoutEmbeddingsSection_UsesOnnxDefaults()
+    public void Load_ConfigWithoutEmbeddingsSection_UsesAutoDefaults()
     {
         var root = NewWorkspaceWithConfig(
             """
@@ -58,7 +58,7 @@ public class ConfigFileTests
 
         var config = ConfigFile.Load(root);
 
-        config.Embeddings.Provider.ShouldBe("onnx");
+        config.Embeddings.Provider.ShouldBe("auto");
         config.Embeddings.Onnx.Model.ShouldBeNull();
         config.Embeddings.Onnx.Dimensions.ShouldBeNull();
         config.Embeddings.Onnx.MaxSequenceLength.ShouldBeNull();

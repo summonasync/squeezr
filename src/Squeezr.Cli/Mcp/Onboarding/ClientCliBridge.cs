@@ -42,13 +42,24 @@ public sealed class ClientCliBridge
 
     private static IReadOnlyList<string> BuildAddArguments(McpClientDescriptor client, McpScope scope, string commandPath, bool watch)
     {
-        List<string> arguments = ["mcp", "add", ServerName];
+        List<string> options = [];
         if (client.SupportsCliScope)
         {
-            arguments.Add("-s");
-            arguments.Add(scope.ToString().ToLowerInvariant());
+            options.Add("-s");
+            options.Add(scope.ToString().ToLowerInvariant());
         }
-        arguments.Add("--");
+        if (client.UsesTrustFlag)
+        {
+            options.Add("--trust");
+        }
+        List<string> arguments = ["mcp", "add"];
+        arguments.AddRange(client.ExpectsOptionsBeforeName
+            ? [.. options, ServerName]
+            : [ServerName, .. options]);
+        if (client.UsesArgumentSeparator)
+        {
+            arguments.Add("--");
+        }
         arguments.Add(commandPath);
         arguments.Add("serve");
         if (watch)

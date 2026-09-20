@@ -21,7 +21,8 @@ public sealed class WorkspaceIndexer
         IEmbeddingProvider? embeddings = null,
         IVectorStore? vectorStore = null,
         bool reembed = false,
-        Action<string>? onStaleTakeover = null)
+        Action<string>? onStaleTakeover = null,
+        EmbeddingProviderResolution? embeddingProviderResolution = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -61,7 +62,9 @@ public sealed class WorkspaceIndexer
                 }
             }
 
-            var modelKey = embeddings is not null ? EmbeddingModelKey.From(config.Embeddings) : null;
+            var modelKey = embeddings is not null
+                ? EmbeddingModelKey.From(WithResolvedProvider(config.Embeddings, embeddingProviderResolution))
+                : null;
 
             if (!reembed && embeddings is not null && vectorStore is not null)
             {
@@ -114,6 +117,9 @@ public sealed class WorkspaceIndexer
 
     private static Dictionary<uint, int[]> ToPostings(string text) =>
         TrigramExtractor.ExtractPostings(text).ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
+
+    private static EmbeddingsConfig WithResolvedProvider(EmbeddingsConfig config, EmbeddingProviderResolution? resolution) =>
+        resolution is null ? config : config with { Provider = resolution.Provider };
 
     private static string DecodeUtf8(byte[] bytes) =>
         bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
@@ -201,7 +207,8 @@ public sealed class WorkspaceIndexer
         string relativePath,
         IEmbeddingProvider? embeddings = null,
         IVectorStore? vectorStore = null,
-        Action<string>? onStaleTakeover = null)
+        Action<string>? onStaleTakeover = null,
+        EmbeddingProviderResolution? embeddingProviderResolution = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -291,7 +298,8 @@ public sealed class WorkspaceIndexer
 
                 if (embeddings is not null && vectorStore is not null)
                 {
-                    var modelKey = EmbeddingModelKey.From(config.Embeddings);
+                    var modelKey = EmbeddingModelKey.From(
+                        WithResolvedProvider(config.Embeddings, embeddingProviderResolution));
                     EmbeddingIndexPhase.Run(repoDoc, store, modelKey, embeddings, vectorStore, warnings.Add);
                 }
 

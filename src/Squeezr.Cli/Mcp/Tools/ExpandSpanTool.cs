@@ -20,7 +20,7 @@ public sealed class ExpandSpanTool
         _gate = gate;
     }
 
-    [Description("Reveal code around coordinates from code_search/symbol_lookup: the exact lines of the span plus contextLines of surrounding context, read from the live file on disk (reflects edits made after indexing). The only tool that returns raw source lines. When truncated is true, context (before/after) may be partially filled — the span itself has priority.")]
+    [Description("Read the exact lines you need from the live file on disk: the span plus contextLines of surrounding context, around coordinates from code_search/symbol_lookup — reflects edits made after indexing, and is the only tool that returns raw source lines. When truncated is true, context (before/after) may be partially filled — the span itself has priority.")]
     [McpServerTool(Name = "expand_span", Title = "Expand span")]
     public object Expand(
         string file,
