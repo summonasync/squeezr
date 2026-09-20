@@ -2,6 +2,12 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
+## [1.0.2] — 2026-09-20
+
+### Added (048/04, cross-repo documentation)
+- README «Cross-repo workspaces» section: `squeezr add <path> --name <name>` for sibling repos (relative to the workspace root or absolute), one workspace = many repos, `index` covers all of them, per-repo filtering via the `repo` parameter on `repo_map`/`code_search`/`symbol_lookup`/`find_references` (`--repo` on the CLI query commands), per-repo coverage in `index_status`/`status`, and a note that discovery stays per-directory until repos are deliberately shared
+- The MCP instructions block's cross-repo line now carries the exact configuration command (`squeezr add <path> --name <repo>`) instead of a hint; SKILL.md section 3 expanded to match
+
 ## [1.0.1] — 2026-09-20
 
 Dogfood hardening wave (2026-09-20 rollout): GPU-first embeddings, agent-experience overhaul, MCP registration fixes. Full suite 910 → 956.

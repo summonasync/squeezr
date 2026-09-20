@@ -71,7 +71,10 @@ squeezr index --events
 - `init` creates the workspace in the current directory with default config.
 - `add <path> [--name <repo>]` registers a repository; the index stays empty until
   at least one repo is added. `add .` covers the common single-repo case (the
-  `.squeezr` store dir is always skipped); repeat for sibling repos.
+  `.squeezr` store dir is always skipped). Sibling repos join the same workspace
+  with `squeezr add <path> --name <repo>` (absolute path or one relative to the
+  workspace root), and the `repo` parameter of the search/map tools then narrows
+  a query to a single repository.
 - `index` builds the trigram + symbol index and embeds chunks for semantic search.
   `--events` streams machine-readable progress events instead of the interactive
   progress bar. Other switches: `--full` (complete rebuild), `--no-semantic`

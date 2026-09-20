@@ -131,6 +131,22 @@ Squeezr не мусорит в проекте: `squeezr init` не создаё�
 - **Реестр:** `squeezr workspace list` показывает все воркспейсы из `workspaces.json`; записи, чей rootPath исчез с диска, помечаются `stale` и удаляются через `squeezr drop --store-key <key>`.
 - **Легаси-миграция автоматическая:** проекты со старым layout (`.squeezr/` + `squeezr.workspace.json` в корне) переезжают в стор при первом же обращении — переносится содержимое `.squeezr/` и манифест, squeezr-сгенерированный `docker-compose.yml` и мёртвый `state.json` удаляются. Детали — [docs/migration-central-store.md](docs/migration-central-store.md). Qdrant-коллекции (имя зависит от пути воркспейса, а не стора) переживают миграцию, вектора не теряются.
 
+## Cross-repo workspaces
+
+A workspace is not limited to one repository — register sibling repos and search them as a single index:
+
+```bash
+squeezr add ../other-repo --name other-repo
+```
+
+The path is absolute or relative (resolved against the workspace root); `--name` sets the repo name the tools filter on — without it, the directory name is taken.
+
+- One workspace, many repos: `squeezr index` covers them all, and the watch daemon keeps each one fresh.
+- Per-repo filtering: the `repo` parameter of `repo_map` / `code_search` / `symbol_lookup` / `find_references` (CLI twins: `--repo` on `search` and `map`).
+- Coverage is visible before you query: `index_status` and `squeezr status` show per-repo file/symbol/chunk counts.
+
+Discovery stays per-directory: a project resolved from inside its tree keeps its own workspace — sibling repos join only when deliberately added with `add`.
+
 ## Managed services: `squeezr services`
 
 Docker-инфраструктура — qdrant и ollama — управляется одной командой, руками compose не трогаешь:

@@ -22,7 +22,7 @@ public static class SqueezrInstructions
         - Read a span of code - expand_span: reads the live file from disk.
         - Exact string search, or a repo not in the index - grep/read is correct, not a violation.
 
-        Cross-repo work: sibling repos join the same workspace with `squeezr add <path>`.
+        Cross-repo work: sibling repos join the same workspace with `squeezr add <path> --name <repo>`.
         If a repo you need is missing from index_status, say so instead of silently grepping.
 
         Output is token-budgeted: respect maxTokens and narrow the query when a result is truncated.
