@@ -2,6 +2,19 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
+## [Unreleased]
+
+### Added (049, windows installer)
+- `installer/squeezr.iss` — Inno Setup 6 definition of a real Windows setup executable: per-user install without admin into `%LOCALAPPDATA%\Programs\Squeezr` (elevate for a machine-wide install in `%ProgramFiles%`), an Add/Remove Programs entry, the whole publish tree including the Roslyn `BuildHost*` payload, and a finish page that reports missing Docker or a missing embedding model as hints
+- `scripts/build-installer.ps1` — one command builds `artifacts\installer\SqueezrSetup-<version>-<rid>.exe` on any Windows machine (`-Rid win-x64|win-arm64`, `-Version`, `-SkipBuild`, `-IsccPath`, `-OutputDir`, `-InstallInno`). Inno Setup 6 is a build prerequisite, discovered on PATH, in the HKCU/HKLM uninstall keys and in the default directories — a per-user Inno under `%LOCALAPPDATA%\Programs` is found as readily as a machine-wide one; `-InstallInno` installs it via winget. Version comes from `<Version>` in the csproj, with the numeric prefix fed to `VersionInfoVersion` (ISCC rejects `0.9.0-pre` in the Win32 version resource)
+- PATH is edited from `[Code]` rather than `[Registry]` with `{olddata}`: the latter truncates at 8191 characters and can rewrite a `REG_EXPAND_SZ` PATH as `REG_SZ`. Verified on a PATH holding a literal `%USERPROFILE%\.dotnet\tools` — install adds exactly one entry, uninstall restores the value byte-identically
+- Uninstall never touches the central store `~/.squeezr`; the uninstaller says so and names the deliberate removal path
+- Windows still has no published release artifact — the Gitea instance has no Windows runner, so `.github/workflows/release.yml` stays `linux-x64` only and Windows packages are always built locally
+
+### Changed (049)
+- README, AGENTS.md: Windows packaging section (prerequisite, build command, flags, SmartScreen caveat for the unsigned package, `squeezr fleet stop` before reinstalling over live daemons), `installer/` added to the structure tree, and the `install-release.sh` one-liner marked Linux-only
+- README now invokes the PowerShell scripts as `powershell -File …` instead of `pwsh -File …`: they declare `#Requires -Version 5.1`, stock Windows PowerShell is enough, and pwsh 7 is not present on every Windows box
+
 ## [1.0.2] — 2026-09-20
 
 ### Added (048/04, cross-repo documentation)
