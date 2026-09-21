@@ -16,7 +16,7 @@ public static class WorkspaceRootResolver
         }
         catch (IOException ex)
         {
-            throw new WorkspaceException(RegistryBusyMessage, WorkspaceException.RegistryBusyCode, ex);
+            throw RegistryBusy(ex);
         }
 
         if (resolution.MigratedFromLegacy)
@@ -55,7 +55,16 @@ public static class WorkspaceRootResolver
         }
         catch (IOException ex)
         {
-            throw new WorkspaceException(RegistryBusyMessage, WorkspaceException.RegistryBusyCode, ex);
+            throw RegistryBusy(ex);
         }
     }
+
+    // Every IOException on this path still maps to the busy contract - narrowing it
+    // by exception type breaks under concurrent access. What changes is visibility:
+    // the cause travels in the message, not only as InnerException, so a hard IO
+    // defect is no longer indistinguishable from transient registry contention.
+    private static WorkspaceException RegistryBusy(IOException cause) =>
+        new($"{RegistryBusyMessage} ({cause.GetType().Name}: {cause.Message})",
+            WorkspaceException.RegistryBusyCode,
+            cause);
 }

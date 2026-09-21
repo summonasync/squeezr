@@ -7,11 +7,14 @@ public static class WorkspaceCanonicalPath
         var full = Path.GetFullPath(path);
         var trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var root = Path.GetPathRoot(full);
-        if (trimmed.Length == 0
+        var isFilesystemRoot = trimmed.Length == 0
             || (root is { Length: > 0 }
-                && string.Equals(trimmed, root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.Ordinal)))
+                && string.Equals(trimmed, root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.Ordinal));
+        if (isFilesystemRoot)
         {
-            trimmed = root ?? full;
+            // A volume root, a UNC share root and "/" can never be links, and on
+            // Windows ResolveLinkTarget throws DirectoryNotFoundException for one.
+            return root ?? full;
         }
 
         if (!Directory.Exists(trimmed))

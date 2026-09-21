@@ -37,6 +37,20 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
     }
 
     [Fact]
+    public void Resolve_StartAtFilesystemRoot_ReturnsNotFoundInsteadOfThrowing()
+    {
+        // The upward walk canonicalizes every level, so it always reaches the
+        // filesystem root; on Windows that used to throw before the loop could exit.
+        var root = Path.GetPathRoot(Path.GetTempPath());
+        root.ShouldNotBeNullOrEmpty();
+
+        var result = WorkspaceStore.Resolve(root);
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.RootPath.ShouldBe(root);
+    }
+
+    [Fact]
     public void Resolve_NestedStart_FindsRegisteredWorkspace()
     {
         var root = NewDir();

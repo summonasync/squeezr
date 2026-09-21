@@ -4,6 +4,13 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed (050, windows path-root fix)
+- `WorkspaceCanonicalPath.Canonicalize` returns a filesystem root instead of resolving it as a link. `DirectoryInfo.ResolveLinkTarget` throws `DirectoryNotFoundException` for a bare Windows volume root, and `WorkspaceStore.ResolveUpward` canonicalizes every level on its way up, so it always reached the root and always threw — `squeezr init` was dead on Windows and every workspace-resolving command with it. A volume root, a UNC share root and `/` can never be links, so the resolution is skipped for them; Linux behaviour is identical (there `/` already resolved to `null`). Found during the 049 dogfood, not in CI: `windows-latest` is parked in both matrices and the 1.0.1/1.0.2 dogfood waves ran on Linux
+- Regression coverage: `Canonicalize_EveryFilesystemRoot_IsReturnedWithTrailingSeparator` and `WorkspaceStoreResolveTests.Resolve_StartAtFilesystemRoot_ReturnsNotFoundInsteadOfThrowing`
+
+### Changed (050)
+- `workspace_registry_busy` now carries the underlying IO failure in its message (`… (DirectoryNotFoundException: Could not find a part of the path 'C:\'.)`) instead of keeping it only as `InnerException`. The error code, the `--json` envelope and the catch itself are unchanged — narrowing the catch by exception type was tried and reverted, because "not found" occurs as an ordinary transient condition under concurrent access and cost 66 test failures
+
 ### Added (049, windows installer)
 - `installer/squeezr.iss` — Inno Setup 6 definition of a real Windows setup executable: per-user install without admin into `%LOCALAPPDATA%\Programs\Squeezr` (elevate for a machine-wide install in `%ProgramFiles%`), an Add/Remove Programs entry, the whole publish tree including the Roslyn `BuildHost*` payload, and a finish page that reports missing Docker or a missing embedding model as hints
 - `scripts/build-installer.ps1` — one command builds `artifacts\installer\SqueezrSetup-<version>-<rid>.exe` on any Windows machine (`-Rid win-x64|win-arm64`, `-Version`, `-SkipBuild`, `-IsccPath`, `-OutputDir`, `-InstallInno`). Inno Setup 6 is a build prerequisite, discovered on PATH, in the HKCU/HKLM uninstall keys and in the default directories — a per-user Inno under `%LOCALAPPDATA%\Programs` is found as readily as a machine-wide one; `-InstallInno` installs it via winget. Version comes from `<Version>` in the csproj, with the numeric prefix fed to `VersionInfoVersion` (ISCC rejects `0.9.0-pre` in the Win32 version resource)
