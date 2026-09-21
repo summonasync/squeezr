@@ -5,7 +5,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Storage;
 
-[Collection("SqueezrHomeScope")]
+[Collection("ProcessGlobals")]
 public sealed class WorkspaceStoreResolveTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

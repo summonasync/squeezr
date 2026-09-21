@@ -2,13 +2,23 @@ namespace Squeezr.Cli.Mcp.Onboarding;
 
 public sealed record McpOnboardingEnvironment(string HomeDir, string WorkspaceRoot, string CommandPath, string? ClientHomeOverride)
 {
+    private const string ClientHomeEnvironmentVariable = "SQUEEZR_CLIENT_HOME";
+
     public static McpOnboardingEnvironment Create(string workspaceRoot) =>
         new(
-            HomeDir: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify),
+            HomeDir: ResolveHomeDir(),
             WorkspaceRoot: Path.GetFullPath(workspaceRoot),
             CommandPath: Environment.ProcessPath
                 ?? throw new InvalidOperationException("Cannot resolve the path of the current executable."),
             ClientHomeOverride: ResolveClientHomeOverride());
+
+    // GetFolderPath(UserProfile) goes to the shell known-folder API on Windows and
+    // ignores USERPROFILE, so tests cannot redirect the profile without this seam.
+    private static string ResolveHomeDir() =>
+        Environment.GetEnvironmentVariable(ClientHomeEnvironmentVariable) is { } clientHome
+        && !string.IsNullOrWhiteSpace(clientHome)
+            ? clientHome
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
 
     private static string? ResolveClientHomeOverride()
     {

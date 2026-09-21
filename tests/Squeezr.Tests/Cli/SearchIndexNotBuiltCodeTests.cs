@@ -3,7 +3,7 @@ using Shouldly;
 
 namespace Squeezr.Tests.Cli;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class SearchIndexNotBuiltCodeTests
 {
     [Fact]

@@ -4,7 +4,7 @@ using Shouldly;
 
 namespace Squeezr.Tests.Mcp;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class McpServeProcessTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");

@@ -4,6 +4,12 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed (051, windows test hermeticity)
+- A full `dotnet test` on Windows no longer rewrites the developer's live agent configuration. `McpCommandsTests` redirected only `HOME`, but on Windows `Environment.GetFolderPath(SpecialFolder.UserProfile)` goes to the shell known-folder API and ignores the environment entirely — so the suite wrote a user-scope MCP server pointing at `testhost.exe` into the real `~/.claude.json` and an instruction block into the real `~/.claude/CLAUDE.md`
+- New `SQUEEZR_CLIENT_HOME` override on `McpOnboardingEnvironment.Create`: the one product change, because no environment variable can redirect that call on Windows without a seam. Inert unless set, documented in README beside `SQUEEZR_HOME`
+- Harness: `TestEnvironmentScope` redirects the client profile with exact restore; `SqueezrTestEnvironment` pins the client profile assembly-wide alongside the store; `CliTestProcess` isolates every spawned process; the two serialized xUnit collections merged into one `ProcessGlobals` — they each disabled parallelization internally but ran in parallel with each other, racing on the very state they were serializing
+- Windows suite on the reference machine: 819/137 at the start of the Windows work, 944 passed / 26 failed / 970 after 050, 051 and 052
+
 ### Fixed (050, windows path-root fix)
 - `WorkspaceCanonicalPath.Canonicalize` returns a filesystem root instead of resolving it as a link. `DirectoryInfo.ResolveLinkTarget` throws `DirectoryNotFoundException` for a bare Windows volume root, and `WorkspaceStore.ResolveUpward` canonicalizes every level on its way up, so it always reached the root and always threw — `squeezr init` was dead on Windows and every workspace-resolving command with it. A volume root, a UNC share root and `/` can never be links, so the resolution is skipped for them; Linux behaviour is identical (there `/` already resolved to `null`). Found during the 049 dogfood, not in CI: `windows-latest` is parked in both matrices and the 1.0.1/1.0.2 dogfood waves ran on Linux
 - Regression coverage: `Canonicalize_EveryFilesystemRoot_IsReturnedWithTrailingSeparator` and `WorkspaceStoreResolveTests.Resolve_StartAtFilesystemRoot_ReturnsNotFoundInsteadOfThrowing`

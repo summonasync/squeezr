@@ -41,10 +41,12 @@ internal static partial class CliTestProcess
             UseShellExecute = false
         };
         startInfo.Environment["NO_COLOR"] = "1";
-        if (squeezrHome is not null)
-        {
-            startInfo.Environment["SQUEEZR_HOME"] = squeezrHome;
-        }
+        // ProcessStartInfo.Environment starts as a copy of ours, so an unset variable
+        // here means the child inherits the developer's real store and profile. No test
+        // has a reason to touch either, so isolation is the default rather than a request.
+        startInfo.Environment["SQUEEZR_HOME"] = squeezrHome ?? TestDirs.SharedStoreDir;
+        startInfo.Environment["SQUEEZR_CLIENT_HOME"] = TestDirs.SharedClientHomeDir;
+        startInfo.Environment["HOME"] = TestDirs.SharedClientHomeDir;
 
         using var process = Process.Start(startInfo)!;
         if (stdin is not null)
