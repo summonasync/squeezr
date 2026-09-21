@@ -4,6 +4,11 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed (052, central store is not a legacy workspace) — P0, data loss
+- `WorkspaceStore.HasLegacyLayout` no longer treats the central store as a legacy in-project workspace. The store lives at `<home>/.squeezr`, which is shaped exactly like a legacy store dir, so the upward walk reached the home directory on every unregistered path, called it legacy and "migrated" it — moving the store's contents into a workspace dir named after the home directory and deleting the original. Reproducible with the shipped binary: `squeezr status` from any directory under `$HOME` destroyed `~/.squeezr`. Shipped in 039 and survived 1.0.0–1.0.2; it fires constantly on Windows because `Path.GetTempPath()` sits under the profile, and on Linux for `squeezr init` in `~/projects/<new-repo>`
+- Two independent guards, because the failure mode is silent data loss: the candidate is not legacy if it is the resolved `SqueezrHome`, and not legacy if it carries `workspaces.json` or a `workspaces/` subdirectory. The `squeezr.workspace.json` branch and the migration path for genuine legacy workspaces are untouched
+- Damaged stores are recoverable by hand: the contents sit inside the workspace store dir the migration created, named after the home directory
+
 ### Fixed (051, windows test hermeticity)
 - A full `dotnet test` on Windows no longer rewrites the developer's live agent configuration. `McpCommandsTests` redirected only `HOME`, but on Windows `Environment.GetFolderPath(SpecialFolder.UserProfile)` goes to the shell known-folder API and ignores the environment entirely — so the suite wrote a user-scope MCP server pointing at `testhost.exe` into the real `~/.claude.json` and an instruction block into the real `~/.claude/CLAUDE.md`
 - New `SQUEEZR_CLIENT_HOME` override on `McpOnboardingEnvironment.Create`: the one product change, because no environment variable can redirect that call on Windows without a seam. Inert unless set, documented in README beside `SQUEEZR_HOME`

@@ -89,7 +89,32 @@ public static class WorkspaceStore
 
     private static bool HasLegacyLayout(string directory) =>
         File.Exists(Path.Combine(directory, SqueezrPaths.ManifestFileName))
-        || Directory.Exists(Path.Combine(directory, SqueezrPaths.StoreDirName));
+        || IsLegacyStoreDir(Path.Combine(directory, SqueezrPaths.StoreDirName));
+
+    // The central store lives at <home>/.squeezr and is shaped exactly like a legacy
+    // in-project store dir, so the upward walk used to reach the home directory, call it
+    // legacy and migrate it - moving the store's contents away and deleting it. Two
+    // guards, because the failure mode is silent data loss: the store this process
+    // resolves, and anything else carrying a registry or a workspaces dir, is not legacy.
+    private static bool IsLegacyStoreDir(string candidate)
+    {
+        if (!Directory.Exists(candidate))
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (string.Equals(
+                WorkspaceCanonicalPath.Canonicalize(candidate),
+                WorkspaceCanonicalPath.Canonicalize(SqueezrHome.Resolve()),
+                comparison))
+        {
+            return false;
+        }
+
+        return !File.Exists(Path.Combine(candidate, SqueezrPaths.RegistryFileName))
+            && !Directory.Exists(Path.Combine(candidate, SqueezrPaths.WorkspacesDirName));
+    }
 
     private static WorkspaceRegistryEntry MigrateLegacyWorkspace(string root)
     {

@@ -51,6 +51,44 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
     }
 
     [Fact]
+    public void Resolve_StartUnderTheStoreHome_DoesNotMigrateTheCentralStoreAsLegacy()
+    {
+        // The central store lives at <home>/.squeezr, which is shaped exactly like a
+        // legacy in-project store dir. Walking up from any directory beneath the home
+        // used to "migrate" it: contents moved away, directory deleted.
+        var profile = NewDir();
+        var store = Path.Combine(profile, SqueezrPaths.StoreDirName);
+        Directory.CreateDirectory(Path.Combine(store, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(store, SqueezrPaths.RegistryFileName), "[]");
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, store);
+        SqueezrHome.Reset();
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "projects", "fresh")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(store).ShouldBeTrue();
+        File.Exists(Path.Combine(store, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Resolve_StartUnderAForeignCentralStore_DoesNotMigrateItEither()
+    {
+        // Same shape, but not the store this process resolves - an old store left behind
+        // after SQUEEZR_HOME was repointed. Still a central store, still not legacy.
+        var profile = NewDir();
+        var foreignStore = Path.Combine(profile, SqueezrPaths.StoreDirName);
+        Directory.CreateDirectory(Path.Combine(foreignStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName), "[]");
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "work")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        File.Exists(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [Fact]
     public void Resolve_NestedStart_FindsRegisteredWorkspace()
     {
         var root = NewDir();
