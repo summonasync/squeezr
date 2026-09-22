@@ -1,3 +1,4 @@
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra;
 using Squeezr.Core.Workspace;
 
@@ -87,9 +88,16 @@ public static class WorkspaceStore
         }
     }
 
-    private static bool HasLegacyLayout(string directory) =>
-        File.Exists(Path.Combine(directory, SqueezrPaths.ManifestFileName))
-        || Directory.Exists(Path.Combine(directory, SqueezrPaths.StoreDirName));
+    private static bool HasLegacyLayout(string directory)
+    {
+        if (File.Exists(Path.Combine(directory, SqueezrPaths.ManifestFileName)))
+        {
+            return true;
+        }
+
+        var storeDir = Path.Combine(directory, SqueezrPaths.StoreDirName);
+        return Directory.Exists(storeDir) && !SqueezrHome.IsCentralStore(storeDir);
+    }
 
     private static WorkspaceRegistryEntry MigrateLegacyWorkspace(string root)
     {
@@ -166,6 +174,38 @@ public static class WorkspaceStore
         if (ServicesComposeFile.IsSqueezrGenerated(composePath))
         {
             File.Delete(composePath);
+        }
+
+        NormalizeMigratedConfig(root);
+    }
+
+    private static void NormalizeMigratedConfig(string root)
+    {
+        SqueezrConfig config;
+        try
+        {
+            config = ConfigFile.Load(root);
+        }
+        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        var ignore = config.Indexing.Ignore;
+        var missingDefaults = SqueezrConfig.CreateDefault().Indexing.Ignore
+            .Where(glob => !ignore.Contains(glob, StringComparer.Ordinal));
+
+        // The save round-trips the loaded document (never CreateDefault), so explicit
+        // legacy settings survive; unknown keys such as the removed gitAware flag do not.
+        try
+        {
+            ConfigFile.Save(root, config with
+            {
+                Indexing = config.Indexing with { Ignore = [.. ignore, .. missingDefaults] }
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

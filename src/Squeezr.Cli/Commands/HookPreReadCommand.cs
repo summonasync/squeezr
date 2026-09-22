@@ -11,6 +11,7 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
 
     private const long LargeFileBytes = 256 * 1024;
     private const int WideRangeLines = 400;
+    private const int MaxStdinChars = 64 * 1024;
 
     private const string NudgeText =
         "This workspace is indexed by squeezr. For a read this size, code_search or symbol_lookup can locate " +
@@ -26,7 +27,7 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
         HookPreReadAdvice? advice = null;
         try
         {
-            advice = Evaluate(Console.In.ReadToEnd());
+            advice = Evaluate(ReadStdin());
         }
         catch (Exception)
         {
@@ -39,6 +40,33 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
         }
 
         return 0;
+    }
+
+    private static string ReadStdin()
+    {
+        var buffer = new char[MaxStdinChars + 1];
+        var read = 0;
+        int chunk;
+        while (read < buffer.Length && (chunk = Console.In.ReadBlock(buffer, read, buffer.Length - read)) > 0)
+        {
+            read += chunk;
+        }
+
+        // Oversized input is treated as unreadable rather than truncated: the hook
+        // stays advisory and oversized payloads degrade to the fail-open empty path.
+        if (read <= MaxStdinChars)
+        {
+            return new string(buffer, 0, read);
+        }
+
+        // Drain the rest into a fixed sink so a large writer never blocks on a full
+        // pipe; allocation stays bounded by the buffers above.
+        var sink = new char[4096];
+        while (Console.In.ReadBlock(sink, 0, sink.Length) > 0)
+        {
+        }
+
+        return string.Empty;
     }
 
     internal static HookPreReadAdvice? Evaluate(string payload)

@@ -100,6 +100,62 @@ public sealed class HookPreReadCommandTests
         result.StdOut.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task OffsetWithoutLimit_LargeFile_EmitsAdvisoryNudge()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+
+        var result = await CliTestProcess.RunPipedAsync(home, ReadPayload(bigFile, offset: 5000), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldContain("expand_span");
+    }
+
+    [Fact]
+    public async Task OffsetWithoutLimit_SmallFile_PrintsNothing()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var smallFile = Path.Combine(root, "small.cs");
+        await File.WriteAllTextAsync(smallFile, "class Small { }");
+
+        var result = await CliTestProcess.RunPipedAsync(home, ReadPayload(smallFile, offset: 5000), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task OversizedStdin_Garbage_FailsOpen()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home, new string('x', 200 * 1024), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task OversizedStdin_NudgeWorthyPayloadBeyondCap_FailsOpen()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+        var oversized = ReadPayload(bigFile) + new string(' ', 70 * 1024);
+
+        var result = await CliTestProcess.RunPipedAsync(home, oversized, root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
     [Theory]
     [InlineData("not json at all")]
     [InlineData("")]
@@ -123,9 +179,10 @@ public sealed class HookPreReadCommandTests
         return root;
     }
 
-    private static string ReadPayload(string filePath, int? limit = null)
+    private static string ReadPayload(string filePath, int? limit = null, int? offset = null)
     {
         var range = limit is null ? string.Empty : $",\"limit\":{limit}";
-        return "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"" + filePath + "\"" + range + "}}";
+        var start = offset is null ? string.Empty : $",\"offset\":{offset}";
+        return "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"" + filePath + "\"" + range + start + "}}";
     }
 }

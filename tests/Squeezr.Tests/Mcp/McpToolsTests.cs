@@ -190,9 +190,11 @@ public class McpToolsTests
         var envelope = ParseEnvelope(result);
         var data = envelope.GetProperty("data");
         data.GetProperty("workspace").GetString().ShouldBe("demo");
+        data.GetProperty("rootPath").GetString().ShouldBe(Path.GetFullPath(workspace));
 
         var repo = data.GetProperty("repos").EnumerateArray().ShouldHaveSingleItem();
         repo.GetProperty("name").GetString().ShouldBe("demo");
+        repo.GetProperty("rootPath").GetString().ShouldBe(Path.GetFullPath(Path.Combine(workspace, "repo")));
         repo.GetProperty("files").GetInt32().ShouldBe(1);
         repo.GetProperty("symbols").GetInt32().ShouldBeGreaterThan(0);
         repo.GetProperty("chunks").GetInt32().ShouldBeGreaterThan(0);

@@ -8,6 +8,7 @@ using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp;
@@ -25,11 +26,30 @@ public static class McpServerHost
             Console.Error.WriteLine($"workspace root resolved via CLAUDE_PROJECT_DIR: {resolution.RootPath}");
         }
 
+        WarnIfSessionOutsideWorkspace(resolution.RootPath, startDirectory, Console.Error);
         Console.Error.WriteLine($"squeezr serve: workspace '{resolution.RootPath}'");
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
         await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, ct, watch, events);
         await forwardTask;
+    }
+
+    internal static void WarnIfSessionOutsideWorkspace(string workspaceRoot, string sessionDirectory, TextWriter stderr)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var root = WorkspaceCanonicalPath.Canonicalize(workspaceRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var session = WorkspaceCanonicalPath.Canonicalize(sessionDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(session, root, comparison)
+            || session.StartsWith(root + Path.DirectorySeparatorChar, comparison))
+        {
+            return;
+        }
+
+        stderr.WriteLine(
+            $"warning: session directory '{session}' is outside the workspace root '{root}'; " +
+            "tools serve that workspace's index, not the current project");
     }
 
     private static async Task ForwardStdinAsync(PipeWriter writer, CancellationToken ct)

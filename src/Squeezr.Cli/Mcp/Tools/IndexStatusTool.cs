@@ -23,7 +23,7 @@ public sealed class IndexStatusTool
         _gate = gate;
     }
 
-    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability and point count, index age. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed.")]
+    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed.")]
     [McpServerTool(Name = "index_status", Title = "Index status")]
     public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
         _gate.RunAsync(GetCore, cancellationToken);
@@ -52,7 +52,13 @@ public sealed class IndexStatusTool
 
             var data = new IndexStatusData(
                 status.Name,
-                status.Repos.Select(r => new RepoData(r.Name, r.Files, r.Symbols, r.Chunks)).ToList(),
+                root,
+                status.Repos.Select(r => new RepoData(
+                    r.Name,
+                    Path.GetFullPath(Path.IsPathRooted(r.Path) ? r.Path : Path.Combine(root, r.Path)),
+                    r.Files,
+                    r.Symbols,
+                    r.Chunks)).ToList(),
                 new EmbeddingsData(qdrant.PendingChunks),
                 new QdrantData(qdrant.Available, qdrant.Points));
 
@@ -70,12 +76,14 @@ public sealed class IndexStatusTool
 
     private sealed record IndexStatusData(
         [property: JsonPropertyName("workspace")] string Workspace,
+        [property: JsonPropertyName("rootPath")] string RootPath,
         [property: JsonPropertyName("repos")] IReadOnlyList<RepoData> Repos,
         [property: JsonPropertyName("embeddings")] EmbeddingsData Embeddings,
         [property: JsonPropertyName("qdrant")] QdrantData Qdrant);
 
     private sealed record RepoData(
         [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("rootPath")] string RootPath,
         [property: JsonPropertyName("files")] int Files,
         [property: JsonPropertyName("symbols")] int Symbols,
         [property: JsonPropertyName("chunks")] int Chunks);

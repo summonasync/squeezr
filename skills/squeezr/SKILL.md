@@ -139,7 +139,9 @@ plain grep/read is correct, not a violation.
   tool that returns raw source lines; reads the live file on disk, so it reflects
   edits newer than the index. Call it on coordinates from other tools.
 - `index_status()` — workspace freshness: per-repo counts, pending embeddings,
-  Qdrant availability. Call before heavy querying to decide on a reindex.
+  Qdrant availability, and the resolved workspace `rootPath` (if it is not your
+  project's root, the session serves a different workspace). Call before heavy
+  querying to decide on a reindex.
 
 Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
 and sets `truncated` when it overflows — narrow the query or adjust maxTokens
