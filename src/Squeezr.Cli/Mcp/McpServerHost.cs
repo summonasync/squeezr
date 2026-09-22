@@ -1,5 +1,4 @@
 using System.IO.Pipelines;
-using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -182,7 +181,5 @@ public static class McpServerHost
         }
     }
 
-    private static string VersionString() =>
-        typeof(McpServerHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? "0.0.0";
+    private static string VersionString() => AppVersion.Current;
 }

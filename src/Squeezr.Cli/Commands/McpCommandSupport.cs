@@ -89,6 +89,23 @@ public static class McpCommandSupport
         return await prompt.ShowAsync(AnsiConsole.Console, cancellationToken);
     }
 
+    public static async Task<bool> ResolveProjectBlockAsync(bool project, bool interactive, CancellationToken cancellationToken)
+    {
+        if (project)
+        {
+            return true;
+        }
+        if (!interactive)
+        {
+            return false;
+        }
+        var prompt = new ConfirmationPrompt("Write the squeezr project block to the project's agent files (AGENTS.md, CLAUDE.md, QWEN.md)?")
+        {
+            DefaultValue = false,
+        };
+        return await prompt.ShowAsync(AnsiConsole.Console, cancellationToken);
+    }
+
     public static bool RequestsAllClients(string[]? values) =>
         values is not null &&
         values.SelectMany(value => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))

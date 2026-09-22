@@ -96,6 +96,17 @@ load server configs at startup, not live. Six tools then appear: `code_search`,
 `symbol_lookup`, `find_references`, `repo_map`, `expand_span`, `index_status`.
 `squeezr mcp doctor` verifies the registration later; `squeezr mcp remove` undoes it.
 
+Repo-level onboarding (only when the human explicitly asks for it): after MCP
+registration, `squeezr mcp install --project` writes a committed
+`squeezr:project-instructions` block into the project's own agent files —
+`AGENTS.md` always (created when missing), plus `CLAUDE.md`/`QWEN.md` when they
+exist and are not one-line `@AGENTS.md` import pointers. Without `--client`/`--all`
+the command only writes the block, no client registration; plain `mcp install`
+never touches project files. The block header carries the squeezr version —
+re-run the same command after a squeezr upgrade to refresh it;
+`squeezr mcp remove --project` strips the block from all carrier files (files
+themselves are never deleted).
+
 Claude Code also has an optional advisory hook. `squeezr hook pre-read` reads the
 PreToolUse payload from stdin and, when the Read targets a large file or wide
 range inside a registered workspace, adds `additionalContext` pointing at

@@ -225,6 +225,19 @@ squeezr mcp install --client all --scope user --yes   # все найденны�
 
 Корень workspace сервер разрешает от cwd процесса вверх (запускай клиент из корня проекта); Claude Code не умеет cwd в конфиге сервера — поэтому `serve` дополнительно уважает `CLAUDE_PROJECT_DIR`, который Claude выставляет своим MCP-процессам. Перед подключением нужны `squeezr init` / `add` / `index` — сервер читает готовый индекс и сам его не строит. Qdrant опционален: без него семантический слой молча отключается, `code_search` работает exact-only (warning в ответе).
 
+### Project-level onboarding
+
+The default instructions block is per-client and per-machine — it never lands in the repo. The project block is the other tier: a committed `squeezr:project-instructions` section in the project's own agent files, so everyone who clones the project gets the same navigation rules and command cheat-sheet.
+
+```bash
+squeezr mcp install --project   # write/refresh the block; no client registration
+squeezr mcp remove --project    # strip the block from every carrier file
+```
+
+Without `--client`/`--all` the command only writes the block (block-only mode, works non-interactively); combined with clients it registers them and writes the block in one pass. Targeting: `AGENTS.md` always (created when missing); `CLAUDE.md`/`QWEN.md` only when they are real files — a one-line `@AGENTS.md` import pointer is left untouched. Plain `mcp install` never touches project files: the flag is explicit (`--yes` does not imply it), and the interactive prompt for it defaults to "no".
+
+Re-running install refreshes the block in place between its markers — no duplicates. The block header carries the squeezr version that wrote it: after upgrading squeezr, re-run `squeezr mcp install --project` to refresh the text. If a target file has one-sided markers (start without end or vice versa), the file is left untouched and you get exactly one stderr warning naming it. `mcp remove --project` strips the block from every file carrying it and never deletes files — a file left empty is fine.
+
 ### Ручная настройка (справка)
 
 Если хочешь прописать конфиг сам — куда писать запись `squeezr`:

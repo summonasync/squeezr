@@ -36,6 +36,7 @@ public sealed class McpCommandsTests
         combined.ShouldContain("--scope");
         combined.ShouldContain("--no-watch");
         combined.ShouldContain("--no-instructions");
+        combined.ShouldContain("--project");
         combined.ShouldContain("--yes");
         combined.ShouldContain("--json");
     }
@@ -281,7 +282,7 @@ public sealed class McpCommandsTests
     {
         var workspace = TestDirs.NewTempDir();
         var console = NewInteractiveConsole();
-        Push(console, ConsoleKey.Spacebar, ConsoleKey.Enter, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter);
+        Push(console, ConsoleKey.Spacebar, ConsoleKey.Enter, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter, ConsoleKey.Enter);
         var overrideDir = TestDirs.NewTempDir();
         var previousOverride = Environment.GetEnvironmentVariable("KIMI_CODE_HOME");
         Environment.SetEnvironmentVariable("KIMI_CODE_HOME", overrideDir);
@@ -307,7 +308,7 @@ public sealed class McpCommandsTests
     {
         var workspace = TestDirs.NewTempDir();
         var console = NewInteractiveConsole();
-        Push(console, ConsoleKey.DownArrow, ConsoleKey.Enter);
+        Push(console, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter);
 
         var (exitCode, _, _, _) = await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--yes"], console);
 
