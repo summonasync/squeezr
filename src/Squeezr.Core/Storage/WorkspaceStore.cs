@@ -101,6 +101,8 @@ public static class WorkspaceStore
 
     private static WorkspaceRegistryEntry MigrateLegacyWorkspace(string root)
     {
+        RefuseCentralStoreMigration(root);
+
         var name = ResolveLegacyName(root);
         var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
         var entry = new WorkspaceRegistryEntry(
@@ -136,8 +138,20 @@ public static class WorkspaceStore
         return new DirectoryInfo(root).Name;
     }
 
+    private static void RefuseCentralStoreMigration(string root)
+    {
+        var storeDir = Path.Combine(root, SqueezrPaths.StoreDirName);
+        if (SqueezrHome.IsCentralStore(storeDir))
+        {
+            throw new WorkspaceException(
+                $"Refusing to migrate '{storeDir}': it is the central squeezr store, not a legacy in-project store.");
+        }
+    }
+
     private static void MoveLegacyContent(string root, string storeKey)
     {
+        RefuseCentralStoreMigration(root);
+
         var storeDir = StoreDirFor(storeKey);
         Directory.CreateDirectory(storeDir);
 

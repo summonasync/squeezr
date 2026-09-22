@@ -4,5 +4,7 @@ public sealed record WorkspaceManifest
 {
     public required string Name { get; init; }
 
+    public string? RootPath { get; init; }
+
     public IReadOnlyList<RepoEntry> Repos { get; init; } = [];
 }

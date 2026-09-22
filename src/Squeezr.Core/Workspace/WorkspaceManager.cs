@@ -27,6 +27,12 @@ public sealed class WorkspaceManager
             throw new WorkspaceException($"Workspace is already initialized at '{_root}'.");
         }
 
+        if (SqueezrHome.IsCentralStore(Path.Combine(_root, SqueezrPaths.StoreDirName)))
+        {
+            throw new WorkspaceException(
+                $"Cannot initialize a workspace at '{_root}': the directory holds the central squeezr store ('{SqueezrHome.Resolve()}').");
+        }
+
         var workspaceName = string.IsNullOrWhiteSpace(name)
             ? new DirectoryInfo(_root).Name
             : name.Trim();
@@ -50,7 +56,7 @@ public sealed class WorkspaceManager
             {
             }
 
-            WorkspaceManifestFile.Save(_root, new WorkspaceManifest { Name = workspaceName });
+            WorkspaceManifestFile.Save(_root, new WorkspaceManifest { Name = workspaceName, RootPath = canonicalRoot });
         }
         catch
         {

@@ -24,6 +24,15 @@ public static class SqueezrHome
 
     public static string WorkspacesDir => Path.Combine(Resolve(), SqueezrPaths.WorkspacesDirName);
 
+    public static bool IsCentralStore(string directory)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(
+            WorkspaceCanonicalPath.Canonicalize(directory),
+            WorkspaceCanonicalPath.Canonicalize(Resolve()),
+            comparison);
+    }
+
     public static void Reset()
     {
         lock (Sync)
