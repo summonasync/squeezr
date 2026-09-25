@@ -2,7 +2,9 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
-## [Unreleased]
+## [1.0.3] — 2026-09-25
+
+Usage analytics (050) + registry orphan repair (051). Full suite 1029 → 1090.
 
 ### Added (051, registry orphan repair)
 - `squeezr workspace list` now surfaces orphaned store dirs (a store dir with a valid manifest that is missing from the registry) as `orphan — adoptable` (manifest carries rootPath, store key verifies) or `orphan — needs root` (legacy manifest without rootPath), and flags husk registry entries (rootPath = `$HOME` or the store parent); hints on stderr in both human and `--json` modes, stdout stays clean, json stays byte-compatible (additive orphan lines / optional `husk` field only)
