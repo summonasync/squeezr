@@ -16,7 +16,7 @@ public class TuiWizardsTests
         var console = TuiTestHarness.InteractiveConsole();
         console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -58,7 +58,7 @@ public class TuiWizardsTests
         console.Input.PushTextWithEnter("does-not-exist");
         console.Input.PushTextWithEnter("repolib");
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -79,7 +79,7 @@ public class TuiWizardsTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 6);
         console.Input.PushKey(ConsoleKey.Enter);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

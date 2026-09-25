@@ -2,6 +2,11 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
+## [Unreleased]
+
+### Added (053, TUI stats/usage views)
+- TUI main menu gains two analytics screens: **Token stats** (per-workspace telemetry summary — per-tool table, savings, cache hit-rate, By agent / By session) and **Usage analytics** (fleet-wide rollup across the registry with stale markers and by-agent totals) — both render through the same shared renderers as `squeezr stats` / `squeezr usage` (CLI human output byte-identical after the IAnsiConsole parameterization), one-shot snapshots refreshed on menu re-entry
+
 ## [1.0.3] — 2026-09-25
 
 Usage analytics (050) + registry orphan repair (051). Full suite 1029 → 1090.

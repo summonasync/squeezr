@@ -15,7 +15,7 @@ public class TuiContextMenuTests
         var console = TuiTestHarness.InteractiveConsole();
         console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -50,7 +50,7 @@ public class TuiContextMenuTests
         console.Input.PushTextWithEnter("n");
         TuiTestHarness.PushMenuChoice(console, 0);
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -66,7 +66,7 @@ public class TuiContextMenuTests
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -94,7 +94,7 @@ public class TuiContextMenuTests
         console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushTextWithEnter("repolib");
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -114,7 +114,7 @@ public class TuiContextMenuTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 0);
         console.Input.PushTextWithEnter("n");
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

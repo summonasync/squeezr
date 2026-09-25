@@ -59,7 +59,7 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
             }
             else
             {
-                Render(rollup);
+                Render(AnsiConsole.Console, rollup);
             }
 
             return 0;
@@ -83,7 +83,7 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
         {
             if (!AnsiConsole.Profile.Capabilities.Interactive)
             {
-                Render(ComputeRollup(settings.Agent, settings.Workspace, since));
+                Render(AnsiConsole.Console, ComputeRollup(settings.Agent, settings.Workspace, since));
                 Console.Error.WriteLine(
                     "warning: --watch requires an interactive terminal; printed a single snapshot instead.");
                 return 0;
@@ -108,14 +108,8 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
         }
     }
 
-    private static UsageRollup ComputeRollup(string? agent, string? workspace, DateTime? since)
-    {
-        var registry = WorkspaceRootResolver.GuardRegistryIo(WorkspaceRegistry.Load);
-        var inputs = registry
-            .Select(entry => (Workspace: entry, Entries: QueryTelemetry.ReadAll(entry.RootPath)))
-            .ToList();
-        return UsageAnalytics.Rollup(inputs, agent, workspace, since);
-    }
+    private static UsageRollup ComputeRollup(string? agent, string? workspace, DateTime? since) =>
+        WorkspaceRootResolver.GuardRegistryIo(() => UsageRollupLoader.Load(agent, workspace, since));
 
     private static DateTime? ParseSince(string? value)
     {
@@ -171,31 +165,31 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
     private static McpUsageException InvalidSince(string value) =>
         new($"Invalid --since '{value}'; expected a period like 90m, 24h, 7d or 30d.");
 
-    private static void Render(UsageRollup rollup)
+    public static void Render(IAnsiConsole console, UsageRollup rollup)
     {
         if (rollup.Totals.Records == 0)
         {
-            AnsiConsole.MarkupLine("No usage telemetry yet.");
+            console.MarkupLine("No usage telemetry yet.");
             return;
         }
 
         foreach (var workspace in rollup.Workspaces)
         {
             var stale = workspace.Stale ? " [yellow](stale)[/]" : string.Empty;
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[bold]{workspace.StoreKey.EscapeMarkup()}[/]{stale} — {workspace.Records} record(s)");
-            AnsiConsole.MarkupLine($"  [grey]{workspace.RootPath.EscapeMarkup()}[/]");
+            console.MarkupLine($"  [grey]{workspace.RootPath.EscapeMarkup()}[/]");
         }
 
-        AnsiConsole.Write(BuildAgentTable(rollup));
+        console.Write(BuildAgentTable(rollup));
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"Period: {rollup.Period.From:yyyy-MM-dd HH:mm} — {rollup.Period.To:yyyy-MM-dd HH:mm} " +
             $"({rollup.Totals.Records} records)");
 
         if (rollup.Totals.Records > RetentionHintThreshold)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]Telemetry holds {rollup.Totals.Records} records since {rollup.Period.From:d} — " +
                 "run 'squeezr stats --reset' per workspace to clear.[/]");
         }

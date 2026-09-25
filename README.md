@@ -192,7 +192,7 @@ squeezr services up                                                     # пов
 Меню контекстное — зависит от состояния workspace:
 
 - **Папка без workspace** (воркспейс не найден — squeezr ищет его вверх по дереву от текущей папки) — сразу предложение «No workspace found here. Initialize now?» (дефолт — да) → форма `init`. Отказ — не тупик: остаётся меню из двух пунктов — Initialize workspace / Exit, можно передумать без рестарта.
-- **Workspace инициализирован** — полный круг: Dashboard / Search / Map / Index / Add repository / Config / Drop workspace / Exit.
+- **Workspace инициализирован** — полный круг: Dashboard / Search / Map / Index / Add repository / Config / Drop workspace / Token stats / Usage analytics / Exit.
 
 Пункты верхнего уровня:
 
@@ -203,6 +203,8 @@ squeezr services up                                                     # пов
 - **Add repository** — форма `add` вместо флагов.
 - **Config** — формы поверх конфига воркспейса (в сторе: `~/.squeezr/workspaces/<storeKey>/config.json`): qdrant, embeddings (onnx/ollama/openai), chunking, indexing. Валидация на вводе (URL, int > 0, provider), diff-сводка «было → станет» перед сохранением, после смены embeddings — напоминание про `index --reembed`.
 - **Drop workspace** — подтверждение и полное удаление индекса workspace (`drop`).
+- **Token stats** — per-workspace аналитика телеметрии: таблица по тулам, savings, cache hit-rate, разрезы By agent / By session — тот же контент, что у `squeezr stats` (общий рендерер). Снапшот на входе в экран; свежие данные = повторный вход.
+- **Usage analytics** — глобальный rollup по всем воркспейсам реестра: per-workspace блоки со stale-пометками + итоговая таблица By agent — то же, что `squeezr usage` без флагов. Текущий воркспейс не нужен по смыслу (данные fleet-wide), пункт живёт в общем меню.
 
 Всё то же самое через CLI-флаги остаётся доступным — TUI это надстройка, не замена.
 

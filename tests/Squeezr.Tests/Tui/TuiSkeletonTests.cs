@@ -17,7 +17,7 @@ public class TuiSkeletonTests
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -39,7 +39,7 @@ public class TuiSkeletonTests
         var workspace = NewIndexedWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 0);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

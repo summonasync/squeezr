@@ -37,7 +37,7 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 return 0;
             }
 
-            Render(summary);
+            Render(AnsiConsole.Console, summary);
             return 0;
         }
         catch (WorkspaceException ex)
@@ -67,11 +67,11 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
         return 0;
     }
 
-    private static void Render(QueryStatsSummary summary)
+    public static void Render(IAnsiConsole console, QueryStatsSummary summary)
     {
         if (summary.Records == 0)
         {
-            AnsiConsole.MarkupLine("No query telemetry yet.");
+            console.MarkupLine("No query telemetry yet.");
             return;
         }
 
@@ -89,21 +89,21 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 tool.TruncationRate.ToString("P1", CultureInfo.InvariantCulture));
         }
 
-        AnsiConsole.Write(table);
+        console.Write(table);
 
         var savings = summary.Savings;
         var ratio = savings.Ratio.ToString("F1", CultureInfo.InvariantCulture);
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"Savings: {savings.ActualTokens} actual vs {savings.CounterfactualTokens} counterfactual tokens — " +
             $"[green]saved {savings.SavedTokens}[/] (×{ratio})");
         if (savings.UnknownFiles > 0)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]{savings.UnknownFiles} expanded file(s) not in the index, excluded from counterfactual.[/]");
         }
 
         var hitRate = summary.Cache.HitRate.ToString("P1", CultureInfo.InvariantCulture);
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"Cache hit-rate: {hitRate} across {summary.Cache.SessionsWithCache} session(s)");
 
         var agentTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By agent") };
@@ -120,7 +120,7 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 $"{agent.LastSeen:yyyy-MM-dd HH:mm}");
         }
 
-        AnsiConsole.Write(agentTable);
+        console.Write(agentTable);
 
         var sessionTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By session") };
         sessionTable.AddColumn("Session");
@@ -138,14 +138,14 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 string.Join(", ", session.TopTools).EscapeMarkup());
         }
 
-        AnsiConsole.Write(sessionTable);
+        console.Write(sessionTable);
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"Period: {summary.From:yyyy-MM-dd HH:mm} — {summary.To:yyyy-MM-dd HH:mm} ({summary.Records} records)");
 
         if (summary.Records > RetentionHintThreshold)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]Telemetry holds {summary.Records} records since {summary.From:d} — " +
                 "run 'squeezr stats --reset' to clear.[/]");
         }
