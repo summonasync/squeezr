@@ -18,12 +18,14 @@ public sealed class RepoMapTool
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
     private readonly ToolResponseCache? _cache;
+    private readonly ClientIdentity _identity;
 
-    public RepoMapTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
+    public RepoMapTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache, ClientIdentity identity)
     {
         _workspace = workspace;
         _gate = gate;
         _cache = cache;
+        _identity = identity;
     }
 
     [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Signatures are refreshed on read: modified files are reindexed inline or reported in staleFiles; expand_span reads code on coordinates from other tools.")]
@@ -44,7 +46,8 @@ public sealed class RepoMapTool
                 var hit = (ToolEnvelope)cached!;
                 QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<MapLineData>)hit.Data!).Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return hit;
             }
 
@@ -71,7 +74,8 @@ public sealed class RepoMapTool
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
             QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
                 result.TokensUsed, result.Truncated, data.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
             _cache?.Put("repo_map", parameters, envelope);
             return envelope;
         }

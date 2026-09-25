@@ -2,6 +2,14 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
+## [Unreleased]
+
+### Added (050, usage analytics)
+- Telemetry client identity: every `queries.jsonl` record carries `client`/`clientVersion` — MCP records are tagged from the initialize handshake `clientInfo` (captured via a `ClientIdentity` holder wired into all six tools), CLI records are tagged `cli`, pre-existing records aggregate as `unknown` (additive schema, no file migrations)
+- `squeezr stats`: new By agent (client, version, count, last seen) and By session (short id, client, count, last seen, top-3 tools) sections in the human output, plus additive `agents`/`sessions` fields in `stats --json` (035 contract preserved — existing fields byte-compatible)
+- `squeezr usage`: global adoption rollup across every workspace in the registry, runnable from any directory — per-workspace blocks (storeKey, rootPath, records, by-agent counts, `(stale)` marker for vanished root paths) plus a fleet-wide by-agent totals table; filters `--agent` (case-insensitive exact), `--workspace <storeKey>`, `--since <90m|24h|7d|30d>` combine as AND; `--json` per the 035 contract; strict period parser routes all garbage into the standard error contract
+- `squeezr usage --watch`: Spectre Live refresh of the rollup (default 3 s, `--interval <sec>`), clean Ctrl+C exit; `--watch` + `--json` is rejected per the 035 contract, and non-TTY runs emit a single snapshot with a stderr warning
+
 ## [1.0.2] — 2026-09-20
 
 ### Added (048/04, cross-repo documentation)

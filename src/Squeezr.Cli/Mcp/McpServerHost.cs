@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
@@ -79,6 +80,7 @@ public static class McpServerHost
 
         var gate = new McpToolGate();
         var cache = new ToolResponseCache(workspaceRoot);
+        var identity = new ClientIdentity();
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.None));
         services.AddSingleton(workspace);
@@ -95,14 +97,15 @@ public static class McpServerHost
                     "Squeezr: local code index for AI agents. Hybrid exact/semantic search over indexed repositories.";
             })
             .WithStreamServerTransport(input, output)
-            .WithTools(new CodeSearchTool(workspace, gate, cache))
-            .WithTools(new IndexStatusTool(workspace, gate))
-            .WithTools(new SymbolLookupTool(workspace, gate, cache))
-            .WithTools(new FindReferencesTool(workspace, gate, cache))
-            .WithTools(new RepoMapTool(workspace, gate, cache))
-            .WithTools(new ExpandSpanTool(workspace, gate));
+            .WithTools(new CodeSearchTool(workspace, gate, cache, identity))
+            .WithTools(new IndexStatusTool(workspace, gate, identity))
+            .WithTools(new SymbolLookupTool(workspace, gate, cache, identity))
+            .WithTools(new FindReferencesTool(workspace, gate, cache, identity))
+            .WithTools(new RepoMapTool(workspace, gate, cache, identity))
+            .WithTools(new ExpandSpanTool(workspace, gate, identity));
 
         await using var provider = services.BuildServiceProvider();
+        identity.Attach(provider.GetRequiredService<McpServer>());
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();
         await server.StartAsync(ct);
         var watcher = await TryStartWatchEngineAsync(workspace, watch, ct, events);

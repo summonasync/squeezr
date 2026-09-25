@@ -1,3 +1,4 @@
+using Squeezr.Cli.Commands;
 using Squeezr.Cli.Infra;
 using Squeezr.Core.Workspace;
 
@@ -23,6 +24,7 @@ public static class CommandError
     {
         WorkspaceException workspace => workspace.Code,
         ServicesException services => services.Code,
+        McpUsageException => "invalid_usage",
         InvalidDataException => "invalid_data",
         _ => "internal_error"
     };

@@ -22,16 +22,18 @@ public sealed class CodeSearchTool
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
     private readonly ToolResponseCache? _cache;
+    private readonly ClientIdentity _identity;
     private readonly object _resolveLock = new();
     private IEmbeddingProvider? _embeddings;
     private IVectorStore? _vectorStore;
     private bool _resolved;
 
-    public CodeSearchTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
+    public CodeSearchTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache, ClientIdentity identity)
     {
         _workspace = workspace;
         _gate = gate;
         _cache = cache;
+        _identity = identity;
     }
 
     [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
@@ -64,7 +66,8 @@ public sealed class CodeSearchTool
                 var hit = (ToolEnvelope)cached!;
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return hit;
             }
 
@@ -96,7 +99,8 @@ public sealed class CodeSearchTool
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 response.TokensUsed, response.Truncated, data.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
             _cache?.Put("code_search", parameters, envelope);
             return envelope;
         }

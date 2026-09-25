@@ -409,8 +409,59 @@ Period: 2026-09-17 14:57 — 2026-09-17 14:58 (4 records)
 - **Savings** — counterfactual-сравнение: actual — сумма `tokensUsed` всех ответов; counterfactual — сколько токенов ушло бы, если бы каждый раскрытый через expand файл читался целиком (файл считается один раз, оценка по размеру — та же формула, что у чанкера; файлы, которых уже нет в индексе, честно исключаются с отдельной строкой). `saved` — разница, `×N.N` — во сколько раз меньше.
 - **Cache hit-rate** — доля повторных ответов из кэша serve-сессий (см. семантику ответа ниже) и число сессий, где кэш срабатывал; CLI-запуски кэш не используют — каждый запуск и есть своя сессия.
 - **Period** — окно записей и их количество; больше 50 000 записей — серый хинт на `--reset` (авточистки нет, осознанно).
+- **By agent** — кто дёргал тулы: MCP-клиенты по имени и версии из initialize-handshake (`kimi-code 1.2.0`, `claude-code 2.0.5`), CLI-запуски как `cli`, записи до появления поля — `unknown`.
+- **By session** — раскладка по сессиям (одна serve-сессия = один клиентский коннект): короткий id, клиент, число запросов, last-seen и топ-3 тула — видно «эта сессия жила три часа и сделала два code_search».
+
+```
+By agent
+Client       Version  Count  Last seen
+claude-code  2.0.5    3      2026-09-25 10:05
+kimi-code    1.2.0    3      2026-09-25 09:15
+cli          -        1      2026-09-25 11:31
+unknown      -        1      2026-09-18 08:00
+
+By session
+Session   Client       Count  Last seen         Top tools
+c0ffee00  cli          1      2026-09-25 11:31  search
+77aa22bb  claude-code  3      2026-09-25 10:05  expand_span, find_references, repo_map
+3f8a1c2e  kimi-code    3      2026-09-25 09:15  symbol_lookup, code_search
+deadbeef  unknown      1      2026-09-18 08:00  search
+```
 
 Приватность: телеметрия — это локальный `queries.jsonl` в store-каталоге воркспейса (`~/.squeezr/workspaces/<storeKey>/`). В проекте и в git её нет, наружу не уходит, с воркспейсом и умирает — `squeezr drop` сносит вместе со всем стором.
+
+## Usage: adoption по агентам, проектам и сессиям
+
+`stats` отвечает за один воркспейс, а `squeezr usage` собирает rollup по всем воркспейсам реестра — какие агенты в каких проектах реально работают (команда не требует текущего воркспейса и запускается из любой директории, как `fleet`):
+
+```bash
+squeezr usage                      # rollup по всем воркспейсам + итоговая таблица по агентам
+squeezr usage --agent kimi-code    # один клиент (точное совпадение, case-insensitive)
+squeezr usage --workspace <key>    # один воркспейс по storeKey
+squeezr usage --since 7d           # окно по времени: 90m / 24h / 7d / 30d
+squeezr usage --json               # один JSON-объект (контракт 035)
+squeezr usage --watch              # живой рефреш (3 с, --interval N), Ctrl+C — чистый выход
+```
+
+```
+demo-proj-a-c4654229 — 8 record(s)
+  /tmp/demo-proj-a
+demo-proj-b-54669aef — 3 record(s)
+  /tmp/demo-proj-b
+                      By agent
+Client       Version  Count  Last seen
+kimi-code    1.2.0    5      2026-09-25 09:15
+claude-code  2.0.5    3      2026-09-25 10:05
+cli          -        2      2026-09-25 11:31
+unknown      -        1      2026-09-18 08:00
+Period: 2026-09-18 08:00 — 2026-09-25 11:31 (11 records)
+```
+
+- Фильтры комбинируются (AND): `squeezr usage --agent kimi-code --since 24h` — только kimi за сутки.
+- Воркспейс с исчезнувшим rootPath помечается `(stale)` — команда не падает (best-effort, как `fleet`).
+- `--watch` и `--json` несовместимы (json не бывает живым) — ошибка по контракту 035; в пайпе (не-TTY) `--watch` печатает один снапшот с предупреждением в stderr и выходит.
+- Совсем без записей — честное `No usage telemetry yet.`.
+- Retention тот же: суммарно больше 50 000 записей — хинт прогнать `squeezr stats --reset` по воркспейсам.
 
 ## Roadmap
 
@@ -437,7 +488,7 @@ The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) 
 
 An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client onboarding is one command: `squeezr mcp install` detects supported agent CLIs (Claude Code, Kimi Code, Qwen Code, Codex), registers a `serve --watch` entry via the client's own CLI (direct config merge for Kimi), and optionally writes an idempotent instruction block into the client's instruction file; `squeezr mcp doctor` verifies the setup per client (exit 0/1), `squeezr mcp remove` undoes it. Flags: `--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--yes`, `--json`. Workspace root = server process cwd, with a `CLAUDE_PROJECT_DIR` fallback for Claude Code (no `cwd` key is ever written to client configs); manual config paths (e.g. `~/.claude.json` / `.mcp.json`, `~/.codex/config.toml`) are listed in the RU section above. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits. Every running daemon writes a heartbeat file (`<storeDir>/<kind>.heartbeat`, refreshed every 5 s, removed on clean exit), so `squeezr fleet` shows all workspaces' daemons at a glance — pid, uptime, stale root paths, pending chunks — and `squeezr fleet stop|restart <storeKey>` manages them: stop covers both daemon kinds (SIGTERM → 5 s grace → SIGKILL, heartbeat pids verified as squeezr processes), restart respawns the CLI watch daemon only (`serve --watch` is owned by the MCP client); `--json` is NDJSON per the 035 contract. For programmatic progress, `index --events` / `serve --watch --events` stream NDJSON events (`started` → `fileIndexed` → `progress` → `completed`/`error`), flushed per line — stdout for `index`, stderr for `serve` (stdout carries MCP JSON-RPC); a quiet incremental run emits exactly `started` → `fileIndexed`×N → `completed`.
 
-Token economics are measurable: every navigation command (CLI and all six MCP tools) appends a local telemetry line to `queries.jsonl` in the workspace store dir, and `squeezr stats [--json|--reset]` turns it into a per-tool table plus counterfactual savings — actual tokens spent vs reading every expanded file whole — and the serve-cache hit-rate; telemetry never leaves the machine and is removed with the workspace. The four expensive MCP tools cache responses per serve session (LRU 100, canonical-JSON key), and any reindex invalidates the cache generation, so identical requests replay instantly only while the index is unchanged.
+Token economics are measurable: every navigation command (CLI and all six MCP tools) appends a local telemetry line to `queries.jsonl` in the workspace store dir, and `squeezr stats [--json|--reset]` turns it into a per-tool table plus counterfactual savings — actual tokens spent vs reading every expanded file whole — and the serve-cache hit-rate; telemetry never leaves the machine and is removed with the workspace. Every record also carries the client identity (MCP handshake `clientInfo` for serve sessions, `cli` for CLI runs, `unknown` for pre-050 records), so `stats` breaks usage down By agent and By session, and `squeezr usage [--agent|--workspace|--since|--json|--watch]` rolls the telemetry up across every workspace in the registry — per-project blocks plus a fleet-wide by-agent table, runnable from any directory, with a live `--watch` view (3 s refresh, `--interval`) for watching adoption as agents work. The four expensive MCP tools cache responses per serve session (LRU 100, canonical-JSON key), and any reindex invalidates the cache generation, so identical requests replay instantly only while the index is unchanged.
 
 ```bash
 dotnet build Squeezr.slnx

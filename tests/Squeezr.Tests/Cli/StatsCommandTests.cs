@@ -39,6 +39,44 @@ public sealed class StatsCommandTests
     }
 
     [Fact]
+    public async Task Stats_Json_IncludesAgentsAndSessionsSections()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        (await RunCliAsync(root, "search", "alpha", "--json")).ExitCode.ShouldBe(0);
+        (await RunCliAsync(root, "expand", "src/Big.cs", "2")).ExitCode.ShouldBe(0);
+
+        var stats = await RunCliAsync(root, "stats", "--json");
+        stats.ExitCode.ShouldBe(0);
+
+        using var document = JsonDocument.Parse(stats.StdOut);
+        var body = document.RootElement;
+        var agents = body.GetProperty("agents");
+        agents.ValueKind.ShouldBe(JsonValueKind.Array);
+        agents.GetArrayLength().ShouldBe(1);
+        var agent = agents[0];
+        agent.GetProperty("client").GetString().ShouldBe("cli");
+        agent.TryGetProperty("clientVersion", out _).ShouldBeFalse();
+        agent.GetProperty("count").GetInt32().ShouldBe(2);
+        agent.GetProperty("lastSeen").ValueKind.ShouldBe(JsonValueKind.String);
+        var sessions = body.GetProperty("sessions");
+        sessions.GetArrayLength().ShouldBe(2);
+        foreach (var session in sessions.EnumerateArray())
+        {
+            session.GetProperty("sessionId").GetString()!.Length.ShouldBe(8);
+            session.GetProperty("client").GetString().ShouldBe("cli");
+            session.GetProperty("count").GetInt32().ShouldBe(1);
+            session.GetProperty("lastSeen").ValueKind.ShouldBe(JsonValueKind.String);
+            session.GetProperty("topTools").GetArrayLength().ShouldBe(1);
+        }
+
+        (await RunCliAsync(root, "stats", "--reset", "--json")).ExitCode.ShouldBe(0);
+        var empty = await RunCliAsync(root, "stats", "--json");
+        using var emptyDocument = JsonDocument.Parse(empty.StdOut);
+        emptyDocument.RootElement.GetProperty("agents").GetArrayLength().ShouldBe(0);
+        emptyDocument.RootElement.GetProperty("sessions").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
     public async Task StatsReset_TruncatesLogAndRespondsWithRemovedCount()
     {
         var root = await NewIndexedCliWorkspaceAsync();

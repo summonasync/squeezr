@@ -13,6 +13,15 @@ public sealed record SavingsStats(
 
 public sealed record CacheStats(int Hits, int Misses, double HitRate, int SessionsWithCache);
 
+public sealed record AgentStats(string Client, string? ClientVersion, int Count, DateTime LastSeen);
+
+public sealed record SessionStats(
+    string SessionId,
+    string Client,
+    int Count,
+    DateTime LastSeen,
+    IReadOnlyList<string> TopTools);
+
 public sealed record QueryStatsSummary(
     int TotalRequests,
     IReadOnlyList<ToolStats> ByTool,
@@ -20,7 +29,9 @@ public sealed record QueryStatsSummary(
     CacheStats Cache,
     DateTime? From,
     DateTime? To,
-    int Records);
+    int Records,
+    IReadOnlyList<AgentStats> Agents,
+    IReadOnlyList<SessionStats> Sessions);
 
 public static class QueryTelemetrySummary
 {
@@ -51,8 +62,40 @@ public static class QueryTelemetrySummary
             new CacheStats(hits, entries.Count - hits, hitRate, DistinctCacheSessions(entries)),
             entries.Count == 0 ? null : entries.Min(e => e.Ts),
             entries.Count == 0 ? null : entries.Max(e => e.Ts),
-            entries.Count);
+            entries.Count,
+            AggregateAgents(entries),
+            AggregateSessions(entries));
     }
+
+    public static IReadOnlyList<AgentStats> AggregateAgents(IReadOnlyList<QueryTelemetryEntry> entries) =>
+        entries
+            .GroupBy(e => (Client: e.Client ?? "unknown", Version: e.ClientVersion))
+            .Select(g => new AgentStats(g.Key.Client, g.Key.Version, g.Count(), g.Max(e => e.Ts)))
+            .OrderByDescending(a => a.Count)
+            .ThenBy(a => a.Client, StringComparer.Ordinal)
+            .ThenBy(a => a.ClientVersion, StringComparer.Ordinal)
+            .ToList();
+
+    private static IReadOnlyList<SessionStats> AggregateSessions(IReadOnlyList<QueryTelemetryEntry> entries) =>
+        entries
+            .GroupBy(e => e.SessionId)
+            .Select(g =>
+            {
+                var last = g.MaxBy(e => e.Ts)!;
+                var topTools = g
+                    .GroupBy(e => e.Tool)
+                    .Select(t => (Tool: t.Key, Count: t.Count()))
+                    .OrderByDescending(t => t.Count)
+                    .ThenBy(t => t.Tool, StringComparer.Ordinal)
+                    .Take(3)
+                    .Select(t => t.Tool)
+                    .ToList();
+                return new SessionStats(
+                    g.Key.ToString("N")[..8], last.Client ?? "unknown", g.Count(), last.Ts, topTools);
+            })
+            .OrderByDescending(s => s.LastSeen)
+            .ThenBy(s => s.SessionId, StringComparer.Ordinal)
+            .ToList();
 
     private static (long Counterfactual, int UnknownFiles) EstimateCounterfactual(
         IReadOnlyList<QueryTelemetryEntry> entries, string workspaceRoot)

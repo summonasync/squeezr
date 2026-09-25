@@ -19,12 +19,14 @@ public sealed class SymbolLookupTool
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
     private readonly ToolResponseCache? _cache;
+    private readonly ClientIdentity _identity;
 
-    public SymbolLookupTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
+    public SymbolLookupTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache, ClientIdentity identity)
     {
         _workspace = workspace;
         _gate = gate;
         _cache = cache;
+        _identity = identity;
     }
 
     [Description("Look up an exact symbol by name across the indexed workspace: signature, doc comment, file:span, and body within the token budget (maxTokens, default 300) — the method you named, not the whole file. Not-found returns an empty result, not an error; expand_span widens the context around a hit.")]
@@ -53,7 +55,8 @@ public sealed class SymbolLookupTool
                 var hit = (ToolEnvelope)cached!;
                 QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SymbolHitData>)hit.Data!).Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return hit;
             }
 
@@ -71,7 +74,8 @@ public sealed class SymbolLookupTool
                 var miss = ToolEnvelope.Wrap(Array.Empty<object>(), 0, false, warnings, root, staleFiles: null);
                 QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                     miss.TokensUsed, miss.Truncated, 0,
-                    sw.ElapsedMilliseconds, indexAge: miss.IndexAge);
+                    sw.ElapsedMilliseconds, indexAge: miss.IndexAge,
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return miss;
             }
 
@@ -92,7 +96,8 @@ public sealed class SymbolLookupTool
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                 result.TokensUsed, result.Truncated, data.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
             _cache?.Put("symbol_lookup", parameters, envelope);
             return envelope;
         }

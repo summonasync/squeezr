@@ -16,11 +16,13 @@ public sealed class IndexStatusTool
     private IVectorStore? _vectorStore;
     private bool _resolved;
     private readonly McpToolGate _gate;
+    private readonly ClientIdentity _identity;
 
-    public IndexStatusTool(McpWorkspace workspace, McpToolGate gate)
+    public IndexStatusTool(McpWorkspace workspace, McpToolGate gate, ClientIdentity identity)
     {
         _workspace = workspace;
         _gate = gate;
+        _identity = identity;
     }
 
     [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed.")]
@@ -65,7 +67,8 @@ public sealed class IndexStatusTool
             var envelope = ToolEnvelope.Wrap(data, 0, false, warnings, root, staleFiles: null);
             QueryTelemetry.Record(root, _workspace.SessionId, "index_status",
                 null, envelope.TokensUsed, envelope.Truncated, 1,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
             return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)

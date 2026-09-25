@@ -106,6 +106,40 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
         AnsiConsole.MarkupLine(
             $"Cache hit-rate: {hitRate} across {summary.Cache.SessionsWithCache} session(s)");
 
+        var agentTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By agent") };
+        agentTable.AddColumn("Client");
+        agentTable.AddColumn("Version");
+        agentTable.AddColumn("Count");
+        agentTable.AddColumn("Last seen");
+        foreach (var agent in summary.Agents)
+        {
+            agentTable.AddRow(
+                agent.Client.EscapeMarkup(),
+                (agent.ClientVersion ?? "-").EscapeMarkup(),
+                agent.Count.ToString(),
+                $"{agent.LastSeen:yyyy-MM-dd HH:mm}");
+        }
+
+        AnsiConsole.Write(agentTable);
+
+        var sessionTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By session") };
+        sessionTable.AddColumn("Session");
+        sessionTable.AddColumn("Client");
+        sessionTable.AddColumn("Count");
+        sessionTable.AddColumn("Last seen");
+        sessionTable.AddColumn("Top tools");
+        foreach (var session in summary.Sessions)
+        {
+            sessionTable.AddRow(
+                session.SessionId.EscapeMarkup(),
+                session.Client.EscapeMarkup(),
+                session.Count.ToString(),
+                $"{session.LastSeen:yyyy-MM-dd HH:mm}",
+                string.Join(", ", session.TopTools).EscapeMarkup());
+        }
+
+        AnsiConsole.Write(sessionTable);
+
         AnsiConsole.MarkupLine(
             $"Period: {summary.From:yyyy-MM-dd HH:mm} — {summary.To:yyyy-MM-dd HH:mm} ({summary.Records} records)");
 

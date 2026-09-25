@@ -19,12 +19,14 @@ public sealed class FindReferencesTool
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
     private readonly ToolResponseCache? _cache;
+    private readonly ClientIdentity _identity;
 
-    public FindReferencesTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
+    public FindReferencesTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache, ClientIdentity identity)
     {
         _workspace = workspace;
         _gate = gate;
         _cache = cache;
+        _identity = identity;
     }
 
     [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
@@ -45,7 +47,8 @@ public sealed class FindReferencesTool
                 var hit = (ToolEnvelope)cached!;
                 QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<RefData>)hit.Data!).Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return hit;
             }
 
@@ -67,7 +70,8 @@ public sealed class FindReferencesTool
             var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale);
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                 tokensUsed, false, data.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
             _cache?.Put("find_references", parameters, envelope);
             return envelope;
         }
