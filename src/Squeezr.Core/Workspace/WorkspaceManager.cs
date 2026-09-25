@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra;
+using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Core.Workspace;
@@ -39,10 +41,13 @@ public sealed class WorkspaceManager
         ValidateName(workspaceName, "Workspace");
 
         var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(_root);
+        var storeKey = WorkspaceStoreKeys.Create(workspaceName, canonicalRoot);
+        var adopting = File.Exists(Path.Combine(SqueezrHome.WorkspacesDir, storeKey, SqueezrPaths.StoreManifestFileName));
+
         WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
             workspaceName,
             canonicalRoot,
-            WorkspaceStoreKeys.Create(workspaceName, canonicalRoot),
+            storeKey,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow));
 
@@ -51,12 +56,24 @@ public sealed class WorkspaceManager
         try
         {
             Directory.CreateDirectory(SqueezrPaths.StoreDir(_root));
-            ConfigFile.Save(_root, SqueezrConfig.CreateDefault());
+
+            if (!adopting || !File.Exists(SqueezrPaths.ConfigPath(_root)))
+            {
+                ConfigFile.Save(_root, SqueezrConfig.CreateDefault());
+            }
+
             using (new MetaStore(SqueezrPaths.MetaDbPath(_root), createIfMissing: true))
             {
             }
 
-            WorkspaceManifestFile.Save(_root, new WorkspaceManifest { Name = workspaceName, RootPath = canonicalRoot });
+            if (adopting)
+            {
+                AdoptManifest(canonicalRoot);
+            }
+            else
+            {
+                WorkspaceManifestFile.Save(_root, new WorkspaceManifest { Name = workspaceName, RootPath = canonicalRoot });
+            }
         }
         catch
         {
@@ -64,7 +81,8 @@ public sealed class WorkspaceManager
             throw;
         }
 
-        return new InitResult(workspaceName, _root);
+        var repairHint = adopting ? FindNameMismatchHint(storeKey, canonicalRoot) : null;
+        return new InitResult(workspaceName, _root, repairHint);
     }
 
     public RepoEntry AddRepo(string path, string? name, Action<string>? onStaleTakeover = null)
@@ -174,6 +192,81 @@ public sealed class WorkspaceManager
         }
 
         return new DropResult([.. removed], "squeezr services down");
+    }
+
+    private void AdoptManifest(string canonicalRoot)
+    {
+        WorkspaceManifest manifest;
+        try
+        {
+            manifest = WorkspaceManifestFile.Load(_root);
+        }
+        catch (JsonException ex)
+        {
+            throw new WorkspaceException(
+                $"Workspace manifest at '{SqueezrPaths.ManifestPath(_root)}' is not valid JSON: {ex.Message}");
+        }
+
+        if (manifest.RootPath is null)
+        {
+            WorkspaceManifestFile.Save(_root, manifest with { RootPath = canonicalRoot });
+        }
+    }
+
+    private static string? FindNameMismatchHint(string adoptedStoreKey, string canonicalRoot)
+    {
+        var workspacesDir = SqueezrHome.WorkspacesDir;
+        if (!Directory.Exists(workspacesDir))
+        {
+            return null;
+        }
+
+        string[] storeDirs;
+        try
+        {
+            storeDirs = Directory.EnumerateDirectories(workspacesDir).ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        foreach (var storeDir in storeDirs)
+        {
+            var otherKey = Path.GetFileName(storeDir);
+            if (string.Equals(otherKey, adoptedStoreKey, StringComparison.Ordinal)
+                || WorkspaceRegistry.FindByStoreKey(otherKey) is not null)
+            {
+                continue;
+            }
+
+            var manifest = TryLoadStoreManifest(storeDir);
+            if (manifest?.RootPath is not { } rootPath)
+            {
+                continue;
+            }
+
+            if (string.Equals(WorkspaceCanonicalPath.Canonicalize(rootPath), canonicalRoot, PathComparison))
+            {
+                return $"another workspace store '{otherKey}' also points at '{canonicalRoot}'; run 'squeezr workspace repair' to reconcile it";
+            }
+        }
+
+        return null;
+    }
+
+    private static WorkspaceManifest? TryLoadStoreManifest(string storeDir)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<WorkspaceManifest>(
+                File.ReadAllText(Path.Combine(storeDir, SqueezrPaths.StoreManifestFileName)),
+                SqueezrJson.FileOptions);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private WorkspaceManifest LoadManifest() =>

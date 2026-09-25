@@ -4,14 +4,28 @@ namespace Squeezr.Cli.Output;
 
 public static class WorkspaceListing
 {
-    public static IReadOnlyList<WorkspaceListEntry> Load() =>
-        WorkspaceRegistry.Load()
+    public static WorkspaceListingResult Load()
+    {
+        var scan = OrphanScanner.Scan();
+        var huskKeys = scan.Husks.Select(husk => husk.StoreKey).ToHashSet(StringComparer.Ordinal);
+        var workspaces = WorkspaceRegistry.Load()
             .Select(entry => new WorkspaceListEntry(
                 entry.Name,
                 entry.RootPath,
                 entry.StoreKey,
                 entry.CreatedAt,
                 entry.LastUsedAt,
-                Stale: !Directory.Exists(entry.RootPath)))
+                Stale: !Directory.Exists(entry.RootPath),
+                Husk: huskKeys.Contains(entry.StoreKey) ? true : null))
             .ToList();
+        var orphans = scan.Orphans
+            .Select(orphan => new WorkspaceOrphanEntry(
+                orphan.Name,
+                orphan.StoreKey,
+                orphan.IsAdoptable ? "adoptable" : "legacy",
+                orphan.RootPath))
+            .ToList();
+
+        return new WorkspaceListingResult(workspaces, orphans);
+    }
 }

@@ -78,6 +78,8 @@ public static class CliApplication
                 workspace.SetDescription("Inspect the current workspace");
                 workspace.AddCommand<WorkspaceListCommand>("list")
                     .WithDescription("List registered workspaces");
+                workspace.AddCommand<WorkspaceRepairCommand>("repair")
+                    .WithDescription("Adopt orphaned workspace stores back into the registry (never deletes anything)");
             });
             config.AddBranch("hook", hook =>
             {

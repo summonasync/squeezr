@@ -4,6 +4,11 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added (051, registry orphan repair)
+- `squeezr workspace list` now surfaces orphaned store dirs (a store dir with a valid manifest that is missing from the registry) as `orphan — adoptable` (manifest carries rootPath, store key verifies) or `orphan — needs root` (legacy manifest without rootPath), and flags husk registry entries (rootPath = `$HOME` or the store parent); hints on stderr in both human and `--json` modes, stdout stays clean, json stays byte-compatible (additive orphan lines / optional `husk` field only)
+- `squeezr workspace repair [--store-key <key> --root <path>] [--json]`: re-registers adoptable orphans (registry entry + RootPath fill only — never deletes or rewrites anything else); legacy orphans are repaired with an explicit `--root` verified against the deterministic store key (a foreign store dir cannot be claimed); one-sided flags and key mismatches follow the 035 error contract
+- `squeezr init` over an existing store dir is now a lossless adoption: live `config.json`, the manifest's repo list and `meta.db` are preserved (previously init silently reset config.json to defaults and blanked Repos), RootPath is backfilled when missing, and a name-mismatched sibling orphan produces a stderr hint pointing at `workspace repair`
+
 ### Added (050, usage analytics)
 - Telemetry client identity: every `queries.jsonl` record carries `client`/`clientVersion` — MCP records are tagged from the initialize handshake `clientInfo` (captured via a `ClientIdentity` holder wired into all six tools), CLI records are tagged `cli`, pre-existing records aggregate as `unknown` (additive schema, no file migrations)
 - `squeezr stats`: new By agent (client, version, count, last seen) and By session (short id, client, count, last seen, top-3 tools) sections in the human output, plus additive `agents`/`sessions` fields in `stats --json` (035 contract preserved — existing fields byte-compatible)
