@@ -7,13 +7,13 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # SDK image instead of setup-dotnet — see ci.yml for the rationale (ephemeral
-    # runner container, persistent docker image cache).
-    container: mcr.microsoft.com/dotnet/sdk:10.0
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
       # Archives carry the whole publish output, not just the binary:
       # MSBuildWorkspace ships out-of-proc BuildHost folders next to the exe,
       # required for semantic indexing (single-file bundle does not embed them).
