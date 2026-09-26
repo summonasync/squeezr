@@ -4,6 +4,13 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-09-26
+
+Patch release: repair-deadlock fix for upgrade-stable MCP client registration (054-06), found dogfooding the Overmind workspace. Full suite 1126 → 1130.
+
+### Fixed (054-06, upgrade-stable MCP client registration)
+- `squeezr mcp install --yes` — the repair command `mcp doctor` emits for stale registrations — failed by construction on CLI-method clients (claude): `mcp add` refuses when an entry exists, and a stale entry is precisely the precondition for a repair, so doctor proposed a command that could only die with `MCP server squeezr already exists in user config` while doctor kept reporting `stale` (live repro: registered `~/apps/squeezr/v1.0.2/squeezr`, repair exit 1, endless loop). Install now **converges in place**: on "already exists" it runs one `mcp remove` and one re-`add`; a second add failure propagates the original-style `ClientCliException`; unrelated add failures pass through with no retry; a fresh install issues no `mcp remove` at all (byte-identical to pre-fix behavior). Writer-method clients (kimi, codex) are untouched — their idempotent writers already upserted
+
 ## [1.0.4] — 2026-09-26
 
 Upgrade-stable MCP client registration (054) + TUI stats/usage views (053). Full suite 1090 → 1126.
