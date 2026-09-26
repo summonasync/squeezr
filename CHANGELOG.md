@@ -4,6 +4,13 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [1.0.6] — 2026-09-26
+
+Dogfood tail from the v1.0.5 session: `mcp doctor` now honors the `--all` flag it advertises itself. Full suite 1130 → 1132.
+
+### Fixed
+- `squeezr mcp doctor` in a non-interactive terminal without `--client` printed the shared usage hint recommending `--all`, but doctor silently ignored that flag (unknown options are not rejected by the parser) — a dead end telling users to type a flag that does nothing. Doctor now accepts `--all` with the same semantics as `install` (expands to every detected client), `--help` lists it, and `--client` + `--all` compose (union, deduped via the shared parser)
+
 ## [1.0.5] — 2026-09-26
 
 Patch release: repair-deadlock fix for upgrade-stable MCP client registration (054-06), found dogfooding the Overmind workspace. Full suite 1126 → 1130.
