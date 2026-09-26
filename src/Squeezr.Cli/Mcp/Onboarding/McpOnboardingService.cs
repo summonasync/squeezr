@@ -35,7 +35,7 @@ public sealed class McpOnboardingService
         var decision = McpInstallStrategy.Resolve(client, scope, _locator);
         if (decision.Method == McpInstallMethod.Cli)
         {
-            await _bridge.AddAsync(client, scope, environment.CommandPath, watch, cancellationToken);
+            await InstallViaCliAsync(client, scope, environment.CommandPath, watch, cancellationToken);
         }
         else
         {
@@ -164,6 +164,27 @@ public sealed class McpOnboardingService
             return $"unavailable: {ex.Message}";
         }
     }
+
+    private async Task InstallViaCliAsync(
+        McpClientDescriptor client,
+        McpScope scope,
+        string commandPath,
+        bool watch,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _bridge.AddAsync(client, scope, commandPath, watch, cancellationToken);
+        }
+        catch (ClientCliException ex) when (IsAlreadyExistsError(ex))
+        {
+            await _bridge.RemoveAsync(client, cancellationToken);
+            await _bridge.AddAsync(client, scope, commandPath, watch, cancellationToken);
+        }
+    }
+
+    private static bool IsAlreadyExistsError(ClientCliException ex) =>
+        ex.Stderr.Contains("already exists", StringComparison.OrdinalIgnoreCase);
 
     private static async Task WriteEntryAsync(McpClientDescriptor client, string configPath, JsonObject entry, CancellationToken cancellationToken)
     {

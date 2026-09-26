@@ -312,6 +312,90 @@ public sealed class McpOnboardingServiceTests
         config.ShouldNotContain(versioned);
     }
 
+    [Fact]
+    public async Task Install_CliClientWhenAlreadyExists_RemovesAndRetriesSuccessfully()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 1, Stdout: "", Stderr: "MCP server squeezr already exists in user config"),
+            (ExitCode: 0, Stdout: "", Stderr: ""),
+            (ExitCode: 0, Stdout: "", Stderr: ""));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var result = await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        result.Method.ShouldBe("cli");
+        result.Error.ShouldBeNull();
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(3);
+        invocations[0].ShouldContain("add");
+        invocations[1].ShouldBe(["mcp", "remove", "squeezr"]);
+        invocations[2].ShouldContain("add");
+    }
+
+    [Fact]
+    public async Task Install_CliClientWhenAddFailsWithUnrelatedError_DoesNotRetry()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 1, Stdout: "", Stderr: "Error: invalid scope value"));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var exception = await Should.ThrowAsync<ClientCliException>(() =>
+            service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None));
+
+        exception.Stderr.ShouldContain("invalid scope");
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(1);
+        invocations[0].ShouldContain("add");
+    }
+
+    [Fact]
+    public async Task Install_CliClientFreshInstall_NoRemoveCall()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 0, Stdout: "", Stderr: ""));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var result = await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        result.Method.ShouldBe("cli");
+        result.Error.ShouldBeNull();
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(1);
+        invocations[0].ShouldContain("add");
+        invocations[0].ShouldNotContain("remove");
+    }
+
+    [Fact]
+    public async Task Install_CliClientAlreadyExistsThenSecondAddFails_PropagatesOriginalException()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 1, Stdout: "", Stderr: "MCP server squeezr already exists in user config"),
+            (ExitCode: 0, Stdout: "", Stderr: ""),
+            (ExitCode: 2, Stdout: "", Stderr: "Error: unexpected failure on retry"));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var exception = await Should.ThrowAsync<ClientCliException>(() =>
+            service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None));
+
+        exception.ExitCode.ShouldBe(2);
+        exception.Stderr.ShouldContain("unexpected failure on retry");
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(3);
+        invocations[1].ShouldBe(["mcp", "remove", "squeezr"]);
+    }
+
     private static (McpOnboardingService Service, McpOnboardingEnvironment Environment, string Workspace, string BinDir) NewService()
     {
         var home = TestDirs.NewTempDir();
