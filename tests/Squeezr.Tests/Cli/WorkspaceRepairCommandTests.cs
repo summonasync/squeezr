@@ -115,7 +115,7 @@ public sealed class WorkspaceRepairCommandTests
             using var document = JsonDocument.Parse(json.StdErr.Trim());
             var error = document.RootElement.GetProperty("error");
             error.GetProperty("code").GetString().ShouldBe("invalid_usage");
-            error.GetProperty("message").GetString().ShouldContain("--store-key");
+            error.GetProperty("message").GetString()!.ShouldContain("--store-key");
 
             var human = await RunCliAsync(home, new[] { "workspace", "repair" }.Concat(extraArgs).ToArray());
             human.ExitCode.ShouldBe(1);
@@ -182,7 +182,7 @@ public sealed class WorkspaceRepairCommandTests
             using var document = JsonDocument.Parse(result.StdErr.Trim());
             var error = document.RootElement.GetProperty("error");
             error.GetProperty("code").GetString().ShouldBe("workspace_error");
-            error.GetProperty("message").GetString().ShouldContain("does not match store key");
+            error.GetProperty("message").GetString()!.ShouldContain("does not match store key");
 
             ReadRegistry(home).ShouldBeEmpty();
             File.ReadAllBytes(manifestPath).ShouldBe(manifestBytes);
