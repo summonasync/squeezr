@@ -24,6 +24,9 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         [CommandOption("--client")]
         public string[]? Client { get; set; }
 
+        [CommandOption("--all")]
+        public bool All { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -46,7 +49,12 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         IReadOnlyList<McpClientDescriptor> clients;
         try
         {
-            clients = await McpCommandSupport.ResolveClientsAsync(settings.Client, interactive, environment, _locator, cancellationToken);
+            var clientValues = settings.Client;
+            if (settings.All)
+            {
+                clientValues = clientValues is { Length: > 0 } ? [.. clientValues, "all"] : ["all"];
+            }
+            clients = await McpCommandSupport.ResolveClientsAsync(clientValues, interactive, environment, _locator, cancellationToken);
         }
         catch (McpUsageException ex)
         {

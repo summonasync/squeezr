@@ -429,6 +429,35 @@ public sealed class McpCommandsTests
     }
 
     [Fact]
+    public async Task Doctor_NonInteractiveWithAll_ChecksEveryDetectedClient()
+    {
+        var workspace = TestDirs.NewTempDir();
+        await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"]);
+
+        var (exitCode, console, _, error) = await RunAsync(
+            workspace,
+            ["mcp", "doctor", "--all"],
+            configureHome: home => Directory.CreateDirectory(Path.Combine(home, ".kimi-code")));
+
+        exitCode.ShouldBe(0);
+        error.ShouldBeEmpty();
+        console.Output.ShouldContain("kimi");
+        console.Output.ShouldContain("entry: user=no project=yes");
+    }
+
+    [Fact]
+    public async Task Doctor_HelpListsClientAllAndJsonOptions()
+    {
+        var (exitCode, console, output, _) = await RunAsync(TestDirs.NewTempDir(), ["mcp", "doctor", "--help"]);
+
+        exitCode.ShouldBe(0);
+        var combined = console.Output + output;
+        combined.ShouldContain("--client");
+        combined.ShouldContain("--all");
+        combined.ShouldContain("--json");
+    }
+
+    [Fact]
     public async Task Doctor_NonInteractiveAfterInstallAndRemove_ExitCodesFollowEntry()
     {
         var workspace = TestDirs.NewTempDir();
