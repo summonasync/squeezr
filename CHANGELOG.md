@@ -4,6 +4,16 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-09-26
+
+Upgrade-stable MCP client registration (054) + TUI stats/usage views (053). Full suite 1090 → 1126.
+
+### Added (054, upgrade-stable MCP client registration)
+- MCP registrations now store a **stable command path** (`~/.local/bin/squeezr` when the release symlink exists, the running binary's path otherwise) instead of the versioned `~/apps/squeezr/<tag>/squeezr` — so `install-release.sh` upgrading the symlink no longer silently leaves agents running a stale binary (pre-054 telemetry with no `client` field, dead 050/053 features). No OS branching: the FS topology picks the branch, Windows (already-stable `%LOCALAPPDATA%` layout) and dev repo builds fall through to the process path untouched
+- `squeezr mcp doctor` detects **stale registrations**: when a client's stored `command` differs from the expected stable path it prints `stale: registered=<path> expected=<path>` plus a ready `squeezr mcp install --client <id> --yes` repair; `--json` gains additive `userCommand`/`projectCommand`/`userStale`/`projectStale`/`expectedCommand` fields (035 contract preserved, doctor exit codes unchanged). A malformed/hand-edited config (incl. inline TOML comments) is parsed best-effort and never crashes the doctor
+- `squeezr mcp install` gains `--yes` (fully non-interactive — no prompts, requires an explicit `--client <csv>|all`, `--scope` defaults to `user`, repairs a stale registration in place via the idempotent 034 writers) and `--instructions` (explicit opt-in to write the agent instruction block in `--yes` mode; without `--yes` the flag is inert, and `--no-instructions` wins if both are passed); interactive behavior is unchanged
+- `squeezr serve` emits a single stderr nudge at startup when it was launched from a binary that differs from the stable symlink's target (naming `squeezr mcp doctor` / `install`); silent when the symlink is absent (dev build), already correct, or on any symlink cycle — never throws
+
 ### Added (053, TUI stats/usage views)
 - TUI main menu gains two analytics screens: **Token stats** (per-workspace telemetry summary — per-tool table, savings, cache hit-rate, By agent / By session) and **Usage analytics** (fleet-wide rollup across the registry with stale markers and by-agent totals) — both render through the same shared renderers as `squeezr stats` / `squeezr usage` (CLI human output byte-identical after the IAnsiConsole parameterization), one-shot snapshots refreshed on menu re-entry
 
