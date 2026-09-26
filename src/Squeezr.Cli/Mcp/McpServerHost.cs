@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
@@ -28,6 +29,8 @@ public static class McpServerHost
 
         WarnIfSessionOutsideWorkspace(resolution.RootPath, startDirectory, Console.Error);
         Console.Error.WriteLine($"squeezr serve: workspace '{resolution.RootPath}'");
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        StaleRegistrationNudge.TryWrite(Console.Error, homeDir, Environment.ProcessPath);
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
         await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, ct, watch, events);

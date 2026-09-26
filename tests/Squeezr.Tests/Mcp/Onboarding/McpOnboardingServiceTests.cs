@@ -259,6 +259,59 @@ public sealed class McpOnboardingServiceTests
         File.Exists(Path.Combine(home, ".kimi-code", "mcp.json")).ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task Install_CliFirstClientWithStableLink_BridgeReceivesStablePath()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var binDir = TestDirs.NewTempDir();
+        var versioned = Path.Combine(home, "apps", "squeezr", "v1.0.3", "squeezr");
+        Directory.CreateDirectory(Path.GetDirectoryName(versioned)!);
+        File.WriteAllText(versioned, "binary");
+        var stableDir = Path.Combine(home, ".local", "bin");
+        Directory.CreateDirectory(stableDir);
+        File.CreateSymbolicLink(Path.Combine(stableDir, "squeezr"), versioned);
+        var stablePath = StableCommandPath.Resolve(home, versioned);
+        var environment = new McpOnboardingEnvironment(home, workspace, stablePath, null);
+        var service = new McpOnboardingService(new ClientCliLocator(binDir));
+        var fake = FakeCli.Install(binDir, "claude");
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var result = await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        result.Method.ShouldBe("cli");
+        fake.ReadCapturedArguments().ShouldContain(Path.Combine(stableDir, "squeezr"));
+        fake.ReadCapturedArguments().ShouldNotContain(versioned);
+    }
+
+    [Fact]
+    public async Task Install_WriterWithStableLink_ConfigContainsStablePath()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var versioned = Path.Combine(home, "apps", "squeezr", "v1.0.3", "squeezr");
+        Directory.CreateDirectory(Path.GetDirectoryName(versioned)!);
+        File.WriteAllText(versioned, "binary");
+        var stableDir = Path.Combine(home, ".local", "bin");
+        Directory.CreateDirectory(stableDir);
+        File.CreateSymbolicLink(Path.Combine(stableDir, "squeezr"), versioned);
+        var stablePath = StableCommandPath.Resolve(home, versioned);
+        var environment = new McpOnboardingEnvironment(home, workspace, stablePath, null);
+        var service = new McpOnboardingService(new ClientCliLocator(string.Empty));
+        var client = McpClientRegistry.Get(McpClientId.Kimi);
+
+        await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        var configPath = Path.Combine(home, ".kimi-code", "mcp.json");
+        var config = File.ReadAllText(configPath);
+        config.ShouldContain(Path.Combine(stableDir, "squeezr"));
+        config.ShouldNotContain(versioned);
+    }
+
     private static (McpOnboardingService Service, McpOnboardingEnvironment Environment, string Workspace, string BinDir) NewService()
     {
         var home = TestDirs.NewTempDir();

@@ -4,8 +4,11 @@ namespace Squeezr.Cli.Mcp.Onboarding;
 
 public static class ServerEntryBuilder
 {
-    public static JsonObject Build(McpClientDescriptor client, bool watch) =>
-        Build(client, ResolveCurrentExecutable(), watch);
+    public static JsonObject Build(McpClientDescriptor client, bool watch)
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        return Build(client, StableCommandPath.Resolve(homeDir, Environment.ProcessPath), watch);
+    }
 
     public static JsonObject Build(McpClientDescriptor client, string commandPath, bool watch)
     {
@@ -26,8 +29,4 @@ public static class ServerEntryBuilder
         }
         return entry;
     }
-
-    private static string ResolveCurrentExecutable() =>
-        Environment.ProcessPath ??
-        throw new InvalidOperationException("Cannot resolve the path of the current executable.");
 }

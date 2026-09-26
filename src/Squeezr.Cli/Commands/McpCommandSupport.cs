@@ -5,7 +5,7 @@ namespace Squeezr.Cli.Commands;
 
 public static class McpCommandSupport
 {
-    private const string ClientValues = "claude, kimi, qwen, codex, all";
+    public const string ClientValues = "claude, kimi, qwen, codex, all";
 
     public static async Task<IReadOnlyList<McpClientDescriptor>> ResolveClientsAsync(
         string[]? values,
@@ -68,7 +68,7 @@ public static class McpCommandSupport
         return await prompt.ShowAsync(AnsiConsole.Console, cancellationToken);
     }
 
-    public static async Task<bool> ResolveWriteInstructionsAsync(bool noInstructions, bool yes, bool interactive, CancellationToken cancellationToken)
+    public static async Task<bool> ResolveWriteInstructionsAsync(bool noInstructions, bool instructions, bool yes, bool interactive, CancellationToken cancellationToken)
     {
         if (noInstructions)
         {
@@ -76,7 +76,7 @@ public static class McpCommandSupport
         }
         if (yes)
         {
-            return true;
+            return instructions;
         }
         if (!interactive)
         {
@@ -89,13 +89,13 @@ public static class McpCommandSupport
         return await prompt.ShowAsync(AnsiConsole.Console, cancellationToken);
     }
 
-    public static async Task<bool> ResolveProjectBlockAsync(bool project, bool interactive, CancellationToken cancellationToken)
+    public static async Task<bool> ResolveProjectBlockAsync(bool project, bool yes, bool interactive, CancellationToken cancellationToken)
     {
         if (project)
         {
             return true;
         }
-        if (!interactive)
+        if (yes || !interactive)
         {
             return false;
         }

@@ -63,7 +63,7 @@ public sealed class McpProjectBlockCommandsTests
     {
         var repo = NewFixtureRepo();
         await RunAsync(repo, ["mcp", "install", "--project"]);
-        await RunAsync(repo, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"]);
+        await RunAsync(repo, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes", "--instructions"]);
         var agents = Path.Combine(repo, "AGENTS.md");
         File.ReadAllText(agents).ShouldContain(ProjectInstructions.StartMarker);
         File.ReadAllText(agents).ShouldContain(SqueezrInstructions.StartMarker);

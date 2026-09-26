@@ -2,13 +2,15 @@ namespace Squeezr.Cli.Mcp.Onboarding;
 
 public sealed record McpOnboardingEnvironment(string HomeDir, string WorkspaceRoot, string CommandPath, string? ClientHomeOverride)
 {
-    public static McpOnboardingEnvironment Create(string workspaceRoot) =>
-        new(
-            HomeDir: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify),
+    public static McpOnboardingEnvironment Create(string workspaceRoot)
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        return new(
+            HomeDir: homeDir,
             WorkspaceRoot: Path.GetFullPath(workspaceRoot),
-            CommandPath: Environment.ProcessPath
-                ?? throw new InvalidOperationException("Cannot resolve the path of the current executable."),
+            CommandPath: StableCommandPath.Resolve(homeDir, Environment.ProcessPath),
             ClientHomeOverride: ResolveClientHomeOverride());
+    }
 
     private static string? ResolveClientHomeOverride()
     {

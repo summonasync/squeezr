@@ -10,4 +10,9 @@ public sealed record McpClientDiagnostics(
     bool SqueezrInPath,
     bool WorkspaceIndexed,
     string? HeadlessStatus,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    string? UserCommand = null,
+    string? ProjectCommand = null,
+    bool UserStale = false,
+    bool ProjectStale = false,
+    string? ExpectedCommand = null);
