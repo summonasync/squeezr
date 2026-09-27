@@ -11,6 +11,7 @@ public sealed class MetaStore : IDisposable
     public const string RefsCollection = "refs";
     public const string ChunksCollection = "chunks";
     public const string IndexStateCollection = "index_state";
+    public const string PendingReapsCollection = "pending_reaps";
 
     private readonly LiteDatabase _db;
 
@@ -41,6 +42,7 @@ public sealed class MetaStore : IDisposable
             _db.Mapper.ToDocument(new SymbolDocument());
             _db.Mapper.ToDocument(new RefDocument());
             _db.Mapper.ToDocument(new ChunkDocument());
+            _db.Mapper.ToDocument(new PendingReapDocument());
         }
         _db.GetCollection(ReposCollection).EnsureIndex("name", unique: true);
         _db.GetCollection(FilesCollection).EnsureIndex("repoId");
@@ -153,6 +155,12 @@ public sealed class MetaStore : IDisposable
     public IReadOnlyList<ChunkDocument> ListChunksByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).Find(c => c.FileId == fileId).ToList();
 
+    public IReadOnlyList<string> ListChunkHashesByFile(uint fileId) =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection)
+            .Find(c => c.FileId == fileId)
+            .Select(c => c.ChunkHash)
+            .ToList();
+
     public void DeleteChunksByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).DeleteMany(c => c.FileId == fileId);
 
@@ -226,6 +234,59 @@ public sealed class MetaStore : IDisposable
             chunks.Update(chunk);
         }
     }
+
+    public int MarkFileChunksPending(uint fileId)
+    {
+        var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        var rows = chunks.Find(c => c.FileId == fileId).ToList();
+        if (rows.Count == 0)
+        {
+            return 0;
+        }
+
+        foreach (var chunk in rows)
+        {
+            chunk.EmbeddingStatus = "pending";
+            chunk.ModelKey = null;
+        }
+
+        chunks.Update(rows);
+        return rows.Count;
+    }
+
+    // A vector delete that could not run (store down, or it threw halfway) is queued here and replayed
+    // by the next pass that has both a store and an embeddings provider. Replay re-deletes by fileId, so
+    // the file's chunks are marked pending on success — otherwise points the delete half-removed while the
+    // same pass re-upserted would be lost for good once the chunks reported themselves embedded.
+    public IReadOnlyList<PendingReapDocument> ListPendingReaps() =>
+        _db.GetCollection<PendingReapDocument>(PendingReapsCollection)
+            .FindAll()
+            .OrderBy(p => p.QueuedAt)
+            .ToList();
+
+    public void EnqueuePendingReaps(IEnumerable<uint> fileIds)
+    {
+        var reaps = _db.GetCollection<PendingReapDocument>(PendingReapsCollection);
+        var queuedAt = DateTime.UtcNow;
+        foreach (var fileId in fileIds.Distinct())
+        {
+            if (reaps.FindById((long)fileId) is null)
+            {
+                reaps.Insert(new PendingReapDocument { FileId = fileId, QueuedAt = queuedAt });
+            }
+        }
+    }
+
+    public void ClearPendingReaps(IEnumerable<uint> fileIds)
+    {
+        var reaps = _db.GetCollection<PendingReapDocument>(PendingReapsCollection);
+        foreach (var fileId in fileIds)
+        {
+            reaps.Delete((long)fileId);
+        }
+    }
+
+    public void ClearAllPendingReaps() => _db.GetCollection(PendingReapsCollection).DeleteAll();
 
     public IndexStateDocument? GetIndexState(string repoName) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).FindById(repoName);
