@@ -105,7 +105,12 @@ public class QdrantStatusProbeTests
         public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VectorHit>>([]);
 
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ulong>>([]);
+
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
+
+        public Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct) => Task.CompletedTask;
 
         public Task DeleteCollectionAsync(CancellationToken ct) => Task.CompletedTask;
     }

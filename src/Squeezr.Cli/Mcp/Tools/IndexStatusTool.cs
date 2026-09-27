@@ -52,6 +52,13 @@ public sealed class IndexStatusTool
                 qdrant = await QdrantStatusProbe.ProbeAsync(_vectorStore, metaStore, cancellationToken);
             }
 
+            if (qdrant.ExcessPoints is { } excess)
+            {
+                warnings.Add(
+                    $"the collection carries {excess} more point(s) than the index has chunks — orphan vectors " +
+                    "no live chunk hash maps to; 'squeezr vectors reconcile' lists them, '--apply' drops them.");
+            }
+
             var data = new IndexStatusData(
                 status.Name,
                 root,

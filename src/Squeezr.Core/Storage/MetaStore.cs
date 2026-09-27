@@ -161,6 +161,13 @@ public sealed class MetaStore : IDisposable
             .Select(c => c.ChunkHash)
             .ToList();
 
+    public IReadOnlyList<string> ListDistinctChunkHashes() =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection)
+            .FindAll()
+            .Select(c => c.ChunkHash)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
     public void DeleteChunksByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).DeleteMany(c => c.FileId == fileId);
 

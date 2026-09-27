@@ -284,7 +284,12 @@ public class TreeSitterRoutingTests
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult(0L);
 
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ulong>>([]);
+
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
+
+        public Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct) => Task.CompletedTask;
 
         public Task DeleteCollectionAsync(CancellationToken ct) => Task.CompletedTask;
     }

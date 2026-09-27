@@ -11,6 +11,7 @@ namespace Squeezr.Cli.Embeddings;
 public sealed class QdrantVectorStore : IVectorStore
 {
     private const int BatchSize = 100;
+    private const uint ScrollPageSize = 500;
     private static readonly TimeSpan AvailabilityTimeout = TimeSpan.FromSeconds(2);
 
     private readonly QdrantClient _client;
@@ -161,6 +162,41 @@ public sealed class QdrantVectorStore : IVectorStore
         }
     }
 
+    public async Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct)
+    {
+        var ids = new List<ulong>();
+        PointId? offset = null;
+        try
+        {
+            while (true)
+            {
+                var page = await _client.ScrollAsync(
+                    _collection,
+                    limit: ScrollPageSize,
+                    offset: offset,
+                    payloadSelector: new WithPayloadSelector { Enable = false },
+                    vectorsSelector: new WithVectorsSelector { Enable = false },
+                    cancellationToken: ct);
+                if (page.Result.Count == 0)
+                {
+                    return ids;
+                }
+
+                ids.AddRange(page.Result.Select(point => point.Id.Num));
+                if (page.NextPageOffset is not { } next)
+                {
+                    return ids;
+                }
+
+                offset = next;
+            }
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        {
+            return ids;
+        }
+    }
+
     public async Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
     {
         if (fileIds.Count == 0)
@@ -189,6 +225,22 @@ public sealed class QdrantVectorStore : IVectorStore
         }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
         {
+        }
+    }
+
+    public async Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct)
+    {
+        for (var i = 0; i < pointIds.Count; i += BatchSize)
+        {
+            var batch = pointIds.Skip(i).Take(BatchSize).ToList();
+            try
+            {
+                await _client.DeleteAsync(_collection, batch, cancellationToken: ct);
+            }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+            {
+                return;
+            }
         }
     }
 

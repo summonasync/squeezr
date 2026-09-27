@@ -81,6 +81,12 @@ public static class CliApplication
                 workspace.AddCommand<WorkspaceRepairCommand>("repair")
                     .WithDescription("Adopt orphaned workspace stores back into the registry (never deletes anything)");
             });
+            config.AddBranch("vectors", vectors =>
+            {
+                vectors.SetDescription("Keep the Qdrant collection in step with the index");
+                vectors.AddCommand<VectorsReconcileCommand>("reconcile")
+                    .WithDescription("Drop collection points no live chunk hash maps to — dry run unless --apply is given");
+            });
             config.AddBranch("hook", hook =>
             {
                 hook.SetDescription("Produce payloads for AI client hooks (advisory, never blocks a tool call)");

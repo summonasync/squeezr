@@ -411,6 +411,9 @@ public class VectorPointReapTests
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)Points.Count);
 
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ulong>>(Points.Keys.ToList());
+
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {
             if (FailDelete)
@@ -420,6 +423,22 @@ public class VectorPointReapTests
 
             Calls.Add($"delete:{string.Join(",", fileIds)}");
             foreach (var id in Points.Where(kv => fileIds.Contains(kv.Value.FileId)).Select(kv => kv.Key).ToList())
+            {
+                Points.Remove(id);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct)
+        {
+            if (FailDelete)
+            {
+                return Task.FromException(new HttpRequestException("qdrant is down"));
+            }
+
+            Calls.Add($"delete-ids:{pointIds.Count}");
+            foreach (var id in pointIds)
             {
                 Points.Remove(id);
             }
