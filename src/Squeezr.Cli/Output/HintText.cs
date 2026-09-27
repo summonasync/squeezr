@@ -10,7 +10,8 @@ public static class HintText
         ["repo"] = "--repo",
         ["kind"] = "--kind",
         ["depth"] = "--depth",
-        ["maxTokens"] = "--max-tokens"
+        ["maxTokens"] = "--max-tokens",
+        ["expand_span"] = "expand <file> <line>"
     };
 
     public static string ForCli(this TruncationHint hint) => hint.Render(Flag);

@@ -4,6 +4,8 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Indexing.Navigation;
 
+public sealed record SymbolMember(string Name, string Kind, int Line);
+
 public sealed record SymbolHit(
     string Repo,
     string File,
@@ -15,7 +17,9 @@ public sealed record SymbolHit(
     string? ContainerName,
     string? DocComment,
     string? Body,
-    bool BodyOmitted);
+    bool BodyOmitted,
+    IReadOnlyList<SymbolMember> Members,
+    int MembersOmitted);
 
 public sealed record SymbolLookupResult(
     IReadOnlyList<SymbolHit> Matches,
@@ -32,6 +36,17 @@ public sealed class SymbolLookup
         new("narrow the query", ["repo", "kind"]),
         new("raise", ["maxTokens"])
     ]);
+
+    private static readonly TruncationHint MembersTruncation = new(
+    [
+        new("read a member with", ["expand_span"]),
+        new("raise", ["maxTokens"])
+    ]);
+
+    private static readonly HashSet<string> TypeKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "class", "interface", "enum"
+    };
 
     private readonly string _workspaceRoot;
 
@@ -69,7 +84,7 @@ public sealed class SymbolLookup
         {
             if (!TryRender(symbol, entry, repoDoc, store, budget, includeBody, hits))
             {
-                return new SymbolLookupResult(hits, budget.Used, true, Truncation);
+                return new SymbolLookupResult(hits, budget.Used, true, HintFor(hits));
             }
         }
 
@@ -79,8 +94,11 @@ public sealed class SymbolLookup
                 $"No symbol named '{name}' in the index. Run 'squeezr index' if the code changed.");
         }
 
-        return new SymbolLookupResult(hits, budget.Used, budget.Truncated, budget.Truncated ? Truncation : null);
+        return new SymbolLookupResult(hits, budget.Used, budget.Truncated, budget.Truncated ? HintFor(hits) : null);
     }
+
+    private static TruncationHint HintFor(List<SymbolHit> hits) =>
+        hits.Any(hit => hit.Members.Count > 0) ? MembersTruncation : Truncation;
 
     private bool TryRender(
         SymbolDocument symbol,
@@ -105,6 +123,8 @@ public sealed class SymbolLookup
 
         string? bodyText = null;
         var bodyOmitted = false;
+        IReadOnlyList<SymbolMember> members = [];
+        var membersOmitted = 0;
         if (includeBody && file is not null)
         {
             var fullPath = Path.Combine(NavigationContext.ResolveRepoRoot(_workspaceRoot, entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
@@ -113,6 +133,10 @@ public sealed class SymbolLookup
             {
                 bodyOmitted = true;
                 bodyText = null;
+                if (TypeKinds.Contains(symbol.Kind))
+                {
+                    (members, membersOmitted) = TakeMembers(store, symbol, budget);
+                }
             }
         }
 
@@ -127,8 +151,51 @@ public sealed class SymbolLookup
             symbol.ContainerName,
             symbol.DocComment,
             bodyText,
-            bodyOmitted));
+            bodyOmitted,
+            members,
+            membersOmitted));
         return true;
+    }
+
+    private static (IReadOnlyList<SymbolMember> Members, int Omitted) TakeMembers(
+        MetaStore store,
+        SymbolDocument container,
+        TokenBudget budget)
+    {
+        var candidates = store.ListSymbolsByFile(container.FileId)
+            .Where(candidate => candidate.Id != container.Id && IsMemberOf(candidate, container))
+            .OrderBy(candidate => candidate.StartLine)
+            .ToList();
+        var taken = new List<SymbolMember>(candidates.Count);
+        var omitted = 0;
+        foreach (var candidate in candidates)
+        {
+            if (!budget.TryTake($"{candidate.Name} ({candidate.Kind}) {candidate.StartLine}"))
+            {
+                omitted = candidates.Count - taken.Count;
+                break;
+            }
+
+            taken.Add(new SymbolMember(candidate.Name, candidate.Kind, candidate.StartLine));
+        }
+
+        if (taken.Count == 0)
+        {
+            return ([], 0);
+        }
+
+        return (taken, omitted);
+    }
+
+    private static bool IsMemberOf(SymbolDocument candidate, SymbolDocument container)
+    {
+        if (candidate.ContainerName is not { } owner)
+        {
+            return false;
+        }
+
+        // a generic type is indexed by its bare name while its members carry 'Name<T>' as the container
+        return owner == container.Name || owner.StartsWith($"{container.Name}<", StringComparison.Ordinal);
     }
 
     private static string? TryReadSpan(string fullPath, int startLine, int endLine)
