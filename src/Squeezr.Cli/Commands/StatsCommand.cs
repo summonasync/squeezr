@@ -112,9 +112,21 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 $"[grey]{savings.UnknownFiles} expanded file(s) not in the index, excluded from counterfactual.[/]");
         }
 
-        var hitRate = summary.Cache.HitRate.ToString("P1", CultureInfo.InvariantCulture);
-        console.MarkupLine(
-            $"Cache hit-rate: {hitRate} across {summary.Cache.SessionsWithCache} session(s)");
+        var cache = summary.Cache;
+        if (cache.SessionsWithCache > 0)
+        {
+            console.MarkupLine(
+                $"Cache hit-rate: {cache.HitRate.ToString("P1", CultureInfo.InvariantCulture)} " +
+                $"across {cache.SessionsWithCache} session(s)");
+        }
+        else
+        {
+            var invalidation = cache.LastInvalidation is { } lastInvalidated
+                ? $" — the index changed {cache.Invalidations} time(s), last at {lastInvalidated:yyyy-MM-dd HH:mm}"
+                : string.Empty;
+            console.MarkupLine(
+                $"[grey]Cache hit-rate: no hits yet across {summary.Sessions.Count} recorded session(s){invalidation}[/]");
+        }
 
         var agentTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By agent") };
         agentTable.AddColumn("Client");

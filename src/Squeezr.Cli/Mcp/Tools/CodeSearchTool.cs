@@ -98,12 +98,14 @@ public sealed class CodeSearchTool
                 m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet)).ToList();
 
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
+            var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 response.TokensUsed, response.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                cacheInvalidated: invalidated is not null);
             _cache?.Put("code_search", parameters, envelope);
-            return envelope;
+            return envelope.WithWarning(invalidated);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

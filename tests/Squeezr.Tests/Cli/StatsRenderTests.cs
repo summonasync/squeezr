@@ -72,6 +72,61 @@ public sealed class StatsRenderTests
         output.ShouldNotContain("counterfactual tokens");
     }
 
+    [Fact]
+    public void Render_NoCacheHitsWithLiveSessions_DropsTheZeroSessionContradiction()
+    {
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", BigFileBytes);
+        var session = Guid.NewGuid();
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("code_search", 120, sessionId: session),
+            Entry("code_search", 90, sessionId: session),
+            Entry("expand", 100, file: "src/Big.cs", sessionId: session)
+        };
+
+        var output = Render(entries, root);
+
+        output.ShouldContain("Cache hit-rate: no hits yet across 1 recorded session(s)");
+        output.ShouldNotContain("across 0 session(s)");
+        output.ShouldNotContain("Cache hit-rate: 0.0 %");
+    }
+
+    [Fact]
+    public void Render_NoCacheHitsAfterInvalidations_NamesTheIndexChange()
+    {
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", BigFileBytes);
+        var session = Guid.NewGuid();
+        var invalidated = new DateTime(2026, 9, 27, 14, 3, 0, DateTimeKind.Utc);
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("code_search", 120, sessionId: session, ts: invalidated.AddMinutes(-5)),
+            Entry("code_search", 90, sessionId: session, ts: invalidated, cacheInvalidated: true),
+            Entry("code_search", 95, sessionId: session, ts: invalidated.AddMinutes(2), cacheInvalidated: true)
+        };
+
+        var output = Render(entries, root);
+
+        output.ShouldContain("Cache hit-rate: no hits yet across 1 recorded session(s)");
+        output.ShouldContain("the index changed 2 time(s), last at 2026-09-27 14:05");
+    }
+
+    [Fact]
+    public void Render_WithCacheHits_KeepsTheRateAndSessionCount()
+    {
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", BigFileBytes);
+        var session = Guid.NewGuid();
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("code_search", 120, sessionId: session),
+            Entry("code_search", 120, sessionId: session, cacheHit: true)
+        };
+
+        var output = Render(entries, root);
+
+        output.ShouldContain("Cache hit-rate: 50.0 % across 1 session(s)");
+        output.ShouldNotContain("no hits yet");
+    }
+
     private static string Render(IReadOnlyList<QueryTelemetryEntry> entries, string root)
     {
         var summary = QueryTelemetrySummary.Summarize(entries, root);
@@ -92,9 +147,17 @@ public sealed class StatsRenderTests
         return root;
     }
 
-    private static QueryTelemetryEntry Entry(string tool, int tokensUsed, string? file = null) =>
+    private static QueryTelemetryEntry Entry(
+        string tool,
+        int tokensUsed,
+        string? file = null,
+        bool cacheHit = false,
+        bool cacheInvalidated = false,
+        Guid? sessionId = null,
+        DateTime? ts = null) =>
         new(
-            DateTime.UtcNow, Guid.NewGuid(), tool,
+            ts ?? DateTime.UtcNow, sessionId ?? Guid.NewGuid(), tool,
             file is null ? null : new { file },
-            tokensUsed, false, 0, 5, false, null);
+            tokensUsed, false, 0, 5, cacheHit, null,
+            CacheInvalidated: cacheInvalidated);
 }

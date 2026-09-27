@@ -33,7 +33,10 @@ public sealed class StatsCommandTests
         savings.GetProperty("unknownFiles").GetInt32().ShouldBe(0);
         savings.GetProperty("baseline").GetString().ShouldBe("whole-file (expanded files)");
         savings.GetProperty("baselineApplies").GetBoolean().ShouldBeTrue();
-        body.GetProperty("cache").GetProperty("hitRate").GetDouble().ShouldBe(0);
+        var cache = body.GetProperty("cache");
+        cache.GetProperty("hitRate").GetDouble().ShouldBe(0);
+        cache.GetProperty("invalidations").GetInt32().ShouldBe(0);
+        cache.TryGetProperty("lastInvalidation", out _).ShouldBeFalse();
         var period = body.GetProperty("period");
         period.GetProperty("records").GetInt32().ShouldBe(2);
         period.GetProperty("from").ValueKind.ShouldNotBe(JsonValueKind.Null);

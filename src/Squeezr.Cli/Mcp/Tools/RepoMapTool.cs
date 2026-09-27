@@ -72,12 +72,14 @@ public sealed class RepoMapTool
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();
 
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
                 result.TokensUsed, result.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                cacheInvalidated: invalidated is not null);
             _cache?.Put("repo_map", parameters, envelope);
-            return envelope;
+            return envelope.WithWarning(invalidated);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

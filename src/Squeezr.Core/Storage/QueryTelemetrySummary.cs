@@ -13,7 +13,13 @@ public sealed record SavingsStats(
     string BaselineLabel,
     bool BaselineApplies);
 
-public sealed record CacheStats(int Hits, int Misses, double HitRate, int SessionsWithCache);
+public sealed record CacheStats(
+    int Hits,
+    int Misses,
+    double HitRate,
+    int SessionsWithCache,
+    int Invalidations = 0,
+    DateTime? LastInvalidation = null);
 
 public sealed record AgentStats(string Client, string? ClientVersion, int Count, DateTime LastSeen);
 
@@ -64,7 +70,7 @@ public static class QueryTelemetrySummary
             entries.Count,
             byTool,
             new SavingsStats(actual, counterfactual, saved, ratio, unknownFiles, WholeFileBaselineLabel, baselineApplies),
-            new CacheStats(hits, entries.Count - hits, hitRate, DistinctCacheSessions(entries)),
+            SummarizeCache(entries, hits, hitRate),
             entries.Count == 0 ? null : entries.Min(e => e.Ts),
             entries.Count == 0 ? null : entries.Max(e => e.Ts),
             entries.Count,
@@ -187,4 +193,16 @@ public static class QueryTelemetrySummary
 
     private static int DistinctCacheSessions(IReadOnlyList<QueryTelemetryEntry> entries) =>
         entries.Where(e => e.CacheHit).Select(e => e.SessionId).Distinct().Count();
+
+    private static CacheStats SummarizeCache(IReadOnlyList<QueryTelemetryEntry> entries, int hits, double hitRate)
+    {
+        var invalidated = entries.Where(e => e.CacheInvalidated).Select(e => e.Ts).ToList();
+        return new CacheStats(
+            hits,
+            entries.Count - hits,
+            hitRate,
+            DistinctCacheSessions(entries),
+            invalidated.Count,
+            invalidated.Count == 0 ? null : invalidated.Max());
+    }
 }

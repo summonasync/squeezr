@@ -94,12 +94,14 @@ public sealed class SymbolLookupTool
                 m.Repo, m.File, $"{m.StartLine}-{m.EndLine}", m.Signature, m.DocComment, m.Body)).ToList();
 
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                 result.TokensUsed, result.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                cacheInvalidated: invalidated is not null);
             _cache?.Put("symbol_lookup", parameters, envelope);
-            return envelope;
+            return envelope.WithWarning(invalidated);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

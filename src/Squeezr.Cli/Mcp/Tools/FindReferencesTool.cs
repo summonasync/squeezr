@@ -68,12 +68,14 @@ public sealed class FindReferencesTool
             var tokensUsed = data.Sum(d => TokenCounter.Estimate($"{d.File}:{d.Line} {d.Kind}"));
 
             var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale);
+            var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                 tokensUsed, false, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                cacheInvalidated: invalidated is not null);
             _cache?.Put("find_references", parameters, envelope);
-            return envelope;
+            return envelope.WithWarning(invalidated);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

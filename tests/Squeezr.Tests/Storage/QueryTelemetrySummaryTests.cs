@@ -76,6 +76,8 @@ public class QueryTelemetrySummaryTests
         summary.Cache.Misses.ShouldBe(0);
         summary.Cache.HitRate.ShouldBe(0);
         summary.Cache.SessionsWithCache.ShouldBe(0);
+        summary.Cache.Invalidations.ShouldBe(0);
+        summary.Cache.LastInvalidation.ShouldBeNull();
         summary.From.ShouldBeNull();
         summary.To.ShouldBeNull();
         summary.Agents.ShouldBeEmpty();
@@ -101,6 +103,31 @@ public class QueryTelemetrySummaryTests
         summary.Cache.Misses.ShouldBe(1);
         summary.Cache.HitRate.ShouldBe(0.75, tolerance: 0.0001);
         summary.Cache.SessionsWithCache.ShouldBe(2);
+        summary.Cache.Invalidations.ShouldBe(0);
+        summary.Cache.LastInvalidation.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Summarize_CacheInvalidatedEntries_CountsThemAndKeepsTheLatestTimestamp()
+    {
+        var session = Guid.NewGuid();
+        var first = new DateTime(2026, 9, 27, 9, 0, 0, DateTimeKind.Utc);
+        var latest = new DateTime(2026, 9, 27, 11, 45, 0, DateTimeKind.Utc);
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("code_search", 10, sessionId: session, ts: first, cacheInvalidated: true),
+            Entry("code_search", 10, sessionId: session, ts: latest.AddMinutes(-30)),
+            Entry("repo_map", 10, sessionId: session, ts: latest, cacheInvalidated: true),
+            Entry("code_search", 10, sessionId: session, ts: latest, cacheHit: true)
+        };
+
+        var summary = QueryTelemetrySummary.Summarize(entries, TestDirs.NewTempDir());
+
+        summary.Cache.Invalidations.ShouldBe(2);
+        summary.Cache.LastInvalidation.ShouldBe(latest);
+        summary.Cache.Hits.ShouldBe(1);
+        summary.Cache.SessionsWithCache.ShouldBe(1);
+        summary.TotalRequests.ShouldBe(4);
     }
 
     [Fact]
@@ -232,9 +259,10 @@ public class QueryTelemetrySummaryTests
         Guid? sessionId = null,
         DateTime? ts = null,
         string? client = null,
-        string? clientVersion = null) =>
+        string? clientVersion = null,
+        bool cacheInvalidated = false) =>
         new(
             ts ?? DateTime.UtcNow, sessionId ?? Guid.NewGuid(), tool,
             file is null ? null : new { file },
-            tokensUsed, false, 0, 5, cacheHit, null, client, clientVersion);
+            tokensUsed, false, 0, 5, cacheHit, null, client, clientVersion, cacheInvalidated);
 }

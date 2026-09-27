@@ -15,7 +15,8 @@ public sealed record QueryTelemetryEntry(
     [property: JsonPropertyName("cacheHit")] bool CacheHit,
     [property: JsonPropertyName("indexAgeSeconds")] long? IndexAgeSeconds,
     [property: JsonPropertyName("client"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Client = null,
-    [property: JsonPropertyName("clientVersion"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClientVersion = null);
+    [property: JsonPropertyName("clientVersion"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClientVersion = null,
+    [property: JsonPropertyName("cacheInvalidated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CacheInvalidated = false);
 
 public static class QueryTelemetry
 {
@@ -43,11 +44,12 @@ public static class QueryTelemetry
         bool cacheHit = false,
         TimeSpan? indexAge = null,
         string? client = "cli",
-        string? clientVersion = null) =>
+        string? clientVersion = null,
+        bool cacheInvalidated = false) =>
         Append(workspaceRoot, new QueryTelemetryEntry(
             DateTime.UtcNow, sessionId, tool, parameters, tokensUsed, truncated,
             hits, durationMs, cacheHit, indexAge is null ? null : (long)indexAge.Value.TotalSeconds,
-            client, clientVersion));
+            client, clientVersion, cacheInvalidated));
 
     public static IReadOnlyList<QueryTelemetryEntry> ReadAll(string workspaceRoot)
     {

@@ -112,6 +112,7 @@ public class QueryTelemetryTests
         read.Tool.ShouldBe("search");
         read.Client.ShouldBeNull();
         read.ClientVersion.ShouldBeNull();
+        read.CacheInvalidated.ShouldBeFalse();
     }
 
     [Fact]
@@ -136,6 +137,28 @@ public class QueryTelemetryTests
         var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
         raw.ShouldContain("\"client\":\"cli\"");
         raw.ShouldNotContain("clientVersion");
+    }
+
+    [Fact]
+    public void Record_WithoutInvalidation_KeepsCacheInvalidatedOutOfTheLog()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "code_search", null, 10, false, 1, 5);
+
+        File.ReadAllText(SqueezrPaths.QueriesLogPath(root)).ShouldNotContain("cacheInvalidated");
+        QueryTelemetry.ReadAll(root).Single().CacheInvalidated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Record_WithInvalidation_RoundTripsTheFlag()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "code_search", null, 10, false, 1, 5, cacheInvalidated: true);
+
+        File.ReadAllText(SqueezrPaths.QueriesLogPath(root)).ShouldContain("\"cacheInvalidated\":true");
+        QueryTelemetry.ReadAll(root).Single().CacheInvalidated.ShouldBeTrue();
     }
 
     private static QueryTelemetryEntry Entry(string tool) =>
