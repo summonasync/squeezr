@@ -25,6 +25,8 @@ public class QueryTelemetrySummaryTests
         summary.Savings.SavedTokens.ShouldBe(fullFileTokens - 270);
         summary.Savings.Ratio.ShouldBe(fullFileTokens / 270.0, tolerance: 0.0001);
         summary.Savings.UnknownFiles.ShouldBe(0);
+        summary.Savings.BaselineLabel.ShouldBe(QueryTelemetrySummary.WholeFileBaselineLabel);
+        summary.Savings.BaselineApplies.ShouldBeTrue();
         summary.TotalRequests.ShouldBe(3);
         summary.Records.ShouldBe(3);
 
@@ -52,6 +54,7 @@ public class QueryTelemetrySummaryTests
         summary.Savings.ActualTokens.ShouldBe(40);
         summary.Savings.SavedTokens.ShouldBe(0);
         summary.Savings.Ratio.ShouldBe(0);
+        summary.Savings.BaselineApplies.ShouldBeFalse();
     }
 
     [Fact]
@@ -67,6 +70,8 @@ public class QueryTelemetrySummaryTests
         summary.Savings.SavedTokens.ShouldBe(0);
         summary.Savings.Ratio.ShouldBe(0);
         summary.Savings.UnknownFiles.ShouldBe(0);
+        summary.Savings.BaselineLabel.ShouldBe(QueryTelemetrySummary.WholeFileBaselineLabel);
+        summary.Savings.BaselineApplies.ShouldBeFalse();
         summary.Cache.Hits.ShouldBe(0);
         summary.Cache.Misses.ShouldBe(0);
         summary.Cache.HitRate.ShouldBe(0);

@@ -31,6 +31,8 @@ public sealed class StatsCommandTests
         savings.GetProperty("saved").GetInt64().ShouldBe(counterfactual - actual);
         savings.GetProperty("ratio").GetDouble().ShouldBeGreaterThan(0);
         savings.GetProperty("unknownFiles").GetInt32().ShouldBe(0);
+        savings.GetProperty("baseline").GetString().ShouldBe("whole-file (expanded files)");
+        savings.GetProperty("baselineApplies").GetBoolean().ShouldBeTrue();
         body.GetProperty("cache").GetProperty("hitRate").GetDouble().ShouldBe(0);
         var period = body.GetProperty("period");
         period.GetProperty("records").GetInt32().ShouldBe(2);

@@ -16,7 +16,9 @@ public sealed record StatsJsonReport(
         long Counterfactual,
         long Saved,
         double Ratio,
-        int UnknownFiles);
+        int UnknownFiles,
+        string Baseline,
+        bool BaselineApplies);
 
     public sealed record PeriodJson(DateTime? From, DateTime? To, int Records);
 
@@ -37,7 +39,9 @@ public sealed record StatsJsonReport(
             summary.Savings.CounterfactualTokens,
             summary.Savings.SavedTokens,
             summary.Savings.Ratio,
-            summary.Savings.UnknownFiles),
+            summary.Savings.UnknownFiles,
+            summary.Savings.BaselineLabel,
+            summary.Savings.BaselineApplies),
         summary.Cache,
         new PeriodJson(summary.From, summary.To, summary.Records),
         summary.Agents.Select(a => new AgentJson(a.Client, a.ClientVersion, a.Count, a.LastSeen)).ToList(),

@@ -92,10 +92,20 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
         console.Write(table);
 
         var savings = summary.Savings;
-        var ratio = savings.Ratio.ToString("F1", CultureInfo.InvariantCulture);
-        console.MarkupLine(
-            $"Savings: {savings.ActualTokens} actual vs {savings.CounterfactualTokens} counterfactual tokens — " +
-            $"[green]saved {savings.SavedTokens}[/] (×{ratio})");
+        if (savings.BaselineApplies)
+        {
+            var ratio = savings.Ratio.ToString("F1", CultureInfo.InvariantCulture);
+            console.MarkupLine(
+                $"Savings: query cost {savings.ActualTokens} · whole-file baseline {savings.CounterfactualTokens} · " +
+                $"[green]saved {savings.SavedTokens}[/] (×{ratio})");
+        }
+        else
+        {
+            console.MarkupLine(
+                $"Savings: [grey]no whole-file baseline for this usage mix " +
+                $"(query cost {savings.ActualTokens}; the baseline counts whole files read via expand only)[/]");
+        }
+
         if (savings.UnknownFiles > 0)
         {
             console.MarkupLine(

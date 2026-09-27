@@ -29,7 +29,7 @@ public static class CliApplication
             config.AddCommand<StatusCommand>("status")
                 .WithDescription("Show workspace and index status");
             config.AddCommand<StatsCommand>("stats")
-                .WithDescription("Show query telemetry: per-tool stats, token savings, cache hit-rate");
+                .WithDescription("Show query telemetry: per-tool stats, token savings (whole-file baseline of expanded files vs actual tokens), cache hit-rate");
             config.AddCommand<UsageCommand>("usage")
                 .WithDescription("Show query telemetry rollup across all registered workspaces");
             config.AddCommand<IndexCommand>("index")

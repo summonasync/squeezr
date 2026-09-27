@@ -414,13 +414,18 @@ Tool     Count  Avg tokens  Truncation
 expand   3      486.0       0.0 %
 search   1      7086.0      0.0 %
 
-Savings: 8544 actual vs 10617 counterfactual tokens — saved 2073 (×1.2)
+Savings: query cost 8544 · whole-file baseline 10617 · saved 2073 (×1.2)
 Cache hit-rate: 0.0 % across 0 session(s)
 Period: 2026-09-17 14:57 — 2026-09-17 14:58 (4 records)
 ```
 
 - **Таблица по тулам** — вызовы, средний `tokensUsed` и доля обрезанных бюджетом ответов.
-- **Savings** — counterfactual-сравнение: actual — сумма `tokensUsed` всех ответов; counterfactual — сколько токенов ушло бы, если бы каждый раскрытый через expand файл читался целиком (файл считается один раз, оценка по размеру — та же формула, что у чанкера; файлы, которых уже нет в индексе, честно исключаются с отдельной строкой). `saved` — разница, `×N.N` — во сколько раз меньше.
+- **Savings** — counterfactual-сравнение с whole-file базовой линией. Формула (без изменений со спеки 021/050):
+  - `actual` (query cost) = сумма `tokensUsed` всех ответов;
+  - `counterfactual` (whole-file baseline) = сумма оценок токенов ПОЛНЫХ файлов, раскрытых через `expand`/`expand_span` — файл считается один раз, оценка по размеру та же формула, что у чанкера; файлы, которых уже нет в индексе, честно исключаются со строкой `unknownFiles`;
+  - `saved = max(0, counterfactual − actual)`, `ratio = counterfactual / actual`.
+
+  Базовая линия осмысленна, только когда она перевешивает фактические затраты (`counterfactual > actual`) — тогда строка читается `Savings: query cost X · whole-file baseline Y · saved Z (×N)`. В противном случае (search-центрированный микс, где `counterfactual ≤ actual`, либо expand'ов не было вовсе) выводится `Savings: no whole-file baseline for this usage mix (query cost X; the baseline counts whole files read via expand only)` — без бессмысленного `saved 0 (×0.3)` рядом с двумя ненулевыми числами: `saved` и `×N` печатаются только в первой ветке. В `--json` аддитивно добавлены `savings.baseline` (метка базовой линии) и `savings.baselineApplies` (bool — перевешивает ли она query cost); существующие поля байт-совместимы (контракт 035).
 - **Cache hit-rate** — доля повторных ответов из кэша serve-сессий (см. семантику ответа ниже) и число сессий, где кэш срабатывал; CLI-запуски кэш не используют — каждый запуск и есть своя сессия.
 - **Period** — окно записей и их количество; больше 50 000 записей — серый хинт на `--reset` (авточистки нет, осознанно).
 - **By agent** — кто дёргал тулы: MCP-клиенты по имени и версии из initialize-handshake (`kimi-code 1.2.0`, `claude-code 2.0.5`), CLI-запуски как `cli`, записи до появления поля — `unknown`.

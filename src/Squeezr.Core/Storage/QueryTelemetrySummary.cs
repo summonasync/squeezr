@@ -9,7 +9,9 @@ public sealed record SavingsStats(
     long CounterfactualTokens,
     long SavedTokens,
     double Ratio,
-    int UnknownFiles);
+    int UnknownFiles,
+    string BaselineLabel,
+    bool BaselineApplies);
 
 public sealed record CacheStats(int Hits, int Misses, double HitRate, int SessionsWithCache);
 
@@ -35,6 +37,8 @@ public sealed record QueryStatsSummary(
 
 public static class QueryTelemetrySummary
 {
+    public const string WholeFileBaselineLabel = "whole-file (expanded files)";
+
     public static QueryStatsSummary Summarize(IReadOnlyList<QueryTelemetryEntry> entries, string workspaceRoot)
     {
         var byTool = entries
@@ -51,6 +55,7 @@ public static class QueryTelemetrySummary
         var actual = entries.Sum(e => (long)e.TokensUsed);
         var saved = Math.Max(0, counterfactual - actual);
         var ratio = counterfactual == 0 || actual == 0 ? 0 : counterfactual / (double)actual;
+        var baselineApplies = counterfactual > actual;
 
         var hits = entries.Count(e => e.CacheHit);
         var hitRate = entries.Count == 0 ? 0 : hits / (double)entries.Count;
@@ -58,7 +63,7 @@ public static class QueryTelemetrySummary
         return new QueryStatsSummary(
             entries.Count,
             byTool,
-            new SavingsStats(actual, counterfactual, saved, ratio, unknownFiles),
+            new SavingsStats(actual, counterfactual, saved, ratio, unknownFiles, WholeFileBaselineLabel, baselineApplies),
             new CacheStats(hits, entries.Count - hits, hitRate, DistinctCacheSessions(entries)),
             entries.Count == 0 ? null : entries.Min(e => e.Ts),
             entries.Count == 0 ? null : entries.Max(e => e.Ts),
