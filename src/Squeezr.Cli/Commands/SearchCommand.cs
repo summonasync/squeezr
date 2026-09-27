@@ -29,6 +29,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         [CommandOption("--path-glob")]
         public string? PathGlob { get; set; }
 
+        [CommandOption("--prefix")]
+        public string? Prefix { get; set; }
+
         [CommandOption("--language")]
         public string? Language { get; set; }
 
@@ -66,7 +69,8 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     settings.PathGlob,
                     settings.Language,
                     settings.TopK,
-                    settings.MaxTokens),
+                    settings.MaxTokens,
+                    settings.Prefix),
                 embeddings,
                 vectorStore,
                 cancellationToken).GetAwaiter().GetResult();
@@ -84,7 +88,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             }
 
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "search",
-                new { query = settings.Query, repo = settings.Repo, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK },
+                new { query = settings.Query, repo = settings.Repo, prefix = settings.Prefix, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK },
                 response.TokensUsed, response.Truncated, response.Matches.Count,
                 sw.ElapsedMilliseconds, indexAge: ResolveIndexAge(workspaceRoot));
 

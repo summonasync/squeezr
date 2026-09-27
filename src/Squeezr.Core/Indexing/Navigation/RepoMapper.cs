@@ -11,7 +11,8 @@ public sealed record RepoMapResult(
     IReadOnlyList<MapLine> Lines,
     int TokensUsed,
     bool Truncated,
-    TruncationHint? Hint);
+    TruncationHint? Hint,
+    string? ScopedPrefix = null);
 
 public sealed class RepoMapper
 {
@@ -34,17 +35,20 @@ public sealed class RepoMapper
 
     public RepoMapper(string workspaceRoot) => _workspaceRoot = NavigationContext.RequireIndex(workspaceRoot);
 
-    public RepoMapResult Build(string? repo, int depth, int maxTokens)
+    public RepoMapResult Build(string? repo, int depth, int maxTokens, string? prefix = null)
     {
         if (depth < 1)
         {
             throw new WorkspaceException("depth must be >= 1.");
         }
 
+        var normalizedPrefix = PathPrefix.Normalize(prefix);
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
         var budget = new TokenBudget(maxTokens);
         var lines = new List<MapLine>();
         var repoNames = new List<string>();
+        List<string>? unscopedPaths = normalizedPrefix is null ? null : [];
+        string? scopedPrefix = null;
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
         foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
@@ -55,22 +59,40 @@ public sealed class RepoMapper
                 continue;
             }
 
+            var files = store.ListFiles(repoDoc.Id);
+            if (normalizedPrefix is not null)
+            {
+                var scoped = files.Where(f => PathPrefix.Matches(normalizedPrefix, f.Path)).ToList();
+                if (scoped.Count == 0)
+                {
+                    unscopedPaths!.AddRange(files.Select(f => f.Path));
+                    continue;
+                }
+
+                // matching is case-insensitive but stored paths are not — keep the stored
+                // casing so downstream path lookups (freshness guard) stay exact
+                scopedPrefix ??= scoped[0].Path[..normalizedPrefix.Length];
+                files = scoped;
+            }
+
             repoNames.Add(repoDoc.Name);
             if (!Take(budget, lines, 0, $"{repoDoc.Name}/"))
             {
-                return Finish(repoNames, depth, lines, budget);
+                return Finish(repoNames, depth, lines, budget, scopedPrefix);
             }
 
-            var files = store.ListFiles(repoDoc.Id);
             var symbolsByFile = store.ListSymbolsByRepo(repoDoc.Id)
                 .GroupBy(s => s.FileId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
-            foreach (var dir in files.GroupBy(f => DirName(f.Path)).OrderBy(g => g.Key))
+            string SubtreeRelative(string path) =>
+                normalizedPrefix is null ? path : PathPrefix.Strip(normalizedPrefix, path);
+
+            foreach (var dir in files.GroupBy(f => DirName(SubtreeRelative(f.Path))).OrderBy(g => g.Key))
             {
                 if (!Take(budget, lines, 1, $"{dir.Key}/ ({dir.Count()} files)"))
                 {
-                    return Finish(repoNames, depth, lines, budget);
+                    return Finish(repoNames, depth, lines, budget, scopedPrefix);
                 }
 
                 if (depth < 2)
@@ -82,7 +104,7 @@ public sealed class RepoMapper
                 {
                     if (!Take(budget, lines, 2, Path.GetFileName(file.Path)))
                     {
-                        return Finish(repoNames, depth, lines, budget);
+                        return Finish(repoNames, depth, lines, budget, scopedPrefix);
                     }
 
                     if (!symbolsByFile.TryGetValue(file.Id, out var symbols) || symbols.Count == 0)
@@ -101,11 +123,16 @@ public sealed class RepoMapper
                         var text = symbol.Signature ?? symbol.Name;
                         if (!Take(budget, lines, 3, text))
                         {
-                            return Finish(repoNames, depth, lines, budget);
+                            return Finish(repoNames, depth, lines, budget, scopedPrefix);
                         }
                     }
                 }
             }
+        }
+
+        if (normalizedPrefix is not null && repoNames.Count == 0 && unscopedPaths!.Count > 0)
+        {
+            throw PathPrefix.NoSubtreeException(normalizedPrefix, unscopedPaths);
         }
 
         if (repoNames.Count == 0)
@@ -113,12 +140,12 @@ public sealed class RepoMapper
             throw new WorkspaceException("No repositories in the index. Run 'squeezr index' first.");
         }
 
-        return Finish(repoNames, depth, lines, budget);
+        return Finish(repoNames, depth, lines, budget, scopedPrefix);
     }
 
     private static RepoMapResult Finish(
-        List<string> repoNames, int depth, List<MapLine> lines, TokenBudget budget) =>
-        new(repoNames, depth, lines, budget.Used, budget.Truncated, budget.Truncated ? Truncation : null);
+        List<string> repoNames, int depth, List<MapLine> lines, TokenBudget budget, string? scopedPrefix) =>
+        new(repoNames, depth, lines, budget.Used, budget.Truncated, budget.Truncated ? Truncation : null, scopedPrefix);
 
     private static bool Take(TokenBudget budget, List<MapLine> lines, int depth, string text)
     {

@@ -138,13 +138,17 @@ Navigation flow: `repo_map` first for orientation → `code_search` /
 `expand_span` to read. Exact string search or a repo outside the index —
 plain grep/read is correct, not a violation.
 
-- `repo_map(repo?, depth?, maxTokens?)` — directory tree with type/member
+- `repo_map(repo?, prefix?, depth?, maxTokens?)` — directory tree with type/member
   signatures, no bodies. Cheapest first contact with an unfamiliar workspace.
-- `code_search(query, repo?, topK?, maxTokens?)` — hybrid exact + semantic search:
+  Pass `prefix` (e.g. `"src/"`) to render only that subtree — directory labels
+  come back relative to the prefix and `depth` keeps its structural meaning.
+- `code_search(query, repo?, prefix?, topK?, maxTokens?)` — hybrid exact + semantic search:
   paraphrases work ("validate config file") and so do exact identifiers
   ("VectorDimensionMismatchException"). Returns file:line matches with snippets,
-  never full bodies.
-- `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span.
+  never full bodies. `prefix` scopes both arms to one directory subtree.
+- `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span. When a
+  type's body exceeds the token budget it returns the member list (name, kind, line)
+  as a mini-map instead — each line is an expand_span coordinate.
 - `find_references` — caller-side reference points for a symbol.
 - `expand_span(file, startLine, endLine?, contextLines?, maxTokens?)` — the only
   tool that returns raw source lines; reads the live file on disk, so it reflects
@@ -157,8 +161,9 @@ plain grep/read is correct, not a violation.
 
 Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
 and sets `truncated` when it overflows — narrow the query or adjust maxTokens
-instead of reading files. Pass `topK` to cap the merged hit count when a few
-strong hits are enough.
+instead of reading files. In big workspaces prefer `prefix` over raising
+maxTokens: a scoped map or search usually fits the default budget. Pass `topK`
+to cap the merged hit count when a few strong hits are enough.
 
 Freshness and cache: reads refresh modified files inline or report them in
 `staleFiles` (then suggest `squeezr index`). Identical repeated calls within one

@@ -15,6 +15,9 @@ public sealed class MapCommand : Command<MapCommand.Settings>
         [CommandOption("--repo")]
         public string? Repo { get; set; }
 
+        [CommandOption("--prefix")]
+        public string? Prefix { get; set; }
+
         [CommandOption("--depth")]
         public int? Depth { get; set; }
 
@@ -34,10 +37,11 @@ public sealed class MapCommand : Command<MapCommand.Settings>
             var result = new RepoMapper(workspaceRoot).Build(
                 settings.Repo,
                 settings.Depth ?? RepoMapper.DefaultDepth,
-                settings.MaxTokens ?? RepoMapper.DefaultMaxTokens);
+                settings.MaxTokens ?? RepoMapper.DefaultMaxTokens,
+                settings.Prefix);
 
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "map",
-                new { repo = settings.Repo, depth = settings.Depth, maxTokens = settings.MaxTokens },
+                new { repo = settings.Repo, prefix = settings.Prefix, depth = settings.Depth, maxTokens = settings.MaxTokens },
                 result.TokensUsed, result.Truncated, result.Lines.Count,
                 sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
 

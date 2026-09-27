@@ -13,7 +13,10 @@ public sealed class SearchEngine
 
     public SearchResponse Search(SearchQuery query)
     {
-        var matches = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: false).Select(hit => hit.Match).ToList();
+        var fileScope = ResolveFileScope(query);
+        var matches = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: false, fileScope)
+            .Select(hit => hit.Match)
+            .ToList();
         return Finalize(matches, query, []);
     }
 
@@ -24,7 +27,8 @@ public sealed class SearchEngine
         CancellationToken ct,
         SemanticCoverage? coverage = null)
     {
-        var exact = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: true);
+        var fileScope = ResolveFileScope(query);
+        var exact = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: true, fileScope);
         var semantic = new List<(string Key, SearchMatch Match)>();
         var warnings = new List<string>();
 
@@ -38,7 +42,7 @@ public sealed class SearchEngine
                 }
                 else if (await vectorStore.CountAsync(ct) > 0)
                 {
-                    semantic = await SemanticHitsResolver.Resolve(_workspaceRoot, query, embeddings, vectorStore, ct);
+                    semantic = await SemanticHitsResolver.Resolve(_workspaceRoot, query, embeddings, vectorStore, ct, fileScope);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -55,6 +59,44 @@ public sealed class SearchEngine
         var exactRanked = exact.Select(hit => (hit.Key!, hit.Match)).ToList();
         var merged = RrfMerger.Merge(exactRanked, semantic);
         return Finalize(merged, query, warnings);
+    }
+
+    private HashSet<uint>? ResolveFileScope(SearchQuery query)
+    {
+        var prefix = PathPrefix.Normalize(query.Prefix);
+        if (prefix is null)
+        {
+            return null;
+        }
+
+        // an unbuilt index is ExactSearchPlan's error to report, with its canonical index_not_built code
+        if (!File.Exists(SqueezrPaths.TrigramIndexPath(_workspaceRoot)))
+        {
+            return null;
+        }
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
+        uint? repoId = null;
+        if (query.Repo is not null)
+        {
+            var repo = store.FindRepo(query.Repo);
+            if (repo is null)
+            {
+                return [];
+            }
+
+            repoId = repo.Id;
+        }
+
+        var scope = FileScope.Resolve(store, path => PathPrefix.Matches(prefix, path), repoId);
+        if (scope.Count == 0)
+        {
+            var indexedPaths = (repoId is { } id ? store.ListFiles(id) : store.ListAllFiles())
+                .Select(f => f.Path);
+            throw PathPrefix.NoSubtreeException(prefix, indexedPaths);
+        }
+
+        return scope;
     }
 
     private static string FormatCoverageWarning(SemanticCoverage coverage)

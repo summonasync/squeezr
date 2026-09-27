@@ -28,19 +28,20 @@ public sealed class RepoMapTool
         _identity = identity;
     }
 
-    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Signatures are refreshed on read: modified files are reindexed inline or reported in staleFiles; expand_span reads code on coordinates from other tools.")]
+    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Pass prefix (e.g. \"src/Squeezr.Cli/\") to render only that subtree with prefix-relative directory labels — depth keeps its structural meaning. Signatures are refreshed on read: modified files are reindexed inline or reported in staleFiles; expand_span reads code on coordinates from other tools.")]
     [McpServerTool(Name = "repo_map", Title = "Repository map")]
-    public object Build(string? repo = null, int? depth = null, int? maxTokens = null) =>
-        _gate.Run(() => BuildCore(repo, depth, maxTokens));
+    public object Build(string? repo = null, string? prefix = null, int? depth = null, int? maxTokens = null) =>
+        _gate.Run(() => BuildCore(repo, prefix, depth, maxTokens));
 
-    private object BuildCore(string? repo, int? depth, int? maxTokens)
+    private object BuildCore(string? repo, string? prefix, int? depth, int? maxTokens)
     {
         var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(repo, depth, maxTokens);
+            var normalizedPrefix = PathPrefix.Normalize(prefix);
+            var parameters = Params(repo, normalizedPrefix, depth, maxTokens);
             if (_cache is not null && _cache.TryGet("repo_map", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -56,12 +57,12 @@ public sealed class RepoMapTool
             var resolvedMaxTokens = maxTokens ?? RepoMapper.DefaultMaxTokens;
 
             var mapper = new RepoMapper(root);
-            var result = mapper.Build(repo, resolvedDepth, resolvedMaxTokens);
+            var result = mapper.Build(repo, resolvedDepth, resolvedMaxTokens, normalizedPrefix);
 
             var freshness = Guard(root, result);
             if (freshness.Refreshed.Count > 0)
             {
-                result = mapper.Build(repo, resolvedDepth, resolvedMaxTokens);
+                result = mapper.Build(repo, resolvedDepth, resolvedMaxTokens, normalizedPrefix);
             }
 
             if (result.Hint is not null)
@@ -89,6 +90,8 @@ public sealed class RepoMapTool
 
     private static FreshnessResult Guard(string root, RepoMapResult result)
     {
+        // dir labels render relative to the prefix, so candidates need it back — in stored casing
+        var prefix = result.ScopedPrefix;
         var candidates = new List<(string Repo, string File)>();
         string? repo = null;
         string? dir = null;
@@ -107,7 +110,8 @@ public sealed class RepoMapTool
             }
             else if (line.Depth == 2 && repo is not null)
             {
-                candidates.Add((repo, dir is null ? line.Text : $"{dir}/{line.Text}"));
+                var relative = dir is null ? line.Text : $"{dir}/{line.Text}";
+                candidates.Add((repo, prefix is null ? relative : prefix + relative));
             }
         }
 
@@ -117,8 +121,8 @@ public sealed class RepoMapTool
             StaleLockWarningSink.ToStderr);
     }
 
-    private static object Params(string? repo, int? depth, int? maxTokens) =>
-        new { repo, depth, maxTokens };
+    private static object Params(string? repo, string? prefix, int? depth, int? maxTokens) =>
+        new { repo, prefix, depth, maxTokens };
 
     private sealed record MapLineData(
         [property: JsonPropertyName("depth")] int Depth,

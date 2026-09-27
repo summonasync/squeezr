@@ -154,6 +154,7 @@ The path is absolute or relative (resolved against the workspace root); `--name`
 
 - One workspace, many repos: `squeezr index` covers them all, and the watch daemon keeps each one fresh.
 - Per-repo filtering: the `repo` parameter of `repo_map` / `code_search` / `symbol_lookup` / `find_references` (CLI twins: `--repo` on `search` and `map`).
+- Subtree scoping: the `prefix` parameter of `repo_map` / `code_search` (CLI twins: `--prefix` on `map` and `search`) answers only inside a directory subtree, matched against stored relative paths. An empty subtree is an error naming the nearest directories, not a silent empty answer.
 - Coverage is visible before you query: `index_status` and `squeezr status` show per-repo file/symbol/chunk counts; `embeddings.coverage` in `index_status` adds the semantic share (embedded / total chunks).
 
 Discovery stays per-directory: a project resolved from inside its tree keeps its own workspace — sibling repos join only when deliberately added with `add`.
@@ -309,9 +310,9 @@ Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`
 
 | Тул | Параметры (дефолты) | Возвращает |
 |---|---|---|
-| `repo_map` | `repo?`, `depth?` (2), `maxTokens?` (4000) | дерево репо: директории → файлы → члены с сигнатурами. Тел нет, только карта для навигации |
-| `code_search` | `query` (обяз.), `repo?`, `topK?`, `maxTokens?` (2000) | гибридные совпадения `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; тела не возвращаются |
-| `symbol_lookup` | `name` (обяз.), `kind?`, `repo?`, `maxTokens?` (300) | определения символа: сигнатура, doc-comment, `span`, тело — если влезло в бюджет. Символ не найден → пустой `data`, не ошибка |
+| `repo_map` | `repo?`, `prefix?`, `depth?` (2), `maxTokens?` (4000) | дерево репо: директории → файлы → члены с сигнатурами. Тел нет, только карта для навигации. `prefix` (например `"src/"`) сужает выдачу до поддерева — имена директорий рендерятся относительно prefix, `depth` сохраняет структурный смысл (1 = директории, 2 = файлы, 3 = члены) |
+| `code_search` | `query` (обяз.), `repo?`, `prefix?`, `topK?`, `maxTokens?` (2000) | гибридные совпадения `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; тела не возвращаются. `prefix` фильтрует оба рука (exact и semantic) по поддереву директорий |
+| `symbol_lookup` | `name` (обяз.), `kind?`, `repo?`, `maxTokens?` (300) | определения символа: сигнатура, doc-comment, `span`, тело — если влезло в бюджет. Тело типа не влезло → `members` (имя, kind, строка) в том же бюджете + счётчик `membersOmitted`: каждая строка — готовая координата для `expand_span`, тупика больше нет. Символ не найден → пустой `data`, не ошибка |
 | `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{file, line, kind, enclosingSymbol}` — enclosingSymbol захватывается на индексации Roslyn'ом (точно, включая partial-классы); для индексов, построенных до захвата, значение выводится по спанам символов (fallback-инференс). Символ не найден → tool error (как `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (обяз.), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | строки спана + контекст из живого файла на диске (видит правки после индексации). Единственный тул, отдающий код построчно |
 | `index_status` | — | свежесть: возраст индекса, per-repo счётчики файлов/символов/чанков, pending-эмбеддинги и `embeddings.coverage` (доля эмбедженных чанков, 0..1; `null`, когда эмбеддить нечего), доступность Qdrant, `rootPath` воркспейса (если это не корень твоего проекта — сессия смотрит в чужой воркспейс) |

@@ -36,21 +36,23 @@ public sealed class CodeSearchTool
         _identity = identity;
     }
 
-    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
+    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,
         string? repo = null,
+        string? prefix = null,
         int? maxTokens = null,
         int? topK = null,
         CancellationToken cancellationToken = default) =>
         _gate.RunAsync(
-            ct => SearchCore(query, repo, maxTokens, topK, ct),
+            ct => SearchCore(query, repo, prefix, maxTokens, topK, ct),
             cancellationToken);
 
     private async Task<object> SearchCore(
         string query,
         string? repo,
+        string? prefix,
         int? maxTokens,
         int? topK,
         CancellationToken cancellationToken)
@@ -60,7 +62,8 @@ public sealed class CodeSearchTool
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(query, repo, maxTokens, topK);
+            var normalizedPrefix = PathPrefix.Normalize(prefix);
+            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -76,7 +79,7 @@ public sealed class CodeSearchTool
             var coverage = _embeddings is not null && _vectorStore is not null ? LoadCoverage(root) : null;
 
             var engine = new SearchEngine(root);
-            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens);
+            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix);
             var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
 
             warnings.AddRange(response.Warnings);
@@ -125,8 +128,8 @@ public sealed class CodeSearchTool
             response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
-    private static object Params(string query, string? repo, int? maxTokens, int? topK) =>
-        new { query, repo, maxTokens, topK };
+    private static object Params(string query, string? repo, string? prefix, int? maxTokens, int? topK) =>
+        new { query, repo, prefix, maxTokens, topK };
 
     private void ResolveRuntime(string root, List<string> warnings)
     {

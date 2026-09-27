@@ -8,4 +8,5 @@ public sealed record SearchQuery(
     string? PathGlob,
     string? Language,
     int? TopK,
-    int? MaxTokens);
+    int? MaxTokens,
+    string? Prefix = null);
