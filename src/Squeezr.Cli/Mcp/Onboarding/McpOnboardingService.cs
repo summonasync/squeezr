@@ -10,6 +10,8 @@ public sealed class McpOnboardingService
         "Codex loads project config only for trusted projects; make sure this workspace is trusted in Codex, otherwise the entry is ignored.",
     ];
 
+    private const int HeadlessMessageCap = 200;
+
     private readonly ClientCliLocator _locator;
     private readonly ClientCliBridge _bridge;
 
@@ -161,8 +163,16 @@ public sealed class McpOnboardingService
         }
         catch (Exception ex) when (ex is ClientCliException or TimeoutException or IOException or InvalidOperationException)
         {
-            return $"unavailable: {ex.Message}";
+            return $"unavailable: {CollapseToOneLine(ex.Message)}";
         }
+    }
+
+    private static string CollapseToOneLine(string text)
+    {
+        var collapsed = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return collapsed.Length <= HeadlessMessageCap
+            ? collapsed
+            : string.Concat(collapsed.AsSpan(0, HeadlessMessageCap - 3), "...");
     }
 
     private async Task InstallViaCliAsync(

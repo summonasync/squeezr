@@ -215,6 +215,26 @@ public sealed class McpOnboardingServiceTests
     }
 
     [Fact]
+    public async Task Doctor_ClientCliFailsWithMultilineStderr_HeadlessStatusIsSingleLineWithinCap()
+    {
+        var (service, environment, _, binDir) = NewService();
+        var stderr = "Traceback (most recent call last):\n  File \"main.py\", line 42, in <module>\nRuntimeError: boom\n" + new string('x', 400);
+        FakeCli.Install(binDir, "claude", stderr: stderr, exitCode: 1);
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+
+        var status = diagnostics.HeadlessStatus;
+        status.ShouldNotBeNull();
+        status.ShouldNotContain('\n');
+        status.ShouldNotContain('\r');
+        status.Length.ShouldBeLessThanOrEqualTo("unavailable: ".Length + 200);
+        status.ShouldStartWith("unavailable: Client CLI 'claude' exited with code 1:");
+        status.ShouldContain("RuntimeError: boom");
+        status.ShouldEndWith("...");
+    }
+
+    [Fact]
     public async Task Doctor_CodexProjectEntry_WarnsAboutTrustedProjects()
     {
         var (service, environment, _, binDir) = NewService();
