@@ -11,59 +11,70 @@ public class QdrantStatusProbeTests
     [Fact]
     public async Task Probe_NullStore_ReportsUnavailable_WithPendingCount()
     {
-        using var store = NewMetaStore(2);
+        using var store = NewMetaStore(2, 2);
 
         var status = await QdrantStatusProbe.ProbeAsync(null, store, CancellationToken.None);
 
-        status.ShouldBe(new QdrantStatus(false, null, 2));
+        status.ShouldBe(new QdrantStatus(false, null, 2, 2));
     }
 
     [Fact]
     public async Task Probe_AvailableStore_ReportsPointsAndPending()
     {
-        using var store = NewMetaStore(2);
+        using var store = NewMetaStore(2, 2);
         var fake = new FakeVectorStore { Available = true, Points = 3 };
 
         var status = await QdrantStatusProbe.ProbeAsync(fake, store, CancellationToken.None);
 
-        status.ShouldBe(new QdrantStatus(true, 3, 2));
+        status.ShouldBe(new QdrantStatus(true, 3, 2, 2));
+    }
+
+    [Fact]
+    public async Task Probe_MixedChunkStatuses_ReportsTotalAlongsidePending()
+    {
+        using var store = NewMetaStore(4, 1);
+
+        var status = await QdrantStatusProbe.ProbeAsync(null, store, CancellationToken.None);
+
+        status.ShouldBe(new QdrantStatus(false, null, 1, 4));
     }
 
     [Fact]
     public async Task Probe_UnavailableStore_PointsAreNull()
     {
-        using var store = NewMetaStore(0);
+        using var store = NewMetaStore(0, 0);
         var fake = new FakeVectorStore { Available = false, Points = 3 };
 
         var status = await QdrantStatusProbe.ProbeAsync(fake, store, CancellationToken.None);
 
-        status.ShouldBe(new QdrantStatus(false, null, 0));
+        status.ShouldBe(new QdrantStatus(false, null, 0, 0));
         fake.CountCalls.ShouldBe(0);
     }
 
     [Fact]
     public async Task Probe_CountThrows_FallsBackToUnavailable()
     {
-        using var store = NewMetaStore(0);
+        using var store = NewMetaStore(0, 0);
         var fake = new FakeVectorStore { Available = true, ThrowOnCount = true };
 
         var status = await QdrantStatusProbe.ProbeAsync(fake, store, CancellationToken.None);
 
-        status.ShouldBe(new QdrantStatus(false, null, 0));
+        status.ShouldBe(new QdrantStatus(false, null, 0, 0));
     }
 
-    private static MetaStore NewMetaStore(int pendingChunks)
+    private static MetaStore NewMetaStore(int totalChunks, int pendingChunks)
     {
         var store = new MetaStore(Path.Combine(TestDirs.NewTempDir(), "meta.db"), createIfMissing: true);
-        if (pendingChunks > 0)
+        if (totalChunks > 0)
         {
-            store.InsertChunks(Enumerable.Range(0, pendingChunks).Select(i => new ChunkDocument
+            store.InsertChunks(Enumerable.Range(0, totalChunks).Select(i => new ChunkDocument
             {
                 RepoId = 1,
                 FileId = (uint)i,
                 Text = "snippet",
                 ChunkHash = $"h{i}",
-                EmbeddingStatus = "pending"
+                EmbeddingStatus = i < pendingChunks ? "pending" : "ok",
+                ModelKey = i < pendingChunks ? null : "m1"
             }));
         }
 

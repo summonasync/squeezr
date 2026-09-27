@@ -177,6 +177,12 @@ public sealed class MetaStore : IDisposable
             : chunks.Count(c => c.EmbeddingStatus != "ok" || c.ModelKey != modelKey);
     }
 
+    public SemanticCoverage GetSemanticCoverage()
+    {
+        var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        return new SemanticCoverage(chunks.Count(), chunks.Count(c => c.EmbeddingStatus != "ok"));
+    }
+
     public IReadOnlyList<ChunkDocument> ListPendingChunks(uint repoId, string modelKey, int limit) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection)
             .Find(c => c.RepoId == repoId && (c.EmbeddingStatus != "ok" || c.ModelKey != modelKey))

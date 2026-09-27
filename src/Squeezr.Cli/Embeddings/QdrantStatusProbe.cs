@@ -8,10 +8,10 @@ public static class QdrantStatusProbe
 {
     public static async Task<QdrantStatus> ProbeAsync(IVectorStore? store, MetaStore metaStore, CancellationToken ct)
     {
-        var pendingChunks = metaStore.CountPendingChunks(null);
+        var coverage = metaStore.GetSemanticCoverage();
         if (store is null)
         {
-            return new QdrantStatus(false, null, pendingChunks);
+            return new QdrantStatus(false, null, coverage.PendingChunks, coverage.TotalChunks);
         }
 
         var available = await store.IsAvailableAsync(ct);
@@ -28,6 +28,6 @@ public static class QdrantStatusProbe
             }
         }
 
-        return new QdrantStatus(available, points, pendingChunks);
+        return new QdrantStatus(available, points, coverage.PendingChunks, coverage.TotalChunks);
     }
 }

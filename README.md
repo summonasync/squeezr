@@ -153,7 +153,7 @@ The path is absolute or relative (resolved against the workspace root); `--name`
 
 - One workspace, many repos: `squeezr index` covers them all, and the watch daemon keeps each one fresh.
 - Per-repo filtering: the `repo` parameter of `repo_map` / `code_search` / `symbol_lookup` / `find_references` (CLI twins: `--repo` on `search` and `map`).
-- Coverage is visible before you query: `index_status` and `squeezr status` show per-repo file/symbol/chunk counts.
+- Coverage is visible before you query: `index_status` and `squeezr status` show per-repo file/symbol/chunk counts; `embeddings.coverage` in `index_status` adds the semantic share (embedded / total chunks).
 
 Discovery stays per-directory: a project resolved from inside its tree keeps its own workspace — sibling repos join only when deliberately added with `add`.
 
@@ -313,7 +313,7 @@ Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`
 | `symbol_lookup` | `name` (обяз.), `kind?`, `repo?`, `maxTokens?` (300) | определения символа: сигнатура, doc-comment, `span`, тело — если влезло в бюджет. Символ не найден → пустой `data`, не ошибка |
 | `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{file, line, kind, enclosingSymbol}` — enclosingSymbol захватывается на индексации Roslyn'ом (точно, включая partial-классы); для индексов, построенных до захвата, значение выводится по спанам символов (fallback-инференс). Символ не найден → tool error (как `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (обяз.), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | строки спана + контекст из живого файла на диске (видит правки после индексации). Единственный тул, отдающий код построчно |
-| `index_status` | — | свежесть: возраст индекса, per-repo счётчики файлов/символов/чанков, pending-эмбеддинги, доступность Qdrant, `rootPath` воркспейса (если это не корень твоего проекта — сессия смотрит в чужой воркспейс) |
+| `index_status` | — | свежесть: возраст индекса, per-repo счётчики файлов/символов/чанков, pending-эмбеддинги и `embeddings.coverage` (доля эмбедженных чанков, 0..1; `null`, когда эмбеддить нечего), доступность Qdrant, `rootPath` воркспейса (если это не корень твоего проекта — сессия смотрит в чужой воркспейс) |
 
 Все тулы имеют дефолтный токен-бюджет (см. таблицу); при `truncated: true` сузь запрос или подними `maxTokens` явно.
 
@@ -335,7 +335,7 @@ Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`
 ```
 
 - `tokensUsed` / `truncated` — фактическая стоимость ответа. `truncated: true` → сузь запрос (`repo`, `kind`) или подними `maxTokens`.
-- `warnings` — мягкая деградация (например, «vector store unavailable, falling back to exact search only») и подсказки при обрезке.
+- `warnings` — мягкая деградация (например, «vector store unavailable, falling back to exact search only» при полном отказе или «semantic coverage: 76% (3017 chunks pending embedding)» в `code_search`, когда семантический слой накачан не целиком — при 100% строки нет) и подсказки при обрезке.
 - `indexAge` / `staleFiles` — свежесть. Изменённые файлы освежаются inline при чтении; то, что освежить не удалось, честно попадает в `staleFiles` — агент видит, что данные по этим файлам протухли, и может предложить `squeezr index`. Окончательное решение о реиндексе — за хозяином workspace.
 
 Повторные запросы почти бесплатны: дорогие тулы (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) кэшируют ответы внутри serve-сессии — LRU на 100 записей, ключ по каноническому JSON параметров (порядок свойств и null-и-absent на ключ не влияют). Идентичный запрос в той же сессии = мгновенный повтор сохранённого конверта, телеметрия помечает его `cacheHit: true` (и он виден в hit-rate у `squeezr stats`). Любая переиндексация — watch-проход или внешний `squeezr index` — меняет поколение кэша (mtime meta.db), все ключи выбиваются, агент получает свежие данные. `expand_span` не кэшируется (читает живой файл с диска), `index_status` дешёвый сам по себе.

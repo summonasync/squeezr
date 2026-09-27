@@ -43,29 +43,39 @@ public sealed class StatusDropQdrantTests
     [Fact]
     public async Task Status_PendingChunks_AreCountedFromMetaStore()
     {
-        var root = TestDirs.NewTempDir();
-        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
-        PointConfigAtDeadEndpoint(root);
-
-        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(root)))
-        {
-            store.InsertChunks(
-            [
-                new ChunkDocument { RepoId = 1, FileId = 1, Text = "a", ChunkHash = "h1" },
-                new ChunkDocument { RepoId = 1, FileId = 1, Text = "b", ChunkHash = "h2" },
-                new ChunkDocument
-                {
-                    RepoId = 1, FileId = 1, Text = "c", ChunkHash = "h3",
-                    EmbeddingStatus = "ok", ModelKey = "m1"
-                }
-            ]);
-        }
+        var root = await WorkspaceWithChunks(2, 1);
 
         var status = await RunCliAsync(root, "status", "--json");
 
         status.ExitCode.ShouldBe(0);
         using var doc = JsonDocument.Parse(status.StdOut.Trim());
-        doc.RootElement.GetProperty("qdrant").GetProperty("pendingChunks").GetInt32().ShouldBe(2);
+        var qdrant = doc.RootElement.GetProperty("qdrant");
+        qdrant.GetProperty("pendingChunks").GetInt32().ShouldBe(2);
+        qdrant.GetProperty("totalChunks").GetInt32().ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Status_Pretty_ShowsSemanticCoverage_WhenChunksArePending()
+    {
+        var root = await WorkspaceWithChunks(2, 1);
+
+        var status = await RunCliAsync(root, "status");
+
+        status.ExitCode.ShouldBe(0);
+        status.StdOut.ShouldContain("semantic coverage 33%");
+    }
+
+    [Fact]
+    public async Task Status_Pretty_OmitsCoverage_WhenNoChunksIndexed()
+    {
+        var root = TestDirs.NewTempDir();
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        PointConfigAtDeadEndpoint(root);
+
+        var status = await RunCliAsync(root, "status");
+
+        status.ExitCode.ShouldBe(0);
+        status.StdOut.ShouldNotContain("semantic coverage");
     }
 
     [Fact]
@@ -115,6 +125,25 @@ public sealed class StatusDropQdrantTests
 
     private static void PointConfigAtDeadEndpoint(string root) =>
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(root);
+
+    private static async Task<string> WorkspaceWithChunks(int pending, int embedded)
+    {
+        var root = TestDirs.NewTempDir();
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        PointConfigAtDeadEndpoint(root);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(root));
+        var chunks = Enumerable.Range(0, pending).Select(i => new ChunkDocument
+        {
+            RepoId = 1, FileId = 1, Text = $"p{i}", ChunkHash = $"p{i}"
+        }).Concat(Enumerable.Range(0, embedded).Select(i => new ChunkDocument
+        {
+            RepoId = 1, FileId = 1, Text = $"e{i}", ChunkHash = $"e{i}",
+            EmbeddingStatus = "ok", ModelKey = "m1"
+        }));
+        store.InsertChunks(chunks);
+        return root;
+    }
 
     private static Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
         string workingDir, params string[] args) => CliTestProcess.RunAsync(workingDir, args);

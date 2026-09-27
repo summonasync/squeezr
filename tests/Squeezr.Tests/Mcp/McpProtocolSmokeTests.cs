@@ -3,6 +3,7 @@ using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp;
@@ -118,6 +119,32 @@ public class McpProtocolSmokeTests
         repo.GetProperty("files").GetInt32().ShouldBe(2);
         repo.GetProperty("symbols").GetInt32().ShouldBeGreaterThan(0);
         repo.GetProperty("chunks").GetInt32().ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task IndexStatus_EmbeddingsCoverage_ReflectsMetaStoreState()
+    {
+        var workspace = NewSmokeWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var before = ParseEnvelope(await CallTool(harness, "index_status", [])).GetProperty("data");
+        var chunks = before.GetProperty("repos").EnumerateArray().Single().GetProperty("chunks").GetInt32();
+        before.GetProperty("embeddings").GetProperty("pending").GetInt32().ShouldBe(chunks);
+        before.GetProperty("embeddings").GetProperty("coverage").GetDouble().ShouldBe(0);
+
+        using (var meta = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            var chunkIds = meta.ListRepos()
+                .SelectMany(r => meta.ListFiles(r.Id))
+                .SelectMany(f => meta.ListChunksByFile(f.Id))
+                .Select(c => c.Id)
+                .ToList();
+            meta.MarkChunksEmbedded(chunkIds, "m1");
+        }
+
+        var after = ParseEnvelope(await CallTool(harness, "index_status", [])).GetProperty("data");
+        after.GetProperty("embeddings").GetProperty("pending").GetInt32().ShouldBe(0);
+        after.GetProperty("embeddings").GetProperty("coverage").GetDouble().ShouldBe(1);
     }
 
     private static async Task<CallToolResult> CallTool(

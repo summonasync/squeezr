@@ -73,17 +73,18 @@ public sealed class CodeSearchTool
 
             var warnings = new List<string>();
             ResolveRuntime(root, warnings);
+            var coverage = _embeddings is not null && _vectorStore is not null ? LoadCoverage(root) : null;
 
             var engine = new SearchEngine(root);
             var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens);
-            var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken);
+            var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
 
             warnings.AddRange(response.Warnings);
 
             var freshness = Guard(root, response);
             if (freshness.Refreshed.Count > 0)
             {
-                response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken);
+                response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
                 foreach (var warning in response.Warnings)
                 {
                     if (!warnings.Contains(warning))
@@ -108,6 +109,12 @@ public sealed class CodeSearchTool
         {
             return ToolErrors.From(ex);
         }
+    }
+
+    private static SemanticCoverage? LoadCoverage(string root)
+    {
+        using var meta = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(root));
+        return meta?.GetSemanticCoverage();
     }
 
     private static FreshnessResult Guard(string root, SearchResponse response) =>

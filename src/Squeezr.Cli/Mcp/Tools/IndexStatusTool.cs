@@ -25,7 +25,7 @@ public sealed class IndexStatusTool
         _identity = identity;
     }
 
-    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed.")]
+    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, semantic coverage (embedded share of chunks, 0..1; null when there is nothing to embed), Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed.")]
     [McpServerTool(Name = "index_status", Title = "Index status")]
     public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
         _gate.RunAsync(GetCore, cancellationToken);
@@ -61,7 +61,9 @@ public sealed class IndexStatusTool
                     r.Files,
                     r.Symbols,
                     r.Chunks)).ToList(),
-                new EmbeddingsData(qdrant.PendingChunks),
+                new EmbeddingsData(
+                    qdrant.PendingChunks,
+                    new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio),
                 new QdrantData(qdrant.Available, qdrant.Points));
 
             var envelope = ToolEnvelope.Wrap(data, 0, false, warnings, root, staleFiles: null);
@@ -92,7 +94,8 @@ public sealed class IndexStatusTool
         [property: JsonPropertyName("chunks")] int Chunks);
 
     private sealed record EmbeddingsData(
-        [property: JsonPropertyName("pending")] int Pending);
+        [property: JsonPropertyName("pending")] int Pending,
+        [property: JsonPropertyName("coverage")] double? Coverage);
 
     private sealed record QdrantData(
         [property: JsonPropertyName("available")] bool Available,
