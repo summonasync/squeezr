@@ -112,6 +112,42 @@ public class McpMapExpandToolsTests
     }
 
     [Fact]
+    public async Task ExpandSpan_StartLineBelowOne_ErrorNamesSchemaParameterWithoutFlags()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "expand_span",
+            new Dictionary<string, object?> { ["file"] = "src/Calc.cs", ["startLine"] = 0 },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldBe(true);
+        var text = result.Content.ShouldHaveSingleItem().ShouldBeOfType<TextContentBlock>().Text;
+        text.ShouldBe("startLine must be >= 1.");
+        text.ShouldNotContain("--");
+    }
+
+    [Fact]
+    public async Task ExpandSpan_AmbiguousPath_ErrorAdvisesRepoPrefixWithoutFlags()
+    {
+        var workspace = NewTwoRepoWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "expand_span",
+            new Dictionary<string, object?> { ["file"] = "src/Dup.cs", ["startLine"] = 1 },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldBe(true);
+        var text = result.Content.ShouldHaveSingleItem().ShouldBeOfType<TextContentBlock>().Text;
+        text.ShouldContain("alpha:src/Dup.cs");
+        text.ShouldContain("beta:src/Dup.cs");
+        text.ShouldContain("Qualify the path with the repo prefix, e.g. 'alpha/src/Dup.cs'.");
+        text.ShouldNotContain("--");
+    }
+
+    [Fact]
     public async Task RepoMap_AfterInlineRefresh_ReturnsFreshSignatures()
     {
         var workspace = NewIndexedWorkspace();
@@ -275,6 +311,20 @@ public class McpMapExpandToolsTests
             }
             """);
         manager.AddRepo("repo", "demo");
+        new WorkspaceIndexer().Index(workspace);
+        return workspace;
+    }
+
+    private static string NewTwoRepoWorkspace()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        WriteFile(workspace, "repo-a/src/Dup.cs", "public class Alpha { }\n");
+        WriteFile(workspace, "repo-b/src/Dup.cs", "public class Beta { }\n");
+        manager.AddRepo("repo-a", "alpha");
+        manager.AddRepo("repo-b", "beta");
         new WorkspaceIndexer().Index(workspace);
         return workspace;
     }

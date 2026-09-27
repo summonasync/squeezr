@@ -16,6 +16,33 @@ public sealed record ExpandResult(
     int TokensUsed,
     bool Truncated);
 
+public enum ExpandInputIssue
+{
+    StartLine,
+    AmbiguousPath
+}
+
+public sealed class ExpandInputException : WorkspaceException
+{
+    public ExpandInputException(
+        ExpandInputIssue issue,
+        string message,
+        string? file = null,
+        IReadOnlyList<string>? candidates = null)
+        : base(message)
+    {
+        Issue = issue;
+        File = file;
+        Candidates = candidates ?? [];
+    }
+
+    public ExpandInputIssue Issue { get; }
+
+    public string? File { get; }
+
+    public IReadOnlyList<string> Candidates { get; }
+}
+
 public sealed class SpanExpander
 {
     public const int DefaultContextLines = 3;
@@ -30,7 +57,7 @@ public sealed class SpanExpander
     {
         if (startLine < 1)
         {
-            throw new WorkspaceException("--start-line must be >= 1.");
+            throw new ExpandInputException(ExpandInputIssue.StartLine, "startLine must be >= 1.");
         }
 
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
@@ -168,8 +195,22 @@ public sealed class SpanExpander
         return candidates.Count == 1 ? candidates[0] : null;
     }
 
-    private static WorkspaceException AmbiguousPath(string file, IEnumerable<string> candidates) =>
-        new($"Path '{file}' matches multiple repositories: {string.Join(", ", candidates)}. Qualify with --repo.");
+    private static ExpandInputException AmbiguousPath(string file, IEnumerable<string> candidates)
+    {
+        var matched = candidates.ToList();
+        return new ExpandInputException(
+            ExpandInputIssue.AmbiguousPath,
+            $"Path '{file}' matches multiple repositories: {string.Join(", ", matched)}. " +
+            $"Qualify the path with the repo prefix, e.g. '{WithRepoPrefix(matched[0])}'.",
+            file,
+            matched);
+    }
+
+    private static string WithRepoPrefix(string candidate)
+    {
+        var separator = candidate.IndexOf(':');
+        return separator < 0 ? candidate : $"{candidate[..separator]}/{candidate[(separator + 1)..]}";
+    }
 
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

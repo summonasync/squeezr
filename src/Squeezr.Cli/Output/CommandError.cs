@@ -6,15 +6,16 @@ namespace Squeezr.Cli.Output;
 
 public static class CommandError
 {
-    public static int Report(Exception ex, bool json)
+    public static int Report(Exception ex, bool json, string? message = null)
     {
+        var text = message ?? ex.Message;
         if (json)
         {
-            JsonOutput.WriteError(CodeFor(ex), ex.Message);
+            JsonOutput.WriteError(CodeFor(ex), text);
         }
         else
         {
-            Console.Error.WriteLine($"error: {ex.Message}");
+            Console.Error.WriteLine($"error: {text}");
         }
 
         return 1;

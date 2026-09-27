@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
@@ -133,6 +134,24 @@ public class SymbolMapExpandTests
     }
 
     [Fact]
+    public async Task Expand_StartLineBelowOne_ErrorIsTransportAware()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var ex = Should.Throw<ExpandInputException>(() =>
+            new SpanExpander(workspace).Expand("src/Calc.cs", 0, null, 3, null, 1000));
+        ex.Message.ShouldBe("startLine must be >= 1.");
+        ex.ForCli().ShouldBe("--start-line must be >= 1.");
+
+        var cli = await RunCliAsync(workspace, "expand", "src/Calc.cs", "0", "--json");
+        cli.ExitCode.ShouldBe(1);
+        cli.StdOut.ShouldBeEmpty();
+        using var doc = JsonDocument.Parse(cli.StdErr.Trim());
+        doc.RootElement.GetProperty("error").GetProperty("message").GetString()!
+            .ShouldBe("--start-line must be >= 1.");
+    }
+
+    [Fact]
     public async Task Expand_DuplicatePathAcrossRepos_ErrorsNamingBothRepos()
     {
         var workspace = TestDirs.NewTempDir();
@@ -144,11 +163,12 @@ public class SymbolMapExpandTests
         manager.AddRepo("repo-b", "beta");
         new WorkspaceIndexer().Index(workspace);
 
-        var ex = Should.Throw<WorkspaceException>(() =>
+        var ex = Should.Throw<ExpandInputException>(() =>
             new SpanExpander(workspace).Expand("src/Dup.cs", 1, null, 3, null, 100));
         ex.Message.ShouldContain("alpha:src/Dup.cs");
         ex.Message.ShouldContain("beta:src/Dup.cs");
-        ex.Message.ShouldContain("--repo");
+        ex.Message.ShouldContain("Qualify the path with the repo prefix, e.g. 'alpha/src/Dup.cs'.");
+        ex.Message.ShouldNotContain("--");
 
         var qualified = new SpanExpander(workspace).Expand("src/Dup.cs", 1, 1, 0, "beta", 100);
         qualified.Repo.ShouldBe("beta");
@@ -161,6 +181,8 @@ public class SymbolMapExpandTests
             var message = doc.RootElement.GetProperty("error").GetProperty("message").GetString()!;
             message.ShouldContain("alpha:src/Dup.cs");
             message.ShouldContain("beta:src/Dup.cs");
+            message.ShouldContain("Qualify with --repo.");
+            message.ShouldNotContain("repo prefix");
         }
 
         var cliQualified = await RunCliAsync(workspace, "expand", "src/Dup.cs", "1", "1", "--repo", "beta", "--json");
@@ -179,11 +201,12 @@ public class SymbolMapExpandTests
         manager.AddRepo("alpha", "alpha");
         new WorkspaceIndexer().Index(workspace);
 
-        var ex = Should.Throw<WorkspaceException>(() =>
+        var ex = Should.Throw<ExpandInputException>(() =>
             new SpanExpander(workspace).Expand("src/Util.cs", 1, null, 0, null, 100));
         ex.Message.ShouldContain("src:Util.cs");
         ex.Message.ShouldContain("alpha:src/Util.cs");
-        ex.Message.ShouldContain("--repo");
+        ex.Message.ShouldContain("Qualify the path with the repo prefix, e.g. 'alpha/src/Util.cs'.");
+        ex.Message.ShouldNotContain("--");
 
         var qualified = new SpanExpander(workspace).Expand("src/Util.cs", 1, 1, 0, "src", 100);
         qualified.Repo.ShouldBe("src");

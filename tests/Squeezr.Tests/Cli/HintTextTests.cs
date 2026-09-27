@@ -3,6 +3,7 @@ using Shouldly;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Serialization;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Cli;
 
@@ -44,6 +45,25 @@ public sealed class HintTextTests
     [Fact]
     public void ForCli_ParameterWithoutFlagMapping_FallsBackToItsName() =>
         new TruncationHint([new("raise", ["topK"])]).ForCli().ShouldBe("raise topK");
+
+    [Fact]
+    public void ForCli_ExpandInputErrors_KeepFlagSyntax()
+    {
+        new ExpandInputException(ExpandInputIssue.StartLine, "startLine must be >= 1.")
+            .ForCli().ShouldBe("--start-line must be >= 1.");
+
+        new ExpandInputException(
+            ExpandInputIssue.AmbiguousPath,
+            "neutral",
+            "src/Dup.cs",
+            ["alpha:src/Dup.cs", "beta:src/Dup.cs"])
+            .ForCli()
+            .ShouldBe("Path 'src/Dup.cs' matches multiple repositories: alpha:src/Dup.cs, beta:src/Dup.cs. Qualify with --repo.");
+    }
+
+    [Fact]
+    public void ForCli_PlainWorkspaceError_PassesTheMessageThrough() =>
+        new WorkspaceException("keep me").ForCli().ShouldBe("keep me");
 
     [Fact]
     public void Converter_WritesHintAsOneCliFlagString()
