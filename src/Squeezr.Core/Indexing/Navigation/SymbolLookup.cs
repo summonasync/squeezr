@@ -21,13 +21,17 @@ public sealed record SymbolLookupResult(
     IReadOnlyList<SymbolHit> Matches,
     int TokensUsed,
     bool Truncated,
-    string? Hint);
+    TruncationHint? Hint);
 
 public sealed class SymbolLookup
 {
     public const int DefaultMaxTokens = 300;
 
-    private const string TruncationHint = "narrow the query (--repo, --kind) or raise --max-tokens";
+    private static readonly TruncationHint Truncation = new(
+    [
+        new("narrow the query", ["repo", "kind"]),
+        new("raise", ["maxTokens"])
+    ]);
 
     private readonly string _workspaceRoot;
 
@@ -65,7 +69,7 @@ public sealed class SymbolLookup
         {
             if (!TryRender(symbol, entry, repoDoc, store, budget, includeBody, hits))
             {
-                return new SymbolLookupResult(hits, budget.Used, true, TruncationHint);
+                return new SymbolLookupResult(hits, budget.Used, true, Truncation);
             }
         }
 
@@ -75,7 +79,7 @@ public sealed class SymbolLookup
                 $"No symbol named '{name}' in the index. Run 'squeezr index' if the code changed.");
         }
 
-        return new SymbolLookupResult(hits, budget.Used, budget.Truncated, budget.Truncated ? TruncationHint : null);
+        return new SymbolLookupResult(hits, budget.Used, budget.Truncated, budget.Truncated ? Truncation : null);
     }
 
     private bool TryRender(

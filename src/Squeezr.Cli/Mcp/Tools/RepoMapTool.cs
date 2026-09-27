@@ -66,7 +66,7 @@ public sealed class RepoMapTool
 
             if (result.Hint is not null)
             {
-                warnings.Add(result.Hint);
+                warnings.Add(result.Hint.ForMcp());
             }
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();

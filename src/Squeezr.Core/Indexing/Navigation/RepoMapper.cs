@@ -11,7 +11,7 @@ public sealed record RepoMapResult(
     IReadOnlyList<MapLine> Lines,
     int TokensUsed,
     bool Truncated,
-    string? Hint);
+    TruncationHint? Hint);
 
 public sealed class RepoMapper
 {
@@ -19,7 +19,11 @@ public sealed class RepoMapper
 
     public const int DefaultMaxTokens = 4000;
 
-    private const string TruncationHint = "lower --depth or raise --max-tokens";
+    private static readonly TruncationHint Truncation = new(
+    [
+        new("lower", ["depth"]),
+        new("raise", ["maxTokens"])
+    ]);
 
     private static readonly HashSet<string> TypeKinds = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -34,7 +38,7 @@ public sealed class RepoMapper
     {
         if (depth < 1)
         {
-            throw new WorkspaceException("--depth must be >= 1.");
+            throw new WorkspaceException("depth must be >= 1.");
         }
 
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
@@ -114,7 +118,7 @@ public sealed class RepoMapper
 
     private static RepoMapResult Finish(
         List<string> repoNames, int depth, List<MapLine> lines, TokenBudget budget) =>
-        new(repoNames, depth, lines, budget.Used, budget.Truncated, budget.Truncated ? TruncationHint : null);
+        new(repoNames, depth, lines, budget.Used, budget.Truncated, budget.Truncated ? Truncation : null);
 
     private static bool Take(TokenBudget budget, List<MapLine> lines, int depth, string text)
     {

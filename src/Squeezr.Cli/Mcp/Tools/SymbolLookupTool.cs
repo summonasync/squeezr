@@ -87,7 +87,7 @@ public sealed class SymbolLookupTool
 
             if (result.Hint is not null)
             {
-                warnings.Add(result.Hint);
+                warnings.Add(result.Hint.ForMcp());
             }
 
             var data = result.Matches.Select(m => new SymbolHitData(

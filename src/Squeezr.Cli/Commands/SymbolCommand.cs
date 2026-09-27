@@ -95,9 +95,9 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
         }
     }
 
-    internal static void WriteBudgetLine(int tokensUsed, bool truncated, string? hint)
+    internal static void WriteBudgetLine(int tokensUsed, bool truncated, TruncationHint? hint)
     {
-        var suffix = truncated && hint is not null ? $" — {hint}" : string.Empty;
+        var suffix = truncated && hint is not null ? $" — {hint.ForCli()}" : string.Empty;
         AnsiConsole.MarkupLine($"[grey]tokens: {tokensUsed}{(truncated ? ", truncated" : string.Empty)}{suffix}[/]");
     }
 }

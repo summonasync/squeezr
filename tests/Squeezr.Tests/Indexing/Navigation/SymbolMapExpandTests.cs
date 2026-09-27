@@ -61,7 +61,8 @@ public class SymbolMapExpandTests
         var result = new SymbolLookup(workspace).Find("Calc", null, null, 15, body: false);
 
         result.Truncated.ShouldBeTrue();
-        result.Hint.ShouldNotBeNull();
+        var hint = result.Hint.ShouldNotBeNull();
+        hint.Render(p => p).ShouldBe("narrow the query (repo, kind) or raise maxTokens");
         result.TokensUsed.ShouldBeLessThanOrEqualTo(15);
     }
 
@@ -99,7 +100,8 @@ public class SymbolMapExpandTests
 
         result.Truncated.ShouldBeTrue();
         result.TokensUsed.ShouldBeLessThanOrEqualTo(30);
-        result.Hint.ShouldNotBeNull();
+        var hint = result.Hint.ShouldNotBeNull();
+        hint.Render(p => p).ShouldBe("lower depth or raise maxTokens");
     }
 
     [Fact]
@@ -270,6 +272,26 @@ public class SymbolMapExpandTests
             error.GetProperty("code").GetString().ShouldBe("workspace_error");
             error.GetProperty("message").GetString()!.ShouldContain("No symbol named 'Nope'");
         }
+    }
+
+    [Fact]
+    public async Task Cli_E2E_TruncatedMapAndSymbol_KeepFlagSyntaxInBothOutputForms()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var pretty = await RunCliAsync(workspace, "map", "--max-tokens", "4");
+        pretty.ExitCode.ShouldBe(0);
+        pretty.StdOut.ShouldContain("truncated");
+        pretty.StdOut.ShouldContain("lower --depth or raise --max-tokens");
+
+        var symbol = await RunCliAsync(workspace, "symbol", "Add", "--max-tokens", "5");
+        symbol.ExitCode.ShouldBe(0);
+        symbol.StdOut.ShouldContain("narrow the query (--repo, --kind) or raise --max-tokens");
+
+        var json = await RunCliAsync(workspace, "map", "--max-tokens", "4", "--json");
+        json.ExitCode.ShouldBe(0);
+        using var doc = JsonDocument.Parse(json.StdOut.Trim());
+        doc.RootElement.GetProperty("hint").GetString().ShouldBe("lower --depth or raise --max-tokens");
     }
 
     private static string NewIndexedWorkspace()

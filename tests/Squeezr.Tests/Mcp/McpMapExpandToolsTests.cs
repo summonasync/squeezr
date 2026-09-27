@@ -47,8 +47,10 @@ public class McpMapExpandToolsTests
         var envelope = ParseEnvelope(result);
         envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
         envelope.GetProperty("tokensUsed").GetInt32().ShouldBeLessThanOrEqualTo(10);
+        envelope.GetRawText().ShouldNotContain("--");
         envelope.GetProperty("warnings").EnumerateArray()
-            .Select(w => w.GetString()!).ShouldNotBeEmpty();
+            .Select(w => w.GetString()!)
+            .ShouldContain("lower depth or raise maxTokens");
     }
 
     [Fact]
