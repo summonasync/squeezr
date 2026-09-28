@@ -4,6 +4,34 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [1.0.7] — 2026-09-28
+
+The dogfood-wave release — the whole v1.0.6 Overmind field report became three features: 058 agent-experience clarity, 059 Qdrant point hygiene, 060 doc-noise scoping. Full suite 1132 → 1288.
+
+### Added (060, doc-noise scoping)
+- `repo_map` and `code_search` take a `prefix` parameter (MCP) / `--prefix` (CLI): the map renders the subtree only (structurally unchanged depth), search filters **both** hybrid arms through one general FileScope predicate→fileId seam; an unknown prefix errors with the 5 nearest directories; absent prefix is byte-identical to today (regression-pinned; live: `map --prefix src/` answers non-truncated at 3821 tokens where unscoped depth-2 burned the 4000 budget and truncated)
+- `indexing.rankExclude` workspace config: globbed trees stay indexed and fully navigable (expand/refs/symbol untouched) but drop out of `code_search` ranking on both arms; malformed globs warn and skip the pattern; empty config is byte-identical; active patterns are listed in `index_status` warnings and folded into the `code_search` cache key (a config edit does not bump meta.db mtime — without this, stale rankings would cache). Live: dogfood query 6/6 audits/BACKLOG markdown → 0/20 with the AC patterns
+- `code_search` returns **one hit per file**: the best span wins, its siblings collapse into `also matched N more spans in this file` (additive `alsoMatched` field; single-span results byte-identical); `topK` now counts distinct files — a contract bump declared per 035 (live: same query 20→16 hits over the same 16 files, tokens 5723→4015, −30%)
+- `symbol_lookup` returns a **member list** (name, kind, line) when a type's body exceeds the token budget — charged from the same budget with exact shown+omitted arithmetic, generic containers included (matched via the indexed `Box<T>` container-name form, mutation-checked). Live A/B on Overmind's 1055-line `OvermindPlanningTools`: dead-end signature → 34 coordinates + 28 omitted
+- Post-shipping note: making excluded/scoped search PROMOTE a source file it never recalled hit a semantic top-80 ceiling — carved out to feature 061-semantic-recall-ceiling (post-hoc drop subtracts, cannot promote)
+
+### Added (059, Qdrant point hygiene)
+- Semantic coverage honesty: `embeddings.coverage` (embedded/total chunks, meta.db-only math) in `index_status`, and a `semantic coverage: NN% (M chunks pending embedding)` line in `code_search` warnings whenever coverage is partial — silent at 100%, floored so one pending chunk never renders a lying 100% (live-proved at 90% / 638 pending on this workspace)
+- New CLI `squeezr vectors reconcile`: compares collection point ids against the live chunk-hash set and batch-deletes orphans; `--dry-run` is the default, `--apply` the sole destructive path; refuses an unindexed store, an unavailable server, and the empty-chunks-with-nonempty-collection case (a recreated `SQUEEZR_HOME` cannot wipe a healthy collection); only ever touches THIS workspace's derived collection. Live: 1320 pre-fix orphans cleaned (7492→6172, second run 0)
+- `index_status` gains a warning when the collection carries noticeably more points than chunks (tolerance 16)
+
+### Fixed (059)
+- A modified file left its old chunk points in Qdrant forever (deletions ran only for removed files) — the drift grew silently (observed 10818 points vs 10514 chunks): files whose chunk-hash set changed now reap their points by fileId before the new set upserts, while unchanged and comment-only edits stay at zero Qdrant requests; a vector delete skipped while the store was unavailable is journalled in meta.db and replayed by the next full pass (replay re-marks the file's chunks pending so a half-failed delete cannot lose vectors). Live A/B: a body edit grew the old binary's collection 7492→7496, the new one holds 7494 — exact round trip
+
+### Fixed (060)
+- Constructor symbols carried junk names — `public (method) :68`: `SymbolExtractor` had no constructor branch, so names fell to a `ToString()` default. Ctors now carry the declaring type name under the additive `SymbolKind.Constructor`, visible in listings and members fallback; stale rows self-heal on the next index (no migration); JS/TS paths checked — pattern absent. Side effect: a bare `symbol_lookup <TypeName>` returns type + ctor (narrow with `kind:class`; `kind:method` no longer matches ctors)
+
+### Added (058, agent-experience clarity)
+- Transport-aware truncation hints: MCP responses now name their actual parameters (`narrow the query (repo, kind) or raise maxTokens`), the CLI keeps `--flags` byte-identically (`map|symbol --json` wire shape unchanged via a local converter); `repo_map` depth and `expand_span` validation errors are de-flagged over MCP, and expand_span's advice became executable — `qualify the path with the repo prefix, e.g. 'alpha/src/Dup.cs'` really resolves, while the old `--repo` hint pointed at a parameter the tool doesn't have
+- Honest `squeezr stats`: `saved 0 (×0.3)` next to two nonzero numbers became structurally impossible — `saved`/`×N` render only when the whole-file baseline applies, search-heavy mixes get `no whole-file baseline for this usage mix`; the formula is documented in `stats --help` and README and is unchanged from the 021/050 spec of record; `--json` gains additive `baseline`/`baselineApplies`
+- Observable MCP response cache: cache entries died silently on every watch reindex (generation = meta.db mtime re-keyed everything). Dead-generation entries are now evicted immediately (not lingering until capacity), the first affected response says `cache: invalidated (index changed)` once per generation (never baked into cached copies), `Cache hit-rate: no hits yet across N recorded session(s)` replaces the self-contradictory `0.0 % across 0 session(s)`, and telemetry marks the request `cacheInvalidated` (queries.jsonl stays byte-compatible for old lines)
+- `squeezr mcp doctor --json` `headlessStatus` no longer embeds raw multiline client stderr (observed live with kimi) — single line capped at 200, exit code and stderr head preserved; audit confirmed it was the only raw-output field
+
 ## [1.0.6] — 2026-09-26
 
 Dogfood tail from the v1.0.5 session: `mcp doctor` now honors the `--all` flag it advertises itself. Full suite 1130 → 1132.
