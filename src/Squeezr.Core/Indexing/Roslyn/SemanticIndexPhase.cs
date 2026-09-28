@@ -208,23 +208,17 @@ public static class SemanticIndexPhase
 
     private static bool HasDrift(List<SymbolDocument> stored, ParseResult result)
     {
-        var storedByKey = stored.ToDictionary(s => (s.Name, s.StartLine), s => s.Signature);
-        if (storedByKey.Count != result.Symbols.Count)
-        {
-            return true;
-        }
-
-        foreach (var symbol in result.Symbols)
-        {
-            if (!storedByKey.TryGetValue((symbol.Name, symbol.Span.StartLine), out var signature)
-                || signature != symbol.Signature)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        // name + line is not a key any more: a ctor carries its declaring type's name, so a
+        // single-line type declaration and its ctor share the pair — compare the whole multiset
+        var storedKeys = stored.Select(Key).Order().ToList();
+        return !storedKeys.SequenceEqual(result.Symbols.Select(Key).Order());
     }
+
+    private static (string Name, int Line, string? Signature) Key(SymbolDocument symbol) =>
+        (symbol.Name, symbol.StartLine, symbol.Signature);
+
+    private static (string Name, int Line, string? Signature) Key(Symbol symbol) =>
+        (symbol.Name, symbol.Span.StartLine, symbol.Signature);
 
     internal static void InsertRefs(
         ParseResult result,

@@ -54,6 +54,8 @@ public static class SymbolExtractor
         {
             BaseTypeDeclarationSyntax type => type.Identifier.Text,
             MethodDeclarationSyntax method => method.Identifier.Text,
+            // generic arity stays in ContainerName; the ctor name is the bare type name
+            ConstructorDeclarationSyntax ctor => ctor.Identifier.Text,
             PropertyDeclarationSyntax property => property.Identifier.Text,
             VariableDeclaratorSyntax variable => variable.Identifier.Text,
             _ => declaration.ToString().Split('(', ' ', ':')[0],
@@ -119,7 +121,8 @@ public static class SymbolExtractor
     {
         ClassDeclarationSyntax or StructDeclarationSyntax or RecordDeclarationSyntax => SymbolKind.Class,
         InterfaceDeclarationSyntax => SymbolKind.Interface,
-        MethodDeclarationSyntax or ConstructorDeclarationSyntax or DestructorDeclarationSyntax
+        ConstructorDeclarationSyntax => SymbolKind.Constructor,
+        MethodDeclarationSyntax or DestructorDeclarationSyntax
             or OperatorDeclarationSyntax or ConversionOperatorDeclarationSyntax => SymbolKind.Method,
         PropertyDeclarationSyntax or EventDeclarationSyntax => SymbolKind.Property,
         BaseFieldDeclarationSyntax or VariableDeclaratorSyntax => SymbolKind.Field,
