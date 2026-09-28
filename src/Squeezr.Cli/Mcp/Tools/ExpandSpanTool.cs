@@ -13,11 +13,13 @@ public sealed class ExpandSpanTool
 {
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
+    private readonly ClientIdentity _identity;
 
-    public ExpandSpanTool(McpWorkspace workspace, McpToolGate gate)
+    public ExpandSpanTool(McpWorkspace workspace, McpToolGate gate, ClientIdentity identity)
     {
         _workspace = workspace;
         _gate = gate;
+        _identity = identity;
     }
 
     [Description("Read the exact lines you need from the live file on disk: the span plus contextLines of surrounding context, around coordinates from code_search/symbol_lookup — reflects edits made after indexing, and is the only tool that returns raw source lines. When truncated is true, context (before/after) may be partially filled — the span itself has priority.")]
@@ -64,7 +66,8 @@ public sealed class ExpandSpanTool
             QueryTelemetry.Record(root, _workspace.SessionId, "expand_span",
                 new { file, startLine, endLine, contextLines },
                 result.TokensUsed, result.Truncated, data.Span.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
             return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)

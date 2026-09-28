@@ -36,6 +36,7 @@ public sealed class McpCommandsTests
         combined.ShouldContain("--scope");
         combined.ShouldContain("--no-watch");
         combined.ShouldContain("--no-instructions");
+        combined.ShouldContain("--project");
         combined.ShouldContain("--yes");
         combined.ShouldContain("--json");
     }
@@ -138,7 +139,7 @@ public sealed class McpCommandsTests
     {
         var workspace = TestDirs.NewTempDir();
 
-        var (exitCode, console, _, _) = await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"]);
+        var (exitCode, console, _, _) = await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes", "--instructions"]);
 
         exitCode.ShouldBe(0);
         console.Output.ShouldContain("kimi");
@@ -186,7 +187,7 @@ public sealed class McpCommandsTests
         var workspace = TestDirs.NewTempDir();
 
         var (exitCode, _, output, _) = await RunAsync(
-            workspace, ["mcp", "install", "--client", "kimi,qwen", "--scope", "project", "--yes", "--json"]);
+            workspace, ["mcp", "install", "--client", "kimi,qwen", "--scope", "project", "--yes", "--instructions", "--json"]);
 
         exitCode.ShouldBe(0);
         using var document = JsonDocument.Parse(output);
@@ -277,11 +278,107 @@ public sealed class McpCommandsTests
     }
 
     [Fact]
+    public async Task Install_YesWithoutClient_ErrorsWithHint()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var (exitCode, _, _, error) = await RunAsync(workspace, ["mcp", "install", "--yes"]);
+
+        exitCode.ShouldBe(1);
+        error.ShouldContain("--yes requires --client");
+        error.ShouldContain("--client");
+        error.ShouldContain("--all");
+    }
+
+    [Fact]
+    public async Task Install_YesClientQwen_OverwritesStaleFixtureWithStablePath()
+    {
+        var workspace = TestDirs.NewTempDir();
+        string? homeDir = null;
+        var stalePath = "/old/stale/path/to/squeezr";
+
+        var (exitCode, _, output, _) = await RunAsync(
+            workspace,
+            ["mcp", "install", "--client", "qwen", "--yes", "--json"],
+            configureHome: home =>
+            {
+                homeDir = home;
+                var qwenConfigDir = Path.Combine(home, ".qwen");
+                Directory.CreateDirectory(qwenConfigDir);
+                var staleConfig = new
+                {
+                    mcpServers = new
+                    {
+                        squeezr = new
+                        {
+                            command = stalePath,
+                            args = new[] { "serve" }
+                        }
+                    }
+                };
+                File.WriteAllText(Path.Combine(qwenConfigDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(staleConfig));
+            });
+
+        exitCode.ShouldBe(0);
+        var configPath = Path.Combine(homeDir!, ".qwen", "settings.json");
+        File.Exists(configPath).ShouldBeTrue();
+        var entry = JsonNode.Parse(File.ReadAllText(configPath))!["mcpServers"]!["squeezr"]!;
+        var command = entry["command"]!.GetValue<string>();
+        command.ShouldNotBe(stalePath);
+        File.Exists(command).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Install_YesClientAll_OnlyTouchesDetectedClients()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var overrideDir = TestDirs.NewTempDir();
+        var previousOverride = Environment.GetEnvironmentVariable("KIMI_CODE_HOME");
+        Environment.SetEnvironmentVariable("KIMI_CODE_HOME", overrideDir);
+        try
+        {
+            var (exitCode, _, output, _) = await RunAsync(
+                workspace,
+                ["mcp", "install", "--client", "all", "--yes", "--json"],
+                configureHome: home => File.WriteAllText(Path.Combine(home, ".claude.json"), "{}"));
+
+            exitCode.ShouldBe(0);
+            using var document = JsonDocument.Parse(output);
+            var clients = document.RootElement.EnumerateArray()
+                .Select(element => element.GetProperty("client").GetString())
+                .Order()
+                .ToArray();
+            clients.ShouldBe(["claude", "kimi"]);
+            File.Exists(Path.Combine(workspace, ".qwen", "settings.json")).ShouldBeFalse();
+            File.Exists(Path.Combine(workspace, ".codex", "config.toml")).ShouldBeFalse();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("KIMI_CODE_HOME", previousOverride);
+        }
+    }
+
+    [Fact]
+    public async Task Install_YesWithoutInstructions_DoesNotWriteInstructions()
+    {
+        var workspace = TestDirs.NewTempDir();
+
+        var (exitCode, _, output, _) = await RunAsync(
+            workspace,
+            ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes", "--json"]);
+
+        exitCode.ShouldBe(0);
+        using var document = JsonDocument.Parse(output);
+        var kimi = document.RootElement.EnumerateArray().Single(element => element.GetProperty("client").GetString() == "kimi");
+        kimi.GetProperty("instructionsWritten").GetBoolean().ShouldBeFalse();
+        File.Exists(Path.Combine(workspace, "AGENTS.md")).ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Install_InteractiveWithoutFlags_PromptsClientsScopeAndInstructions()
     {
         var workspace = TestDirs.NewTempDir();
         var console = NewInteractiveConsole();
-        Push(console, ConsoleKey.Spacebar, ConsoleKey.Enter, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter);
+        Push(console, ConsoleKey.Spacebar, ConsoleKey.Enter, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter, ConsoleKey.Enter);
         var overrideDir = TestDirs.NewTempDir();
         var previousOverride = Environment.GetEnvironmentVariable("KIMI_CODE_HOME");
         Environment.SetEnvironmentVariable("KIMI_CODE_HOME", overrideDir);
@@ -303,17 +400,16 @@ public sealed class McpCommandsTests
     }
 
     [Fact]
-    public async Task Install_InteractiveWithClientFlag_PromptsScopeOnly()
+    public async Task Install_InteractiveWithYes_SkipsPromptsAndDoesNotWriteInstructions()
     {
         var workspace = TestDirs.NewTempDir();
         var console = NewInteractiveConsole();
-        Push(console, ConsoleKey.DownArrow, ConsoleKey.Enter);
 
-        var (exitCode, _, _, _) = await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--yes"], console);
+        var (exitCode, _, _, _) = await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"], console);
 
         exitCode.ShouldBe(0);
         File.Exists(Path.Combine(workspace, ".kimi-code", "mcp.json")).ShouldBeTrue();
-        File.ReadAllText(Path.Combine(workspace, "AGENTS.md")).ShouldContain("squeezr:instructions");
+        File.Exists(Path.Combine(workspace, "AGENTS.md")).ShouldBeFalse();
     }
 
     [Fact]
@@ -330,6 +426,35 @@ public sealed class McpCommandsTests
         File.Exists(configPath).ShouldBeTrue();
         JsonNode.Parse(File.ReadAllText(configPath))!["mcpServers"]!.AsObject().ContainsKey("squeezr").ShouldBeFalse();
         File.Exists(Path.Combine(workspace, "AGENTS.md")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Doctor_NonInteractiveWithAll_ChecksEveryDetectedClient()
+    {
+        var workspace = TestDirs.NewTempDir();
+        await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"]);
+
+        var (exitCode, console, _, error) = await RunAsync(
+            workspace,
+            ["mcp", "doctor", "--all"],
+            configureHome: home => Directory.CreateDirectory(Path.Combine(home, ".kimi-code")));
+
+        exitCode.ShouldBe(0);
+        error.ShouldBeEmpty();
+        console.Output.ShouldContain("kimi");
+        console.Output.ShouldContain("entry: user=no project=yes");
+    }
+
+    [Fact]
+    public async Task Doctor_HelpListsClientAllAndJsonOptions()
+    {
+        var (exitCode, console, output, _) = await RunAsync(TestDirs.NewTempDir(), ["mcp", "doctor", "--help"]);
+
+        exitCode.ShouldBe(0);
+        var combined = console.Output + output;
+        combined.ShouldContain("--client");
+        combined.ShouldContain("--all");
+        combined.ShouldContain("--json");
     }
 
     [Fact]

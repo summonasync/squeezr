@@ -36,6 +36,12 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         [CommandOption("--no-instructions")]
         public bool NoInstructions { get; set; }
 
+        [CommandOption("--instructions")]
+        public bool Instructions { get; set; }
+
+        [CommandOption("--project")]
+        public bool Project { get; set; }
+
         [CommandOption("--yes")]
         public bool Yes { get; set; }
 
@@ -64,9 +70,21 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             clientValues = clientValues is { Length: > 0 } ? [.. clientValues, "all"] : ["all"];
         }
 
+        if (clientValues is not { Length: > 0 } && settings.Project)
+        {
+            return WriteProjectBlockOnly(environment, settings.Json);
+        }
+
+        if (settings.Yes && clientValues is not { Length: > 0 })
+        {
+            Console.Error.WriteLine(
+                $"error: --yes requires --client (<csv>|all). Specify at least one client with --client ({McpCommandSupport.ClientValues}), or --all to onboard every detected client.");
+            return 1;
+        }
+
         var scopeValue = settings.Scope;
         var scopeDefaultedToUser = false;
-        if (scopeValue is null && settings.Yes && !interactive)
+        if (scopeValue is null && settings.Yes)
         {
             scopeValue = "user";
             scopeDefaultedToUser = true;
@@ -91,11 +109,14 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         }
 
         var writeInstructions = await McpCommandSupport.ResolveWriteInstructionsAsync(
-            settings.NoInstructions, settings.Yes, interactive, cancellationToken);
+            settings.NoInstructions, settings.Instructions, settings.Yes, interactive, cancellationToken);
         if (!writeInstructions && !settings.NoInstructions && !settings.Yes && !interactive)
         {
-            Console.Error.WriteLine("note: instructions block skipped (non-interactive); pass --yes to add it.");
+            Console.Error.WriteLine("note: instructions block skipped (non-interactive); pass --yes --instructions to add it.");
         }
+
+        var writeProjectBlock = await McpCommandSupport.ResolveProjectBlockAsync(
+            settings.Project, settings.Yes, interactive, cancellationToken);
 
         var service = new McpOnboardingService(_locator);
         var results = new List<McpInstallResult>();
@@ -120,8 +141,19 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             }
         }
 
+        ProjectBlockChange? projectChange = null;
+        if (writeProjectBlock)
+        {
+            projectChange = ProjectInstructionsWriter.Refresh(environment.WorkspaceRoot);
+            WarnOrphans(projectChange.Orphaned);
+        }
+
         if (settings.Json)
         {
+            if (projectChange is not null)
+            {
+                results.Add(ProjectInstallResult(environment, projectChange));
+            }
             JsonOutput.Write(results);
         }
         else
@@ -131,12 +163,44 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
                 AnsiConsole.MarkupLine(
                     $"[grey]detected: {string.Join(", ", clients.Select(client => client.Id.ToString().ToLowerInvariant()))}[/]");
             }
-            Render(results);
+            Render(results, projectChange);
         }
         return results.Any(result => result.Error is not null) ? 1 : 0;
     }
 
-    private static void Render(IReadOnlyList<McpInstallResult> results)
+    private static int WriteProjectBlockOnly(McpOnboardingEnvironment environment, bool json)
+    {
+        var change = ProjectInstructionsWriter.Refresh(environment.WorkspaceRoot);
+        WarnOrphans(change.Orphaned);
+        if (json)
+        {
+            JsonOutput.Write(new[] { ProjectInstallResult(environment, change) });
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[green]✓[/] project block written — {change.Written.Count} file(s)");
+            foreach (var path in change.Written)
+            {
+                AnsiConsole.MarkupLine($"  [grey]{Markup.Escape(path)}[/]");
+            }
+        }
+        return 0;
+    }
+
+    private static McpInstallResult ProjectInstallResult(McpOnboardingEnvironment environment, ProjectBlockChange change) =>
+        new("project", "project", "writer", environment.WorkspaceRoot, change.Written.Count > 0,
+            change.Orphaned.Count > 0 ? string.Join("; ", change.Orphaned) : null, null);
+
+    private static void WarnOrphans(IReadOnlyList<string> orphaned)
+    {
+        foreach (var path in orphaned)
+        {
+            Console.Error.WriteLine(
+                $"warning: {path}: one-sided squeezr:project-instructions markers; file left untouched");
+        }
+    }
+
+    private static void Render(IReadOnlyList<McpInstallResult> results, ProjectBlockChange? projectChange)
     {
         foreach (var result in results)
         {
@@ -155,6 +219,14 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             if (result.InstructionsWritten)
             {
                 AnsiConsole.MarkupLine($"  [green]+[/] instructions block written");
+            }
+        }
+        if (projectChange is not null)
+        {
+            AnsiConsole.MarkupLine($"[green]+[/] project block written — {projectChange.Written.Count} file(s)");
+            foreach (var path in projectChange.Written)
+            {
+                AnsiConsole.MarkupLine($"  [grey]{Markup.Escape(path)}[/]");
             }
         }
     }

@@ -83,6 +83,16 @@ squeezr index --events
 `squeezr status` shows per-repo file/symbol/chunk counts, the configured
 embeddings provider and Qdrant state.
 
+Doc-heavy repos can curate ranking without unindexing anything: set
+`indexing.rankExclude` in the workspace config
+(`~/.squeezr/workspaces/<storeKey>/config.json`) to a list of globs, e.g.
+`["audits/**", "BACKLOG/**"]`. Matching files stay indexed and fully navigable —
+`expand_span` / `find_references` / `symbol_lookup` still reach them — they just
+stop outranking source in `code_search`. It applies at query time, so no reindex
+is needed; `prefix` narrows in, `rankExclude` pushes out, and the two intersect.
+`index_status` lists the active patterns in `warnings`, and a malformed glob
+warns and is skipped instead of failing the query.
+
 ## 4. MCP registration
 
 ```bash
@@ -95,6 +105,17 @@ defaults to user). After it succeeds, restart the agent session — MCP clients
 load server configs at startup, not live. Six tools then appear: `code_search`,
 `symbol_lookup`, `find_references`, `repo_map`, `expand_span`, `index_status`.
 `squeezr mcp doctor` verifies the registration later; `squeezr mcp remove` undoes it.
+
+Repo-level onboarding (only when the human explicitly asks for it): after MCP
+registration, `squeezr mcp install --project` writes a committed
+`squeezr:project-instructions` block into the project's own agent files —
+`AGENTS.md` always (created when missing), plus `CLAUDE.md`/`QWEN.md` when they
+exist and are not one-line `@AGENTS.md` import pointers. Without `--client`/`--all`
+the command only writes the block, no client registration; plain `mcp install`
+never touches project files. The block header carries the squeezr version —
+re-run the same command after a squeezr upgrade to refresh it;
+`squeezr mcp remove --project` strips the block from all carrier files (files
+themselves are never deleted).
 
 Claude Code also has an optional advisory hook. `squeezr hook pre-read` reads the
 PreToolUse payload from stdin and, when the Read targets a large file or wide
@@ -127,24 +148,39 @@ Navigation flow: `repo_map` first for orientation → `code_search` /
 `expand_span` to read. Exact string search or a repo outside the index —
 plain grep/read is correct, not a violation.
 
-- `repo_map(repo?, depth?, maxTokens?)` — directory tree with type/member
+- `repo_map(repo?, prefix?, depth?, maxTokens?)` — directory tree with type/member
   signatures, no bodies. Cheapest first contact with an unfamiliar workspace.
-- `code_search(query, repo?, topK?, maxTokens?)` — hybrid exact + semantic search:
+  Pass `prefix` (e.g. `"src/"`) to render only that subtree — directory labels
+  come back relative to the prefix and `depth` keeps its structural meaning.
+- `code_search(query, repo?, prefix?, topK?, maxTokens?)` — hybrid exact + semantic search:
   paraphrases work ("validate config file") and so do exact identifiers
   ("VectorDimensionMismatchException"). Returns file:line matches with snippets,
-  never full bodies.
-- `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span.
+  never full bodies. One hit = one file: the best span wins and the file's other
+  spans collapse into `alsoMatched`, so `topK` caps distinct files, not spans.
+  `prefix` scopes both arms to one directory subtree; the
+  workspace config `indexing.rankExclude` keeps whole trees out of the ranking
+  while they stay indexed and readable through `expand_span`.
+- `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span. When a
+  type's body exceeds the token budget it returns the member list (name, kind, line)
+  as a mini-map instead — each line is an expand_span coordinate.
 - `find_references` — caller-side reference points for a symbol.
 - `expand_span(file, startLine, endLine?, contextLines?, maxTokens?)` — the only
   tool that returns raw source lines; reads the live file on disk, so it reflects
   edits newer than the index. Call it on coordinates from other tools.
 - `index_status()` — workspace freshness: per-repo counts, pending embeddings,
-  Qdrant availability. Call before heavy querying to decide on a reindex.
+  semantic coverage (`embeddings.coverage`, embedded share of chunks 0..1),
+  Qdrant availability, and the resolved workspace `rootPath` (if it is not your
+  project's root, the session serves a different workspace). Call before heavy
+  querying to decide on a reindex. When ranking is curated, `warnings` lists the
+  active `indexing.rankExclude` patterns — read them before trusting a
+  `code_search` result set as complete.
 
 Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
 and sets `truncated` when it overflows — narrow the query or adjust maxTokens
-instead of reading files. Pass `topK` to cap the merged hit count when a few
-strong hits are enough.
+instead of reading files. In big workspaces prefer `prefix` over raising
+maxTokens: a scoped map or search usually fits the default budget. Pass `topK`
+to cap how many files come back when a few strong hits are enough — `code_search`
+returns one hit per file, so `topK` counts distinct files, not spans.
 
 Freshness and cache: reads refresh modified files inline or report them in
 `staleFiles` (then suggest `squeezr index`). Identical repeated calls within one

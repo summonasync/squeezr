@@ -39,7 +39,7 @@ public class McpNavigationToolsTests
     }
 
     [Fact]
-    public async Task SymbolLookup_WithTightBudget_Truncates()
+    public async Task SymbolLookup_WithTightBudget_TruncatesWithParameterHint()
     {
         var workspace = NewIndexedWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
@@ -52,6 +52,10 @@ public class McpNavigationToolsTests
         result.IsError.ShouldNotBe(true);
         var envelope = ParseEnvelope(result);
         envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.GetRawText().ShouldNotContain("--");
+        envelope.GetProperty("warnings").EnumerateArray()
+            .Select(w => w.GetString()!)
+            .ShouldContain("narrow the query (repo, kind) or raise maxTokens");
     }
 
     [Fact]

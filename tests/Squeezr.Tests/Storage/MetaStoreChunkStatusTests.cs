@@ -119,6 +119,47 @@ public class MetaStoreChunkStatusTests
         store.CountPendingChunks(99).ShouldBe(0);
     }
 
+    [Fact]
+    public void GetSemanticCoverage_EmptyStore_HasNullRatio()
+    {
+        using var store = NewStore();
+
+        var coverage = store.GetSemanticCoverage();
+
+        coverage.ShouldBe(new SemanticCoverage(0, 0));
+        coverage.Ratio.ShouldBeNull();
+    }
+
+    [Fact]
+    public void GetSemanticCoverage_MixedStatuses_SpansAllRepos()
+    {
+        using var store = NewStore();
+        store.InsertChunks(
+        [
+            Chunk(1, 1, "pending", null),
+            Chunk(1, 2, "ok", "m1"),
+            Chunk(2, 1, "pending", null),
+            Chunk(2, 2, "ok", "m1")
+        ]);
+
+        var coverage = store.GetSemanticCoverage();
+
+        coverage.ShouldBe(new SemanticCoverage(4, 2));
+        coverage.Ratio.ShouldBe(0.5);
+    }
+
+    [Fact]
+    public void GetSemanticCoverage_AllEmbedded_RatioIsOne()
+    {
+        using var store = NewStore();
+        store.InsertChunks([Chunk(1, 1, "ok", "m1"), Chunk(1, 2, "ok", "m1")]);
+
+        var coverage = store.GetSemanticCoverage();
+
+        coverage.ShouldBe(new SemanticCoverage(2, 0));
+        coverage.Ratio.ShouldBe(1.0);
+    }
+
     private static MetaStore NewStore() =>
         new(Path.Combine(TestDirs.NewTempDir(), "meta.db"), createIfMissing: true);
 

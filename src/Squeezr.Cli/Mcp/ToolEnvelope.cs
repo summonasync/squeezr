@@ -20,6 +20,9 @@ public sealed record ToolEnvelope(
         IReadOnlyList<string>? staleFiles = null) =>
         new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? []);
 
+    public ToolEnvelope WithWarning(string? warning) =>
+        warning is null ? this : this with { Warnings = [.. Warnings, warning] };
+
     private static TimeSpan? ResolveIndexAge(string? workspaceRoot)
     {
         if (workspaceRoot is null)

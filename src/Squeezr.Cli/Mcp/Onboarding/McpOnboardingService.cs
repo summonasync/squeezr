@@ -10,6 +10,8 @@ public sealed class McpOnboardingService
         "Codex loads project config only for trusted projects; make sure this workspace is trusted in Codex, otherwise the entry is ignored.",
     ];
 
+    private const int HeadlessMessageCap = 200;
+
     private readonly ClientCliLocator _locator;
     private readonly ClientCliBridge _bridge;
 
@@ -35,7 +37,7 @@ public sealed class McpOnboardingService
         var decision = McpInstallStrategy.Resolve(client, scope, _locator);
         if (decision.Method == McpInstallMethod.Cli)
         {
-            await _bridge.AddAsync(client, scope, environment.CommandPath, watch, cancellationToken);
+            await InstallViaCliAsync(client, scope, environment.CommandPath, watch, cancellationToken);
         }
         else
         {
@@ -98,16 +100,22 @@ public sealed class McpOnboardingService
         ArgumentNullException.ThrowIfNull(environment);
         var userDecision = McpInstallStrategy.Resolve(client, McpScope.User, _locator);
         var projectDecision = McpInstallStrategy.Resolve(client, McpScope.Project, _locator);
-        var userEntry = await McpConfigProbe.HasServerAsync(
-            McpClientPaths.ConfigPath(client, environment, McpScope.User),
-            client.ConfigFormat,
-            ClientCliBridge.ServerName,
-            cancellationToken);
-        var projectEntry = await McpConfigProbe.HasServerAsync(
-            McpClientPaths.ConfigPath(client, environment, McpScope.Project),
-            client.ConfigFormat,
-            ClientCliBridge.ServerName,
-            cancellationToken);
+        var userConfigPath = McpClientPaths.ConfigPath(client, environment, McpScope.User);
+        var projectConfigPath = McpClientPaths.ConfigPath(client, environment, McpScope.Project);
+        var userEntry = await McpConfigProbe.HasServerAsync(userConfigPath, client.ConfigFormat, ClientCliBridge.ServerName, cancellationToken);
+        var projectEntry = await McpConfigProbe.HasServerAsync(projectConfigPath, client.ConfigFormat, ClientCliBridge.ServerName, cancellationToken);
+        var userCommand = await McpConfigProbe.TryGetServerCommandAsync(userConfigPath, client.ConfigFormat, ClientCliBridge.ServerName, cancellationToken);
+        var projectCommand = await McpConfigProbe.TryGetServerCommandAsync(projectConfigPath, client.ConfigFormat, ClientCliBridge.ServerName, cancellationToken);
+        string? expectedPath = null;
+        try
+        {
+            expectedPath = StableCommandPath.Resolve(environment.HomeDir, Environment.ProcessPath);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        var userStale = userEntry && userCommand is not null && expectedPath is not null && !PathsMatch(userCommand, expectedPath);
+        var projectStale = projectEntry && projectCommand is not null && expectedPath is not null && !PathsMatch(projectCommand, expectedPath);
         var warnings = new List<string>();
         var userWarning = userDecision.Warning;
         if (userWarning is not null)
@@ -132,7 +140,12 @@ public sealed class McpOnboardingService
             _locator.Locate(ClientCliBridge.ServerName) is not null,
             File.Exists(SqueezrPaths.MetaDbPath(environment.WorkspaceRoot)),
             await ProbeHeadlessAsync(client, cancellationToken),
-            warnings);
+            warnings,
+            userCommand,
+            projectCommand,
+            userStale,
+            projectStale,
+            expectedPath);
     }
 
     private async Task<string?> ProbeHeadlessAsync(McpClientDescriptor client, CancellationToken cancellationToken)
@@ -150,9 +163,38 @@ public sealed class McpOnboardingService
         }
         catch (Exception ex) when (ex is ClientCliException or TimeoutException or IOException or InvalidOperationException)
         {
-            return $"unavailable: {ex.Message}";
+            return $"unavailable: {CollapseToOneLine(ex.Message)}";
         }
     }
+
+    private static string CollapseToOneLine(string text)
+    {
+        var collapsed = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return collapsed.Length <= HeadlessMessageCap
+            ? collapsed
+            : string.Concat(collapsed.AsSpan(0, HeadlessMessageCap - 3), "...");
+    }
+
+    private async Task InstallViaCliAsync(
+        McpClientDescriptor client,
+        McpScope scope,
+        string commandPath,
+        bool watch,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _bridge.AddAsync(client, scope, commandPath, watch, cancellationToken);
+        }
+        catch (ClientCliException ex) when (IsAlreadyExistsError(ex))
+        {
+            await _bridge.RemoveAsync(client, cancellationToken);
+            await _bridge.AddAsync(client, scope, commandPath, watch, cancellationToken);
+        }
+    }
+
+    private static bool IsAlreadyExistsError(ClientCliException ex) =>
+        ex.Stderr.Contains("already exists", StringComparison.OrdinalIgnoreCase);
 
     private static async Task WriteEntryAsync(McpClientDescriptor client, string configPath, JsonObject entry, CancellationToken cancellationToken)
     {
@@ -187,4 +229,15 @@ public sealed class McpOnboardingService
     private static string ScopeName(McpScope scope) => scope.ToString().ToLowerInvariant();
 
     private static string MethodName(McpInstallMethod method) => method.ToString().ToLowerInvariant();
+
+    internal static bool PathsMatch(string a, string b)
+    {
+        var normA = NormalizePath(a);
+        var normB = NormalizePath(b);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(normA, normB, comparison);
+    }
+
+    private static string NormalizePath(string path) =>
+        Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }

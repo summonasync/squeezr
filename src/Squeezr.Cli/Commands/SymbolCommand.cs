@@ -78,6 +78,20 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
                     {
                         AnsiConsole.MarkupLine($"  [grey]{hit.Body.EscapeMarkup()}[/]");
                     }
+                    else if (hit.Members.Count > 0)
+                    {
+                        AnsiConsole.MarkupLine("  body: omitted (budget) — members:");
+                        foreach (var member in hit.Members)
+                        {
+                            AnsiConsole.MarkupLine(
+                                $"    [grey]{member.Name.EscapeMarkup()} ({member.Kind.EscapeMarkup()}) :{member.Line}[/]");
+                        }
+
+                        if (hit.MembersOmitted > 0)
+                        {
+                            AnsiConsole.MarkupLine($"    [grey]+{hit.MembersOmitted} more (budget)[/]");
+                        }
+                    }
                     else if (hit.BodyOmitted)
                     {
                         AnsiConsole.MarkupLine("  body: omitted (budget); use --body or raise --max-tokens");
@@ -95,9 +109,9 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
         }
     }
 
-    internal static void WriteBudgetLine(int tokensUsed, bool truncated, string? hint)
+    internal static void WriteBudgetLine(int tokensUsed, bool truncated, TruncationHint? hint)
     {
-        var suffix = truncated && hint is not null ? $" — {hint}" : string.Empty;
+        var suffix = truncated && hint is not null ? $" — {hint.ForCli()}" : string.Empty;
         AnsiConsole.MarkupLine($"[grey]tokens: {tokensUsed}{(truncated ? ", truncated" : string.Empty)}{suffix}[/]");
     }
 }

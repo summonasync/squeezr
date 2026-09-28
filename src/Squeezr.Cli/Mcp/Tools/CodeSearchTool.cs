@@ -22,33 +22,37 @@ public sealed class CodeSearchTool
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
     private readonly ToolResponseCache? _cache;
+    private readonly ClientIdentity _identity;
     private readonly object _resolveLock = new();
     private IEmbeddingProvider? _embeddings;
     private IVectorStore? _vectorStore;
     private bool _resolved;
 
-    public CodeSearchTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache = null)
+    public CodeSearchTool(McpWorkspace workspace, McpToolGate gate, ToolResponseCache? cache, ClientIdentity identity)
     {
         _workspace = workspace;
         _gate = gate;
         _cache = cache;
+        _identity = identity;
     }
 
-    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
+    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,
         string? repo = null,
+        string? prefix = null,
         int? maxTokens = null,
         int? topK = null,
         CancellationToken cancellationToken = default) =>
         _gate.RunAsync(
-            ct => SearchCore(query, repo, maxTokens, topK, ct),
+            ct => SearchCore(query, repo, prefix, maxTokens, topK, ct),
             cancellationToken);
 
     private async Task<object> SearchCore(
         string query,
         string? repo,
+        string? prefix,
         int? maxTokens,
         int? topK,
         CancellationToken cancellationToken)
@@ -58,29 +62,34 @@ public sealed class CodeSearchTool
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(query, repo, maxTokens, topK);
+            var normalizedPrefix = PathPrefix.Normalize(prefix);
+            var rankExclusion = RankExclusion.Load(root);
+            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, rankExclusion);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge);
+                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return hit;
             }
 
             var warnings = new List<string>();
             ResolveRuntime(root, warnings);
+            warnings.AddRange(rankExclusion.Warnings);
+            var coverage = _embeddings is not null && _vectorStore is not null ? LoadCoverage(root) : null;
 
-            var engine = new SearchEngine(root);
-            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens);
-            var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken);
+            var engine = new SearchEngine(root, rankExclusion);
+            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix);
+            var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
 
             warnings.AddRange(response.Warnings);
 
             var freshness = Guard(root, response);
             if (freshness.Refreshed.Count > 0)
             {
-                response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken);
+                response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
                 foreach (var warning in response.Warnings)
                 {
                     if (!warnings.Contains(warning))
@@ -91,19 +100,29 @@ public sealed class CodeSearchTool
             }
 
             var data = response.Matches.Select(m => new SearchHitData(
-                m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet)).ToList();
+                m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet,
+                m.AlsoMatched == 0 ? null : m.AlsoMatched)).ToList();
 
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
+            var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 response.TokensUsed, response.Truncated, data.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge);
+                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                cacheInvalidated: invalidated is not null);
             _cache?.Put("code_search", parameters, envelope);
-            return envelope;
+            return envelope.WithWarning(invalidated);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
             return ToolErrors.From(ex);
         }
+    }
+
+    private static SemanticCoverage? LoadCoverage(string root)
+    {
+        using var meta = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(root));
+        return meta?.GetSemanticCoverage();
     }
 
     private static FreshnessResult Guard(string root, SearchResponse response) =>
@@ -112,8 +131,18 @@ public sealed class CodeSearchTool
             response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
-    private static object Params(string query, string? repo, int? maxTokens, int? topK) =>
-        new { query, repo, maxTokens, topK };
+    private static object Params(string query, string? repo, string? prefix, int? maxTokens, int? topK, RankExclusion rankExclusion) =>
+        new
+        {
+            query,
+            repo,
+            prefix,
+            maxTokens,
+            topK,
+            // cache generations track meta.db only, so without the patterns in the key a config
+            // edit would keep being served from the pre-exclusion envelope
+            rankExclude = rankExclusion.IsActive ? rankExclusion.Patterns : null
+        };
 
     private void ResolveRuntime(string root, List<string> warnings)
     {
@@ -142,5 +171,8 @@ public sealed class CodeSearchTool
         [property: JsonPropertyName("line")] int Line,
         [property: JsonPropertyName("score")] double Score,
         [property: JsonPropertyName("source")] string Source,
-        [property: JsonPropertyName("snippet")] string Snippet);
+        [property: JsonPropertyName("snippet")] string Snippet,
+        [property: JsonPropertyName("alsoMatched")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int? AlsoMatched);
 }

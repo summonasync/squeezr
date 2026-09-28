@@ -37,7 +37,7 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 return 0;
             }
 
-            Render(summary);
+            Render(AnsiConsole.Console, summary);
             return 0;
         }
         catch (WorkspaceException ex)
@@ -67,11 +67,11 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
         return 0;
     }
 
-    private static void Render(QueryStatsSummary summary)
+    public static void Render(IAnsiConsole console, QueryStatsSummary summary)
     {
         if (summary.Records == 0)
         {
-            AnsiConsole.MarkupLine("No query telemetry yet.");
+            console.MarkupLine("No query telemetry yet.");
             return;
         }
 
@@ -89,29 +89,85 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 tool.TruncationRate.ToString("P1", CultureInfo.InvariantCulture));
         }
 
-        AnsiConsole.Write(table);
+        console.Write(table);
 
         var savings = summary.Savings;
-        var ratio = savings.Ratio.ToString("F1", CultureInfo.InvariantCulture);
-        AnsiConsole.MarkupLine(
-            $"Savings: {savings.ActualTokens} actual vs {savings.CounterfactualTokens} counterfactual tokens — " +
-            $"[green]saved {savings.SavedTokens}[/] (×{ratio})");
+        if (savings.BaselineApplies)
+        {
+            var ratio = savings.Ratio.ToString("F1", CultureInfo.InvariantCulture);
+            console.MarkupLine(
+                $"Savings: query cost {savings.ActualTokens} · whole-file baseline {savings.CounterfactualTokens} · " +
+                $"[green]saved {savings.SavedTokens}[/] (×{ratio})");
+        }
+        else
+        {
+            console.MarkupLine(
+                $"Savings: [grey]no whole-file baseline for this usage mix " +
+                $"(query cost {savings.ActualTokens}; the baseline counts whole files read via expand only)[/]");
+        }
+
         if (savings.UnknownFiles > 0)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]{savings.UnknownFiles} expanded file(s) not in the index, excluded from counterfactual.[/]");
         }
 
-        var hitRate = summary.Cache.HitRate.ToString("P1", CultureInfo.InvariantCulture);
-        AnsiConsole.MarkupLine(
-            $"Cache hit-rate: {hitRate} across {summary.Cache.SessionsWithCache} session(s)");
+        var cache = summary.Cache;
+        if (cache.SessionsWithCache > 0)
+        {
+            console.MarkupLine(
+                $"Cache hit-rate: {cache.HitRate.ToString("P1", CultureInfo.InvariantCulture)} " +
+                $"across {cache.SessionsWithCache} session(s)");
+        }
+        else
+        {
+            var invalidation = cache.LastInvalidation is { } lastInvalidated
+                ? $" — the index changed {cache.Invalidations} time(s), last at {lastInvalidated:yyyy-MM-dd HH:mm}"
+                : string.Empty;
+            console.MarkupLine(
+                $"[grey]Cache hit-rate: no hits yet across {summary.Sessions.Count} recorded session(s){invalidation}[/]");
+        }
 
-        AnsiConsole.MarkupLine(
+        var agentTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By agent") };
+        agentTable.AddColumn("Client");
+        agentTable.AddColumn("Version");
+        agentTable.AddColumn("Count");
+        agentTable.AddColumn("Last seen");
+        foreach (var agent in summary.Agents)
+        {
+            agentTable.AddRow(
+                agent.Client.EscapeMarkup(),
+                (agent.ClientVersion ?? "-").EscapeMarkup(),
+                agent.Count.ToString(),
+                $"{agent.LastSeen:yyyy-MM-dd HH:mm}");
+        }
+
+        console.Write(agentTable);
+
+        var sessionTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By session") };
+        sessionTable.AddColumn("Session");
+        sessionTable.AddColumn("Client");
+        sessionTable.AddColumn("Count");
+        sessionTable.AddColumn("Last seen");
+        sessionTable.AddColumn("Top tools");
+        foreach (var session in summary.Sessions)
+        {
+            sessionTable.AddRow(
+                session.SessionId.EscapeMarkup(),
+                session.Client.EscapeMarkup(),
+                session.Count.ToString(),
+                $"{session.LastSeen:yyyy-MM-dd HH:mm}",
+                string.Join(", ", session.TopTools).EscapeMarkup());
+        }
+
+        console.Write(sessionTable);
+
+        console.MarkupLine(
             $"Period: {summary.From:yyyy-MM-dd HH:mm} — {summary.To:yyyy-MM-dd HH:mm} ({summary.Records} records)");
 
         if (summary.Records > RetentionHintThreshold)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]Telemetry holds {summary.Records} records since {summary.From:d} — " +
                 "run 'squeezr stats --reset' to clear.[/]");
         }

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Squeezr.Core.Serialization;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Storage;
 
@@ -13,8 +14,11 @@ public static class WorkspaceRegistry
     private const int WriteLockRetryDelayMs = 25;
     private const int ReadRetryCount = 3;
     private const int ReadRetryDelayMs = 50;
+    private const string BackupSuffix = ".bak";
 
     public static string FilePath => Path.Combine(SqueezrHome.Resolve(), SqueezrPaths.RegistryFileName);
+
+    public static string BackupFilePath => FilePath + BackupSuffix;
 
     public static IReadOnlyList<WorkspaceRegistryEntry> Load()
     {
@@ -25,15 +29,18 @@ public static class WorkspaceRegistry
             {
                 if (!File.Exists(path))
                 {
-                    return [];
+                    return LoadBackupOrRebuild(path);
                 }
 
-                return JsonSerializer.Deserialize<List<WorkspaceRegistryEntry>>(File.ReadAllText(path), SqueezrJson.FileOptions)
-                       ?? [];
-            }
-            catch (JsonException)
-            {
-                return [];
+                try
+                {
+                    return JsonSerializer.Deserialize<List<WorkspaceRegistryEntry>>(File.ReadAllText(path), SqueezrJson.FileOptions)
+                           ?? [];
+                }
+                catch (JsonException)
+                {
+                    return LoadBackupOrRebuild(path);
+                }
             }
             catch (IOException) when (attempt < ReadRetryCount)
             {
@@ -160,9 +167,114 @@ public static class WorkspaceRegistry
     {
         var path = FilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        RotateBackup(path);
+        OverwriteWithoutRotation(path, entries);
+    }
+
+    private static void RotateBackup(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var backupPath = path + BackupSuffix;
+        var tempPath = $"{backupPath}.{Guid.NewGuid():N}.tmp";
+        File.Copy(path, tempPath);
+        File.Move(tempPath, backupPath, overwrite: true);
+    }
+
+    private static void OverwriteWithoutRotation(string path, IReadOnlyList<WorkspaceRegistryEntry> entries)
+    {
         var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
         File.WriteAllText(tempPath, JsonSerializer.Serialize(entries, SqueezrJson.FileOptions));
         File.Move(tempPath, path, overwrite: true);
+    }
+
+    private static IReadOnlyList<WorkspaceRegistryEntry> LoadBackupOrRebuild(string path)
+    {
+        var backupPath = path + BackupSuffix;
+        if (File.Exists(backupPath)
+            && TryReadEntries(backupPath, out var fromBackup))
+        {
+            OverwriteWithoutRotation(path, fromBackup);
+            return fromBackup;
+        }
+
+        return RebuildFromStoreDirs(path);
+    }
+
+    private static bool TryReadEntries(string path, out IReadOnlyList<WorkspaceRegistryEntry> entries)
+    {
+        try
+        {
+            entries = JsonSerializer.Deserialize<List<WorkspaceRegistryEntry>>(File.ReadAllText(path), SqueezrJson.FileOptions)
+                      ?? [];
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            entries = [];
+            return false;
+        }
+    }
+
+    private static IReadOnlyList<WorkspaceRegistryEntry> RebuildFromStoreDirs(string registryPath)
+    {
+        var workspacesDir = SqueezrHome.WorkspacesDir;
+        string[] storeDirs;
+        try
+        {
+            storeDirs = Directory.Exists(workspacesDir)
+                ? Directory.EnumerateDirectories(workspacesDir).ToArray()
+                : [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+
+        var entries = new List<WorkspaceRegistryEntry>();
+        foreach (var storeDir in storeDirs)
+        {
+            var manifestPath = Path.Combine(storeDir, SqueezrPaths.StoreManifestFileName);
+            var manifest = TryReadStoreManifest(manifestPath);
+            if (manifest?.RootPath is not { } rootPath || string.IsNullOrWhiteSpace(manifest.Name))
+            {
+                continue;
+            }
+
+            var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(rootPath);
+            var storeKey = WorkspaceStoreKeys.Create(manifest.Name, canonicalRoot);
+            if (!string.Equals(Path.GetFileName(storeDir), storeKey, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var timestamp = File.GetLastWriteTimeUtc(manifestPath);
+            entries.Add(new WorkspaceRegistryEntry(manifest.Name, canonicalRoot, storeKey, timestamp, timestamp));
+        }
+
+        if (entries.Count == 0)
+        {
+            return [];
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(registryPath)!);
+        OverwriteWithoutRotation(registryPath, entries);
+        return entries;
+    }
+
+    private static WorkspaceManifest? TryReadStoreManifest(string manifestPath)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<WorkspaceManifest>(File.ReadAllText(manifestPath), SqueezrJson.FileOptions);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static void InvalidateCacheIfHomeChanged()

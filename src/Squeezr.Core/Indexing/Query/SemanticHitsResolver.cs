@@ -7,12 +7,18 @@ public static class SemanticHitsResolver
 {
     private const int VectorTopK = 20;
 
+    // A scoped query drops out-of-scope hits post-hoc, so the vector query asks for more than
+    // VectorTopK to still fill the semantic arm; bounded, unlike a fileId must-match filter
+    // that would put the whole allowed set into the Qdrant payload.
+    private const int ScopedVectorTopK = VectorTopK * 4;
+
     public static async Task<List<(string Key, SearchMatch Match)>> Resolve(
         string workspaceRoot,
         SearchQuery query,
         IEmbeddingProvider embeddings,
         IVectorStore vectorStore,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlySet<uint>? fileScope = null)
     {
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
 
@@ -34,12 +40,21 @@ public static class SemanticHitsResolver
             return [];
         }
 
-        var hits = await vectorStore.SearchAsync(vectors[0], VectorTopK, repoId, ct);
+        var hits = await vectorStore.SearchAsync(
+            vectors[0],
+            fileScope is null ? VectorTopK : ScopedVectorTopK,
+            repoId,
+            ct);
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
 
         var result = new List<(string Key, SearchMatch Match)>();
         foreach (var hit in hits)
         {
+            if (fileScope is not null && !fileScope.Contains(hit.FileId))
+            {
+                continue;
+            }
+
             if (!reposById.TryGetValue(hit.RepoId, out var repo))
             {
                 continue;
@@ -64,6 +79,11 @@ public static class SemanticHitsResolver
                 {
                     Source = "semantic"
                 }));
+
+            if (result.Count == VectorTopK)
+            {
+                break;
+            }
         }
 
         return result;

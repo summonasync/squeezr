@@ -18,7 +18,7 @@ public class TuiIndexRunnerTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 3);
         TuiTestHarness.PushMenuChoice(console, 0);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -47,7 +47,7 @@ public class TuiIndexRunnerTests
             var console = TuiTestHarness.InteractiveConsole();
             TuiTestHarness.PushMenuChoice(console, 3);
             TuiTestHarness.PushMenuChoice(console, 0);
-            TuiTestHarness.PushMenuChoice(console, 7);
+            TuiTestHarness.PushMenuChoice(console, 9);
 
             var code = await TuiApp.RunAsync(console, workspace);
 
@@ -72,7 +72,7 @@ public class TuiIndexRunnerTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 3);
         TuiTestHarness.PushMenuChoice(console, 0);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -89,7 +89,7 @@ public class TuiIndexRunnerTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 3);
         TuiTestHarness.PushMenuChoice(console, 0);
-        TuiTestHarness.PushMenuChoice(console, 7);
+        TuiTestHarness.PushMenuChoice(console, 9);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

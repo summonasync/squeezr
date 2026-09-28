@@ -12,7 +12,11 @@ public interface IVectorStore
 
     Task<long> CountAsync(CancellationToken ct);
 
+    Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct);
+
     Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct);
+
+    Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct);
 
     Task DeleteCollectionAsync(CancellationToken ct);
 }

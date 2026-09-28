@@ -1,5 +1,6 @@
 using Spectre.Console;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
@@ -27,6 +28,11 @@ public static class TuiSearchFlow
         IEmbeddingProvider? embeddings = null;
         IVectorStore? vectorStore = null;
         var runtimeResolved = false;
+        var rankExclusion = RankExclusion.Load(workspaceRoot);
+        foreach (var warning in rankExclusion.Warnings)
+        {
+            console.MarkupLine($"[yellow]warning:[/] {warning.EscapeMarkup()}");
+        }
 
         while (true)
         {
@@ -51,7 +57,7 @@ public static class TuiSearchFlow
             SearchResponse response;
             try
             {
-                response = await new SearchEngine(workspaceRoot).SearchHybridAsync(
+                response = await new SearchEngine(workspaceRoot, rankExclusion).SearchHybridAsync(
                     new SearchQuery(
                         query.Trim(),
                         Regex: false,
@@ -163,8 +169,13 @@ public static class TuiSearchFlow
         };
     }
 
-    private static string HitLabel(SearchMatch match) =>
-        $"[{match.Source}] {match.Repo}/{match.Path}:{match.Line}  {match.Snippet}".EscapeMarkup();
+    private static string HitLabel(SearchMatch match)
+    {
+        var label = $"[{match.Source}] {match.Repo}/{match.Path}:{match.Line}  {match.Snippet}";
+        return match.CollapseNote() is { } note
+            ? $"{label}  ({note})".EscapeMarkup()
+            : label.EscapeMarkup();
+    }
 
     private enum HitAction
     {

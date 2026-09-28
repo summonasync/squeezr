@@ -215,6 +215,26 @@ public sealed class McpOnboardingServiceTests
     }
 
     [Fact]
+    public async Task Doctor_ClientCliFailsWithMultilineStderr_HeadlessStatusIsSingleLineWithinCap()
+    {
+        var (service, environment, _, binDir) = NewService();
+        var stderr = "Traceback (most recent call last):\n  File \"main.py\", line 42, in <module>\nRuntimeError: boom\n" + new string('x', 400);
+        FakeCli.Install(binDir, "claude", stderr: stderr, exitCode: 1);
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+
+        var status = diagnostics.HeadlessStatus;
+        status.ShouldNotBeNull();
+        status.ShouldNotContain('\n');
+        status.ShouldNotContain('\r');
+        status.Length.ShouldBeLessThanOrEqualTo("unavailable: ".Length + 200);
+        status.ShouldStartWith("unavailable: Client CLI 'claude' exited with code 1:");
+        status.ShouldContain("RuntimeError: boom");
+        status.ShouldEndWith("...");
+    }
+
+    [Fact]
     public async Task Doctor_CodexProjectEntry_WarnsAboutTrustedProjects()
     {
         var (service, environment, _, binDir) = NewService();
@@ -257,6 +277,143 @@ public sealed class McpOnboardingServiceTests
         await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
 
         File.Exists(Path.Combine(home, ".kimi-code", "mcp.json")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Install_CliFirstClientWithStableLink_BridgeReceivesStablePath()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var binDir = TestDirs.NewTempDir();
+        var versioned = Path.Combine(home, "apps", "squeezr", "v1.0.3", "squeezr");
+        Directory.CreateDirectory(Path.GetDirectoryName(versioned)!);
+        File.WriteAllText(versioned, "binary");
+        var stableDir = Path.Combine(home, ".local", "bin");
+        Directory.CreateDirectory(stableDir);
+        File.CreateSymbolicLink(Path.Combine(stableDir, "squeezr"), versioned);
+        var stablePath = StableCommandPath.Resolve(home, versioned);
+        var environment = new McpOnboardingEnvironment(home, workspace, stablePath, null);
+        var service = new McpOnboardingService(new ClientCliLocator(binDir));
+        var fake = FakeCli.Install(binDir, "claude");
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var result = await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        result.Method.ShouldBe("cli");
+        fake.ReadCapturedArguments().ShouldContain(Path.Combine(stableDir, "squeezr"));
+        fake.ReadCapturedArguments().ShouldNotContain(versioned);
+    }
+
+    [Fact]
+    public async Task Install_WriterWithStableLink_ConfigContainsStablePath()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var versioned = Path.Combine(home, "apps", "squeezr", "v1.0.3", "squeezr");
+        Directory.CreateDirectory(Path.GetDirectoryName(versioned)!);
+        File.WriteAllText(versioned, "binary");
+        var stableDir = Path.Combine(home, ".local", "bin");
+        Directory.CreateDirectory(stableDir);
+        File.CreateSymbolicLink(Path.Combine(stableDir, "squeezr"), versioned);
+        var stablePath = StableCommandPath.Resolve(home, versioned);
+        var environment = new McpOnboardingEnvironment(home, workspace, stablePath, null);
+        var service = new McpOnboardingService(new ClientCliLocator(string.Empty));
+        var client = McpClientRegistry.Get(McpClientId.Kimi);
+
+        await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        var configPath = Path.Combine(home, ".kimi-code", "mcp.json");
+        var config = File.ReadAllText(configPath);
+        config.ShouldContain(Path.Combine(stableDir, "squeezr"));
+        config.ShouldNotContain(versioned);
+    }
+
+    [Fact]
+    public async Task Install_CliClientWhenAlreadyExists_RemovesAndRetriesSuccessfully()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 1, Stdout: "", Stderr: "MCP server squeezr already exists in user config"),
+            (ExitCode: 0, Stdout: "", Stderr: ""),
+            (ExitCode: 0, Stdout: "", Stderr: ""));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var result = await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        result.Method.ShouldBe("cli");
+        result.Error.ShouldBeNull();
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(3);
+        invocations[0].ShouldContain("add");
+        invocations[1].ShouldBe(["mcp", "remove", "squeezr"]);
+        invocations[2].ShouldContain("add");
+    }
+
+    [Fact]
+    public async Task Install_CliClientWhenAddFailsWithUnrelatedError_DoesNotRetry()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 1, Stdout: "", Stderr: "Error: invalid scope value"));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var exception = await Should.ThrowAsync<ClientCliException>(() =>
+            service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None));
+
+        exception.Stderr.ShouldContain("invalid scope");
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(1);
+        invocations[0].ShouldContain("add");
+    }
+
+    [Fact]
+    public async Task Install_CliClientFreshInstall_NoRemoveCall()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 0, Stdout: "", Stderr: ""));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var result = await service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None);
+
+        result.Method.ShouldBe("cli");
+        result.Error.ShouldBeNull();
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(1);
+        invocations[0].ShouldContain("add");
+        invocations[0].ShouldNotContain("remove");
+    }
+
+    [Fact]
+    public async Task Install_CliClientAlreadyExistsThenSecondAddFails_PropagatesOriginalException()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var (service, environment, _, binDir) = NewService();
+        var fake = StatefulFakeCli.Install(binDir, "claude",
+            (ExitCode: 1, Stdout: "", Stderr: "MCP server squeezr already exists in user config"),
+            (ExitCode: 0, Stdout: "", Stderr: ""),
+            (ExitCode: 2, Stdout: "", Stderr: "Error: unexpected failure on retry"));
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var exception = await Should.ThrowAsync<ClientCliException>(() =>
+            service.InstallAsync(client, McpScope.User, watch: true, writeInstructions: false, environment, CancellationToken.None));
+
+        exception.ExitCode.ShouldBe(2);
+        exception.Stderr.ShouldContain("unexpected failure on retry");
+        var invocations = fake.ReadAllInvocations();
+        invocations.Count.ShouldBe(3);
+        invocations[1].ShouldBe(["mcp", "remove", "squeezr"]);
     }
 
     private static (McpOnboardingService Service, McpOnboardingEnvironment Environment, string Workspace, string BinDir) NewService()

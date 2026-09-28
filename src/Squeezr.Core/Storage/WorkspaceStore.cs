@@ -1,3 +1,4 @@
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra;
 using Squeezr.Core.Workspace;
 
@@ -87,37 +88,28 @@ public static class WorkspaceStore
         }
     }
 
-    private static bool HasLegacyLayout(string directory) =>
-        File.Exists(Path.Combine(directory, SqueezrPaths.ManifestFileName))
-        || IsLegacyStoreDir(Path.Combine(directory, SqueezrPaths.StoreDirName));
-
-    // The central store lives at <home>/.squeezr and is shaped exactly like a legacy
-    // in-project store dir, so the upward walk used to reach the home directory, call it
-    // legacy and migrate it - moving the store's contents away and deleting it. Two
-    // guards, because the failure mode is silent data loss: the store this process
-    // resolves, and anything else carrying a registry or a workspaces dir, is not legacy.
-    private static bool IsLegacyStoreDir(string candidate)
+    private static bool HasLegacyLayout(string directory)
     {
-        if (!Directory.Exists(candidate))
+        if (File.Exists(Path.Combine(directory, SqueezrPaths.ManifestFileName)))
         {
-            return false;
+            return true;
         }
 
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (string.Equals(
-                WorkspaceCanonicalPath.Canonicalize(candidate),
-                WorkspaceCanonicalPath.Canonicalize(SqueezrHome.Resolve()),
-                comparison))
-        {
-            return false;
-        }
-
-        return !File.Exists(Path.Combine(candidate, SqueezrPaths.RegistryFileName))
-            && !Directory.Exists(Path.Combine(candidate, SqueezrPaths.WorkspacesDirName));
+        var storeDir = Path.Combine(directory, SqueezrPaths.StoreDirName);
+        return Directory.Exists(storeDir) && !SqueezrHome.IsCentralStore(storeDir) && !LooksLikeCentralStore(storeDir);
     }
+
+    // A store dir under some other home (a foreign SQUEEZR_HOME, a stale profile) is shaped
+    // exactly like a legacy in-project store; anything carrying a registry or a workspaces
+    // dir is a central store and must never be migrated away.
+    private static bool LooksLikeCentralStore(string storeDir) =>
+        File.Exists(Path.Combine(storeDir, SqueezrPaths.RegistryFileName))
+        || Directory.Exists(Path.Combine(storeDir, SqueezrPaths.WorkspacesDirName));
 
     private static WorkspaceRegistryEntry MigrateLegacyWorkspace(string root)
     {
+        RefuseCentralStoreMigration(root);
+
         var name = ResolveLegacyName(root);
         var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
         var entry = new WorkspaceRegistryEntry(
@@ -153,8 +145,20 @@ public static class WorkspaceStore
         return new DirectoryInfo(root).Name;
     }
 
+    private static void RefuseCentralStoreMigration(string root)
+    {
+        var storeDir = Path.Combine(root, SqueezrPaths.StoreDirName);
+        if (SqueezrHome.IsCentralStore(storeDir))
+        {
+            throw new WorkspaceException(
+                $"Refusing to migrate '{storeDir}': it is the central squeezr store, not a legacy in-project store.");
+        }
+    }
+
     private static void MoveLegacyContent(string root, string storeKey)
     {
+        RefuseCentralStoreMigration(root);
+
         var storeDir = StoreDirFor(storeKey);
         Directory.CreateDirectory(storeDir);
 
@@ -191,6 +195,38 @@ public static class WorkspaceStore
         if (ServicesComposeFile.IsSqueezrGenerated(composePath))
         {
             File.Delete(composePath);
+        }
+
+        NormalizeMigratedConfig(root);
+    }
+
+    private static void NormalizeMigratedConfig(string root)
+    {
+        SqueezrConfig config;
+        try
+        {
+            config = ConfigFile.Load(root);
+        }
+        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        var ignore = config.Indexing.Ignore;
+        var missingDefaults = SqueezrConfig.CreateDefault().Indexing.Ignore
+            .Where(glob => !ignore.Contains(glob, StringComparer.Ordinal));
+
+        // The save round-trips the loaded document (never CreateDefault), so explicit
+        // legacy settings survive; unknown keys such as the removed gitAware flag do not.
+        try
+        {
+            ConfigFile.Save(root, config with
+            {
+                Indexing = config.Indexing with { Ignore = [.. ignore, .. missingDefaults] }
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

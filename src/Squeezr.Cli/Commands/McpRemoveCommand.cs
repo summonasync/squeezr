@@ -27,6 +27,9 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
         [CommandOption("--scope")]
         public string? Scope { get; set; }
 
+        [CommandOption("--project")]
+        public bool Project { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -44,6 +47,11 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
         {
             Console.Error.WriteLine($"error: {ex.Message}");
             return 1;
+        }
+
+        if (settings.Client is not { Length: > 0 } && settings.Project)
+        {
+            return StripProjectBlockOnly(environment, settings.Json);
         }
 
         IReadOnlyList<McpClientDescriptor> clients;
@@ -81,8 +89,19 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
             }
         }
 
+        IReadOnlyList<string>? stripped = null;
+        if (settings.Project)
+        {
+            stripped = ProjectInstructionsWriter.Strip(environment.WorkspaceRoot);
+        }
+
         if (settings.Json)
         {
+            if (stripped is not null)
+            {
+                results.Add(new McpRemoveResult(
+                    "project", "project", "writer", environment.WorkspaceRoot, stripped.Count > 0, null, null));
+            }
             JsonOutput.Write(results);
         }
         else
@@ -92,12 +111,33 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
                 AnsiConsole.MarkupLine(
                     $"[grey]detected: {string.Join(", ", clients.Select(client => client.Id.ToString().ToLowerInvariant()))}[/]");
             }
-            Render(results);
+            Render(results, stripped);
         }
         return results.Any(result => result.Error is not null) ? 1 : 0;
     }
 
-    private static void Render(IReadOnlyList<McpRemoveResult> results)
+    private static int StripProjectBlockOnly(McpOnboardingEnvironment environment, bool json)
+    {
+        var stripped = ProjectInstructionsWriter.Strip(environment.WorkspaceRoot);
+        if (json)
+        {
+            JsonOutput.Write(new[]
+            {
+                new McpRemoveResult("project", "project", "writer", environment.WorkspaceRoot, stripped.Count > 0, null, null),
+            });
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[green]✓[/] project block removed — {stripped.Count} file(s)");
+            foreach (var path in stripped)
+            {
+                AnsiConsole.MarkupLine($"  [grey]{Markup.Escape(path)}[/]");
+            }
+        }
+        return 0;
+    }
+
+    private static void Render(IReadOnlyList<McpRemoveResult> results, IReadOnlyList<string>? stripped)
     {
         foreach (var result in results)
         {
@@ -116,6 +156,14 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
             if (result.InstructionsRemoved)
             {
                 AnsiConsole.MarkupLine("  [green]-[/] instructions block removed");
+            }
+        }
+        if (stripped is { Count: > 0 })
+        {
+            AnsiConsole.MarkupLine($"[green]-[/] project block removed — {stripped.Count} file(s)");
+            foreach (var path in stripped)
+            {
+                AnsiConsole.MarkupLine($"  [grey]{Markup.Escape(path)}[/]");
             }
         }
     }

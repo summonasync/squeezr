@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Shouldly;
 using Squeezr.Cli.Mcp;
 using Squeezr.Core.Indexing;
@@ -55,11 +56,7 @@ public sealed class ToolResponseCacheTests
     [Fact]
     public void TryGet_AfterMetaDbMtimeChange_Misses()
     {
-        var root = TestDirs.NewTempDir();
-        var metaDbPath = SqueezrPaths.MetaDbPath(root);
-        Directory.CreateDirectory(Path.GetDirectoryName(metaDbPath)!);
-        File.WriteAllText(metaDbPath, "v1");
-        var cache = new ToolResponseCache(root);
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
 
         cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "envelope");
         var before = cache.Generation;
@@ -67,6 +64,88 @@ public sealed class ToolResponseCacheTests
 
         cache.Generation.ShouldNotBe(before);
         cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void TryGet_AfterGenerationChange_DropsDeadEntriesAndArmsOneWarning()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "first");
+        cache.Put("repo_map", MapParams("demo"), "second");
+        cache.Count.ShouldBe(2);
+
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow.AddSeconds(30));
+
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+        cache.Count.ShouldBe(0);
+        cache.TakeInvalidationWarning().ShouldBe(ToolResponseCache.InvalidationWarning);
+        cache.TakeInvalidationWarning().ShouldBeNull();
+    }
+
+    [Fact]
+    public void Put_SameKeyOnANewGeneration_HoldsOneEntryNotTwo()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "v1");
+
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow.AddSeconds(30));
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "v2");
+
+        cache.Count.ShouldBe(1);
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out var live).ShouldBeTrue();
+        live.ShouldBe("v2");
+    }
+
+    [Fact]
+    public void TakeInvalidationWarning_MetaDbDisappears_ArmsAsWell()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "first");
+
+        File.Delete(metaDbPath);
+
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+        cache.Count.ShouldBe(0);
+        cache.TakeInvalidationWarning().ShouldBe(ToolResponseCache.InvalidationWarning);
+    }
+
+    [Fact]
+    public void TakeInvalidationWarning_GenerationChangeOverAnEmptyCache_StaysQuiet()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow.AddSeconds(30));
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+
+        cache.TakeInvalidationWarning().ShouldBeNull();
+    }
+
+    [Fact]
+    public void TakeInvalidationWarning_PlainMissOnALiveGeneration_StaysQuiet()
+    {
+        var (cache, _) = NewCacheWithMetaDb();
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "first");
+
+        cache.TryGet("code_search", SearchParams("Sub", "demo", 2000, 5), out _).ShouldBeFalse();
+
+        cache.TakeInvalidationWarning().ShouldBeNull();
+        cache.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void TakeInvalidationWarning_NextGenerationChange_ArmsAgain()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "first");
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow.AddSeconds(30));
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+        cache.TakeInvalidationWarning().ShouldNotBeNull();
+
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "second");
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow.AddSeconds(90));
+
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+        cache.TakeInvalidationWarning().ShouldBe(ToolResponseCache.InvalidationWarning);
     }
 
     [Fact]
@@ -106,10 +185,56 @@ public sealed class ToolResponseCacheTests
         entries[1].CacheHit.ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task McpIdenticalCodeSearchAcrossAGenerationBump_CarriesTheMarkerOnce()
+    {
+        var root = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(root);
+
+        Warnings(await SearchAsync(harness)).ShouldNotContain(ToolResponseCache.InvalidationWarning);
+
+        File.SetLastWriteTimeUtc(SqueezrPaths.MetaDbPath(root), DateTime.UtcNow.AddSeconds(30));
+
+        Warnings(await SearchAsync(harness)).ShouldContain(ToolResponseCache.InvalidationWarning);
+        Warnings(await SearchAsync(harness)).ShouldNotContain(ToolResponseCache.InvalidationWarning);
+
+        var entries = QueryTelemetry.ReadAll(root);
+        entries.Count.ShouldBe(3);
+        entries[0].CacheInvalidated.ShouldBeFalse();
+        entries[1].CacheInvalidated.ShouldBeTrue();
+        entries[2].CacheInvalidated.ShouldBeFalse();
+        entries[2].CacheHit.ShouldBeTrue();
+    }
+
+    private static async Task<JsonElement> SearchAsync(McpTestHarness harness)
+    {
+        var result = await harness.Client.CallToolAsync(
+            "code_search",
+            new Dictionary<string, object?> { ["query"] = "Add" },
+            cancellationToken: CancellationToken.None);
+        result.IsError.ShouldNotBe(true);
+        return JsonDocument.Parse(result.Content.ShouldHaveSingleItem().ToString()!).RootElement.Clone();
+    }
+
+    private static IReadOnlyList<string> Warnings(JsonElement envelope) =>
+        envelope.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!).ToList();
+
     private static ToolResponseCache NewCache() => new(TestDirs.NewTempDir());
+
+    private static (ToolResponseCache Cache, string MetaDbPath) NewCacheWithMetaDb()
+    {
+        var root = TestDirs.NewTempDir();
+        var metaDbPath = SqueezrPaths.MetaDbPath(root);
+        Directory.CreateDirectory(Path.GetDirectoryName(metaDbPath)!);
+        File.WriteAllText(metaDbPath, "v1");
+        return (new ToolResponseCache(root), metaDbPath);
+    }
 
     private static object SearchParams(string query, string? repo, int? maxTokens, int? topK) =>
         new { query, repo, maxTokens, topK };
+
+    private static object MapParams(string repo) =>
+        new { repo, depth = (int?)null, maxTokens = (int?)null };
 
     private static string NewIndexedWorkspace()
     {

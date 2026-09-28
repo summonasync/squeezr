@@ -24,6 +24,9 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         [CommandOption("--client")]
         public string[]? Client { get; set; }
 
+        [CommandOption("--all")]
+        public bool All { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -46,7 +49,12 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         IReadOnlyList<McpClientDescriptor> clients;
         try
         {
-            clients = await McpCommandSupport.ResolveClientsAsync(settings.Client, interactive, environment, _locator, cancellationToken);
+            var clientValues = settings.Client;
+            if (settings.All)
+            {
+                clientValues = clientValues is { Length: > 0 } ? [.. clientValues, "all"] : ["all"];
+            }
+            clients = await McpCommandSupport.ResolveClientsAsync(clientValues, interactive, environment, _locator, cancellationToken);
         }
         catch (McpUsageException ex)
         {
@@ -84,10 +92,32 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
             AnsiConsole.MarkupLine(
                 $"  squeezr in PATH: {Flag(entry.SqueezrInPath)}   workspace indexed: {Flag(entry.WorkspaceIndexed)}" +
                 $"   headless: {Markup.Escape(entry.HeadlessStatus ?? "n/a")}");
+            RenderStale(entry);
             foreach (var warning in entry.Warnings)
             {
                 AnsiConsole.MarkupLine($"  [yellow]warning:[/] {Markup.Escape(warning)}");
             }
+        }
+    }
+
+    private static void RenderStale(McpClientDiagnostics entry)
+    {
+        if (!entry.UserStale && !entry.ProjectStale)
+        {
+            return;
+        }
+        var expected = entry.ExpectedCommand ?? "";
+        if (entry.UserStale)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]stale (user):[/] registered={Markup.Escape(entry.UserCommand ?? "")} → expected={Markup.Escape(expected)}");
+            AnsiConsole.MarkupLine($"  [yellow]repair:[/] squeezr mcp install --client {Markup.Escape(entry.Client)} --yes");
+        }
+        if (entry.ProjectStale)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]stale (project):[/] registered={Markup.Escape(entry.ProjectCommand ?? "")} → expected={Markup.Escape(expected)}");
+            AnsiConsole.MarkupLine($"  [yellow]repair:[/] squeezr mcp install --client {Markup.Escape(entry.Client)} --yes");
         }
     }
 

@@ -1,13 +1,15 @@
 using System.IO.Pipelines;
-using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp;
@@ -25,11 +27,32 @@ public static class McpServerHost
             Console.Error.WriteLine($"workspace root resolved via CLAUDE_PROJECT_DIR: {resolution.RootPath}");
         }
 
+        WarnIfSessionOutsideWorkspace(resolution.RootPath, startDirectory, Console.Error);
         Console.Error.WriteLine($"squeezr serve: workspace '{resolution.RootPath}'");
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        StaleRegistrationNudge.TryWrite(Console.Error, homeDir, Environment.ProcessPath);
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
         await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, ct, watch, events);
         await forwardTask;
+    }
+
+    internal static void WarnIfSessionOutsideWorkspace(string workspaceRoot, string sessionDirectory, TextWriter stderr)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var root = WorkspaceCanonicalPath.Canonicalize(workspaceRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var session = WorkspaceCanonicalPath.Canonicalize(sessionDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(session, root, comparison)
+            || session.StartsWith(root + Path.DirectorySeparatorChar, comparison))
+        {
+            return;
+        }
+
+        stderr.WriteLine(
+            $"warning: session directory '{session}' is outside the workspace root '{root}'; " +
+            "tools serve that workspace's index, not the current project");
     }
 
     private static async Task ForwardStdinAsync(PipeWriter writer, CancellationToken ct)
@@ -60,6 +83,7 @@ public static class McpServerHost
 
         var gate = new McpToolGate();
         var cache = new ToolResponseCache(workspaceRoot);
+        var identity = new ClientIdentity();
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.None));
         services.AddSingleton(workspace);
@@ -76,14 +100,15 @@ public static class McpServerHost
                     "Squeezr: local code index for AI agents. Hybrid exact/semantic search over indexed repositories.";
             })
             .WithStreamServerTransport(input, output)
-            .WithTools(new CodeSearchTool(workspace, gate, cache))
-            .WithTools(new IndexStatusTool(workspace, gate))
-            .WithTools(new SymbolLookupTool(workspace, gate, cache))
-            .WithTools(new FindReferencesTool(workspace, gate, cache))
-            .WithTools(new RepoMapTool(workspace, gate, cache))
-            .WithTools(new ExpandSpanTool(workspace, gate));
+            .WithTools(new CodeSearchTool(workspace, gate, cache, identity))
+            .WithTools(new IndexStatusTool(workspace, gate, identity))
+            .WithTools(new SymbolLookupTool(workspace, gate, cache, identity))
+            .WithTools(new FindReferencesTool(workspace, gate, cache, identity))
+            .WithTools(new RepoMapTool(workspace, gate, cache, identity))
+            .WithTools(new ExpandSpanTool(workspace, gate, identity));
 
         await using var provider = services.BuildServiceProvider();
+        identity.Attach(provider.GetRequiredService<McpServer>());
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();
         await server.StartAsync(ct);
         var watcher = await TryStartWatchEngineAsync(workspace, watch, ct, events);
@@ -162,7 +187,5 @@ public static class McpServerHost
         }
     }
 
-    private static string VersionString() =>
-        typeof(McpServerHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? "0.0.0";
+    private static string VersionString() => AppVersion.Current;
 }

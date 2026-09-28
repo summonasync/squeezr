@@ -16,7 +16,7 @@ using Squeezr.Tests.Mcp;
 
 namespace Squeezr.Tests.Indexing;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public class RankExcludeTests
 {
     private const string Marker = "rankneedle";

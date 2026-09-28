@@ -22,6 +22,7 @@ public enum SymbolKind
 {
     Class,
     Method,
+    Constructor,
     Function,
     Property,
     Field,

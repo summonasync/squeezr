@@ -2,7 +2,6 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Commands;
 using Squeezr.Cli.Tui;
-using System.Reflection;
 
 namespace Squeezr.Cli;
 
@@ -22,8 +21,7 @@ public static class CliApplication
         app.Configure(config =>
         {
             config.SetApplicationName("squeezr");
-            config.SetApplicationVersion(typeof(CliApplication).Assembly
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0");
+            config.SetApplicationVersion(AppVersion.Current);
             config.AddCommand<InitCommand>("init")
                 .WithDescription("Create a new Squeezr workspace in the current directory");
             config.AddCommand<AddCommand>("add")
@@ -31,7 +29,9 @@ public static class CliApplication
             config.AddCommand<StatusCommand>("status")
                 .WithDescription("Show workspace and index status");
             config.AddCommand<StatsCommand>("stats")
-                .WithDescription("Show query telemetry: per-tool stats, token savings, cache hit-rate");
+                .WithDescription("Show query telemetry: per-tool stats, token savings (whole-file baseline of expanded files vs actual tokens), cache hit-rate");
+            config.AddCommand<UsageCommand>("usage")
+                .WithDescription("Show query telemetry rollup across all registered workspaces");
             config.AddCommand<IndexCommand>("index")
                 .WithDescription("Index workspace repositories into the trigram index");
             config.AddCommand<SearchCommand>("search")
@@ -78,6 +78,14 @@ public static class CliApplication
                 workspace.SetDescription("Inspect the current workspace");
                 workspace.AddCommand<WorkspaceListCommand>("list")
                     .WithDescription("List registered workspaces");
+                workspace.AddCommand<WorkspaceRepairCommand>("repair")
+                    .WithDescription("Adopt orphaned workspace stores back into the registry (never deletes anything)");
+            });
+            config.AddBranch("vectors", vectors =>
+            {
+                vectors.SetDescription("Keep the Qdrant collection in step with the index");
+                vectors.AddCommand<VectorsReconcileCommand>("reconcile")
+                    .WithDescription("Drop collection points no live chunk hash maps to — dry run unless --apply is given");
             });
             config.AddBranch("hook", hook =>
             {

@@ -85,7 +85,7 @@ public sealed class ExpandCommand : Command<ExpandCommand.Settings>
         }
         catch (WorkspaceException ex)
         {
-            return CommandError.Report(ex, settings.Json);
+            return CommandError.Report(ex, settings.Json, ex.ForCli());
         }
     }
 }

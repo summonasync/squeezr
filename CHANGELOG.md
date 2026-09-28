@@ -33,6 +33,76 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 - README, AGENTS.md: Windows packaging section (prerequisite, build command, flags, SmartScreen caveat for the unsigned package, `squeezr fleet stop` before reinstalling over live daemons), `installer/` added to the structure tree, and the `install-release.sh` one-liner marked Linux-only
 - README now invokes the PowerShell scripts as `powershell -File …` instead of `pwsh -File …`: they declare `#Requires -Version 5.1`, stock Windows PowerShell is enough, and pwsh 7 is not present on every Windows box
 
+## [1.0.7] — 2026-09-28
+
+The dogfood-wave release — the whole v1.0.6 Overmind field report became three features: 058 agent-experience clarity, 059 Qdrant point hygiene, 060 doc-noise scoping. Full suite 1132 → 1288.
+
+### Added (060, doc-noise scoping)
+- `repo_map` and `code_search` take a `prefix` parameter (MCP) / `--prefix` (CLI): the map renders the subtree only (structurally unchanged depth), search filters **both** hybrid arms through one general FileScope predicate→fileId seam; an unknown prefix errors with the 5 nearest directories; absent prefix is byte-identical to today (regression-pinned; live: `map --prefix src/` answers non-truncated at 3821 tokens where unscoped depth-2 burned the 4000 budget and truncated)
+- `indexing.rankExclude` workspace config: globbed trees stay indexed and fully navigable (expand/refs/symbol untouched) but drop out of `code_search` ranking on both arms; malformed globs warn and skip the pattern; empty config is byte-identical; active patterns are listed in `index_status` warnings and folded into the `code_search` cache key (a config edit does not bump meta.db mtime — without this, stale rankings would cache). Live: dogfood query 6/6 audits/BACKLOG markdown → 0/20 with the AC patterns
+- `code_search` returns **one hit per file**: the best span wins, its siblings collapse into `also matched N more spans in this file` (additive `alsoMatched` field; single-span results byte-identical); `topK` now counts distinct files — a contract bump declared per 035 (live: same query 20→16 hits over the same 16 files, tokens 5723→4015, −30%)
+- `symbol_lookup` returns a **member list** (name, kind, line) when a type's body exceeds the token budget — charged from the same budget with exact shown+omitted arithmetic, generic containers included (matched via the indexed `Box<T>` container-name form, mutation-checked). Live A/B on Overmind's 1055-line `OvermindPlanningTools`: dead-end signature → 34 coordinates + 28 omitted
+- Post-shipping note: making excluded/scoped search PROMOTE a source file it never recalled hit a semantic top-80 ceiling — carved out to feature 061-semantic-recall-ceiling (post-hoc drop subtracts, cannot promote)
+
+### Added (059, Qdrant point hygiene)
+- Semantic coverage honesty: `embeddings.coverage` (embedded/total chunks, meta.db-only math) in `index_status`, and a `semantic coverage: NN% (M chunks pending embedding)` line in `code_search` warnings whenever coverage is partial — silent at 100%, floored so one pending chunk never renders a lying 100% (live-proved at 90% / 638 pending on this workspace)
+- New CLI `squeezr vectors reconcile`: compares collection point ids against the live chunk-hash set and batch-deletes orphans; `--dry-run` is the default, `--apply` the sole destructive path; refuses an unindexed store, an unavailable server, and the empty-chunks-with-nonempty-collection case (a recreated `SQUEEZR_HOME` cannot wipe a healthy collection); only ever touches THIS workspace's derived collection. Live: 1320 pre-fix orphans cleaned (7492→6172, second run 0)
+- `index_status` gains a warning when the collection carries noticeably more points than chunks (tolerance 16)
+
+### Fixed (059)
+- A modified file left its old chunk points in Qdrant forever (deletions ran only for removed files) — the drift grew silently (observed 10818 points vs 10514 chunks): files whose chunk-hash set changed now reap their points by fileId before the new set upserts, while unchanged and comment-only edits stay at zero Qdrant requests; a vector delete skipped while the store was unavailable is journalled in meta.db and replayed by the next full pass (replay re-marks the file's chunks pending so a half-failed delete cannot lose vectors). Live A/B: a body edit grew the old binary's collection 7492→7496, the new one holds 7494 — exact round trip
+
+### Fixed (060)
+- Constructor symbols carried junk names — `public (method) :68`: `SymbolExtractor` had no constructor branch, so names fell to a `ToString()` default. Ctors now carry the declaring type name under the additive `SymbolKind.Constructor`, visible in listings and members fallback; stale rows self-heal on the next index (no migration); JS/TS paths checked — pattern absent. Side effect: a bare `symbol_lookup <TypeName>` returns type + ctor (narrow with `kind:class`; `kind:method` no longer matches ctors)
+
+### Added (058, agent-experience clarity)
+- Transport-aware truncation hints: MCP responses now name their actual parameters (`narrow the query (repo, kind) or raise maxTokens`), the CLI keeps `--flags` byte-identically (`map|symbol --json` wire shape unchanged via a local converter); `repo_map` depth and `expand_span` validation errors are de-flagged over MCP, and expand_span's advice became executable — `qualify the path with the repo prefix, e.g. 'alpha/src/Dup.cs'` really resolves, while the old `--repo` hint pointed at a parameter the tool doesn't have
+- Honest `squeezr stats`: `saved 0 (×0.3)` next to two nonzero numbers became structurally impossible — `saved`/`×N` render only when the whole-file baseline applies, search-heavy mixes get `no whole-file baseline for this usage mix`; the formula is documented in `stats --help` and README and is unchanged from the 021/050 spec of record; `--json` gains additive `baseline`/`baselineApplies`
+- Observable MCP response cache: cache entries died silently on every watch reindex (generation = meta.db mtime re-keyed everything). Dead-generation entries are now evicted immediately (not lingering until capacity), the first affected response says `cache: invalidated (index changed)` once per generation (never baked into cached copies), `Cache hit-rate: no hits yet across N recorded session(s)` replaces the self-contradictory `0.0 % across 0 session(s)`, and telemetry marks the request `cacheInvalidated` (queries.jsonl stays byte-compatible for old lines)
+- `squeezr mcp doctor --json` `headlessStatus` no longer embeds raw multiline client stderr (observed live with kimi) — single line capped at 200, exit code and stderr head preserved; audit confirmed it was the only raw-output field
+
+## [1.0.6] — 2026-09-26
+
+Dogfood tail from the v1.0.5 session: `mcp doctor` now honors the `--all` flag it advertises itself. Full suite 1130 → 1132.
+
+### Fixed
+- `squeezr mcp doctor` in a non-interactive terminal without `--client` printed the shared usage hint recommending `--all`, but doctor silently ignored that flag (unknown options are not rejected by the parser) — a dead end telling users to type a flag that does nothing. Doctor now accepts `--all` with the same semantics as `install` (expands to every detected client), `--help` lists it, and `--client` + `--all` compose (union, deduped via the shared parser)
+
+## [1.0.5] — 2026-09-26
+
+Patch release: repair-deadlock fix for upgrade-stable MCP client registration (054-06), found dogfooding the Overmind workspace. Full suite 1126 → 1130.
+
+### Fixed (054-06, upgrade-stable MCP client registration)
+- `squeezr mcp install --yes` — the repair command `mcp doctor` emits for stale registrations — failed by construction on CLI-method clients (claude): `mcp add` refuses when an entry exists, and a stale entry is precisely the precondition for a repair, so doctor proposed a command that could only die with `MCP server squeezr already exists in user config` while doctor kept reporting `stale` (live repro: registered `~/apps/squeezr/v1.0.2/squeezr`, repair exit 1, endless loop). Install now **converges in place**: on "already exists" it runs one `mcp remove` and one re-`add`; a second add failure propagates the original-style `ClientCliException`; unrelated add failures pass through with no retry; a fresh install issues no `mcp remove` at all (byte-identical to pre-fix behavior). Writer-method clients (kimi, codex) are untouched — their idempotent writers already upserted
+
+## [1.0.4] — 2026-09-26
+
+Upgrade-stable MCP client registration (054) + TUI stats/usage views (053). Full suite 1090 → 1126.
+
+### Added (054, upgrade-stable MCP client registration)
+- MCP registrations now store a **stable command path** (`~/.local/bin/squeezr` when the release symlink exists, the running binary's path otherwise) instead of the versioned `~/apps/squeezr/<tag>/squeezr` — so `install-release.sh` upgrading the symlink no longer silently leaves agents running a stale binary (pre-054 telemetry with no `client` field, dead 050/053 features). No OS branching: the FS topology picks the branch, Windows (already-stable `%LOCALAPPDATA%` layout) and dev repo builds fall through to the process path untouched
+- `squeezr mcp doctor` detects **stale registrations**: when a client's stored `command` differs from the expected stable path it prints `stale: registered=<path> expected=<path>` plus a ready `squeezr mcp install --client <id> --yes` repair; `--json` gains additive `userCommand`/`projectCommand`/`userStale`/`projectStale`/`expectedCommand` fields (035 contract preserved, doctor exit codes unchanged). A malformed/hand-edited config (incl. inline TOML comments) is parsed best-effort and never crashes the doctor
+- `squeezr mcp install` gains `--yes` (fully non-interactive — no prompts, requires an explicit `--client <csv>|all`, `--scope` defaults to `user`, repairs a stale registration in place via the idempotent 034 writers) and `--instructions` (explicit opt-in to write the agent instruction block in `--yes` mode; without `--yes` the flag is inert, and `--no-instructions` wins if both are passed); interactive behavior is unchanged
+- `squeezr serve` emits a single stderr nudge at startup when it was launched from a binary that differs from the stable symlink's target (naming `squeezr mcp doctor` / `install`); silent when the symlink is absent (dev build), already correct, or on any symlink cycle — never throws
+
+### Added (053, TUI stats/usage views)
+- TUI main menu gains two analytics screens: **Token stats** (per-workspace telemetry summary — per-tool table, savings, cache hit-rate, By agent / By session) and **Usage analytics** (fleet-wide rollup across the registry with stale markers and by-agent totals) — both render through the same shared renderers as `squeezr stats` / `squeezr usage` (CLI human output byte-identical after the IAnsiConsole parameterization), one-shot snapshots refreshed on menu re-entry
+
+## [1.0.3] — 2026-09-25
+
+Usage analytics (050) + registry orphan repair (051). Full suite 1029 → 1090.
+
+### Added (051, registry orphan repair)
+- `squeezr workspace list` now surfaces orphaned store dirs (a store dir with a valid manifest that is missing from the registry) as `orphan — adoptable` (manifest carries rootPath, store key verifies) or `orphan — needs root` (legacy manifest without rootPath), and flags husk registry entries (rootPath = `$HOME` or the store parent); hints on stderr in both human and `--json` modes, stdout stays clean, json stays byte-compatible (additive orphan lines / optional `husk` field only)
+- `squeezr workspace repair [--store-key <key> --root <path>] [--json]`: re-registers adoptable orphans (registry entry + RootPath fill only — never deletes or rewrites anything else); legacy orphans are repaired with an explicit `--root` verified against the deterministic store key (a foreign store dir cannot be claimed); one-sided flags and key mismatches follow the 035 error contract
+- `squeezr init` over an existing store dir is now a lossless adoption: live `config.json`, the manifest's repo list and `meta.db` are preserved (previously init silently reset config.json to defaults and blanked Repos), RootPath is backfilled when missing, and a name-mismatched sibling orphan produces a stderr hint pointing at `workspace repair`
+
+### Added (050, usage analytics)
+- Telemetry client identity: every `queries.jsonl` record carries `client`/`clientVersion` — MCP records are tagged from the initialize handshake `clientInfo` (captured via a `ClientIdentity` holder wired into all six tools), CLI records are tagged `cli`, pre-existing records aggregate as `unknown` (additive schema, no file migrations)
+- `squeezr stats`: new By agent (client, version, count, last seen) and By session (short id, client, count, last seen, top-3 tools) sections in the human output, plus additive `agents`/`sessions` fields in `stats --json` (035 contract preserved — existing fields byte-compatible)
+- `squeezr usage`: global adoption rollup across every workspace in the registry, runnable from any directory — per-workspace blocks (storeKey, rootPath, records, by-agent counts, `(stale)` marker for vanished root paths) plus a fleet-wide by-agent totals table; filters `--agent` (case-insensitive exact), `--workspace <storeKey>`, `--since <90m|24h|7d|30d>` combine as AND; `--json` per the 035 contract; strict period parser routes all garbage into the standard error contract
+- `squeezr usage --watch`: Spectre Live refresh of the rollup (default 3 s, `--interval <sec>`), clean Ctrl+C exit; `--watch` + `--json` is rejected per the 035 contract, and non-TTY runs emit a single snapshot with a stderr warning
+
 ## [1.0.2] — 2026-09-20
 
 ### Added (048/04, cross-repo documentation)

@@ -13,6 +13,8 @@ public static class TuiApp
         "Add repository",
         "Config",
         "Drop workspace",
+        "Token stats",
+        "Usage analytics",
         "Exit",
     ];
 
@@ -149,6 +151,12 @@ public static class TuiApp
                 break;
             case "Drop workspace":
                 await TuiWizards.DropAsync(console, workspaceRoot, cancellationToken);
+                break;
+            case "Token stats":
+                await TuiStatsView.RenderAsync(console, workspaceRoot, cancellationToken);
+                break;
+            case "Usage analytics":
+                await TuiUsageView.RenderAsync(console, workspaceRoot, cancellationToken);
                 break;
         }
     }

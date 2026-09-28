@@ -29,6 +29,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         [CommandOption("--path-glob")]
         public string? PathGlob { get; set; }
 
+        [CommandOption("--prefix")]
+        public string? Prefix { get; set; }
+
         [CommandOption("--language")]
         public string? Language { get; set; }
 
@@ -56,7 +59,13 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 ReportWarning(warning);
             }
 
-            var engine = new SearchEngine(workspaceRoot);
+            var rankExclusion = RankExclusion.Load(workspaceRoot);
+            foreach (var warning in rankExclusion.Warnings)
+            {
+                ReportWarning(warning);
+            }
+
+            var engine = new SearchEngine(workspaceRoot, rankExclusion);
             var response = engine.SearchHybridAsync(
                 new SearchQuery(
                     settings.Query,
@@ -66,7 +75,8 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     settings.PathGlob,
                     settings.Language,
                     settings.TopK,
-                    settings.MaxTokens),
+                    settings.MaxTokens,
+                    settings.Prefix),
                 embeddings,
                 vectorStore,
                 cancellationToken).GetAwaiter().GetResult();
@@ -84,7 +94,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             }
 
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "search",
-                new { query = settings.Query, repo = settings.Repo, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK },
+                new { query = settings.Query, repo = settings.Repo, prefix = settings.Prefix, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK },
                 response.TokensUsed, response.Truncated, response.Matches.Count,
                 sw.ElapsedMilliseconds, indexAge: ResolveIndexAge(workspaceRoot));
 
@@ -111,6 +121,10 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     : $" [grey][[{match.Source}]][/]";
                 AnsiConsole.MarkupLine(
                     $"[bold]{(match.Repo + "/" + match.Path).EscapeMarkup()}[/]:{match.Line}: {match.Snippet.EscapeMarkup()}{marker}");
+                if (match.CollapseNote() is { } note)
+                {
+                    AnsiConsole.MarkupLine($"  [grey]{note}[/]");
+                }
             }
 
             if (response.Truncated)

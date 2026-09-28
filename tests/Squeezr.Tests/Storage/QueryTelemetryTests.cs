@@ -99,6 +99,68 @@ public class QueryTelemetryTests
         File.ReadAllText(SqueezrPaths.QueriesLogPath(root)).ShouldEndWith("\n");
     }
 
+    [Fact]
+    public void ReadAll_LegacyLineWithoutClientFields_DeserializesWithNullClient()
+    {
+        var root = TestDirs.NewTempDir();
+        Directory.CreateDirectory(SqueezrPaths.StoreDir(root));
+        var legacyLine = "{\"ts\":\"2026-09-20T10:00:00Z\",\"sessionId\":\"8f6f1c2e-0d4a-4b1e-9c3d-7a5e6f8a9b0c\",\"tool\":\"search\",\"params\":null,\"tokensUsed\":100,\"truncated\":false,\"hits\":3,\"durationMs\":12,\"cacheHit\":false,\"indexAgeSeconds\":null}";
+        File.WriteAllText(SqueezrPaths.QueriesLogPath(root), legacyLine + "\n");
+
+        var read = QueryTelemetry.ReadAll(root).Single();
+
+        read.Tool.ShouldBe("search");
+        read.Client.ShouldBeNull();
+        read.ClientVersion.ShouldBeNull();
+        read.CacheInvalidated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ReadAll_AfterAppend_RoundTripsClientAndVersion()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Append(root, Entry(tool: "search") with { Client = "kimi-code", ClientVersion = "1.0.0" });
+
+        var read = QueryTelemetry.ReadAll(root).Single();
+        read.Client.ShouldBe("kimi-code");
+        read.ClientVersion.ShouldBe("1.0.0");
+    }
+
+    [Fact]
+    public void Record_WithoutClientArgs_WritesCliClientAndOmitsClientVersion()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "search", null, 10, false, 1, 5);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        raw.ShouldContain("\"client\":\"cli\"");
+        raw.ShouldNotContain("clientVersion");
+    }
+
+    [Fact]
+    public void Record_WithoutInvalidation_KeepsCacheInvalidatedOutOfTheLog()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "code_search", null, 10, false, 1, 5);
+
+        File.ReadAllText(SqueezrPaths.QueriesLogPath(root)).ShouldNotContain("cacheInvalidated");
+        QueryTelemetry.ReadAll(root).Single().CacheInvalidated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Record_WithInvalidation_RoundTripsTheFlag()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "code_search", null, 10, false, 1, 5, cacheInvalidated: true);
+
+        File.ReadAllText(SqueezrPaths.QueriesLogPath(root)).ShouldContain("\"cacheInvalidated\":true");
+        QueryTelemetry.ReadAll(root).Single().CacheInvalidated.ShouldBeTrue();
+    }
+
     private static QueryTelemetryEntry Entry(string tool) =>
         new(DateTime.UtcNow, Guid.NewGuid(), tool, null, 0, false, 0, 1, false, null);
 }

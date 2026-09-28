@@ -6,4 +6,5 @@ public sealed record WorkspaceListEntry(
     string StoreKey,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastUsedAt,
-    bool Stale);
+    bool Stale,
+    bool? Husk = null);

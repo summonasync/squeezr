@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Shouldly;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -314,6 +315,73 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
         result.IsWorkspace.ShouldBeTrue();
         result.RootPath.ShouldBe(Path.GetFullPath(realRoot));
         result.StoreKey.ShouldBe(WorkspaceStore.Resolve(realRoot).StoreKey);
+    }
+
+    [Fact]
+    public void Resolve_LegacyShortIgnoreList_UnionsCurrentDefaults()
+    {
+        var root = NewDir();
+        CreateLegacyLayoutWithConfig(root, LegacyConfig(ignore: """["**/node_modules/**", "**/custom-build/**"]"""));
+
+        var result = WorkspaceStore.Resolve(root);
+
+        result.MigratedFromLegacy.ShouldBeTrue();
+        var defaults = SqueezrConfig.CreateDefault().Indexing.Ignore;
+        ConfigFile.Load(root).Indexing.Ignore.ShouldBe(
+            ["**/node_modules/**", "**/custom-build/**", .. defaults.Where(d => d != "**/node_modules/**")]);
+    }
+
+    [Fact]
+    public void Resolve_LegacyGitAwareKey_NotWrittenBackAndExplicitProviderKept()
+    {
+        var root = NewDir();
+        CreateLegacyLayoutWithConfig(root, """
+            {
+              "chunking": { "maxTokensPerChunk": 512, "fallbackWindowLines": 60, "fallbackOverlapLines": 15 },
+              "indexing": { "ignore": [], "maxFileSizeKb": 512, "gitAware": true },
+              "qdrant": { "endpoint": "http://localhost:6334" },
+              "embeddings": { "provider": "onnx" }
+            }
+            """);
+
+        var result = WorkspaceStore.Resolve(root);
+
+        var raw = File.ReadAllText(Path.Combine(result.StoreDir!, SqueezrPaths.ConfigFileName));
+        raw.ShouldNotContain("gitAware");
+        ConfigFile.Load(root).Embeddings.Provider.ShouldBe("onnx");
+    }
+
+    [Fact]
+    public void Resolve_ReMigration_DoesNotDuplicateDefaults()
+    {
+        var root = NewDir();
+        CreateLegacyLayoutWithConfig(root, LegacyConfig(ignore: """["**/node_modules/**"]"""));
+
+        var first = WorkspaceStore.Resolve(root);
+        var afterFirst = ConfigFile.Load(root).Indexing.Ignore;
+
+        File.WriteAllText(Path.Combine(root, SqueezrPaths.ManifestFileName), """{"name":"legacy","repos":[]}""");
+        var second = WorkspaceStore.Resolve(root);
+
+        second.StoreKey.ShouldBe(first.StoreKey);
+        ConfigFile.Load(root).Indexing.Ignore.ShouldBe(afterFirst);
+    }
+
+    private static string LegacyConfig(string ignore) =>
+        """
+        {
+          "chunking": { "maxTokensPerChunk": 512, "fallbackWindowLines": 60, "fallbackOverlapLines": 15 },
+          "indexing": { "ignore": ##IGNORE##, "maxFileSizeKb": 512 },
+          "qdrant": { "endpoint": "http://localhost:6334" }
+        }
+        """.Replace("##IGNORE##", ignore);
+
+    private static void CreateLegacyLayoutWithConfig(string root, string configJson)
+    {
+        File.WriteAllText(Path.Combine(root, SqueezrPaths.ManifestFileName), """{"name":"legacy","repos":[]}""");
+        var storeDir = Path.Combine(root, SqueezrPaths.StoreDirName);
+        Directory.CreateDirectory(storeDir);
+        File.WriteAllText(Path.Combine(storeDir, SqueezrPaths.ConfigFileName), configJson);
     }
 
     private static bool TryCreateSymbolicLink(string linkPath, string target)

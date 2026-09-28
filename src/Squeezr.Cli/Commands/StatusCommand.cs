@@ -80,11 +80,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             if (qdrant.Available)
             {
                 AnsiConsole.MarkupLine(
-                    $"Qdrant: [green]available[/] — {qdrant.Points} point(s), {qdrant.PendingChunks} pending chunk(s)");
+                    $"Qdrant: [green]available[/] — {qdrant.Points} point(s), {qdrant.PendingChunks} pending chunk(s){CoverageSuffix(qdrant)}");
             }
             else
             {
-                AnsiConsole.MarkupLine($"Qdrant: [red]unavailable[/] — {qdrant.PendingChunks} pending chunk(s)");
+                AnsiConsole.MarkupLine($"Qdrant: [red]unavailable[/] — {qdrant.PendingChunks} pending chunk(s){CoverageSuffix(qdrant)}");
                 var hint = config is null
                     ? null
                     : QdrantEndpointHint.RestPortMisconfiguration(config.Qdrant.Endpoint);
@@ -101,6 +101,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             return CommandError.Report(ex, settings.Json);
         }
     }
+
+    private static string CoverageSuffix(QdrantStatus qdrant) =>
+        new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio is { } ratio
+            ? $", semantic coverage {(int)Math.Round(ratio * 100, MidpointRounding.AwayFromZero)}%"
+            : string.Empty;
 
     private static SqueezrConfig? LoadConfigIfReadable(string workspaceRoot)
     {

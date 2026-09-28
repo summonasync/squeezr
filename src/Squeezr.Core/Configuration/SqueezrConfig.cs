@@ -38,7 +38,8 @@ public sealed record SqueezrConfig
                     "**/*.tsbuildinfo"
                 ],
                 MaxFileSizeKb = 512,
-                NoSemantic = false
+                NoSemantic = false,
+                RankExclude = []
             },
             Qdrant = new QdrantConfig
             {

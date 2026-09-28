@@ -132,6 +132,62 @@ public class HybridSearchTests
         response.Warnings.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void Hybrid_PartialCoverage_AddsOneLineWarning()
+    {
+        var workspace = NewIndexedWorkspace(out _, out _);
+        var store = new FakeVectorStore();
+
+        var response = Search(workspace, "Add", store, coverage: new SemanticCoverage(4, 1));
+
+        response.Warnings.ShouldContain("semantic coverage: 75% (1 chunk pending embedding)");
+    }
+
+    [Fact]
+    public void Hybrid_LargePendingCount_UsesPluralAndFlooredPercent()
+    {
+        var workspace = NewIndexedWorkspace(out _, out _);
+        var store = new FakeVectorStore();
+
+        var response = Search(workspace, "Add", store, coverage: new SemanticCoverage(4000, 3017));
+
+        response.Warnings.ShouldContain("semantic coverage: 24% (3017 chunks pending embedding)");
+    }
+
+    [Fact]
+    public void Hybrid_FullCoverage_StaysSilent()
+    {
+        var workspace = NewIndexedWorkspace(out _, out _);
+        var store = new FakeVectorStore();
+
+        var response = Search(workspace, "Add", store, coverage: new SemanticCoverage(4, 0));
+
+        response.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Hybrid_NoChunksIndexed_CoverageWarningSuppressed()
+    {
+        var workspace = NewIndexedWorkspace(out _, out _);
+        var store = new FakeVectorStore();
+
+        var response = Search(workspace, "Add", store, coverage: new SemanticCoverage(0, 0));
+
+        response.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Hybrid_StoreDownAndPartialCoverage_BothWarningsSpeak()
+    {
+        var workspace = NewIndexedWorkspace(out _, out _);
+        var store = new FakeVectorStore { Available = false };
+
+        var response = Search(workspace, "Add", store, coverage: new SemanticCoverage(4, 1));
+
+        response.Warnings.ShouldContain(SearchEngine.VectorStoreUnavailableWarning);
+        response.Warnings.ShouldContain("semantic coverage: 75% (1 chunk pending embedding)");
+    }
+
     private static ChunkDocument ChunkContaining(List<ChunkDocument> chunks, int line)
     {
         var minStart = chunks.Where(c => c.StartLine <= line && line <= c.EndLine).Min(c => c.StartLine);
@@ -139,14 +195,15 @@ public class HybridSearchTests
     }
 
     private static SearchResponse Search(
-        string workspace, string query, FakeVectorStore store, string? repo = null)
+        string workspace, string query, FakeVectorStore store, string? repo = null, SemanticCoverage? coverage = null)
     {
         var engine = new SearchEngine(workspace);
         return engine.SearchHybridAsync(
             new SearchQuery(query, false, null, repo, null, null, null, null),
             new FakeEmbeddingProvider(),
             store,
-            CancellationToken.None).GetAwaiter().GetResult();
+            CancellationToken.None,
+            coverage).GetAwaiter().GetResult();
     }
 
     private static string NewIndexedWorkspace(out List<ChunkDocument> chunks, out uint repoId)
@@ -211,7 +268,12 @@ public class HybridSearchTests
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)Hits.Count);
 
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ulong>>([]);
+
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
+
+        public Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct) => Task.CompletedTask;
 
         public Task DeleteCollectionAsync(CancellationToken ct) => Task.CompletedTask;
     }

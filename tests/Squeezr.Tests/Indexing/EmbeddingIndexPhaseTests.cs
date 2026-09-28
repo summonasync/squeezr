@@ -599,6 +599,9 @@ public class EmbeddingIndexPhaseTests
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)Points.Count);
 
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ulong>>(Points.Keys.ToList());
+
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {
             if (FailDelete)
@@ -607,6 +610,21 @@ public class EmbeddingIndexPhaseTests
             }
 
             DeletedFileIds.AddRange(fileIds);
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct)
+        {
+            if (FailDelete)
+            {
+                return Task.FromException(new HttpRequestException("qdrant is down"));
+            }
+
+            foreach (var id in pointIds)
+            {
+                Points.Remove(id);
+            }
+
             return Task.CompletedTask;
         }
 

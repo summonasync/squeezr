@@ -12,7 +12,8 @@ public static class ExactSearchPlan
     public static List<(SearchMatch Match, string? Key)> Execute(
         string workspaceRoot,
         SearchQuery query,
-        bool trackChunkKeys)
+        bool trackChunkKeys,
+        IReadOnlySet<uint>? fileScope = null)
     {
         var indexPath = SqueezrPaths.TrigramIndexPath(workspaceRoot);
         if (!File.Exists(indexPath))
@@ -42,7 +43,7 @@ public static class ExactSearchPlan
         var manifest = WorkspaceManifestFile.Load(workspaceRoot);
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
         var entriesByName = manifest.Repos.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
-        var filter = BuildFilter(store, query);
+        var filter = BuildFilter(store, query, fileScope);
 
         var caseSensitive = ResolveCaseSensitivity(query);
         var candidates = PlanCandidates(reader, query, filter, caseSensitive);
@@ -104,7 +105,7 @@ public static class ExactSearchPlan
     private static bool ResolveCaseSensitivity(SearchQuery query) =>
         query.IgnoreCase ?? (query.Query != query.Query.ToLowerInvariant());
 
-    private static List<uint> PlanCandidates(TrigramIndexReader reader, SearchQuery query, HashSet<uint>? filter, bool caseSensitive)
+    private static List<uint> PlanCandidates(TrigramIndexReader reader, SearchQuery query, IReadOnlySet<uint>? filter, bool caseSensitive)
     {
         List<string[]> trigramGroups;
         if (query.Regex)
@@ -181,7 +182,7 @@ public static class ExactSearchPlan
         return variants;
     }
 
-    private static List<uint> FullScan(TrigramIndexReader reader, HashSet<uint>? filter)
+    private static List<uint> FullScan(TrigramIndexReader reader, IReadOnlySet<uint>? filter)
     {
         var result = new List<uint>();
         for (uint docId = 0; docId < reader.DocCount; docId++)
@@ -195,11 +196,11 @@ public static class ExactSearchPlan
         return result;
     }
 
-    private static HashSet<uint>? BuildFilter(MetaStore store, SearchQuery query)
+    private static IReadOnlySet<uint>? BuildFilter(MetaStore store, SearchQuery query, IReadOnlySet<uint>? fileScope)
     {
         if (query.Repo is null && query.PathGlob is null && query.Language is null)
         {
-            return null;
+            return fileScope;
         }
 
         var filter = new HashSet<uint>();
@@ -212,6 +213,11 @@ public static class ExactSearchPlan
 
             foreach (var file in store.ListFiles(repo.Id))
             {
+                if (fileScope is not null && !fileScope.Contains(file.Id))
+                {
+                    continue;
+                }
+
                 if (query.PathGlob is not null && !GlobMatcher.IsMatch(query.PathGlob, file.Path))
                 {
                     continue;

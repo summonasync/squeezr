@@ -33,6 +33,11 @@ public sealed class InitCommand : Command<InitCommand.Settings>
             var result = WorkspaceRootResolver.GuardRegistryIo(
                 () => new WorkspaceManager(currentDirectory).Init(settings.Name));
 
+            if (result.RepairHint is not null)
+            {
+                Console.Error.WriteLine($"warning: {result.RepairHint}");
+            }
+
             if (settings.Json)
             {
                 JsonOutput.Write(result);
