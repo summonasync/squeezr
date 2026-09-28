@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -25,7 +26,9 @@ public sealed record SymbolLookupResult(
     IReadOnlyList<SymbolHit> Matches,
     int TokensUsed,
     bool Truncated,
-    TruncationHint? Hint);
+    TruncationHint? Hint,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? DidYouMean);
 
 public sealed class SymbolLookup
 {
@@ -42,6 +45,9 @@ public sealed class SymbolLookup
         new("read a member with", ["expand_span"]),
         new("raise", ["maxTokens"])
     ]);
+
+    private const double DidYouMeanThreshold = 0.34;
+    private const int DidYouMeanTopN = 3;
 
     private static readonly HashSet<string> TypeKinds = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -84,17 +90,74 @@ public sealed class SymbolLookup
         {
             if (!TryRender(symbol, entry, repoDoc, store, budget, includeBody, hits))
             {
-                return new SymbolLookupResult(hits, budget.Used, true, HintFor(hits));
+                return new SymbolLookupResult(hits, budget.Used, true, HintFor(hits), null);
             }
         }
 
         if (hits.Count == 0)
         {
-            throw new WorkspaceException(
-                $"No symbol named '{name}' in the index. Run 'squeezr index' if the code changed.");
+            var candidates = FindDidYouMean(name, repo, kind, store, manifest);
+            IReadOnlyList<string>? didYouMean = candidates.Count > 0 ? candidates : null;
+            if (didYouMean is not null)
+            {
+                var suggestionText = $"did you mean: {string.Join(", ", didYouMean)}";
+                if (!budget.TryTake(suggestionText))
+                {
+                    return new SymbolLookupResult([], budget.Used, true, null, null);
+                }
+            }
+
+            return new SymbolLookupResult([], budget.Used, budget.Truncated, null, didYouMean);
         }
 
-        return new SymbolLookupResult(hits, budget.Used, budget.Truncated, budget.Truncated ? HintFor(hits) : null);
+        return new SymbolLookupResult(hits, budget.Used, budget.Truncated, budget.Truncated ? HintFor(hits) : null, null);
+    }
+
+    private List<string> FindDidYouMean(
+        string name,
+        string? repo,
+        string? kind,
+        MetaStore store,
+        WorkspaceManifest manifest)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var scored = new List<(string Name, double Score)>();
+
+        foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
+        {
+            var repoDoc = store.FindRepo(entry.Name);
+            if (repoDoc is null)
+            {
+                continue;
+            }
+
+            foreach (var symbol in store.ListSymbolsByRepo(repoDoc.Id))
+            {
+                if (kind is not null && !symbol.Kind.Equals(kind, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!seen.Add(symbol.Name))
+                {
+                    continue;
+                }
+
+                var score = TrigramJaccard.Similarity(name, symbol.Name);
+                if (score >= DidYouMeanThreshold)
+                {
+                    scored.Add((symbol.Name, score));
+                }
+            }
+        }
+
+        return scored
+            .OrderByDescending(s => s.Score)
+            .ThenBy(s => s.Name.Length)
+            .ThenBy(s => s.Name, StringComparer.Ordinal)
+            .Take(DidYouMeanTopN)
+            .Select(s => s.Name)
+            .ToList();
     }
 
     private static TruncationHint HintFor(List<SymbolHit> hits) =>

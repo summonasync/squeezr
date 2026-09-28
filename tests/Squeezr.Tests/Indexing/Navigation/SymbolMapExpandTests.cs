@@ -49,9 +49,8 @@ public class SymbolMapExpandTests
 
         lookup.Find("Area", null, "property", 300, body: false).Matches.ShouldHaveSingleItem();
 
-        var ex = Should.Throw<WorkspaceException>(() =>
-            lookup.Find("Calc", null, "interface", 300, body: false));
-        ex.Message.ShouldContain("No symbol named 'Calc'");
+        var miss = lookup.Find("Calc", null, "interface", 300, body: false);
+        miss.Matches.ShouldBeEmpty();
     }
 
     [Fact]
@@ -287,13 +286,10 @@ public class SymbolMapExpandTests
         }
 
         var missing = await RunCliAsync(root, "symbol", "Nope", "--json");
-        missing.ExitCode.ShouldBe(1);
-        missing.StdOut.ShouldBeEmpty();
-        using (var doc = JsonDocument.Parse(missing.StdErr.Trim()))
+        missing.ExitCode.ShouldBe(0);
+        using (var doc = JsonDocument.Parse(missing.StdOut.Trim()))
         {
-            var error = doc.RootElement.GetProperty("error");
-            error.GetProperty("code").GetString().ShouldBe("workspace_error");
-            error.GetProperty("message").GetString()!.ShouldContain("No symbol named 'Nope'");
+            doc.RootElement.GetProperty("matches").GetArrayLength().ShouldBe(0);
         }
     }
 

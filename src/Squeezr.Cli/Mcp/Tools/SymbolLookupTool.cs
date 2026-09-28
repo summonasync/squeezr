@@ -14,7 +14,6 @@ namespace Squeezr.Cli.Mcp.Tools;
 public sealed class SymbolLookupTool
 {
     private const int GuardCandidateLimit = 50;
-    private const string NotFoundPrefix = "No symbol named";
 
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
@@ -64,20 +63,7 @@ public sealed class SymbolLookupTool
             var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
             var lookup = new SymbolLookup(root);
 
-            SymbolLookupResult result;
-            try
-            {
-                result = lookup.Find(name, repo, kind, budget, body: true);
-            }
-            catch (WorkspaceException ex) when (ex.Message.StartsWith(NotFoundPrefix, StringComparison.Ordinal))
-            {
-                var miss = ToolEnvelope.Wrap(Array.Empty<object>(), 0, false, warnings, root, staleFiles: null);
-                QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
-                    miss.TokensUsed, miss.Truncated, 0,
-                    sw.ElapsedMilliseconds, indexAge: miss.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
-                return miss;
-            }
+            var result = lookup.Find(name, repo, kind, budget, body: true);
 
             var freshness = Guard(root, result);
             if (freshness.Refreshed.Count > 0)
@@ -90,6 +76,11 @@ public sealed class SymbolLookupTool
                 warnings.Add(result.Hint.ForMcp());
             }
 
+            if (result.Matches.Count == 0 && result.DidYouMean is null)
+            {
+                warnings.Add("No symbol found — use code_search for paraphrase queries.");
+            }
+
             var data = result.Matches.Select(m => new SymbolHitData(
                 m.Repo, m.File, $"{m.StartLine}-{m.EndLine}", m.Signature, m.DocComment, m.Body,
                 m.Members.Count == 0
@@ -97,7 +88,8 @@ public sealed class SymbolLookupTool
                     : m.Members.Select(member => new SymbolMemberData(member.Name, member.Kind, member.Line)).ToList(),
                 m.MembersOmitted)).ToList();
 
-            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale,
+                result.DidYouMean);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                 result.TokensUsed, result.Truncated, data.Count,

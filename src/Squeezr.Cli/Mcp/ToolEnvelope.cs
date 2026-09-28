@@ -9,7 +9,9 @@ public sealed record ToolEnvelope(
     [property: JsonPropertyName("truncated")] bool Truncated,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
     [property: JsonPropertyName("indexAge")] TimeSpan? IndexAge,
-    [property: JsonPropertyName("staleFiles")] IReadOnlyList<string> StaleFiles)
+    [property: JsonPropertyName("staleFiles")] IReadOnlyList<string> StaleFiles,
+    [property: JsonPropertyName("didYouMean"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? DidYouMean = null)
 {
     public static ToolEnvelope Wrap(
         object? data,
@@ -17,8 +19,9 @@ public sealed record ToolEnvelope(
         bool truncated,
         IReadOnlyList<string>? warnings = null,
         string? workspaceRoot = null,
-        IReadOnlyList<string>? staleFiles = null) =>
-        new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? []);
+        IReadOnlyList<string>? staleFiles = null,
+        IReadOnlyList<string>? didYouMean = null) =>
+        new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [], didYouMean);
 
     public ToolEnvelope WithWarning(string? warning) =>
         warning is null ? this : this with { Warnings = [.. Warnings, warning] };

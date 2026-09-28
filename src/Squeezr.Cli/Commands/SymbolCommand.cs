@@ -98,6 +98,19 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
                     }
                 }
 
+                if (result.Matches.Count == 0)
+                {
+                    if (result.DidYouMean is not null && result.DidYouMean.Count > 0)
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]did you mean: {string.Join(", ", result.DidYouMean.Select(s => s.EscapeMarkup()))}[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]No symbol named '{settings.Name.EscapeMarkup()}' in the index. Run 'squeezr index' if the code changed.[/]");
+                        AnsiConsole.MarkupLine("[yellow]use code_search for paraphrase queries[/]");
+                    }
+                }
+
                 WriteBudgetLine(result.TokensUsed, result.Truncated, result.Hint);
             }
 
