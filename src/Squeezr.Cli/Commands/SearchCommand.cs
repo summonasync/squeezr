@@ -59,7 +59,13 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 ReportWarning(warning);
             }
 
-            var engine = new SearchEngine(workspaceRoot);
+            var rankExclusion = RankExclusion.Load(workspaceRoot);
+            foreach (var warning in rankExclusion.Warnings)
+            {
+                ReportWarning(warning);
+            }
+
+            var engine = new SearchEngine(workspaceRoot, rankExclusion);
             var response = engine.SearchHybridAsync(
                 new SearchQuery(
                     settings.Query,

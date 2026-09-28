@@ -8,8 +8,13 @@ public sealed class SearchEngine
     public const string VectorStoreUnavailableWarning = "vector store is unavailable, falling back to exact search only";
 
     private readonly string _workspaceRoot;
+    private readonly RankExclusion _rankExclusion;
 
-    public SearchEngine(string workspaceRoot) => _workspaceRoot = Path.GetFullPath(workspaceRoot);
+    public SearchEngine(string workspaceRoot, RankExclusion? rankExclusion = null)
+    {
+        _workspaceRoot = Path.GetFullPath(workspaceRoot);
+        _rankExclusion = rankExclusion ?? RankExclusion.None;
+    }
 
     public SearchResponse Search(SearchQuery query)
     {
@@ -64,7 +69,8 @@ public sealed class SearchEngine
     private HashSet<uint>? ResolveFileScope(SearchQuery query)
     {
         var prefix = PathPrefix.Normalize(query.Prefix);
-        if (prefix is null)
+        var excluding = _rankExclusion.IsActive;
+        if (prefix is null && !excluding)
         {
             return null;
         }
@@ -88,8 +94,23 @@ public sealed class SearchEngine
             repoId = repo.Id;
         }
 
-        var scope = FileScope.Resolve(store, path => PathPrefix.Matches(prefix, path), repoId);
-        if (scope.Count == 0)
+        if (prefix is null)
+        {
+            return FileScope.Resolve(store, path => !_rankExclusion.Matches(path), repoId);
+        }
+
+        var scope = FileScope.Resolve(
+            store,
+            path => PathPrefix.Matches(prefix, path) && !_rankExclusion.Matches(path),
+            repoId);
+        if (scope.Count > 0)
+        {
+            return scope;
+        }
+
+        // rank-excluded files stay indexed, so a prefix whose whole subtree is excluded answers
+        // with no hits — only a prefix matching nothing at all is the "no such subtree" error
+        if (!excluding || FileScope.Resolve(store, path => PathPrefix.Matches(prefix, path), repoId).Count == 0)
         {
             var indexedPaths = (repoId is { } id ? store.ListFiles(id) : store.ListAllFiles())
                 .Select(f => f.Path);

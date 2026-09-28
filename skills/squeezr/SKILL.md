@@ -83,6 +83,16 @@ squeezr index --events
 `squeezr status` shows per-repo file/symbol/chunk counts, the configured
 embeddings provider and Qdrant state.
 
+Doc-heavy repos can curate ranking without unindexing anything: set
+`indexing.rankExclude` in the workspace config
+(`~/.squeezr/workspaces/<storeKey>/config.json`) to a list of globs, e.g.
+`["audits/**", "BACKLOG/**"]`. Matching files stay indexed and fully navigable —
+`expand_span` / `find_references` / `symbol_lookup` still reach them — they just
+stop outranking source in `code_search`. It applies at query time, so no reindex
+is needed; `prefix` narrows in, `rankExclude` pushes out, and the two intersect.
+`index_status` lists the active patterns in `warnings`, and a malformed glob
+warns and is skipped instead of failing the query.
+
 ## 4. MCP registration
 
 ```bash
@@ -145,7 +155,9 @@ plain grep/read is correct, not a violation.
 - `code_search(query, repo?, prefix?, topK?, maxTokens?)` — hybrid exact + semantic search:
   paraphrases work ("validate config file") and so do exact identifiers
   ("VectorDimensionMismatchException"). Returns file:line matches with snippets,
-  never full bodies. `prefix` scopes both arms to one directory subtree.
+  never full bodies. `prefix` scopes both arms to one directory subtree; the
+  workspace config `indexing.rankExclude` keeps whole trees out of the ranking
+  while they stay indexed and readable through `expand_span`.
 - `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span. When a
   type's body exceeds the token budget it returns the member list (name, kind, line)
   as a mini-map instead — each line is an expand_span coordinate.
@@ -157,7 +169,9 @@ plain grep/read is correct, not a violation.
   semantic coverage (`embeddings.coverage`, embedded share of chunks 0..1),
   Qdrant availability, and the resolved workspace `rootPath` (if it is not your
   project's root, the session serves a different workspace). Call before heavy
-  querying to decide on a reindex.
+  querying to decide on a reindex. When ranking is curated, `warnings` lists the
+  active `indexing.rankExclude` patterns — read them before trusting a
+  `code_search` result set as complete.
 
 Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
 and sets `truncated` when it overflows — narrow the query or adjust maxTokens

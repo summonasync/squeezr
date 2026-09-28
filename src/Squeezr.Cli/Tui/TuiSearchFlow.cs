@@ -27,6 +27,11 @@ public static class TuiSearchFlow
         IEmbeddingProvider? embeddings = null;
         IVectorStore? vectorStore = null;
         var runtimeResolved = false;
+        var rankExclusion = RankExclusion.Load(workspaceRoot);
+        foreach (var warning in rankExclusion.Warnings)
+        {
+            console.MarkupLine($"[yellow]warning:[/] {warning.EscapeMarkup()}");
+        }
 
         while (true)
         {
@@ -51,7 +56,7 @@ public static class TuiSearchFlow
             SearchResponse response;
             try
             {
-                response = await new SearchEngine(workspaceRoot).SearchHybridAsync(
+                response = await new SearchEngine(workspaceRoot, rankExclusion).SearchHybridAsync(
                     new SearchQuery(
                         query.Trim(),
                         Regex: false,

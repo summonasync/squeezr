@@ -63,7 +63,8 @@ public sealed class CodeSearchTool
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
             var normalizedPrefix = PathPrefix.Normalize(prefix);
-            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK);
+            var rankExclusion = RankExclusion.Load(root);
+            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, rankExclusion);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -76,9 +77,10 @@ public sealed class CodeSearchTool
 
             var warnings = new List<string>();
             ResolveRuntime(root, warnings);
+            warnings.AddRange(rankExclusion.Warnings);
             var coverage = _embeddings is not null && _vectorStore is not null ? LoadCoverage(root) : null;
 
-            var engine = new SearchEngine(root);
+            var engine = new SearchEngine(root, rankExclusion);
             var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix);
             var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
 
@@ -128,8 +130,18 @@ public sealed class CodeSearchTool
             response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
-    private static object Params(string query, string? repo, string? prefix, int? maxTokens, int? topK) =>
-        new { query, repo, prefix, maxTokens, topK };
+    private static object Params(string query, string? repo, string? prefix, int? maxTokens, int? topK, RankExclusion rankExclusion) =>
+        new
+        {
+            query,
+            repo,
+            prefix,
+            maxTokens,
+            topK,
+            // cache generations track meta.db only, so without the patterns in the key a config
+            // edit would keep being served from the pre-exclusion envelope
+            rankExclude = rankExclusion.IsActive ? rankExclusion.Patterns : null
+        };
 
     private void ResolveRuntime(string root, List<string> warnings)
     {

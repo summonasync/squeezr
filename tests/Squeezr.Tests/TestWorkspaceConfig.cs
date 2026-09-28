@@ -37,4 +37,13 @@ public static class TestWorkspaceConfig
             Embeddings = config.Embeddings with { Provider = "onnx" }
         });
     }
+
+    public static void SetRankExclude(string workspaceRoot, params string[] globs)
+    {
+        var config = ConfigFile.Load(workspaceRoot);
+        ConfigFile.Save(workspaceRoot, config with
+        {
+            Indexing = config.Indexing with { RankExclude = globs }
+        });
+    }
 }

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -57,6 +58,16 @@ public sealed class IndexStatusTool
                 warnings.Add(
                     $"the collection carries {excess} more point(s) than the index has chunks — orphan vectors " +
                     "no live chunk hash maps to; 'squeezr vectors reconcile' lists them, '--apply' drops them.");
+            }
+
+            var rankExclusion = RankExclusion.Load(root);
+            warnings.AddRange(rankExclusion.Warnings);
+            if (rankExclusion.IsActive)
+            {
+                var listed = string.Join(", ", rankExclusion.Patterns.Select(pattern => $"'{pattern}'"));
+                warnings.Add(
+                    $"indexing.rankExclude is active: code_search ranking drops {listed} — those files stay " +
+                    "indexed, so expand_span / find_references / symbol_lookup still reach them.");
             }
 
             var data = new IndexStatusData(
