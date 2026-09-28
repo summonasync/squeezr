@@ -8,4 +8,6 @@ public sealed record SearchMatch(
     string Snippet)
 {
     public string Source { get; init; } = "exact";
+
+    public int AlsoMatched { get; init; }
 }

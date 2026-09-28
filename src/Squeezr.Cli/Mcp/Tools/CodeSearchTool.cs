@@ -36,7 +36,7 @@ public sealed class CodeSearchTool
         _identity = identity;
     }
 
-    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
+    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,
@@ -100,7 +100,8 @@ public sealed class CodeSearchTool
             }
 
             var data = response.Matches.Select(m => new SearchHitData(
-                m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet)).ToList();
+                m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet,
+                m.AlsoMatched == 0 ? null : m.AlsoMatched)).ToList();
 
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
             var invalidated = _cache?.TakeInvalidationWarning();
@@ -170,5 +171,8 @@ public sealed class CodeSearchTool
         [property: JsonPropertyName("line")] int Line,
         [property: JsonPropertyName("score")] double Score,
         [property: JsonPropertyName("source")] string Source,
-        [property: JsonPropertyName("snippet")] string Snippet);
+        [property: JsonPropertyName("snippet")] string Snippet,
+        [property: JsonPropertyName("alsoMatched")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int? AlsoMatched);
 }

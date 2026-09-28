@@ -9,8 +9,10 @@ public sealed record SearchMatchLine(
     int Line,
     double Score,
     string Snippet,
-    string Source)
+    string Source,
+    int? AlsoMatched)
 {
     public static SearchMatchLine FromMatch(SearchMatch match) =>
-        new("match", match.Repo, match.Path, match.Line, match.Score, match.Snippet, match.Source);
+        new("match", match.Repo, match.Path, match.Line, match.Score, match.Snippet, match.Source,
+            match.AlsoMatched == 0 ? null : match.AlsoMatched);
 }

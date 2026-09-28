@@ -1,5 +1,6 @@
 using Spectre.Console;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
@@ -168,8 +169,13 @@ public static class TuiSearchFlow
         };
     }
 
-    private static string HitLabel(SearchMatch match) =>
-        $"[{match.Source}] {match.Repo}/{match.Path}:{match.Line}  {match.Snippet}".EscapeMarkup();
+    private static string HitLabel(SearchMatch match)
+    {
+        var label = $"[{match.Source}] {match.Repo}/{match.Path}:{match.Line}  {match.Snippet}";
+        return match.CollapseNote() is { } note
+            ? $"{label}  ({note})".EscapeMarkup()
+            : label.EscapeMarkup();
+    }
 
     private enum HitAction
     {

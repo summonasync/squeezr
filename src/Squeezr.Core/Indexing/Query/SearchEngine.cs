@@ -129,7 +129,9 @@ public sealed class SearchEngine
 
     private static SearchResponse Finalize(IReadOnlyList<SearchMatch> ranked, SearchQuery query, IReadOnlyList<string> warnings)
     {
-        var limited = query.TopK is > 0 ? ranked.Take(query.TopK.Value).ToList() : ranked.ToList();
+        // collapse before the cap so topK counts files, not spans of one file
+        var files = FileHitCollapser.Collapse(ranked);
+        var limited = query.TopK is > 0 ? files.Take(query.TopK.Value).ToList() : files.ToList();
 
         var budget = query.MaxTokens;
         var tokensUsed = 0;

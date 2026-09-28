@@ -121,6 +121,10 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     : $" [grey][[{match.Source}]][/]";
                 AnsiConsole.MarkupLine(
                     $"[bold]{(match.Repo + "/" + match.Path).EscapeMarkup()}[/]:{match.Line}: {match.Snippet.EscapeMarkup()}{marker}");
+                if (match.CollapseNote() is { } note)
+                {
+                    AnsiConsole.MarkupLine($"  [grey]{note}[/]");
+                }
             }
 
             if (response.Truncated)

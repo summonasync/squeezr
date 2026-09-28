@@ -155,7 +155,9 @@ plain grep/read is correct, not a violation.
 - `code_search(query, repo?, prefix?, topK?, maxTokens?)` — hybrid exact + semantic search:
   paraphrases work ("validate config file") and so do exact identifiers
   ("VectorDimensionMismatchException"). Returns file:line matches with snippets,
-  never full bodies. `prefix` scopes both arms to one directory subtree; the
+  never full bodies. One hit = one file: the best span wins and the file's other
+  spans collapse into `alsoMatched`, so `topK` caps distinct files, not spans.
+  `prefix` scopes both arms to one directory subtree; the
   workspace config `indexing.rankExclude` keeps whole trees out of the ranking
   while they stay indexed and readable through `expand_span`.
 - `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span. When a
@@ -177,7 +179,8 @@ Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
 and sets `truncated` when it overflows — narrow the query or adjust maxTokens
 instead of reading files. In big workspaces prefer `prefix` over raising
 maxTokens: a scoped map or search usually fits the default budget. Pass `topK`
-to cap the merged hit count when a few strong hits are enough.
+to cap how many files come back when a few strong hits are enough — `code_search`
+returns one hit per file, so `topK` counts distinct files, not spans.
 
 Freshness and cache: reads refresh modified files inline or report them in
 `staleFiles` (then suggest `squeezr index`). Identical repeated calls within one
