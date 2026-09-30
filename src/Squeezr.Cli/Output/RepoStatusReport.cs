@@ -8,4 +8,9 @@ public sealed record RepoStatusReport(
     int Chunks,
     IReadOnlyList<string> StaleFiles,
     DateTime? LastIndexedAt,
-    TimeSpan? IndexAge);
+    TimeSpan? IndexAge,
+    RepoIgnoredReport? Ignored = null);
+
+public sealed record RepoIgnoredReport(
+    int Files,
+    IReadOnlyDictionary<string, int> BySource);

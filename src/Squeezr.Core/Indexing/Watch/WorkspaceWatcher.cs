@@ -1,4 +1,5 @@
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -70,8 +71,9 @@ public sealed class WorkspaceWatcher
         var config = LoadConfig(_workspaceRoot);
         _debounceWindow = TimeSpan.FromSeconds(config.Watch.DebounceSeconds);
         _backoffCap = TimeSpan.FromSeconds(config.Watch.BackoffMaxSeconds);
-        _filter = new WatchEventFilter(
-            _workspaceRoot, ResolveRepoRoots(_workspaceRoot), config.Indexing.Ignore);
+        var repoRoots = ResolveRepoRoots(_workspaceRoot);
+        var rulesByRepo = BuildRulesets(repoRoots, config);
+        _filter = new WatchEventFilter(_workspaceRoot, repoRoots, rulesByRepo);
 
         lock (_gate)
         {
@@ -142,6 +144,17 @@ public sealed class WorkspaceWatcher
             .ToList();
     }
 
+    private static IReadOnlyDictionary<string, IgnoreRuleset> BuildRulesets(
+        IReadOnlyList<string> repoRoots, SqueezrConfig config)
+    {
+        var result = new Dictionary<string, IgnoreRuleset>(StringComparer.Ordinal);
+        foreach (var root in repoRoots)
+        {
+            result[root] = IgnoreRuleset.For(root, config);
+        }
+        return result;
+    }
+
     private List<FileSystemWatcher> CreateWatchers()
     {
         var watchers = new List<FileSystemWatcher>();
@@ -179,8 +192,18 @@ public sealed class WorkspaceWatcher
         return watchers;
     }
 
-    private void OnEvent(string fullPath, bool pathMayBeGone)
+    internal void OnEvent(string fullPath, bool pathMayBeGone)
     {
+        if (WatchEventFilter.IsIgnoreFileChange(fullPath))
+        {
+            lock (_gate)
+            {
+                _forcePass = true;
+                _lastEventAt = DateTime.UtcNow;
+            }
+            return;
+        }
+
         if (!_filter!.ShouldTrack(fullPath, pathMayBeGone))
         {
             return;
@@ -230,7 +253,7 @@ public sealed class WorkspaceWatcher
         }
     }
 
-    private List<string>? CollectDueBatch()
+    internal List<string>? CollectDueBatch()
     {
         lock (_gate)
         {

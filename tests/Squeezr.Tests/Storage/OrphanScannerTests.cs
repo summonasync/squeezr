@@ -6,7 +6,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Storage;
 
-[Collection("SqueezrHomeScope")]
+[Collection("CliProcessGlobals")]
 public sealed class OrphanScannerTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

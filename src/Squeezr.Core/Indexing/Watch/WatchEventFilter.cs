@@ -1,3 +1,4 @@
+using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Core.Indexing.Watch;
@@ -5,19 +6,29 @@ namespace Squeezr.Core.Indexing.Watch;
 public sealed class WatchEventFilter
 {
     private static readonly string[] AlwaysIgnoredDirs = [".git", ".squeezr"];
+    private static readonly string[] IgnoreFileNames = [".gitignore", ".squeezrignore"];
 
     private readonly string _storeDir;
     private readonly IReadOnlyList<string> _repoRoots;
-    private readonly IReadOnlyList<string> _ignoreGlobs;
+    private readonly IReadOnlyDictionary<string, IgnoreRuleset> _rulesByRepo;
 
-    public WatchEventFilter(string workspaceRoot, IReadOnlyList<string> repoRoots, IReadOnlyList<string> ignoreGlobs)
+    public WatchEventFilter(
+        string workspaceRoot,
+        IReadOnlyList<string> repoRoots,
+        IReadOnlyDictionary<string, IgnoreRuleset> rulesByRepo)
     {
         _storeDir = Path.GetFullPath(SqueezrPaths.StoreDir(workspaceRoot));
         _repoRoots = repoRoots.OrderByDescending(root => root.Length).ToList();
-        _ignoreGlobs = ignoreGlobs;
+        _rulesByRepo = rulesByRepo;
     }
 
     public IReadOnlyList<string> RepoRoots => _repoRoots;
+
+    public static bool IsIgnoreFileChange(string fullPath)
+    {
+        var name = Path.GetFileName(fullPath);
+        return IgnoreFileNames.Contains(name, StringComparer.OrdinalIgnoreCase);
+    }
 
     public bool ShouldTrack(string fullPath, bool pathMayBeGone)
     {
@@ -38,7 +49,8 @@ public sealed class WatchEventFilter
             return false;
         }
 
-        if (_ignoreGlobs.Any(glob => GlobMatcher.IsMatch(glob, relativePath)))
+        if (_rulesByRepo.TryGetValue(repoRoot, out var rules)
+            && rules.Decision(relativePath, isDirectory: false).Excluded)
         {
             return false;
         }
@@ -52,7 +64,8 @@ public sealed class WatchEventFilter
 
     private string? FindRepoRoot(string fullPath) =>
         _repoRoots.FirstOrDefault(root =>
-            fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison));
+            fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison)
+            || string.Equals(fullPath, root, PathComparison));
 
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

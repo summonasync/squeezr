@@ -48,7 +48,7 @@ public class IndexEventWriterTests
     public void Completed_WithoutProvider_OmitsProviderField()
     {
         var writer = new StringWriter();
-        var result = new IndexResult([new RepoIndexResult("demo", 1, 0, 0, 0, 1)], DateTime.UtcNow, []);
+        var result = new IndexResult([new RepoIndexResult("demo", 1, 0, 0, 0, 1, 0)], DateTime.UtcNow, []);
 
         new IndexEventWriter(writer).Completed(result, 7, 2);
 

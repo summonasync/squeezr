@@ -1,5 +1,6 @@
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Indexing.Roslyn;
 using Squeezr.Core.Indexing.TreeSitter;
 using Squeezr.Core.Indexing.Trigram;
@@ -236,6 +237,7 @@ public sealed class WorkspaceIndexer
             var now = DateTime.UtcNow;
             var existing = store.ListFiles(repoDoc.Id)
                 .FirstOrDefault(f => string.Equals(f.Path, relativePath, StringComparison.Ordinal));
+            var rules = IgnoreRuleset.ForFile(repoRoot, config, relativePath, warnings.Add);
 
             if (embeddings is not null && vectorStore is not null)
             {
@@ -245,7 +247,20 @@ public sealed class WorkspaceIndexer
             List<FileDocument> changed;
             List<(uint RepoId, uint Id)> tombstones;
 
-            if (!File.Exists(fullPath))
+            if (File.Exists(fullPath) && rules.Decision(relativePath, isDirectory: false).Excluded)
+            {
+                if (existing is null)
+                {
+                    return null;
+                }
+
+                CascadeSemanticRecords(existing.Id, store);
+                store.DeleteFile(existing.Id);
+                changed = [];
+                tombstones = [(existing.RepoId, existing.Id)];
+                DeleteVectorsForFiles(vectorStore, store, [existing.Id], warnings);
+            }
+            else if (!File.Exists(fullPath))
             {
                 if (existing is null)
                 {
@@ -324,6 +339,7 @@ public sealed class WorkspaceIndexer
                 workspaceRoot, store, manifest, warnings, textCache, SqueezrPaths.TrigramIndexPath(workspaceRoot),
                 changed, tombstones, full: false, progress: null);
 
+            var priorState = store.GetIndexState(repo.Name);
             store.SaveIndexState(new IndexStateDocument
             {
                 RepoKey = repo.Name,
@@ -332,7 +348,9 @@ public sealed class WorkspaceIndexer
                 {
                     Files = store.CountFiles(repoDoc.Id),
                     Symbols = store.CountSymbols(repoDoc.Id),
-                    Chunks = store.CountChunks(repoDoc.Id)
+                    Chunks = store.CountChunks(repoDoc.Id),
+                    IgnoredTotal = priorState?.Stats.IgnoredTotal ?? 0,
+                    IgnoredBySource = priorState?.Stats.IgnoredBySource
                 }
             });
             repoDoc.LastIndexedAt = now;
@@ -367,7 +385,8 @@ public sealed class WorkspaceIndexer
         }
 
         progress?.PhaseStarted(repo.Name, IndexPhase.Walk, 0);
-        var walk = RepoFileWalker.Walk(repoRoot, config.Indexing.Ignore, config.Indexing.MaxFileSizeKb, warnings.Add);
+        var rules = IgnoreRuleset.For(repoRoot, config, warnings.Add);
+        var walk = RepoFileWalker.Walk(repoRoot, rules, config.Indexing.MaxFileSizeKb, warnings.Add);
         progress?.PhaseStarted(repo.Name, IndexPhase.Files, walk.Files.Count);
         var skipped = walk.Skipped;
         var dbFiles = store.ListFiles(repoDoc.Id);
@@ -468,6 +487,10 @@ public sealed class WorkspaceIndexer
         }
 
         var totalFiles = store.CountFiles(repoDoc.Id);
+        var ignoredBySource = walk.IgnoredBySource
+            .Where(kv => kv.Value > 0)
+            .ToDictionary(kv => IgnoreSourceKey.Of(kv.Key), kv => kv.Value);
+        var ignoredSnapshot = ignoredBySource.Count > 0 ? ignoredBySource : null;
         store.SaveIndexState(new IndexStateDocument
         {
             RepoKey = repo.Name,
@@ -476,14 +499,16 @@ public sealed class WorkspaceIndexer
             {
                 Files = totalFiles,
                 Symbols = store.CountSymbols(repoDoc.Id),
-                Chunks = store.CountChunks(repoDoc.Id)
+                Chunks = store.CountChunks(repoDoc.Id),
+                IgnoredTotal = walk.Ignored,
+                IgnoredBySource = ignoredSnapshot
             }
         });
         repoDoc.LastIndexedAt = now;
         store.UpsertRepo(repoDoc);
 
         return new RepoWork(
-            new RepoIndexResult(repo.Name, added, modified, deleted.Count, skipped, totalFiles),
+            new RepoIndexResult(repo.Name, added, modified, deleted.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot),
             changed,
             deleted);
     }

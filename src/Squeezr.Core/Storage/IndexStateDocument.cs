@@ -27,4 +27,10 @@ public sealed class IndexStateStats
 
     [BsonField("chunks")]
     public int Chunks { get; set; }
+
+    [BsonField("ignoredTotal")]
+    public int IgnoredTotal { get; set; }
+
+    [BsonField("ignoredBySource")]
+    public Dictionary<string, int>? IgnoredBySource { get; set; }
 }

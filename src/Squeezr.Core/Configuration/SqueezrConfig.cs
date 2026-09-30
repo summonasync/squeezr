@@ -35,7 +35,14 @@ public sealed record SqueezrConfig
                     "**/.idea/**",
                     "**/.claude/worktrees/**",
                     "**/*.min.js",
-                    "**/*.tsbuildinfo"
+                    "**/*.tsbuildinfo",
+                    "**/web/out/**",
+                    "**/.qwen/tmp/**",
+                    "**/coverage/**",
+                    "**/.turbo/**",
+                    "**/.pytest_cache/**",
+                    "**/.gradle/**",
+                    "**/TestResults/**"
                 ],
                 MaxFileSizeKb = 512,
                 NoSemantic = false,

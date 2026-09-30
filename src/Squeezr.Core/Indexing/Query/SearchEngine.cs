@@ -34,6 +34,9 @@ public sealed class SearchEngine
     {
         var fileScope = ResolveFileScope(query);
         var exact = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: true, fileScope);
+        var identifierHits = query.Regex
+            ? []
+            : IdentifierTokenLeg.Execute(_workspaceRoot, query, fileScope);
         var semantic = new List<(string Key, SearchMatch Match)>();
         var warnings = new List<string>();
 
@@ -61,7 +64,16 @@ public sealed class SearchEngine
             }
         }
 
-        var exactRanked = exact.Select(hit => (hit.Key!, hit.Match)).ToList();
+        var phraseLocations = new HashSet<(string Path, int Line)>(
+            exact.Select(hit => (hit.Match.Path, hit.Match.Line)));
+        var dedupedIdentifier = identifierHits
+            .Where(hit => !phraseLocations.Contains((hit.Match.Path, hit.Match.Line)))
+            .ToList();
+
+        var exactRanked = exact
+            .Concat(dedupedIdentifier)
+            .Select(hit => (hit.Key!, hit.Match))
+            .ToList();
         var merged = RrfMerger.Merge(exactRanked, semantic);
         return Finalize(merged, query, warnings);
     }

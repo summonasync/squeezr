@@ -1,5 +1,6 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Indexing.Ignore;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -20,7 +21,8 @@ public class RepoFileWalkerTests
         WriteFile(root, "logs/big.log", new string('x', 600 * 1024));
 
         var config = SqueezrConfig.CreateDefault();
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, config.Indexing.Ignore, config.Indexing.MaxFileSizeKb);
+        var rules = IgnoreRuleset.For(root, config);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
 
         result.Files.Select(f => f.RelativePath).ShouldBe([
             "docs/readme.md",
@@ -48,7 +50,8 @@ public class RepoFileWalkerTests
         config.Indexing.Ignore.ShouldContain("**/.vs/**");
         config.Indexing.Ignore.ShouldContain("**/.idea/**");
 
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, config.Indexing.Ignore, config.Indexing.MaxFileSizeKb);
+        var rules = IgnoreRuleset.For(root, config);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["src/Program.cs"]);
         result.Skipped.ShouldBe(0);
@@ -61,7 +64,8 @@ public class RepoFileWalkerTests
         WriteFile(root, "a.cs", "class A { }");
         WriteFile(root, "sub/b.js", "function b() { }");
 
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, [], 512);
+        var rules = EmptyRuleset(root);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, 512);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["a.cs", "sub/b.js"]);
         result.Skipped.ShouldBe(0);
@@ -78,7 +82,8 @@ public class RepoFileWalkerTests
         using var lockStream = new FileStream(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None);
         var warnings = new List<string>();
 
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, [], 512, warnings.Add);
+        var rules = EmptyRuleset(root);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, 512, warnings.Add);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["free.cs"]);
         result.Skipped.ShouldBe(1);
@@ -103,9 +108,113 @@ public class RepoFileWalkerTests
             return;
         }
 
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, [], 512);
+        var rules = EmptyRuleset(root);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, 512);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["real/a.cs"]);
+    }
+
+    [Fact]
+    public void Walk_DirRule_DoesNotDescend_SubtreeFilesNeverRead()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "src/keep.cs", "class Keep { }");
+        WriteFile(root, "web/out/deep.js", "function deep() { }");
+        WriteFile(root, "web/out/vendor/lib.js", "function lib() { }");
+        WriteFile(root, ".gitignore", "web/out/\n");
+
+        var config = SqueezrConfig.CreateDefault();
+        var rules = IgnoreRuleset.For(root, config);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+
+        result.Files.Select(f => f.RelativePath).ShouldBe([".gitignore", "src/keep.cs"]);
+        result.Ignored.ShouldBe(2);
+        result.IgnoredBySource.ShouldContainKey(IgnoreSource.Gitignore);
+        result.IgnoredBySource[IgnoreSource.Gitignore].ShouldBe(2);
+    }
+
+    [Fact]
+    public void Walk_PrunedDirectory_CountsFilesByName_WithoutReadingOrHashingThem()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "src/keep.cs", "class Keep { }");
+        WriteFile(root, "build/out.js", "var x;");
+        WriteFile(root, "build/nested/deep.js", "function deep() { }");
+        WriteFile(root, "build/huge.log", new string('x', 900 * 1024));
+        WriteFile(root, ".gitignore", "build/\n");
+
+        var config = SqueezrConfig.CreateDefault();
+        var rules = IgnoreRuleset.For(root, config);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+
+        result.Ignored.ShouldBe(3);
+        result.Skipped.ShouldBe(0);
+        result.Files.Select(f => f.RelativePath).ShouldBe([".gitignore", "src/keep.cs"]);
+    }
+
+    [Fact]
+    public void Walk_ReportsIgnoredBySource()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "src/keep.cs", "class Keep { }");
+        WriteFile(root, "build/out.js", "var x;");
+        WriteFile(root, "build/nested/deep.js", "function deep() { }");
+        WriteFile(root, ".gitignore", "build/\n");
+
+        var config = SqueezrConfig.CreateDefault();
+        var rules = IgnoreRuleset.For(root, config);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+
+        result.Ignored.ShouldBe(2);
+        result.IgnoredBySource[IgnoreSource.Gitignore].ShouldBe(2);
+        result.IgnoredBySource.Values.Sum().ShouldBe(result.Ignored);
+    }
+
+    [Fact]
+    public void Walk_EmptyPrunedDirectory_CountsNoFiles()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "src/keep.cs", "class Keep { }");
+        Directory.CreateDirectory(Path.Combine(root, "artifacts"));
+        WriteFile(root, ".gitignore", "artifacts/\n");
+
+        var config = SqueezrConfig.CreateDefault();
+        var rules = IgnoreRuleset.For(root, config);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+
+        result.Ignored.ShouldBe(0);
+        result.IgnoredBySource.ShouldNotContainKey(IgnoreSource.Gitignore);
+    }
+
+    [Fact]
+    public void Walk_RespectGitignoreFalse_IgnoresOnlyDefaults()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "src/keep.cs", "class Keep { }");
+        WriteFile(root, "build/deep.js", "function deep() { }");
+        WriteFile(root, ".gitignore", "build/\n");
+
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Indexing = SqueezrConfig.CreateDefault().Indexing with { RespectGitignore = false }
+        };
+        var rules = IgnoreRuleset.For(root, config);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+
+        result.Files.Select(f => f.RelativePath).ShouldContain("build/deep.js");
+    }
+
+    private static IgnoreRuleset EmptyRuleset(string root)
+    {
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Indexing = SqueezrConfig.CreateDefault().Indexing with
+            {
+                Ignore = [],
+                RespectGitignore = false
+            }
+        };
+        return IgnoreRuleset.For(root, config);
     }
 
     private static void WriteFile(string root, string relativePath, string content)

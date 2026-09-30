@@ -139,7 +139,9 @@ public sealed class WorkspaceManager
                     state?.Stats.Files ?? 0,
                     state?.Stats.Symbols ?? 0,
                     state?.Stats.Chunks ?? 0,
-                    state?.LastFullIndexAt ?? store.FindRepo(r.Name)?.LastIndexedAt);
+                    state?.LastFullIndexAt ?? store.FindRepo(r.Name)?.LastIndexedAt,
+                    state?.Stats.IgnoredTotal ?? 0,
+                    state?.Stats.IgnoredBySource);
             })
             .ToList();
 

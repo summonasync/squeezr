@@ -4,7 +4,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Workspace;
 
-[Collection("SqueezrHomeScope")]
+[Collection("CliProcessGlobals")]
 public sealed class WorkspaceManagerInitRollbackTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

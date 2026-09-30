@@ -1,17 +1,25 @@
+using Squeezr.Core.Indexing.Ignore;
+
 namespace Squeezr.Core.Indexing;
 
 public sealed record SourceFile(string RelativePath, string FullPath, string Language, long SizeBytes, string Sha256);
 
-public sealed record FileWalkResult(IReadOnlyList<SourceFile> Files, int Skipped);
+public sealed record FileWalkResult(
+    IReadOnlyList<SourceFile> Files,
+    int Skipped,
+    int Ignored,
+    IReadOnlyDictionary<IgnoreSource, int> IgnoredBySource);
 
 public static class RepoFileWalker
 {
     private static readonly string[] AlwaysSkippedDirs = [".git", ".squeezr"];
 
-    public static FileWalkResult Walk(string repoRoot, IReadOnlyList<string> ignoreGlobs, int maxFileSizeKb, Action<string>? warn = null)
+    public static FileWalkResult Walk(string repoRoot, IgnoreRuleset rules, int maxFileSizeKb, Action<string>? warn = null)
     {
         var files = new List<SourceFile>();
         var skipped = 0;
+        var ignored = 0;
+        var ignoredBySource = new Dictionary<IgnoreSource, int>();
         var maxBytes = (long)maxFileSizeKb * 1024;
         var pending = new Queue<string>();
         pending.Enqueue(repoRoot);
@@ -55,9 +63,16 @@ public static class RepoFileWalker
 
                     var name = Path.GetFileName(entry);
                     if ((attributes & FileAttributes.ReparsePoint) != 0
-                        || AlwaysSkippedDirs.Contains(name, StringComparer.OrdinalIgnoreCase)
-                        || ignoreGlobs.Any(g => GlobMatcher.IsMatch(g, relativePath)))
+                        || AlwaysSkippedDirs.Contains(name, StringComparer.OrdinalIgnoreCase))
                     {
+                        continue;
+                    }
+
+                    var dirDecision = rules.Decision(relativePath, isDirectory: true);
+                    if (dirDecision.Excluded)
+                    {
+                        // the walk stops at the directory, so the tree below it has to be counted by name
+                        CountIgnored(dirDecision.Source, ignoredBySource, ref ignored, CountDroppedFiles(entry));
                         continue;
                     }
 
@@ -65,8 +80,10 @@ public static class RepoFileWalker
                     continue;
                 }
 
-                if (ignoreGlobs.Any(g => GlobMatcher.IsMatch(g, relativePath)))
+                var fileDecision = rules.Decision(relativePath, isDirectory: false);
+                if (fileDecision.Excluded)
                 {
+                    CountIgnored(fileDecision.Source, ignoredBySource, ref ignored, 1);
                     continue;
                 }
 
@@ -115,6 +132,74 @@ public static class RepoFileWalker
         }
 
         files.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
-        return new FileWalkResult(files, skipped);
+        return new FileWalkResult(files, skipped, ignored, ignoredBySource);
+    }
+
+    private static void CountIgnored(
+        IgnoreSource? source, Dictionary<IgnoreSource, int> bySource, ref int total, int count)
+    {
+        if (count == 0)
+            return;
+
+        total += count;
+        if (source is not null)
+        {
+            bySource.TryGetValue(source.Value, out var existing);
+            bySource[source.Value] = existing + count;
+        }
+    }
+
+    private static int CountDroppedFiles(string directory)
+    {
+        var count = 0;
+        var pending = new Queue<string>();
+        pending.Enqueue(directory);
+
+        while (pending.Count > 0)
+        {
+            IEnumerable<string> entries;
+            try
+            {
+                entries = Directory.EnumerateFileSystemEntries(pending.Dequeue());
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                if (!Directory.Exists(entry))
+                {
+                    count++;
+                    continue;
+                }
+
+                FileAttributes attributes;
+                try
+                {
+                    attributes = File.GetAttributes(entry);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                var name = Path.GetFileName(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0
+                    || AlwaysSkippedDirs.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                pending.Enqueue(entry);
+            }
+        }
+
+        return count;
     }
 }

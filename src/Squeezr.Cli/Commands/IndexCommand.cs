@@ -112,9 +112,10 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
             {
                 foreach (var repo in result.Repos)
                 {
+                    var ignoredPart = repo.Ignored > 0 ? $", ignored: {repo.Ignored}" : "";
                     AnsiConsole.MarkupLine(
                         $"[bold]{repo.Name}[/]: +{repo.Added} ~{repo.Modified} -{repo.Deleted} " +
-                        $"(skipped: {repo.Skipped}, files: {repo.Files})");
+                        $"(skipped: {repo.Skipped}{ignoredPart}, files: {repo.Files})");
                 }
 
                 foreach (var warning in result.Warnings)

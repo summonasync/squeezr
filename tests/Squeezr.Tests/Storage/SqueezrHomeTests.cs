@@ -3,7 +3,7 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Storage;
 
-[Collection("SqueezrHomeScope")]
+[Collection("CliProcessGlobals")]
 public sealed class SqueezrHomeTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

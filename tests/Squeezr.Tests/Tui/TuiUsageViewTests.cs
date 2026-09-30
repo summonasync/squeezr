@@ -6,7 +6,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Tui;
 
-[Collection("SqueezrHomeScope")]
+[Collection("CliProcessGlobals")]
 public sealed class TuiUsageViewTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

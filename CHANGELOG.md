@@ -4,6 +4,14 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+- **Redirected CLI output no longer wraps contract lines at 80 columns.** When stdout is not a TTY, Spectre fell back to width 80 and re-wrapped long single `MarkupLine`s — breaking machine-readable output in pipes (first seen as `squeezr symbol … | grep` losing its truncation hint). Terminal rendering is unchanged; long lines now stay one logical line in pipes.
+
+### Added
+- Gitignore-aware ignore engine (`IgnoreRuleset` + a supported-subset matcher): layered defaults → config → `.squeezrignore` → `.gitignore` cascade, last-match-wins, `indexing.respectGitignore` honored.
+- Ignored-file observability: per-repo `ignored { files, bySource }` counts persisted from the real index pass, surfaced in `squeezr index`, `squeezr status --json` and `index_status`; directories pruned as a subtree are counted as the files inside them. **`--json` contract addition (declared per 035).**
+- Identifier-token arm in hybrid search: multi-word queries whose full phrase exists nowhere still get `source=exact` hits (smart-case, df-capped, filter-aware).
+
 ## [1.0.7] — 2026-09-28
 
 The dogfood-wave release — the whole v1.0.6 Overmind field report became three features: 058 agent-experience clarity, 059 Qdrant point hygiene, 060 doc-noise scoping. Full suite 1132 → 1288.

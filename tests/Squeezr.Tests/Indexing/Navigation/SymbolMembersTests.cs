@@ -6,11 +6,12 @@ using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Xunit.Abstractions;
 
 namespace Squeezr.Tests.Indexing.Navigation;
 
 [Collection("CliProcessGlobals")]
-public class SymbolMembersTests
+public class SymbolMembersTests(ITestOutputHelper output)
 {
     private const int MembersFitBudget = 120;
     private const int MembersOverflowBudget = 40;
@@ -142,6 +143,8 @@ public class SymbolMembersTests
 
         var pretty = await CliTestProcess.RunAsync(
             workspace, "symbol", "Huge", "--max-tokens", MembersOverflowBudget.ToString());
+        output.WriteLine($"symbol Huge --max-tokens {MembersOverflowBudget} -> exit {pretty.ExitCode}" +
+                         $"\n{pretty.StdOut}\n{pretty.StdErr}");
         pretty.ExitCode.ShouldBe(0);
         pretty.StdOut.ShouldContain("body: omitted (budget)");
         pretty.StdOut.ShouldContain("members:");

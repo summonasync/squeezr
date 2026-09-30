@@ -41,7 +41,7 @@ public sealed class WatchEventsStatusTests
         var renderer = new IndexEventsRenderer(new IndexEventWriter(writer));
         var status = new WatchEventsStatus(new IndexEventWriter(writer), "/ws", renderer);
         var result = new IndexResult(
-            [new RepoIndexResult("demo", 2, 1, 0, 0, 5)], DateTime.UtcNow, []);
+            [new RepoIndexResult("demo", 2, 1, 0, 0, 5, 0)], DateTime.UtcNow, []);
 
         status.PassStarted(1);
         renderer.PhaseStarted("demo", IndexPhase.Semantic, 1);

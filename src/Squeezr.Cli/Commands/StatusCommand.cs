@@ -44,7 +44,12 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             if (settings.Json)
             {
                 var staleFiles = StaleFileDetector.Detect(workspaceRoot);
-                JsonOutput.Write(WorkspaceStatusReport.Create(status, staleFiles, config?.Embeddings.Provider));
+                var report = WorkspaceStatusReport.Create(status, staleFiles, config?.Embeddings.Provider);
+                JsonOutput.Write(report);
+                foreach (var warning in report.Warnings)
+                {
+                    Console.Error.WriteLine($"warning: {warning}");
+                }
                 return 0;
             }
 
@@ -57,6 +62,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             table.AddColumn("Files");
             table.AddColumn("Symbols");
             table.AddColumn("Chunks");
+            table.AddColumn("Ignored");
             table.AddColumn("Last indexed");
 
             foreach (var repo in status.Repos)
@@ -67,6 +73,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                     repo.Files.ToString(),
                     repo.Symbols.ToString(),
                     repo.Chunks.ToString(),
+                    repo.IgnoredTotal > 0 ? repo.IgnoredTotal.ToString() : "-",
                     repo.LastIndexedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-");
             }
 

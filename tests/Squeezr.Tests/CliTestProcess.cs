@@ -1,11 +1,20 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests;
 
 internal static partial class CliTestProcess
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
+
+    // Captured once on first use so that every child CLI in a test run is pinned
+    // to the same central store, even if a SqueezrHomeScope test (running earlier
+    // in the same serialized collection) left SQUEEZR_HOME pointing at its own
+    // temp dir and SqueezrHome.Reset() cleared the cache. Without this snapshot,
+    // SqueezrHome.Resolve() at Process.Start time could re-read a stale env var
+    // and send the child to a registry where the workspace is unknown.
+    private static readonly string TestRunHome = SqueezrHome.Resolve();
 
     public static async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(
         string workingDir, params string[] args)
@@ -32,6 +41,7 @@ internal static partial class CliTestProcess
     private static async Task<(int ExitCode, string StdOut, string StdErr)> StartAsync(
         string workingDir, string[] args, string? squeezrHome, string? stdin = null)
     {
+        var effectiveHome = squeezrHome ?? TestRunHome;
         var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {string.Join(" ", args)}")
         {
             WorkingDirectory = workingDir,
@@ -41,10 +51,7 @@ internal static partial class CliTestProcess
             UseShellExecute = false
         };
         startInfo.Environment["NO_COLOR"] = "1";
-        if (squeezrHome is not null)
-        {
-            startInfo.Environment["SQUEEZR_HOME"] = squeezrHome;
-        }
+        startInfo.Environment["SQUEEZR_HOME"] = effectiveHome;
 
         using var process = Process.Start(startInfo)!;
         if (stdin is not null)

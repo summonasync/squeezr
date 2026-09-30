@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Commands;
+using Squeezr.Cli.Output;
 using Squeezr.Cli.Tui;
 
 namespace Squeezr.Cli;
@@ -96,6 +97,7 @@ public static class CliApplication
             McpCommandRegistration.AddMcpBranch(config);
         });
 
+        RedirectedOutput.ApplyLayout(AnsiConsole.Console, System.Console.IsOutputRedirected);
         return app.RunAsync(args);
     }
 }

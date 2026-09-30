@@ -9,4 +9,6 @@ public sealed record IndexingConfig
     public bool NoSemantic { get; init; }
 
     public IReadOnlyList<string> RankExclude { get; init; } = [];
+
+    public bool RespectGitignore { get; init; } = true;
 }

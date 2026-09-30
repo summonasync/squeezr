@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing;
+using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -46,7 +48,8 @@ public sealed class IndexStatusTool
                 _resolved = true;
             }
 
-            var status = new WorkspaceManager(root).GetStatus();
+            var manager = new WorkspaceManager(root);
+            var status = manager.GetStatus();
             QdrantStatus qdrant;
             using (var metaStore = new MetaStore(SqueezrPaths.MetaDbPath(root)))
             {
@@ -70,15 +73,18 @@ public sealed class IndexStatusTool
                     "indexed, so expand_span / find_references / symbol_lookup still reach them.");
             }
 
+            var repos = new List<RepoData>();
+            foreach (var r in status.Repos)
+            {
+                var repoRoot = Path.GetFullPath(Path.IsPathRooted(r.Path) ? r.Path : Path.Combine(root, r.Path));
+                var ignored = BuildIgnoredData(r, warnings);
+                repos.Add(new RepoData(r.Name, repoRoot, r.Files, r.Symbols, r.Chunks, ignored));
+            }
+
             var data = new IndexStatusData(
                 status.Name,
                 root,
-                status.Repos.Select(r => new RepoData(
-                    r.Name,
-                    Path.GetFullPath(Path.IsPathRooted(r.Path) ? r.Path : Path.Combine(root, r.Path)),
-                    r.Files,
-                    r.Symbols,
-                    r.Chunks)).ToList(),
+                repos,
                 new EmbeddingsData(
                     qdrant.PendingChunks,
                     new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio),
@@ -97,6 +103,47 @@ public sealed class IndexStatusTool
         }
     }
 
+    private static IgnoredData? BuildIgnoredData(RepoStatus repo, List<string> warnings)
+    {
+        if (repo.IgnoredTotal == 0 || repo.IgnoredBySource is null || repo.IgnoredBySource.Count == 0)
+            return null;
+
+        var dominant = repo.IgnoredBySource.MaxBy(kv => kv.Value);
+        if (dominant.Key is not null && dominant.Value > 0 && IgnoreSourceKey.IsKnown(dominant.Key))
+        {
+            warnings.Add(FormatIgnoreWarning(dominant.Key, dominant.Value));
+        }
+
+        var bySourceData = new Dictionary<string, int>();
+        foreach (var (source, count) in repo.IgnoredBySource.OrderBy(kv => kv.Key))
+        {
+            if (count > 0)
+                bySourceData[source] = count;
+        }
+
+        return new IgnoredData(repo.IgnoredTotal, bySourceData);
+    }
+
+    private static string FormatIgnoreWarning(string sourceKey, int count)
+    {
+        var via = sourceKey switch
+        {
+            "defaults" => "built-in defaults",
+            "config" => "indexing.ignore config",
+            "squeezrignore" => ".squeezrignore",
+            "gitignore" => ".gitignore",
+            _ => sourceKey
+        };
+        var hint = sourceKey switch
+        {
+            "gitignore" => " — set indexing.respectGitignore=false to disable",
+            "squeezrignore" => " — remove .squeezrignore or adjust patterns to include them",
+            "config" => " — adjust indexing.ignore in the workspace config",
+            _ => " — adjust indexing.ignore defaults via workspace config"
+        };
+        return $"last index pass excluded {count} file(s) via {via}{hint}";
+    }
+
     private sealed record IndexStatusData(
         [property: JsonPropertyName("workspace")] string Workspace,
         [property: JsonPropertyName("rootPath")] string RootPath,
@@ -109,7 +156,13 @@ public sealed class IndexStatusTool
         [property: JsonPropertyName("rootPath")] string RootPath,
         [property: JsonPropertyName("files")] int Files,
         [property: JsonPropertyName("symbols")] int Symbols,
-        [property: JsonPropertyName("chunks")] int Chunks);
+        [property: JsonPropertyName("chunks")] int Chunks,
+        [property: JsonPropertyName("ignored"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IgnoredData? Ignored);
+
+    private sealed record IgnoredData(
+        [property: JsonPropertyName("files")] int Files,
+        [property: JsonPropertyName("bySource")] IReadOnlyDictionary<string, int> BySource);
 
     private sealed record EmbeddingsData(
         [property: JsonPropertyName("pending")] int Pending,

@@ -105,7 +105,7 @@ public static class ExactSearchPlan
     private static bool ResolveCaseSensitivity(SearchQuery query) =>
         query.IgnoreCase ?? (query.Query != query.Query.ToLowerInvariant());
 
-    private static List<uint> PlanCandidates(TrigramIndexReader reader, SearchQuery query, IReadOnlySet<uint>? filter, bool caseSensitive)
+    private static IReadOnlyList<uint> PlanCandidates(TrigramIndexReader reader, SearchQuery query, IReadOnlySet<uint>? filter, bool caseSensitive)
     {
         List<string[]> trigramGroups;
         if (query.Regex)
@@ -118,7 +118,7 @@ public static class ExactSearchPlan
         }
         else if (query.Query.Length >= 3)
         {
-            trigramGroups = PlanLiteral(query.Query, caseSensitive, out var exceededCap);
+            trigramGroups = LiteralGroups(query.Query, caseSensitive, out var exceededCap);
             if (exceededCap)
             {
                 return FullScan(reader, filter);
@@ -129,7 +129,28 @@ public static class ExactSearchPlan
             return FullScan(reader, filter);
         }
 
-        var lists = trigramGroups
+        return ResolveCandidates(reader, trigramGroups, filter);
+    }
+
+    internal static List<string[]> LiteralGroups(string literal, bool caseSensitive, out bool exceededCap)
+    {
+        exceededCap = false;
+        var groups = new List<string[]>(literal.Length - 2);
+        for (var i = 0; i + 3 <= literal.Length; i++)
+        {
+            var trigram = literal.Substring(i, 3);
+            groups.Add(caseSensitive ? [trigram] : ExpandWithCap(trigram, literal.Length - 2, ref exceededCap));
+        }
+
+        return groups;
+    }
+
+    internal static uint[] ResolveCandidates(
+        TrigramIndexReader reader,
+        IReadOnlyList<string[]> groups,
+        IReadOnlySet<uint>? filter)
+    {
+        var lists = groups
             .Select(group =>
             {
                 var union = new HashSet<uint>();
@@ -148,20 +169,7 @@ public static class ExactSearchPlan
             })
             .ToList();
 
-        return PostingListIntersect.Intersect(lists).ToList();
-    }
-
-    private static List<string[]> PlanLiteral(string literal, bool caseSensitive, out bool exceededCap)
-    {
-        exceededCap = false;
-        var groups = new List<string[]>(literal.Length - 2);
-        for (var i = 0; i + 3 <= literal.Length; i++)
-        {
-            var trigram = literal.Substring(i, 3);
-            groups.Add(caseSensitive ? [trigram] : ExpandWithCap(trigram, literal.Length - 2, ref exceededCap));
-        }
-
-        return groups;
+        return PostingListIntersect.Intersect(lists);
     }
 
     private static string[] ExpandWithCap(string trigram, int trigramCount, ref bool exceededCap)
@@ -196,7 +204,7 @@ public static class ExactSearchPlan
         return result;
     }
 
-    private static IReadOnlySet<uint>? BuildFilter(MetaStore store, SearchQuery query, IReadOnlySet<uint>? fileScope)
+    internal static IReadOnlySet<uint>? BuildFilter(MetaStore store, SearchQuery query, IReadOnlySet<uint>? fileScope)
     {
         if (query.Repo is null && query.PathGlob is null && query.Language is null)
         {
@@ -340,7 +348,7 @@ public static class ExactSearchPlan
                || trimmed.StartsWith("*", StringComparison.Ordinal);
     }
 
-    private static string ResolveChunkKey(MetaStore store, uint fileId, int line)
+    internal static string ResolveChunkKey(MetaStore store, uint fileId, int line)
     {
         var start = store.ListChunksByFile(fileId)
             .Where(c => c.StartLine <= line && line <= c.EndLine)

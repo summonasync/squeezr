@@ -1,4 +1,5 @@
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -32,7 +33,8 @@ public static class StaleFileDetector
                 continue;
             }
 
-            var walk = RepoFileWalker.Walk(repoRoot, config.Indexing.Ignore, config.Indexing.MaxFileSizeKb);
+            var rules = IgnoreRuleset.For(repoRoot, config);
+            var walk = RepoFileWalker.Walk(repoRoot, rules, config.Indexing.MaxFileSizeKb);
             var dbByPath = dbFiles.ToDictionary(f => f.Path, StringComparer.Ordinal);
             var walkedPaths = walk.Files.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
 

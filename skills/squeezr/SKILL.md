@@ -162,7 +162,9 @@ plain grep/read is correct, not a violation.
   while they stay indexed and readable through `expand_span`.
 - `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span. When a
   type's body exceeds the token budget it returns the member list (name, kind, line)
-  as a mini-map instead — each line is an expand_span coordinate.
+  as a mini-map instead — each line is an expand_span coordinate. When no symbol
+  matches, returns `didYouMean` (top-3 candidates by trigram-Jaccard, threshold
+  0.34) instead of a bare miss.
 - `find_references` — caller-side reference points for a symbol.
 - `expand_span(file, startLine, endLine?, contextLines?, maxTokens?)` — the only
   tool that returns raw source lines; reads the live file on disk, so it reflects
@@ -173,7 +175,13 @@ plain grep/read is correct, not a violation.
   project's root, the session serves a different workspace). Call before heavy
   querying to decide on a reindex. When ranking is curated, `warnings` lists the
   active `indexing.rankExclude` patterns — read them before trusting a
-  `code_search` result set as complete.
+  `code_search` result set as complete. When files are excluded from indexing,
+  the `ignored` block per repo shows `{ files, bySource }` (sources: defaults,
+  config, squeezrignore, gitignore — absent keys mean 0) and `warnings` names
+  the dominant source with a hint on how to disable it. `files` counts files,
+  not directories: everything under a pruned directory (`out/`) is included,
+  counted by name only. The ignored numbers are a snapshot from the last index
+  pass, not live disk state — they stay stable until the next `squeezr index`.
 
 Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
 and sets `truncated` when it overflows — narrow the query or adjust maxTokens
@@ -189,7 +197,37 @@ serve session come from an in-memory cache; a reindex invalidates it.
 Every tool also has a CLI twin (`squeezr search`, `map`, `symbol`, `refs`,
 `expand`) for use outside an MCP session.
 
-## 6. Troubleshooting
+## 6. Ignore mechanics
+
+Squeezr excludes files from indexing via a layered ruleset (last-match-wins):
+
+1. **Built-in defaults** — `node_modules`, `bin`, `obj`, `dist`, `.next`, `.vs`,
+   `coverage`, etc. Always active.
+2. **`indexing.ignore`** in the workspace config — additional globs.
+3. **`.squeezrignore`** in the repo root — gitignore-syntax, non-cascading.
+4. **`.gitignore` cascade** — enabled by default (`indexing.respectGitignore:
+   true`). Set to `false` to disable.
+
+Supported gitignore subset: `#` comments, `!` negation, `/` anchoring, trailing
+`/` for dirs, `*`, `?`, `**`. NOT supported: `[character-classes]` and `\`
+escapes — they produce a warning and are skipped.
+
+`code_search` hybrid gained an identifier-exact branch: multi-token queries with
+code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens hit a
+dedicated branch with `source=exact` — more precise for compound identifiers.
+The branch honours the same filters as the phrase arm (`repo`, `language`,
+`pathGlob`, `prefix`, `rankExclude`).
+
+Known limitation of the branch, a quiet recall loss: case expansion of a token's
+trigrams is capped (`CaseVariantCap = 64` divided by the token's trigram count,
+8 variants per trigram), so a lowercase token longer than ~10 characters stops
+folding case — `materialization` will not reach a spelling that exists only as
+`Materialization…`, and the token drops out of the discriminants silently. The
+phrase arm degrades to a disk full-scan in the same case, so single literals keep
+their recall. The real fix is case-folded trigrams in the index — an index format
+change that needs a rebuild and has no owner in the backlog yet.
+
+## 7. Troubleshooting
 
 - **qdrant.endpoint / gRPC vs REST** — a warning saying the configured endpoint
   "points at the REST port — squeezr speaks gRPC" means the workspace config has
