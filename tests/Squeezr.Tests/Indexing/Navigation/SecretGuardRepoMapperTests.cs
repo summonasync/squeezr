@@ -1,4 +1,5 @@
 using Shouldly;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Workspace;
 
@@ -55,15 +56,54 @@ public class SecretGuardRepoMapperTests
     }
 
     [Fact]
-    public void Build_PrefixOverASubtreeOfOnlySecrets_RefusesWithoutNamingTheFile()
+    public void Build_PrefixOverASubtreeOfOnlySecrets_ReportsWithheldInsteadOfAbsent()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+
+        var result = new RepoMapper(workspace).Build(null, 3, 4000, "deploy/");
+
+        result.ScopedPrefix.ShouldBe("deploy/");
+        result.Lines.Select(l => l.Text).ShouldNotContain("monkey.pem");
+        result.Lines.ShouldNotContain(line => line.Text.StartsWith("keys/"));
+        Withheld(result).ShouldMatch(
+            @"^secret guard: 1 result\(s\) withheld \('deploy/keys/monkey\.pem' matches built-in patterns\)$");
+    }
+
+    [Fact]
+    public void Build_PrefixOverARepoOfOnlySecrets_MapsAnEmptySubtree()
+    {
+        var workspace = NewVaultWorkspace();
+
+        var result = new RepoMapper(workspace).Build(null, 3, 4000, "deploy/");
+
+        result.Lines.Select(l => l.Text).ShouldNotContain("monkey.pem");
+        result.Repos.ShouldHaveSingleItem().ShouldBe("vault");
+        Withheld(result).ShouldMatch(
+            @"^secret guard: 1 result\(s\) withheld \('deploy/keys/monkey\.pem' matches built-in patterns\)$");
+    }
+
+    [Fact]
+    public void Build_UnscopedRepoOfOnlySecrets_MapsHeaderAndCountsEveryFile()
+    {
+        var workspace = NewVaultWorkspace();
+
+        var result = new RepoMapper(workspace).Build(null, 3, 4000);
+
+        result.Lines.Select(l => l.Text).ShouldNotContain("monkey.pem");
+        result.Lines.Select(l => l.Text).ShouldNotContain(".env");
+        Withheld(result).ShouldStartWith("secret guard: 2 result(s) withheld");
+    }
+
+    [Fact]
+    public void Build_PrefixThatNamesAProtectedFile_RefusesInsteadOfReportingAbsent()
     {
         var workspace = SecretGuardFixture.NewIndexedWorkspace();
 
         var ex = Should.Throw<WorkspaceException>(
-            () => new RepoMapper(workspace).Build(null, 3, 4000, "deploy/"));
+            () => new RepoMapper(workspace).Build(null, 3, 4000, ".env"));
 
-        ex.Message.ShouldNotContain("monkey.pem");
-        ex.Message.ShouldNotContain("keys/ (");
+        ex.Message.ShouldContain("protected by squeezr's built-in secret guard");
+        ex.Message.ShouldNotContain("No indexed files under prefix");
     }
 
     [Fact]
@@ -74,5 +114,32 @@ public class SecretGuardRepoMapperTests
         var result = new RepoMapper(workspace).Build(null, 2, 4000, "src/");
 
         result.Lines.Select(l => l.Text).ShouldContain("App.cs");
+    }
+
+    private static string Withheld(RepoMapResult result) =>
+        result.GuardWarnings.ShouldNotBeNull()
+            .Single(w => w.StartsWith("secret guard:", StringComparison.Ordinal));
+
+    private static string NewVaultWorkspace()
+    {
+        var vault = TestDirs.NewTempDir();
+        Directory.CreateDirectory(Path.Combine(vault, "vault"));
+        var manager = new WorkspaceManager(vault);
+        manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(vault);
+        manager.AddRepo("vault", "vault");
+        foreach (var (relative, content) in new (string, string)[]
+                 {
+                     ("deploy/keys/monkey.pem", $"{SecretGuardFixture.PemCanary}\n"),
+                     (".env", $"OPENAI_API_KEY={SecretGuardFixture.EnvCanary}\n"),
+                 })
+        {
+            var fullPath = Path.Combine(vault, "vault", relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            File.WriteAllText(fullPath, content);
+        }
+
+        new WorkspaceIndexer().Index(vault);
+        return vault;
     }
 }

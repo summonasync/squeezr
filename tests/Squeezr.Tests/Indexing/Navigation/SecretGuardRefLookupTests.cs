@@ -16,6 +16,8 @@ public class SecretGuardRefLookupTests
 
         result.Groups.ShouldNotBeEmpty();
         result.Groups.SelectMany(g => g.Refs).ShouldNotContain(r => r.File == SecretGuardFixture.EnvPath);
+        Withheld(result).ShouldMatch(
+            @"^secret guard: 1 result\(s\) withheld \('\.env' matches built-in patterns\)$");
     }
 
     [Fact]
@@ -28,6 +30,7 @@ public class SecretGuardRefLookupTests
 
         ex.Message.ShouldContain("protected by squeezr's built-in secret guard");
         ex.Message.ShouldNotContain("No symbol named");
+        ex.Message.ShouldContain(SecretGuardFixture.EnvPath);
     }
 
     [Fact]
@@ -40,6 +43,8 @@ public class SecretGuardRefLookupTests
         var result = new RefLookup(workspace).Find("Run", null);
 
         result.Groups.SelectMany(g => g.Refs).ShouldNotContain(r => r.File == SecretGuardFixture.TokensPath);
+        Withheld(result).ShouldMatch(
+            @"^secret guard: 1 result\(s\) withheld \('notes/tokens\.txt' matches indexing\.secretGuardExtra\)$");
     }
 
     [Fact]
@@ -51,5 +56,10 @@ public class SecretGuardRefLookupTests
 
         result.Groups.ShouldNotBeEmpty();
         result.Groups.SelectMany(g => g.Refs).ShouldContain(r => r.File == SecretGuardFixture.AppPath);
+        result.GuardWarnings.ShouldBeNull();
     }
+
+    private static string Withheld(RefLookupResult result) =>
+        result.GuardWarnings.ShouldNotBeNull()
+            .Single(w => w.StartsWith("secret guard:", StringComparison.Ordinal));
 }

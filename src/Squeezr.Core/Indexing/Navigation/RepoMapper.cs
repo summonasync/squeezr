@@ -48,6 +48,13 @@ public sealed class RepoMapper
         var normalizedPrefix = PathPrefix.Normalize(prefix);
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
         var guard = SecretGuardReader.Load(_workspaceRoot);
+        // a prefix that itself names a secret is a request about that secret: answering "no such subtree"
+        // would be the absence oracle the guard exists to close
+        if (normalizedPrefix is not null && guard.IsProtected(normalizedPrefix))
+        {
+            throw guard.Refusal(normalizedPrefix);
+        }
+
         var budget = new TokenBudget(maxTokens);
         var lines = new List<MapLine>();
         var repoNames = new List<string>();
@@ -67,10 +74,11 @@ public sealed class RepoMapper
             IReadOnlyList<FileDocument> files;
             if (normalizedPrefix is not null)
             {
-                var scoped = Serve(
-                    stored.Where(f => PathPrefix.Matches(normalizedPrefix, f.Path)),
-                    guard);
-                if (scoped.Count == 0)
+                // existence is decided before the guard, exactly like SearchEngine.ResolveFileScope: a
+                // subtree that exists but holds only secrets maps empty with a withheld count, and only a
+                // prefix matching nothing at all is the "no such subtree" answer
+                var matching = stored.Where(f => PathPrefix.Matches(normalizedPrefix, f.Path)).ToList();
+                if (matching.Count == 0)
                 {
                     unscopedPaths!.AddRange(stored.Where(f => !guard.IsProtected(f.Path)).Select(f => f.Path));
                     continue;
@@ -78,8 +86,8 @@ public sealed class RepoMapper
 
                 // matching is case-insensitive but stored paths are not — keep the stored
                 // casing so downstream path lookups (freshness guard) stay exact
-                scopedPrefix ??= scoped[0].Path[..normalizedPrefix.Length];
-                files = scoped;
+                scopedPrefix ??= matching[0].Path[..normalizedPrefix.Length];
+                files = Serve(matching, guard);
             }
             else
             {

@@ -110,6 +110,18 @@ public class SecretGuardSearchEngineTests
     }
 
     [Fact]
+    public void Search_PrefixNamingAProtectedFile_RefusesInsteadOfReportingAbsent()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+
+        var ex = Should.Throw<WorkspaceException>(
+            () => new SearchEngine(workspace).Search(Literal("CANARY") with { Prefix = ".env" }));
+
+        ex.Message.ShouldContain("protected by squeezr's built-in secret guard");
+        ex.Message.ShouldNotContain("No indexed files under prefix");
+    }
+
+    [Fact]
     public void Search_PrefixThatMatchesNothingNeverNamesAProtectedDirectoryInTheSuggestion()
     {
         var workspace = SecretGuardFixture.NewIndexedWorkspace();

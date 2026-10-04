@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -14,7 +15,9 @@ public sealed record ExpandResult(
     IReadOnlyList<string> Span,
     IReadOnlyList<string> After,
     int TokensUsed,
-    bool Truncated);
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? GuardWarnings = null);
 
 public enum ExpandInputIssue
 {
@@ -103,7 +106,7 @@ public sealed class SpanExpander
         return new ExpandResult(
             entry.Name, fileDoc.Path, start, end, context,
             beforeOut, spanOut, afterOut, budget.Used,
-            spanCut || beforeCut || afterCut);
+            spanCut || beforeCut || afterCut, guard.Warnings);
     }
 
     private static List<string> TakeWithin(TokenBudget budget, string[] lines, out bool truncated)

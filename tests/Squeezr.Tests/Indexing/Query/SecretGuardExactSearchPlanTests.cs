@@ -1,4 +1,5 @@
 using Shouldly;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 
 namespace Squeezr.Tests.Indexing.Query;
@@ -66,5 +67,10 @@ public class SecretGuardExactSearchPlanTests
     }
 
     private static List<(SearchMatch Match, string? Key)> Run(string workspace, string literal) =>
-        ExactSearchPlan.Execute(workspace, new SearchQuery(literal, false, null, null, null, null, null, null), trackChunkKeys: false);
+        ExactSearchPlan.Execute(
+            workspace,
+            new SearchQuery(literal, false, null, null, null, null, null, null),
+            trackChunkKeys: false,
+            fileScope: null,
+            guard: SecretGuardReader.Load(workspace));
 }

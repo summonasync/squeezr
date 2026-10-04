@@ -43,6 +43,23 @@ public class McpSecretGuardToolsTests
     }
 
     [Fact]
+    public async Task ExpandSpan_ProtectedFileWithTrailingSeparator_ReturnsRefusalErrorNotNotFound()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "expand_span",
+            new Dictionary<string, object?> { ["file"] = $"{SecretGuardFixture.PemPath}/", ["startLine"] = 1 },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldBe(true);
+        var text = ErrorText(result);
+        text.ShouldContain("protected by squeezr's built-in secret guard");
+        text.ShouldNotContain("not in the index");
+    }
+
+    [Fact]
     public async Task CodeSearch_OverProtectedText_WithholdsAndWarns()
     {
         var workspace = SecretGuardFixture.NewIndexedWorkspace();
@@ -325,7 +342,27 @@ public class McpSecretGuardToolsTests
         }
     }
 
-    // the strings a result structure uses to name files: tree labels, hit paths, match files, ref files
+    [Fact]
+    public async Task SymbolLookup_SuggestionSweepStopsAtTheGuard()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.PlantSymbol(workspace, SecretGuardFixture.TokensPath, "VaultToken", "variable");
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        // the near name really does surface while the file is unprotected, so the widened call below fails
+        // on the guard rather than on a suggestion path that never worked
+        NamedFields("symbol_lookup", ParseEnvelope(await Suggest(harness))).ShouldContain("VaultToken");
+
+        SecretGuardFixture.SetGuardExtra(workspace, "**/tokens.txt");
+
+        var named = NamedFields("symbol_lookup", ParseEnvelope(await Suggest(harness)));
+
+        named.ShouldNotContain("VaultToken");
+        named.ShouldNotContain(SecretGuardFixture.TokensPath);
+    }
+
+    // the strings a result structure uses to name files: tree labels, hit paths, match files, ref files,
+    // and the did-you-mean list, which names symbols read out of the files the guard hides
     private static IReadOnlyList<string> NamedFields(string tool, JsonElement envelope) =>
         tool switch
         {
@@ -334,7 +371,10 @@ public class McpSecretGuardToolsTests
             "code_search" => [.. envelope.GetProperty("data").EnumerateArray()
                 .Select(hit => hit.GetProperty("file").GetString()!)],
             "symbol_lookup" => [.. envelope.GetProperty("data").EnumerateArray()
-                .Select(match => match.GetProperty("file").GetString()!)],
+                    .Select(match => match.GetProperty("file").GetString()!),
+                .. envelope.TryGetProperty("didYouMean", out var suggestions)
+                    ? suggestions.EnumerateArray().Select(suggestion => suggestion.GetString()!)
+                    : []],
             "find_references" => [.. envelope.GetProperty("data").EnumerateArray()
                 .Select(reference => reference.GetProperty("file").GetString()!)],
             _ => throw new InvalidOperationException($"no field mapping for {tool}"),
@@ -344,6 +384,12 @@ public class McpSecretGuardToolsTests
         harness.Client.CallToolAsync(
             "symbol_lookup",
             new Dictionary<string, object?> { ["name"] = "VaultToken" },
+            cancellationToken: CancellationToken.None);
+
+    private static ValueTask<CallToolResult> Suggest(McpTestHarness harness) =>
+        harness.Client.CallToolAsync(
+            "symbol_lookup",
+            new Dictionary<string, object?> { ["name"] = "VaultTokens" },
             cancellationToken: CancellationToken.None);
 
     private static string ErrorText(CallToolResult result) =>

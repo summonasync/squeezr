@@ -18,10 +18,9 @@ public static class SemanticHitsResolver
         IEmbeddingProvider embeddings,
         IVectorStore vectorStore,
         CancellationToken ct,
-        IReadOnlySet<uint>? fileScope = null,
-        SecretGuardReader? secretGuard = null)
+        IReadOnlySet<uint>? fileScope,
+        SecretGuardReader guard)
     {
-        var guard = secretGuard ?? SecretGuardReader.Load(workspaceRoot);
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
 
         uint? repoId = null;

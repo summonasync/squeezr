@@ -1,5 +1,6 @@
 using Shouldly;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 
 namespace Squeezr.Tests.Indexing.Query;
@@ -57,7 +58,9 @@ public class SecretGuardSemanticHitsTests
                     new VectorHit(2, "b", app.FileId, app.RepoId, app.StartLine, app.EndLine, 0.9)
                 ]
             },
-            CancellationToken.None);
+            CancellationToken.None,
+            null,
+            SecretGuardReader.Load(workspace));
 
         hits.ShouldHaveSingleItem().Match.Path.ShouldBe(SecretGuardFixture.AppPath);
     }
@@ -73,6 +76,8 @@ public class SecretGuardSemanticHitsTests
             {
                 Hits = [new VectorHit(1, "h", chunk.FileId, chunk.RepoId, chunk.StartLine, chunk.EndLine, 0.9)]
             },
-            CancellationToken.None);
+            CancellationToken.None,
+            null,
+            SecretGuardReader.Load(workspace));
     }
 }

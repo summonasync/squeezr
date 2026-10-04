@@ -13,10 +13,9 @@ public static class ExactSearchPlan
         string workspaceRoot,
         SearchQuery query,
         bool trackChunkKeys,
-        IReadOnlySet<uint>? fileScope = null,
-        SecretGuardReader? secretGuard = null)
+        IReadOnlySet<uint>? fileScope,
+        SecretGuardReader guard)
     {
-        var guard = secretGuard ?? SecretGuardReader.Load(workspaceRoot);
         var indexPath = SqueezrPaths.TrigramIndexPath(workspaceRoot);
         if (!File.Exists(indexPath))
         {

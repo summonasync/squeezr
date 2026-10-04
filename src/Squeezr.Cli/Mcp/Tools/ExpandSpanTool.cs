@@ -62,6 +62,11 @@ public sealed class ExpandSpanTool
                 result.Span.ToList(),
                 result.After.ToList());
 
+            if (result.GuardWarnings is { } guardLines)
+            {
+                warnings.AddRange(guardLines);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, staleFiles: null);
             QueryTelemetry.Record(root, _workspace.SessionId, "expand_span",
                 new { file, startLine, endLine, contextLines },

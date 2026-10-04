@@ -94,6 +94,11 @@ public sealed class SearchEngine
     private HashSet<uint>? ResolveFileScope(SearchQuery query, SecretGuardReader guardReader)
     {
         var prefix = PathPrefix.Normalize(query.Prefix);
+        if (prefix is not null && guardReader.IsProtected(prefix))
+        {
+            throw guardReader.Refusal(prefix);
+        }
+
         var excluding = _rankExclusion.IsActive;
         if (prefix is null && !excluding)
         {

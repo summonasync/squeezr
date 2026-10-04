@@ -59,7 +59,7 @@ public class IdentifierTokenLegTests
     {
         var workspace = NewIndexedWorkspaceWithMultipleTokens();
 
-        var hits = IdentifierTokenLeg.Execute(workspace, Query("OrphanRegistry HuskLossless AdoptionRepair"), null);
+        var hits = IdentifierTokenLeg.Execute(workspace, Query("OrphanRegistry HuskLossless AdoptionRepair"), null, Guard(workspace));
 
         hits.ShouldNotBeEmpty();
         hits.ShouldAllBe(hit => hit.Match.AlsoMatched == 0);
@@ -87,7 +87,7 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithMultipleTokens();
 
         var counter = new IdentifierTokenLeg.ReadCounter();
-        IdentifierTokenLeg.Execute(workspace, Query("quantum fluxbridge OrphanRegistry"), null, counter);
+        IdentifierTokenLeg.Execute(workspace, Query("quantum fluxbridge OrphanRegistry"), null, counter, Guard(workspace));
 
         counter.TokensSelected.ShouldBe(1);
     }
@@ -146,7 +146,7 @@ public class IdentifierTokenLegTests
         var query = string.Join(" ", Enumerable.Range(0, 20).Select(i => $"Marker{i}Token"));
 
         var counter = new IdentifierTokenLeg.ReadCounter();
-        IdentifierTokenLeg.Execute(workspace, Query(query), null, counter);
+        IdentifierTokenLeg.Execute(workspace, Query(query), null, counter, Guard(workspace));
 
         counter.TokensSelected.ShouldBe(8);
         counter.CandidateReads.ShouldBeLessThanOrEqualTo(8 * 80);
@@ -159,7 +159,7 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithManyFiles();
 
         var counter = new IdentifierTokenLeg.ReadCounter();
-        IdentifierTokenLeg.Execute(workspace, Query("WorkspaceManager WorkspaceManagerKeeper"), null, counter);
+        IdentifierTokenLeg.Execute(workspace, Query("WorkspaceManager WorkspaceManagerKeeper"), null, counter, Guard(workspace));
 
         counter.TokensSelected.ShouldBe(2);
         counter.CandidateReads.ShouldBe(160);
@@ -172,7 +172,7 @@ public class IdentifierTokenLegTests
     {
         var workspace = NewIndexedWorkspaceWithFilterSurfaces();
 
-        var hits = IdentifierTokenLeg.Execute(workspace, Query("OrphanRegistry HuskAdoption"), null);
+        var hits = IdentifierTokenLeg.Execute(workspace, Query("OrphanRegistry HuskAdoption"), null, Guard(workspace));
 
         hits.Select(hit => hit.Match.Path).ToList()
             .ShouldBe(["generated/ForeignSubtree.cs", "lib/ForeignLang.js", "src/ForeignRepo.cs", "src/Keep.cs"]);
@@ -186,7 +186,8 @@ public class IdentifierTokenLegTests
         var hits = IdentifierTokenLeg.Execute(
             workspace,
             Query("OrphanRegistry HuskAdoption") with { Repo = "demo" },
-            null);
+            null,
+            Guard(workspace));
 
         hits.ShouldNotBeEmpty();
         hits.ShouldAllBe(hit => hit.Match.Repo == "demo");
@@ -201,7 +202,8 @@ public class IdentifierTokenLegTests
         var hits = IdentifierTokenLeg.Execute(
             workspace,
             Query("OrphanRegistry HuskAdoption") with { Language = "csharp" },
-            null);
+            null,
+            Guard(workspace));
 
         hits.ShouldNotBeEmpty();
         hits.ShouldNotContain(hit => hit.Match.Path == "lib/ForeignLang.js");
@@ -215,7 +217,8 @@ public class IdentifierTokenLegTests
         var hits = IdentifierTokenLeg.Execute(
             workspace,
             Query("OrphanRegistry HuskAdoption") with { PathGlob = "**/src/**" },
-            null);
+            null,
+            Guard(workspace));
 
         hits.ShouldNotBeEmpty();
         hits.ShouldNotContain(hit => hit.Match.Path.StartsWith("generated/", StringComparison.Ordinal));
@@ -246,7 +249,7 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithLongIdentifier();
         var counter = new IdentifierTokenLeg.ReadCounter();
 
-        var hits = IdentifierTokenLeg.Execute(workspace, Query("materialization note"), null, counter);
+        var hits = IdentifierTokenLeg.Execute(workspace, Query("materialization note"), null, counter, Guard(workspace));
 
         // 13 trigrams leave a budget of 64/13 = 4 variants while the expansion needs 8, so the
         // token keeps its literal case, finds no candidates and drops out of the discriminants
@@ -260,7 +263,7 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithLongIdentifier();
         var counter = new IdentifierTokenLeg.ReadCounter();
 
-        var hits = IdentifierTokenLeg.Execute(workspace, Query("ledger note"), null, counter);
+        var hits = IdentifierTokenLeg.Execute(workspace, Query("ledger note"), null, counter, Guard(workspace));
 
         counter.TokensSelected.ShouldBe(2);
         hits.ShouldContain(hit => hit.Match.Path == "MaterializationLedger.cs");
@@ -547,6 +550,8 @@ public class IdentifierTokenLegTests
 
     private static SearchQuery Query(string text) =>
         new(text, false, null, null, null, null, null, null);
+
+    private static SecretGuardReader Guard(string workspace) => SecretGuardReader.Load(workspace);
 
     private static string NewRepoWorkspace()
     {

@@ -73,6 +73,11 @@ internal static class SecretGuardFixture
         File.SetLastWriteTimeUtc(SqueezrPaths.ConfigPath(workspace), _lastConfigStamp);
     }
 
+    // the guard reads its extensions from config.json on every call; a broken file must degrade loudly
+    // rather than silently serving the user half of a mask
+    internal static void CorruptConfig(string workspace, string content = "}{ not json") =>
+        File.WriteAllText(SqueezrPaths.ConfigPath(workspace), content);
+
     internal static long PlantSymbol(
         string workspace,
         string relativePath,

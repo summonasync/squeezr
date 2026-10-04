@@ -55,6 +55,36 @@ public class SecretGuardSpanExpanderTests
         ex.Message.ShouldContain("protected by squeezr's built-in secret guard");
     }
 
+    [Theory]
+    [InlineData("/.env")]
+    [InlineData(".env/")]
+    [InlineData(".env\\")]
+    [InlineData("deploy/keys/monkey.pem/")]
+    [InlineData("demo/.env/")]
+    public void Expand_ProtectedPathWithTrailingSeparator_Refuses(string file)
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+
+        var ex = Should.Throw<WorkspaceException>(
+            () => new SpanExpander(workspace).Expand(file, 1, null, 3, null, 500));
+
+        ex.Message.ShouldContain("protected by squeezr's built-in secret guard");
+        ex.Message.ShouldNotContain("is not in the index");
+    }
+
+    [Theory]
+    [InlineData(".env.example/")]
+    [InlineData("src/App.cs/")]
+    public void Expand_OrdinaryPathWithTrailingSeparator_StillReportsMissing(string file)
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+
+        var ex = Should.Throw<WorkspaceException>(
+            () => new SpanExpander(workspace).Expand(file, 1, null, 3, null, 500));
+
+        ex.Message.ShouldNotContain("secret guard");
+    }
+
     [Fact]
     public void Expand_ExtraPatternFile_Refuses()
     {

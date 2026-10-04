@@ -34,17 +34,16 @@ public static class IdentifierTokenLeg
         string workspaceRoot,
         SearchQuery query,
         IReadOnlySet<uint>? fileScope,
-        SecretGuardReader? secretGuard = null) =>
-        Execute(workspaceRoot, query, fileScope, null, secretGuard);
+        SecretGuardReader guard) =>
+        Execute(workspaceRoot, query, fileScope, null, guard);
 
     internal static List<(SearchMatch Match, string? Key)> Execute(
         string workspaceRoot,
         SearchQuery query,
         IReadOnlySet<uint>? fileScope,
         ReadCounter? counter,
-        SecretGuardReader? secretGuard = null)
+        SecretGuardReader guard)
     {
-        var guard = secretGuard ?? SecretGuardReader.Load(workspaceRoot);
         var tokens = Tokenize(query.Query);
         // a lone token is the phrase arm's own literal — the leg only earns its keep when no whole
         // phrase can match, so single-token queries stay byte-identical to the pre-leg pipeline
