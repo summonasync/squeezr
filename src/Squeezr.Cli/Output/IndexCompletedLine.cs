@@ -11,7 +11,9 @@ public sealed record IndexCompletedLine(
     int Deleted,
     int? Symbols,
     IReadOnlyList<RepoIndexResult> Repos,
-    string? Provider = null)
+    string? Provider = null,
+    int DeferredReaps = 0,
+    int PendingReaps = 0)
 {
     public static IndexCompletedLine FromResult(IndexResult result, int durationMs, int? symbols, string? provider = null) =>
         new(
@@ -23,5 +25,7 @@ public sealed record IndexCompletedLine(
             result.Repos.Sum(repo => repo.Deleted),
             symbols is > 0 ? symbols : null,
             result.Repos,
-            provider);
+            provider,
+            result.DeferredReaps,
+            result.PendingReaps);
 }

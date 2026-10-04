@@ -86,7 +86,9 @@ public static class CliApplication
             {
                 vectors.SetDescription("Keep the Qdrant collection in step with the index");
                 vectors.AddCommand<VectorsReconcileCommand>("reconcile")
-                    .WithDescription("Drop collection points no live chunk hash maps to — dry run unless --apply is given");
+                    .WithDescription(
+                        "Drop collection points no live chunk hash maps to and re-queue chunks whose vector is " +
+                        "gone — dry run unless --apply is given");
             });
             config.AddBranch("hook", hook =>
             {

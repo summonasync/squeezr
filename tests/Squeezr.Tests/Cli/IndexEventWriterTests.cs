@@ -56,4 +56,29 @@ public class IndexEventWriterTests
         doc.RootElement.GetProperty("symbols").GetInt32().ShouldBe(2);
         doc.RootElement.TryGetProperty("provider", out _).ShouldBeFalse();
     }
+
+    [Fact]
+    public void Completed_CarriesTheReapQueueCounters()
+    {
+        var writer = new StringWriter();
+        var result = new IndexResult([], DateTime.UtcNow, [], DeferredReaps: 2, PendingReaps: 5);
+
+        new IndexEventWriter(writer).Completed(result, 7, null);
+
+        using var doc = JsonDocument.Parse(writer.ToString());
+        doc.RootElement.GetProperty("deferredReaps").GetInt32().ShouldBe(2);
+        doc.RootElement.GetProperty("pendingReaps").GetInt32().ShouldBe(5);
+    }
+
+    [Fact]
+    public void Completed_ReapCountersAreAlwaysPresent_ZeroIncluded()
+    {
+        var writer = new StringWriter();
+
+        new IndexEventWriter(writer).Completed(new IndexResult([], DateTime.UtcNow, []), 7, null);
+
+        using var doc = JsonDocument.Parse(writer.ToString());
+        doc.RootElement.GetProperty("deferredReaps").GetInt32().ShouldBe(0);
+        doc.RootElement.GetProperty("pendingReaps").GetInt32().ShouldBe(0);
+    }
 }

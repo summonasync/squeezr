@@ -16,7 +16,8 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
         [CommandOption("--dry-run")]
         public bool DryRun { get; set; }
 
-        [Description("Delete the orphan points; without this flag the command never writes to Qdrant")]
+        [Description(
+            "Delete orphan points and reset stale embedded markers in meta.db; without this flag nothing is written")]
         [CommandOption("--apply")]
         public bool Apply { get; set; }
 
@@ -91,10 +92,11 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
                 "[grey]Dry run: nothing was deleted. Re-run with --apply to remove them.[/]");
         }
 
-        if (report.ChunksWithoutPoints > 0)
+        // StaleMarkers is a subset of ChunksWithoutPoints: those rows claim a vector that is gone, so naming
+        // them "pending embedding" would tell the reader the work is already queued when it is not.
+        if (NeverEmbeddedLine(report) is { } pendingLine)
         {
-            AnsiConsole.MarkupLine(
-                $"[grey]{report.ChunksWithoutPoints} chunk(s) have no point yet — pending embedding.[/]");
+            AnsiConsole.MarkupLine($"[grey]{pendingLine.EscapeMarkup()}[/]");
         }
 
         if (report.StaleMarkers > 0)
@@ -102,7 +104,8 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
             if (report.Applied)
             {
                 AnsiConsole.MarkupLine(
-                    $"[green]Re-queued {report.Requeued} chunk(s) whose vectors are gone — run 'squeezr index' to embed them.[/]");
+                    $"[green]Re-queued {report.Requeued} chunk(s) whose vectors are gone — run 'squeezr index' " +
+                    "with embeddings available to re-embed them (watch passes do not embed).[/]");
             }
             else
             {
@@ -112,5 +115,13 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
                     "[grey]Dry run: nothing was re-queued. Re-run with --apply to put them back in the embedding queue.[/]");
             }
         }
+    }
+
+    internal static string? NeverEmbeddedLine(VectorReconcileReport report)
+    {
+        var neverEmbedded = report.ChunksWithoutPoints - report.StaleMarkers;
+        return neverEmbedded > 0
+            ? $"{neverEmbedded} chunk(s) have no point yet — never embedded."
+            : null;
     }
 }

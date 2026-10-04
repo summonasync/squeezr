@@ -51,7 +51,7 @@ public sealed class VectorsReconcileCommandTests
     }
 
     [Fact]
-    public async Task Reconcile_Help_StatesThatNothingIsDeletedWithoutApply()
+    public async Task Reconcile_Help_StatesThatNothingIsWrittenWithoutApply()
     {
         var root = TestDirs.NewTempDir();
         (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
@@ -63,6 +63,9 @@ public sealed class VectorsReconcileCommandTests
         text.ShouldContain("--apply");
         text.ShouldContain("--dry-run");
         text.ShouldContain("dry run unless --apply");
+        // --apply writes in two places now, so the help has to say what it does to meta.db as well as Qdrant
+        text.ShouldContain("reset stale embedded markers");
+        text.ShouldContain("nothing is written");
     }
 
     [Fact]

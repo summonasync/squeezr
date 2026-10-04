@@ -161,7 +161,8 @@ public static class McpServerHost
             }
             else
             {
-                watcher = new WorkspaceWatcher(onStaleTakeover: StaleLockWarningSink.ToStderr);
+                watcher = new WorkspaceWatcher(
+                    new ServeWatchStatus(Console.Error), onStaleTakeover: StaleLockWarningSink.ToStderr);
             }
 
             await watcher.StartAsync(workspace.Root, ct, daemonKind: DaemonHeartbeat.ServeWatchKind);

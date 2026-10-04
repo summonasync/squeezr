@@ -162,6 +162,12 @@ public sealed class MetaStore : IDisposable
     public IReadOnlyList<ChunkDocument> ListChunksByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).Find(c => c.FileId == fileId).ToList();
 
+    // The fileId index answers this with a seek: the callers run it per deleted file, including on every
+    // watch pass, and materializing the chunk documents (Text included) to answer an Any() is not free.
+    public bool HasEmbeddedChunks(uint fileId) =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection)
+            .Exists(c => c.FileId == fileId && c.EmbeddingStatus == "ok");
+
     public IReadOnlyList<string> ListChunkHashesByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection)
             .Find(c => c.FileId == fileId)
@@ -345,21 +351,43 @@ public sealed class MetaStore : IDisposable
     // by the next pass that has both a store and an embeddings provider. Replay re-deletes by fileId, so
     // the file's chunks are marked pending on success — otherwise points the delete half-removed while the
     // same pass re-upserted would be lost for good once the chunks reported themselves embedded.
+    // The path/repo identity travelling with the id is what lets replay notice that MetaStore.NextId has
+    // already handed that id to a different file and keep its hands off the stranger's points.
     public IReadOnlyList<PendingReapDocument> ListPendingReaps() =>
         _db.GetCollection<PendingReapDocument>(PendingReapsCollection)
             .FindAll()
             .OrderBy(p => p.QueuedAt)
             .ToList();
 
-    public void EnqueuePendingReaps(IEnumerable<uint> fileIds)
+    public int CountPendingReaps() => _db.GetCollection(PendingReapsCollection).Count();
+
+    public void EnqueuePendingReaps(IReadOnlyList<PendingReapTarget> targets)
     {
         var reaps = _db.GetCollection<PendingReapDocument>(PendingReapsCollection);
         var queuedAt = DateTime.UtcNow;
-        foreach (var fileId in fileIds.Distinct())
+        foreach (var target in targets.DistinctBy(t => t.FileId))
         {
-            if (reaps.FindById((long)fileId) is null)
+            var existing = reaps.FindById((long)target.FileId);
+            if (existing is null)
             {
-                reaps.Insert(new PendingReapDocument { FileId = fileId, QueuedAt = queuedAt });
+                reaps.Insert(new PendingReapDocument
+                {
+                    FileId = target.FileId,
+                    RepoId = target.RepoId,
+                    Path = target.Path,
+                    QueuedAt = queuedAt
+                });
+                continue;
+            }
+
+            if (existing.RepoId != target.RepoId
+                || !string.Equals(existing.Path, target.Path, StringComparison.Ordinal))
+            {
+                // the id changed hands while the entry stood, and a delete-by-fileId can only serve the file
+                // that owns it now — the entry follows the newest claim instead of going stale
+                existing.RepoId = target.RepoId;
+                existing.Path = target.Path;
+                reaps.Update(existing);
             }
         }
     }

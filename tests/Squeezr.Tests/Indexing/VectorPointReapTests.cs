@@ -66,6 +66,24 @@ public class VectorPointReapTests
         }
         """;
 
+    private const string ThirdSource = """
+        class Routing
+        {
+            string Select(string[] candidates, string term)
+            {
+                foreach (var candidate in candidates)
+                {
+                    if (candidate.Contains(term, StringComparison.Ordinal))
+                    {
+                        return candidate;
+                    }
+                }
+
+                return term;
+            }
+        }
+        """;
+
     [Fact]
     public void Index_ModifiedFile_DropsOldPointsBeforeUpsertingNewOnes()
     {
@@ -368,8 +386,15 @@ public class VectorPointReapTests
         var dbPath = Path.Combine(TestDirs.NewTempDir(), "meta.db");
         using (var store = new MetaStore(dbPath, createIfMissing: true))
         {
-            store.EnqueuePendingReaps([7u, 7u, 9u]);
+            store.EnqueuePendingReaps(
+                [
+                    new PendingReapTarget(7, 3, "deep/a.cs"),
+                    new PendingReapTarget(7, 3, "deep/a.cs"),
+                    new PendingReapTarget(9, 3, "deep/b.cs")
+                ]);
             store.ListPendingReaps().Select(p => p.FileId).ShouldBe([7L, 9L]);
+            store.ListPendingReaps().Select(p => p.Path).ShouldBe(["deep/a.cs", "deep/b.cs"]);
+            store.CountPendingReaps().ShouldBe(2);
         }
 
         using (var reopened = new MetaStore(dbPath))
@@ -383,7 +408,197 @@ public class VectorPointReapTests
         {
             cleared.ClearAllPendingReaps();
             cleared.ListPendingReaps().ShouldBeEmpty();
+            cleared.CountPendingReaps().ShouldBe(0);
         }
+    }
+
+    [Fact]
+    public void EnqueuePendingReaps_ReusedId_FollowsTheNewestClaimOnThatId()
+    {
+        var dbPath = Path.Combine(TestDirs.NewTempDir(), "meta.db");
+        using var store = new MetaStore(dbPath, createIfMissing: true);
+        store.EnqueuePendingReaps([new PendingReapTarget(4, 1, "gone/a.cs")]);
+        var queuedAt = store.ListPendingReaps().Single().QueuedAt;
+
+        store.EnqueuePendingReaps([new PendingReapTarget(4, 2, "other/b.cs")]);
+
+        // a delete by fileId can only serve the file that owns the id now, so the entry moves with it
+        // rather than freezing on an identity no replay can honour any more
+        var entry = store.ListPendingReaps().Single();
+        entry.Path.ShouldBe("other/b.cs");
+        entry.RepoId.ShouldBe(2);
+        entry.QueuedAt.ShouldBe(queuedAt);
+        store.CountPendingReaps().ShouldBe(1);
+    }
+
+    [Fact]
+    public void Index_FileIdRecycledByAnotherFile_ReplayDropsTheEntryAndPointsAtReconcile()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var recycledId = FileIdOf(workspace, "b.cs");
+        var droppedHashes = ChunkHashes(workspace, recycledId);
+        File.Delete(Path.Combine(workspace, "repo", "b.cs"));
+        indexer.Index(workspace);
+        PendingReapIds(workspace).ShouldBe([recycledId]);
+        PendingReapPaths(workspace).ShouldBe(["b.cs"]);
+
+        // the watch pass hands the freed id to the file that arrived next; the next embedding pass must
+        // notice the entry names a stranger instead of reaping the stranger by id
+        WriteFile(workspace, "repo/c.cs", ThirdSource);
+        indexer.Index(workspace);
+        FileIdOf(workspace, "c.cs").ShouldBe(recycledId);
+        vectorStore.Calls.Clear();
+
+        var replayed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        vectorStore.Calls.ShouldNotContain($"delete:{recycledId}");
+        replayed.Warnings.ShouldNotContain(w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));
+        replayed.Warnings.ShouldContain(w => w.Contains("file ids now name different files", StringComparison.Ordinal));
+        replayed.Warnings.ShouldContain(w => w.Contains("vectors reconcile", StringComparison.Ordinal));
+        PendingReapIds(workspace).ShouldBeEmpty();
+        replayed.PendingReaps.ShouldBe(0);
+        // the payload of b.cs's orphan points still names this id, so the file's point set is its own hashes
+        // plus the orphans the dropped entry could no longer reach
+        var survivingPoints = PointsOfFile(vectorStore, recycledId).Select(p => p.ChunkHash).ToList();
+        ChunkHashes(workspace, recycledId).ShouldAllBe(hash => survivingPoints.Contains(hash));
+        // the points the dropped entry was meant to pay for are orphans now — reachable by the hash-level
+        // route the warning names, never by an id that belongs to somebody else
+        droppedHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
+    }
+
+    [Fact]
+    public void Index_DeferredReapIdNowNamingALiveFile_KeepsItsPointsAndMarkersIntact()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var liveId = FileIdOf(workspace, "b.cs");
+        var liveHashes = ChunkHashes(workspace, liveId);
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            // the shape an entry written before this fix takes after the id moved on: it names a file that
+            // is alive and embedded, under a path the store no longer answers to
+            store.EnqueuePendingReaps([new PendingReapTarget(liveId, store.FindRepo("demo")!.Id, "deleted-earlier.cs")]);
+        }
+
+        vectorStore.Calls.Clear();
+        var replayed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        vectorStore.Calls.ShouldNotContain(c => c.StartsWith("delete:", StringComparison.Ordinal));
+        replayed.Warnings.ShouldContain(w => w.Contains("file ids now name different files", StringComparison.Ordinal));
+        PendingReapIds(workspace).ShouldBeEmpty();
+        liveHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
+        ListChunks(workspace, liveId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+    }
+
+    [Fact]
+    public void Index_ReportsDeferredAndPendingReapCounts()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        File.Delete(Path.Combine(workspace, "repo", "b.cs"));
+        var deferred = indexer.Index(workspace);
+        deferred.DeferredReaps.ShouldBe(1);
+        deferred.PendingReaps.ShouldBe(1);
+
+        var standing = indexer.Index(workspace);
+        standing.DeferredReaps.ShouldBe(0);
+        standing.PendingReaps.ShouldBe(1);
+
+        var drained = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        drained.DeferredReaps.ShouldBe(0);
+        drained.PendingReaps.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Index_WithoutDeferredWork_ReportsZeroReapCounters()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        var vectorStore = new FakeVectorStore();
+
+        var pass = new WorkspaceIndexer().Index(
+            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        pass.DeferredReaps.ShouldBe(0);
+        pass.PendingReaps.ShouldBe(0);
+    }
+
+    [Fact]
+    public void RebuildTrigramIndex_DroppingAFile_CascadesItsRowsAndJournalsItsPointCleanup()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        var vectorStore = new FakeVectorStore();
+        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var droppedId = FileIdOf(workspace, "b.cs");
+        var droppedHashes = ChunkHashes(workspace, droppedId);
+        droppedHashes.ShouldNotBeEmpty();
+        File.Delete(Path.Combine(workspace, "repo", "b.cs"));
+
+        var warnings = new List<string>();
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            var deferred = WorkspaceIndexer.RebuildTrigramIndex(
+                workspace, store, WorkspaceManifestFile.Load(workspace), warnings,
+                new Dictionary<uint, string>(), SqueezrPaths.TrigramIndexPath(workspace));
+
+            deferred.ShouldBe(1);
+            store.FindFileById(droppedId).ShouldBeNull();
+            store.ListChunksByFile(droppedId).ShouldBeEmpty();
+            store.ListSymbolsByFile(droppedId).ShouldBeEmpty();
+            store.ListPendingReaps().Select(p => (uint)p.FileId).ShouldBe([droppedId]);
+            store.ListPendingReaps().Single().Path.ShouldBe("b.cs");
+        }
+
+        warnings.ShouldContain(w => w.Contains("file is missing on disk", StringComparison.Ordinal));
+        warnings.ShouldContain(w => w.Contains("point cleanup", StringComparison.Ordinal));
+        droppedHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
+    }
+
+    [Fact]
+    public void RebuildTrigramIndex_WithAVectorStore_RemovesThePointsInsteadOfJournalingThem()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var droppedId = FileIdOf(workspace, "b.cs");
+        var droppedHashes = ChunkHashes(workspace, droppedId);
+        File.Delete(Path.Combine(workspace, "repo", "b.cs"));
+
+        var warnings = new List<string>();
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            WorkspaceIndexer.RebuildTrigramIndex(
+                workspace, store, WorkspaceManifestFile.Load(workspace), warnings,
+                new Dictionary<uint, string>(), SqueezrPaths.TrigramIndexPath(workspace), vectorStore: vectorStore);
+
+            store.CountPendingReaps().ShouldBe(0);
+        }
+
+        vectorStore.Calls.ShouldContain($"delete:{droppedId}");
+        droppedHashes.ShouldAllBe(hash => !vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
     }
 
     private static string NewWorkspace()
@@ -428,6 +643,12 @@ public class VectorPointReapTests
     {
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         return store.ListPendingReaps().Select(p => (uint)p.FileId).ToList();
+    }
+
+    private static List<string?> PendingReapPaths(string workspace)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        return store.ListPendingReaps().Select(p => p.Path).ToList();
     }
 
     private static List<VectorPoint> PointsOfFile(FakeVectorStore store, uint fileId) =>
