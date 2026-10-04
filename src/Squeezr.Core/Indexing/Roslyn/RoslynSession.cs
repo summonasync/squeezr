@@ -21,12 +21,20 @@ public sealed class RoslynSession : IDisposable
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     private readonly RoslynWorkspace _workspace;
-    private readonly Dictionary<string, Document> _documents;
+    private readonly Dictionary<string, DocumentId> _documents;
+    private Solution _solution;
     private readonly string _root;
 
-    private RoslynSession(RoslynWorkspace workspace, Dictionary<string, Document> documents, bool semantic, List<string> warnings, string root)
+    private RoslynSession(
+        RoslynWorkspace workspace,
+        Solution solution,
+        Dictionary<string, DocumentId> documents,
+        bool semantic,
+        List<string> warnings,
+        string root)
     {
         _workspace = workspace;
+        _solution = solution;
         _documents = documents;
         Semantic = semantic;
         Warnings = warnings;
@@ -36,6 +44,8 @@ public sealed class RoslynSession : IDisposable
     public bool Semantic { get; }
 
     public IReadOnlyList<string> Warnings { get; }
+
+    public bool RequiresReopen { get; private set; }
 
     public static RoslynSession Create(string rootPath, bool semantic)
     {
@@ -58,14 +68,99 @@ public sealed class RoslynSession : IDisposable
 
     public Document? FindDocument(string relativePath)
     {
-        var full = Path.GetFullPath(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-        return _documents.GetValueOrDefault(full);
+        var full = FullPath(relativePath);
+        return _documents.TryGetValue(full, out var id) ? _solution.GetDocument(id) : null;
+    }
+
+    public void SyncContent(IEnumerable<string> relativePaths)
+    {
+        foreach (var relativePath in relativePaths)
+        {
+            var full = FullPath(relativePath);
+            if (!File.Exists(full))
+            {
+                RemoveDocument(relativePath);
+                continue;
+            }
+
+            string text;
+            try
+            {
+                text = File.ReadAllText(full);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            UpsertDocument(full, text);
+        }
+    }
+
+    public void RemoveDocument(string relativePath)
+    {
+        var full = FullPath(relativePath);
+        if (_documents.Remove(full, out var id))
+        {
+            _solution = _solution.RemoveDocument(id);
+        }
     }
 
     public async Task<SemanticModel?> GetSemanticModelAsync(Document document, CancellationToken cancellationToken = default) =>
         Semantic ? await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) : null;
 
     public void Dispose() => _workspace.Dispose();
+
+    private string FullPath(string relativePath) =>
+        Path.GetFullPath(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+    private void UpsertDocument(string fullPath, string text)
+    {
+        if (_documents.TryGetValue(fullPath, out var known))
+        {
+            _solution = _solution.WithDocumentText(known, SourceText.From(text));
+            return;
+        }
+
+        var project = FindOwningProject(fullPath);
+        if (project is null)
+        {
+            RequiresReopen = true;
+            return;
+        }
+
+        var added = DocumentInfo.Create(
+            DocumentId.CreateNewId(project.Id),
+            Path.GetFileName(fullPath),
+            filePath: fullPath,
+            loader: TextLoader.From(TextAndVersion.Create(SourceText.From(text), VersionStamp.Create())));
+        _solution = _solution.AddDocument(added);
+        _documents[fullPath] = added.Id;
+    }
+
+    private Project? FindOwningProject(string fullPath)
+    {
+        Project? best = null;
+        var bestLength = -1;
+        foreach (var project in _solution.Projects)
+        {
+            var directory = project.FilePath is null
+                ? null
+                : Path.GetDirectoryName(project.FilePath);
+            if (directory is null || !fullPath.StartsWith(directory + Path.DirectorySeparatorChar, PathComparison))
+            {
+                continue;
+            }
+
+            if (directory.Length > bestLength)
+            {
+                best = project;
+                bestLength = directory.Length;
+            }
+        }
+
+        return best;
+    }
 
     private static bool TryRegisterLocator()
     {
@@ -120,10 +215,15 @@ public sealed class RoslynSession : IDisposable
             solution = loaded.Solution;
         }
 
-        var documents = solution.Projects
-            .SelectMany(p => p.Documents)
-            .Where(d => d.FilePath is not null && IsUnderRoot(d.FilePath, root))
-            .ToDictionary(d => Path.GetFullPath(d.FilePath!), PathComparer);
+        var documents = new Dictionary<string, DocumentId>(PathComparer);
+        foreach (var document in solution.Projects.SelectMany(p => p.Documents))
+        {
+            if (document.FilePath is not null && IsUnderRoot(document.FilePath, root))
+            {
+                documents.TryAdd(Path.GetFullPath(document.FilePath), document.Id);
+            }
+        }
+
         if (documents.Count == 0)
         {
             workspace.Dispose();
@@ -131,7 +231,7 @@ public sealed class RoslynSession : IDisposable
         }
 
         warnings.Add($"semantic mode: {solution.Projects.Count()} project(s) via {(solutionPath is null ? "project file" : Path.GetFileName(solutionPath))}");
-        return new RoslynSession(workspace, documents, semantic: true, warnings, root);
+        return new RoslynSession(workspace, solution, documents, semantic: true, warnings, root);
     }
 
     private static RoslynSession CreateAdHocSession(string root, bool semantic, List<string> warnings)
@@ -154,6 +254,7 @@ public sealed class RoslynSession : IDisposable
         }
 
         var projectInfo = ProjectInfo.Create(projectId, VersionStamp.Create(), "AdHoc", "AdHoc", LanguageNames.CSharp)
+            .WithFilePath(Path.Combine(root, "AdHoc.csproj"))
             .WithMetadataReferences(references)
             .WithDocuments(files.Select(f =>
                 DocumentInfo.Create(
@@ -163,11 +264,18 @@ public sealed class RoslynSession : IDisposable
                     loader: TextLoader.From(TextAndVersion.Create(SourceText.From(File.ReadAllText(f)), VersionStamp.Create())))));
         workspace.TryApplyChanges(workspace.CurrentSolution.AddProject(projectInfo));
 
-        var documents = workspace.CurrentSolution.Projects
-            .SelectMany(p => p.Documents)
-            .ToDictionary(d => Path.GetFullPath(d.FilePath!), PathComparer);
+        var solution = workspace.CurrentSolution;
+        var documents = new Dictionary<string, DocumentId>(PathComparer);
+        foreach (var document in solution.Projects.SelectMany(p => p.Documents))
+        {
+            if (document.FilePath is not null)
+            {
+                documents.TryAdd(Path.GetFullPath(document.FilePath), document.Id);
+            }
+        }
+
         warnings.Add($"ad-hoc workspace: {files.Count} file(s), project references unresolved");
-        return new RoslynSession(workspace, documents, semantic, warnings, root);
+        return new RoslynSession(workspace, solution, documents, semantic, warnings, root);
     }
 
     private static PortableExecutableReference[] DefaultMetadataReferences()

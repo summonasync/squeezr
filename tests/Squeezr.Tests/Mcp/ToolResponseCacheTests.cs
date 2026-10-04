@@ -67,6 +67,75 @@ public sealed class ToolResponseCacheTests
     }
 
     [Fact]
+    public void Put_AfterIndexWriteDuringTheCall_StaleAnswerDoesNotSurviveTheNextRead()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+        var parameters = SearchParams("Add", "demo", 2000, 5);
+
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse();
+
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow.AddSeconds(30));
+        cache.Put("code_search", parameters, "answer computed before the write");
+
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse(
+            "a response read before an index write must not be filed under the generation that write produced");
+        cache.Count.ShouldBe(0);
+        cache.TakeInvalidationWarning().ShouldBe(ToolResponseCache.InvalidationWarning);
+    }
+
+    [Fact]
+    public void Put_AfterASecondMissOnTheSameKey_StaleAnswerStillDoesNotSurvive()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+        var parameters = SearchParams("Add", "demo", 2000, 5);
+
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse();
+
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow.AddSeconds(30));
+
+        // A second miss must not vouch for the first caller's answer: without TryAdd this re-tags the
+        // marker to the new generation and the stale Put below lands as if it were fresh.
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse();
+        cache.Put("code_search", parameters, "answer computed before the write");
+
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Put_WhenTheGenerationMovedBackwards_DoesNotCache()
+    {
+        var (cache, metaDbPath) = NewCacheWithMetaDb();
+        var parameters = SearchParams("Add", "demo", 2000, 5);
+        var readStamp = DateTime.UtcNow;
+
+        File.SetLastWriteTimeUtc(metaDbPath, readStamp);
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse();
+
+        File.SetLastWriteTimeUtc(metaDbPath, readStamp.AddSeconds(-30));
+        cache.Put("code_search", parameters, "answer from the rolled-back clock");
+
+        // The next read's sweep would drop a wrongly-tagged entry anyway, so the real exposure is the clock
+        // catching up: an answer of unknowable freshness must not be sitting there as a hit when it returns.
+        File.SetLastWriteTimeUtc(metaDbPath, readStamp);
+
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse(
+            "an answer computed across a backwards clock step cannot be served as fresh when the stamp returns");
+    }
+
+    [Fact]
+    public void Put_WithoutAnIndexWriteDuringTheCall_StillCaches()
+    {
+        var (cache, _) = NewCacheWithMetaDb();
+        var parameters = SearchParams("Add", "demo", 2000, 5);
+
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse();
+        cache.Put("code_search", parameters, "fresh");
+
+        cache.TryGet("code_search", parameters, out var cached).ShouldBeTrue();
+        cached.ShouldBe("fresh");
+    }
+
+    [Fact]
     public void TryGet_AfterGenerationChange_DropsDeadEntriesAndArmsOneWarning()
     {
         var (cache, metaDbPath) = NewCacheWithMetaDb();

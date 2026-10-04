@@ -45,6 +45,14 @@ public static class EmbeddingIndexPhase
             return new EmbeddingPhaseResult(0);
         }
 
+        var rekeyed = store.CountChunksWithOtherModelKey(repoDoc.Id, modelKey);
+        if (rekeyed > 0)
+        {
+            warning(
+                $"model key of repo '{repoDoc.Name}' changed: {rekeyed} chunk(s) carry vectors from another " +
+                "embedding model and are re-embedded once");
+        }
+
         progress?.PhaseStarted(repoDoc.Name, IndexPhase.Embeddings, totalPending);
 
         while (true)

@@ -10,6 +10,8 @@ public sealed record VectorReconcileReport(
     int LiveHashes,
     int Orphans,
     int ChunksWithoutPoints,
+    int StaleMarkers,
+    int Requeued,
     bool Applied,
     long? PointsAfter,
     IReadOnlyList<ulong> OrphanSample);
@@ -64,7 +66,12 @@ public static class VectorPointReconciler
 
             var orphans = pointIds.Where(id => !liveIds.Contains(id)).ToList();
             var chunksWithoutPoints = liveIds.Count - (pointIds.Count - orphans.Count);
+            var pointSet = pointIds.ToHashSet();
+            var staleMarkerHashes = store.ListEmbeddedChunkHashes()
+                .Where(hash => !pointSet.Contains(ChunkPointId.FromHash(hash)))
+                .ToList();
             long? pointsAfter = null;
+            var requeued = 0;
 
             if (apply)
             {
@@ -84,6 +91,10 @@ public static class VectorPointReconciler
                 }
 
                 pointsAfter = await vectorStore.CountAsync(ct);
+
+                // a marker whose point is gone is invisible to every later index pass — the row says the work
+                // is done — so the reconcile that found it is the one that has to put the chunk back in the queue
+                requeued = store.MarkChunksPendingByHash(staleMarkerHashes);
             }
 
             return new VectorReconcileReport(
@@ -92,6 +103,8 @@ public static class VectorPointReconciler
                 liveIds.Count,
                 orphans.Count,
                 chunksWithoutPoints,
+                staleMarkerHashes.Count,
+                requeued,
                 apply,
                 pointsAfter,
                 orphans.Take(SampleSize).ToList());

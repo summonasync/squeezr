@@ -1,5 +1,6 @@
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Ignore;
+using Squeezr.Core.Indexing.Roslyn;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -30,6 +31,7 @@ public sealed class WorkspaceWatcher
     private readonly HashSet<string> _pending = [];
 
     private List<FileSystemWatcher> _watchers = [];
+    private SemanticSessionPool? _sessions;
     private WatchEventFilter? _filter;
     private CancellationTokenSource? _stopping;
     private Task _runTask = Task.CompletedTask;
@@ -83,6 +85,7 @@ public sealed class WorkspaceWatcher
         }
 
         _watchers = CreateWatchers();
+        _sessions = new SemanticSessionPool();
         _stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _running = true;
         _heartbeat = new DaemonHeartbeatWriter(
@@ -250,6 +253,8 @@ public sealed class WorkspaceWatcher
             {
                 watcher.Dispose();
             }
+
+            Interlocked.Exchange(ref _sessions, null)?.Dispose();
         }
     }
 
@@ -282,7 +287,9 @@ public sealed class WorkspaceWatcher
         {
             try
             {
-                var result = _indexer.Index(_workspaceRoot, progress: _progress, onStaleTakeover: _onStaleTakeover);
+                var result = _indexer.Index(
+                    _workspaceRoot, progress: _progress, onStaleTakeover: _onStaleTakeover,
+                    changedPaths: batch, sessions: _sessions);
                 _status?.PassCompleted(result);
                 _heartbeat?.Beat();
                 return;

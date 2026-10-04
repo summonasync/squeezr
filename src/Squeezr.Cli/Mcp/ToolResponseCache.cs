@@ -4,6 +4,9 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Cli.Mcp;
 
+// Callers must serialize the TryGet→Put pair per key (McpToolGate runs one tool call at a time). The
+// read-generation marker is what makes a stored answer describe the index it was computed from; two
+// overlapping calls on one key would let the second marker license the first caller's stale answer.
 public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
 {
     public const string InvalidationWarning = "cache: invalidated (index changed)";
@@ -15,6 +18,7 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
     private readonly Dictionary<string, LinkedListNode<CachedEntry>> _index = new();
     private readonly LinkedList<CachedEntry> _recent = new();
     private readonly HashSet<string> _invalidatedKeys = new();
+    private readonly Dictionary<string, long> _readGenerations = new();
     private long _observedGeneration;
     private long _announcedGeneration = long.MinValue;
     private bool _noticePending;
@@ -50,10 +54,32 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
             Retire(generation);
             if (_index.TryGetValue(key, out var node))
             {
+                // Retire only sweeps when the generation moved, so an entry stored against an older one by a
+                // call that raced an index write is caught here instead: it describes data that no longer holds.
+                if (node.Value.Generation == generation)
+                {
+                    _recent.Remove(node);
+                    _recent.AddFirst(node);
+                    _readGenerations.Remove(key);
+                    response = node.Value.Response;
+                    return true;
+                }
+
                 _recent.Remove(node);
-                _recent.AddFirst(node);
-                response = node.Value.Response;
-                return true;
+                _index.Remove(key);
+                _invalidatedKeys.Add(key);
+            }
+
+            // TryAdd, not indexer assignment: a second miss on the same key while the first is still in
+            // flight must not vouch for the first caller's answer.
+            _readGenerations.TryAdd(key, generation);
+            if (_readGenerations.Count > _capacity * 4)
+            {
+                // A marker lives between the miss and its Put; a tool call that throws leaves one behind.
+                // Wiping them costs a caching opportunity and, given the serialized caller contract above,
+                // can only ever drop markers of calls that already died.
+                _readGenerations.Clear();
+                _readGenerations[key] = generation;
             }
 
             if (_invalidatedKeys.Remove(key) && _announcedGeneration != generation)
@@ -88,15 +114,31 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
         lock (_sync)
         {
             Retire(generation);
+            // The response describes the generation the miss was read at, not whichever one is current when
+            // the caller finally stores it. An index write landing mid-call would otherwise file a pre-write
+            // answer under the post-write generation, and that entry survives the next invalidation.
+            var described = generation;
+            if (_readGenerations.Remove(key, out var readAt))
+            {
+                if (readAt > generation)
+                {
+                    // The clock went backwards (NTP step, or a test pinning mtime into the past), so which
+                    // index state this answer describes is unknowable. Refusing to cache beats a wrong tag.
+                    return;
+                }
+
+                described = readAt;
+            }
+
             if (_index.TryGetValue(key, out var existing))
             {
                 _recent.Remove(existing);
                 _recent.AddFirst(existing);
-                existing.Value = existing.Value with { Response = response, Generation = generation };
+                existing.Value = existing.Value with { Response = response, Generation = described };
                 return;
             }
 
-            var node = _recent.AddFirst(new CachedEntry(key, response, generation));
+            var node = _recent.AddFirst(new CachedEntry(key, response, described));
             _index[key] = node;
             while (_index.Count > _capacity)
             {

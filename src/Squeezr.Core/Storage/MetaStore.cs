@@ -81,6 +81,13 @@ public sealed class MetaStore : IDisposable
     public RepoDocument? FindRepo(string name) =>
         _db.GetCollection<RepoDocument>(ReposCollection).FindOne(r => r.Name == name);
 
+    // Query filters resolve repo names case-insensitively: LiteDB's FindOne is exact-match, while the exact
+    // arm compares names with OrdinalIgnoreCase, so `--repo DEMO` used to hit in one arm and return nothing
+    // in the others. One rule for every arm: exact first, then the case-insensitive fallback.
+    public RepoDocument? FindRepoIgnoringCase(string name) =>
+        FindRepo(name) ?? ListRepos()
+            .FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+
     public IReadOnlyList<RepoDocument> ListRepos() =>
         _db.GetCollection<RepoDocument>(ReposCollection).FindAll().OrderBy(r => r.Name).ToList();
 
@@ -168,11 +175,74 @@ public sealed class MetaStore : IDisposable
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
+    public IReadOnlyList<string> ListEmbeddedChunkHashes() =>
+        _db.GetCollection<ChunkDocument>(ChunksCollection)
+            .Find(c => c.EmbeddingStatus == "ok")
+            .Select(c => c.ChunkHash)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    // Closes the lying-marker case: a row claiming "ok" whose point is gone (shared hash reaped through
+    // another file, a collection dropped out of band). Resetting the marker puts the chunk back in the
+    // queue, where the next embedding pass gives it a vector again.
+    public int MarkChunksPendingByHash(IReadOnlyCollection<string> chunkHashes)
+    {
+        if (chunkHashes.Count == 0)
+        {
+            return 0;
+        }
+
+        var collection = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        var stale = collection.Find(c => c.EmbeddingStatus == "ok" && chunkHashes.Contains(c.ChunkHash)).ToList();
+        foreach (var chunk in stale)
+        {
+            chunk.EmbeddingStatus = "pending";
+            chunk.ModelKey = null;
+        }
+
+        if (stale.Count > 0)
+        {
+            collection.Update(stale);
+        }
+
+        return stale.Count;
+    }
+
     public void DeleteChunksByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).DeleteMany(c => c.FileId == fileId);
 
     public void InsertChunks(IEnumerable<ChunkDocument> chunks) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).InsertBulk(chunks);
+
+    // Vector points are keyed by chunk hash alone, so a file that re-chunks into the same chunk texts
+    // already owns its vectors: the embedded marker rides along with the hash instead of being reset.
+    // Chunks whose text moved come back pending, and the caller that reaps a file whose hash set changed
+    // marks that whole file pending (see WorkspaceIndexer.RequeueReapedFiles) — a carried "ok" never
+    // outlives its point within the same file. Across files the guarantee does not hold: identical chunk
+    // text in two files shares one point, so reaping either drops the shared point while the other keeps
+    // its marker. Nothing here closes that — 'squeezr vectors reconcile' re-queues marker-bearing rows that
+    // have no point behind them (059).
+    public void ReplaceFileChunks(uint fileId, IReadOnlyList<ChunkDocument> chunks)
+    {
+        var collection = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        var markers = collection.Find(c => c.FileId == fileId && c.EmbeddingStatus == "ok")
+            .Select(c => (c.ChunkHash, c.ModelKey))
+            .ToList()
+            .GroupBy(m => m.ChunkHash)
+            .ToDictionary(g => g.Key, g => g.First().ModelKey, StringComparer.Ordinal);
+
+        collection.DeleteMany(c => c.FileId == fileId);
+        foreach (var chunk in chunks)
+        {
+            if (markers.TryGetValue(chunk.ChunkHash, out var modelKey) && modelKey is not null)
+            {
+                chunk.EmbeddingStatus = "ok";
+                chunk.ModelKey = modelKey;
+            }
+        }
+
+        collection.InsertBulk(chunks);
+    }
 
     public int CountChunks(uint repoId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).Count(c => c.RepoId == repoId);
@@ -196,6 +266,16 @@ public sealed class MetaStore : IDisposable
     {
         var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
         return new SemanticCoverage(chunks.Count(), chunks.Count(c => c.EmbeddingStatus != "ok"));
+    }
+
+    // Marks carried over from a previous model are a one-time re-queue, not a refill: counting them apart
+    // from never-embedded rows is what lets a pass say "the model changed" instead of re-embedding silently.
+    public int CountChunksWithOtherModelKey(uint? repoId, string modelKey)
+    {
+        var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
+        return repoId.HasValue
+            ? chunks.Count(c => c.RepoId == repoId.Value && c.EmbeddingStatus == "ok" && c.ModelKey != modelKey)
+            : chunks.Count(c => c.EmbeddingStatus == "ok" && c.ModelKey != modelKey);
     }
 
     public IReadOnlyList<ChunkDocument> ListPendingChunks(uint repoId, string modelKey, int limit) =>

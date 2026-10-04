@@ -42,6 +42,46 @@ public sealed class StaleFileDetectorTests
     }
 
     [Fact]
+    public void Detect_IndexedFileThatLaterBecomesIgnored_IsStale()
+    {
+        var workspace = NewIndexedWorkspace(out _);
+        WriteFile(workspace, "repo/generated/Dto.cs", "public class Dto { }\n");
+        new WorkspaceIndexer().Index(workspace);
+        StaleFileDetector.Detect(workspace).ShouldBeEmpty();
+
+        WriteFile(workspace, "repo/.gitignore", "generated/\n");
+
+        StaleFileDetector.Detect(workspace).ShouldBe(["repo/.gitignore", "repo/generated/Dto.cs"]);
+    }
+
+    [Fact]
+    public void Detect_IndexedFileDeletedFromPrunedSubtree_IsStale()
+    {
+        var workspace = NewIndexedWorkspace(out _);
+        WriteFile(workspace, "repo/generated/Dto.cs", "public class Dto { }\n");
+        WriteFile(workspace, "repo/generated/nested/Deep.cs", "public class Deep { }\n");
+        new WorkspaceIndexer().Index(workspace);
+        WriteFile(workspace, "repo/.gitignore", "generated/\n");
+
+        Directory.Delete(Path.Combine(workspace, "repo", "generated"), recursive: true);
+
+        StaleFileDetector.Detect(workspace)
+            .ShouldBe(["repo/.gitignore", "repo/generated/Dto.cs", "repo/generated/nested/Deep.cs"]);
+    }
+
+    [Fact]
+    public void Detect_NewFileInsideIgnoredSubtree_IsNotStale()
+    {
+        var workspace = NewIndexedWorkspace(out _);
+        WriteFile(workspace, "repo/.gitignore", "generated/\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        WriteFile(workspace, "repo/generated/Fresh.cs", "public class Fresh { }\n");
+
+        StaleFileDetector.Detect(workspace).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Detect_UnindexedRepo_FilesAreStale()
     {
         var workspace = TestDirs.NewTempDir();

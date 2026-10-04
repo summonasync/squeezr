@@ -136,7 +136,7 @@ public class VectorPointReconcileTests
     }
 
     [Fact]
-    public async Task Reconcile_ChunkWithoutAPoint_IsCountedAndNotRecreated()
+    public async Task Reconcile_ChunkWithoutAPoint_IsCountedAndRequeuedForEmbedding()
     {
         var workspace = IndexedWorkspace("repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
@@ -149,10 +149,61 @@ public class VectorPointReconcileTests
         var report = await VectorPointReconciler.ReconcileAsync(workspace, vectorStore, apply: true);
 
         report.ChunksWithoutPoints.ShouldBe(1);
+        report.StaleMarkers.ShouldBe(1);
+        report.Requeued.ShouldBe(1);
         report.Orphans.ShouldBe(0);
         report.PointsAfter.ShouldBe(remaining);
         vectorStore.Points.Count.ShouldBe(remaining);
         vectorStore.Calls.ShouldBeEmpty();
+        AllRows(workspace).ShouldContain(c => c.EmbeddingStatus == "pending");
+    }
+
+    [Fact]
+    public async Task Reconcile_DryRun_RequeuesNothingAndLeavesMarkersAlone()
+    {
+        var workspace = IndexedWorkspace("repo/a.cs", Source);
+        var vectorStore = new FakeVectorStore();
+        Index(workspace, vectorStore);
+        vectorStore.Points.Remove(vectorStore.Points.Keys.First());
+        var rowsBefore = AllRows(workspace).Count(c => c.EmbeddingStatus == "ok");
+        vectorStore.Calls.Clear();
+
+        var report = await VectorPointReconciler.ReconcileAsync(workspace, vectorStore, apply: false);
+
+        report.StaleMarkers.ShouldBe(1);
+        report.Requeued.ShouldBe(0);
+        AllRows(workspace).Count(c => c.EmbeddingStatus == "ok").ShouldBe(rowsBefore);
+        vectorStore.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Reconcile_SharedPointReapedThroughAnotherFile_RequeuesEveryCopy()
+    {
+        // identical chunk text in two files collapses into one point whose payload names a single file, so a
+        // reap of that file destroys the vector the other file still claims — the marker survives the loss
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", Source);
+        var vectorStore = new FakeVectorStore();
+        Index(workspace, vectorStore);
+        var rowsBefore = AllRows(workspace);
+        rowsBefore.ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        var sharedHash = ChunkHashes(workspace, FileIdOf(workspace, "a.cs")).First();
+
+        vectorStore.Points.Remove(ChunkPointId.FromHash(sharedHash));
+        vectorStore.Calls.Clear();
+
+        var report = await VectorPointReconciler.ReconcileAsync(workspace, vectorStore, apply: true);
+
+        report.StaleMarkers.ShouldBe(1);
+        report.Requeued.ShouldBe(2);
+        AllRows(workspace).Count(c => c.ChunkHash == sharedHash && c.EmbeddingStatus == "pending").ShouldBe(2);
+
+        new WorkspaceIndexer().Index(
+            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        vectorStore.Points.ShouldContainKey(ChunkPointId.FromHash(sharedHash));
+        AllRows(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
     }
 
     [Fact]
@@ -271,6 +322,12 @@ public class VectorPointReconcileTests
     {
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         return store.ListChunkHashesByFile(fileId).Distinct().ToList();
+    }
+
+    private static List<ChunkDocument> AllRows(string workspace)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        return store.ListAllFiles().SelectMany(f => store.ListChunksByFile(f.Id)).ToList();
     }
 
     private sealed class FakeEmbeddingProvider : IEmbeddingProvider

@@ -30,43 +30,15 @@ public sealed record IgnorePattern
 
     internal bool MatchesPathInternal(string path, bool isDirectory)
     {
-        if (DirOnly && !isDirectory)
-            return false;
-
         var normalizedPath = path.Replace('\\', '/');
-
-        if (!string.IsNullOrEmpty(BaseDir) && BaseDir != ".")
-        {
-            var baseDirNormalized = BaseDir.Replace('\\', '/').TrimEnd('/');
-            if (!normalizedPath.StartsWith(baseDirNormalized + "/", StringComparison.Ordinal) &&
-                normalizedPath != baseDirNormalized)
-                return false;
-
-            string relativePath;
-            if (normalizedPath == baseDirNormalized)
-            {
-                relativePath = baseDirNormalized;
-            }
-            else if (normalizedPath.Length == baseDirNormalized.Length + 1)
-            {
-                relativePath = "";
-            }
-            else
-            {
-                relativePath = normalizedPath.Substring(baseDirNormalized.Length + 1);
-            }
-
-            var matchPath = Anchored ? relativePath : GetFileName(relativePath);
-            return GlobMatcher.IsMatch(CompiledPattern, matchPath);
-        }
-
-        var matchPath2 = Anchored ? normalizedPath : GetFileName(normalizedPath);
-        return GlobMatcher.IsMatch(CompiledPattern, matchPath2);
-    }
-
-    private static string GetFileName(string path)
-    {
-        var lastSlash = path.LastIndexOf('/');
-        return lastSlash >= 0 ? path.Substring(lastSlash + 1) : path;
+        var rawSegments = normalizedPath.Split('/');
+        return IgnoreRule.Evaluate(
+            this,
+            GlobMatcher.NormalizePattern(CompiledPattern),
+            IgnoreRule.SplitBase(BaseDir),
+            rawSegments,
+            normalizedPath.ToLowerInvariant().Split('/'),
+            rawSegments.Length,
+            isDirectory);
     }
 }

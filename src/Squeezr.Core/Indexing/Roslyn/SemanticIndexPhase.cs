@@ -42,6 +42,52 @@ public static class SemanticIndexPhase
         }
     }
 
+    public static SemanticPhaseResult RunPooled(
+        SemanticSessionPool sessions,
+        string repoRoot,
+        RepoDocument repoDoc,
+        MetaStore store,
+        IReadOnlyList<SourceFile> csFiles,
+        IReadOnlyDictionary<string, FileDocument> changedByPath,
+        IReadOnlyDictionary<string, FileDocument> dbFilesByPath,
+        SqueezrConfig config,
+        bool noSemantic,
+        Action<string> warning,
+        IIndexProgress? progress = null,
+        bool syncDocuments = false)
+    {
+        if (csFiles.Count == 0)
+        {
+            return new SemanticPhaseResult(0, 0, 0);
+        }
+
+        var session = sessions.Acquire(
+            repoRoot, !noSemantic, ex => warning($"semantic index skipped for repo '{repoDoc.Name}': {ex.Message}"));
+        if (session is null)
+        {
+            return new SemanticPhaseResult(0, 0, 0);
+        }
+
+        if (syncDocuments)
+        {
+            // the reused session holds the text it opened with: refresh every file this pass hands over
+            // before the first parse, so a declaration parsed early in the pass already sees the edits
+            // and additions made further down the same batch
+            session.SyncContent(csFiles.Select(f => f.RelativePath));
+        }
+
+        var result = RunWithSession(
+            session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
+            noSemantic, warning, progress);
+
+        if (session.RequiresReopen)
+        {
+            sessions.Discard(repoRoot);
+        }
+
+        return result;
+    }
+
     internal static SemanticPhaseResult RunWithSession(
         RoslynSession session,
         string repoRoot,
@@ -102,8 +148,9 @@ public static class SemanticIndexPhase
                 }
 
                 var isChanged = changedByPath.TryGetValue(file.RelativePath, out var fileDoc);
-                // syntax-only signatures never match semantic ones, so drift under a degraded
-                // session is parser noise rather than a real edit — keep the stored symbols
+                // under a paced pass only touched files reach this, so drift here means content came back
+                // identical over symbols a degraded session wrote. syntax-only signatures never match
+                // semantic ones, so that difference is parser noise rather than an edit — keep the rows
                 if (!isChanged && session.Semantic
                     && dbFilesByPath.TryGetValue(file.RelativePath, out var existingDoc)
                     && symbolsByFile.TryGetValue(existingDoc.Id, out var existingSymbols)
@@ -196,6 +243,8 @@ public static class SemanticIndexPhase
         Dictionary<uint, List<SymbolDocument>> symbolsByFile,
         MetaStore store)
     {
+        // chunks are deliberately left alone: MetaStore.ReplaceFileChunks owns them and needs the previous
+        // rows alive while it writes the new ones, so a chunk whose text did not move keeps its marker
         if (symbolsByFile.TryGetValue(fileId, out var oldSymbols))
         {
             store.DeleteRefsByFromSymbolIds(oldSymbols.Select(s => s.Id).ToList());
@@ -203,7 +252,6 @@ public static class SemanticIndexPhase
         }
 
         store.DeleteSymbolsByFile(fileId);
-        store.DeleteChunksByFile(fileId);
     }
 
     private static bool HasDrift(List<SymbolDocument> stored, ParseResult result)

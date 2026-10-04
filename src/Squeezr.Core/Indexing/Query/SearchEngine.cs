@@ -97,7 +97,7 @@ public sealed class SearchEngine
         uint? repoId = null;
         if (query.Repo is not null)
         {
-            var repo = store.FindRepo(query.Repo);
+            var repo = store.FindRepoIgnoringCase(query.Repo);
             if (repo is null)
             {
                 return [];

@@ -275,6 +275,109 @@ public class IdentifierTokenLegTests
         return (bool)method!.Invoke(null, [token])!;
     }
 
+    [Fact]
+    public async Task Hybrid_PrefixAndRepo_NarrowTheIdentifierArmTogether()
+    {
+        var workspace = NewTwoRepoWorkspace();
+        var engine = new SearchEngine(workspace);
+
+        var response = await engine.SearchHybridAsync(
+            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, null, 50, null, "src/"),
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        response.Matches.ShouldNotBeEmpty();
+        response.Matches.ShouldContain(m => m.Source == "exact");
+        response.Matches.ShouldAllBe(m => m.Repo == "alpha" && m.Path.StartsWith("src/"));
+    }
+
+    [Fact]
+    public async Task Hybrid_PrefixRepoAndLanguage_NarrowTheIdentifierArmTogether()
+    {
+        var workspace = NewTwoRepoWorkspace();
+        var engine = new SearchEngine(workspace);
+
+        var response = await engine.SearchHybridAsync(
+            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, "csharp", 50, null, "src/"),
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        response.Matches.ShouldNotBeEmpty();
+        response.Matches.ShouldAllBe(m => m.Repo == "alpha" && m.Path.StartsWith("src/"));
+        response.Matches.ShouldAllBe(m => m.Path.EndsWith(".cs"), "language filter must reach the identifier arm");
+    }
+
+    [Fact]
+    public async Task Hybrid_UnknownRepo_IdentifierArmAgreesWithPhraseArm()
+    {
+        var workspace = NewTwoRepoWorkspace();
+        var engine = new SearchEngine(workspace);
+        var query = new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "nosuchrepo", null, null, 50, null, null);
+
+        engine.Search(query).Matches.ShouldBeEmpty();
+        var response = await engine.SearchHybridAsync(
+            query, new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+
+        response.Matches.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Hybrid_RepoNameInAnotherCase_ResolvesLikeTheExactArm()
+    {
+        var workspace = NewTwoRepoWorkspace();
+        var engine = new SearchEngine(workspace);
+
+        var lower = await engine.SearchHybridAsync(
+            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, null, 50, null, null),
+            new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+        var upper = await engine.SearchHybridAsync(
+            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "ALPHA", null, null, 50, null, null),
+            new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+
+        lower.Matches.ShouldNotBeEmpty();
+        Render(upper).ShouldBe(Render(lower),
+            "repo names are case-insensitive in every arm, not only where the file list is filtered");
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        store.FindRepo("ALPHA").ShouldNotBeNull(
+            "LiteDB name match is already case-insensitive; the rule is pinned here so no arm can tighten it later");
+    }
+
+    private static string NewTwoRepoWorkspace()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init("demo");
+        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+
+        foreach (var (name, dir) in new[] { ("alpha", "repo-alpha"), ("beta", "repo-beta") })
+        {
+            var repoDir = Path.Combine(workspace, dir);
+            Directory.CreateDirectory(Path.Combine(repoDir, "src"));
+            Directory.CreateDirectory(Path.Combine(repoDir, "other"));
+            manager.AddRepo(dir, name);
+        }
+
+        var source = """
+            public class ZephyrGadget
+            {
+                public int QuaternionGizmo() => 1;
+            }
+            """;
+
+        foreach (var dir in new[] { "repo-alpha", "repo-beta" })
+        {
+            File.WriteAllText(Path.Combine(workspace, dir, "src", "Widgets.cs"), source);
+            File.WriteAllText(Path.Combine(workspace, dir, "src", "Widgets.js"), "const zephyrGadget = { quaternionGizmo: 1 };");
+            File.WriteAllText(Path.Combine(workspace, dir, "other", "Loose.cs"), source);
+        }
+
+        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        return workspace;
+    }
+
     private static string NewIndexedWorkspaceWithMultipleTokens()
     {
         var workspace = NewRepoWorkspace();

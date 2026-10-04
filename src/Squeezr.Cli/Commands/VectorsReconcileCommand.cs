@@ -96,5 +96,21 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
             AnsiConsole.MarkupLine(
                 $"[grey]{report.ChunksWithoutPoints} chunk(s) have no point yet — pending embedding.[/]");
         }
+
+        if (report.StaleMarkers > 0)
+        {
+            if (report.Applied)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[green]Re-queued {report.Requeued} chunk(s) whose vectors are gone — run 'squeezr index' to embed them.[/]");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]{report.StaleMarkers} chunk(s) are marked embedded but have no point in the collection[/]");
+                AnsiConsole.MarkupLine(
+                    "[grey]Dry run: nothing was re-queued. Re-run with --apply to put them back in the embedding queue.[/]");
+            }
+        }
     }
 }

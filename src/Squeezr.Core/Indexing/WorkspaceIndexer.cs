@@ -23,7 +23,9 @@ public sealed class WorkspaceIndexer
         IVectorStore? vectorStore = null,
         bool reembed = false,
         Action<string>? onStaleTakeover = null,
-        EmbeddingProviderResolution? embeddingProviderResolution = null)
+        EmbeddingProviderResolution? embeddingProviderResolution = null,
+        IReadOnlyList<string>? changedPaths = null,
+        SemanticSessionPool? sessions = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -75,12 +77,13 @@ public sealed class WorkspaceIndexer
             }
 
             var works = targets
-                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache, progress, embeddings, vectorStore, modelKey))
+                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache, progress, embeddings, vectorStore, modelKey, Pacing(sessions, changedPaths)))
                 .ToList();
 
             var changedDocs = works.SelectMany(w => w.Changed).ToList();
             var tombstones = works.SelectMany(w => w.Deleted).Select(d => (d.RepoId, d.Id)).ToList();
             var deletedVectorFileIds = works.SelectMany(w => w.Deleted).Select(d => d.Id).ToList();
+            var deletedWithVectors = works.SelectMany(w => w.DeletedWithVectors).ToList();
 
             if (repoName is null)
             {
@@ -94,13 +97,19 @@ public sealed class WorkspaceIndexer
                     }
 
                     warnings.Add($"dropping '{file.Path}' from index store: repository is not in the workspace manifest");
+                    if (HasEmbeddedVectors(store, file.Id))
+                    {
+                        deletedWithVectors.Add(file.Id);
+                    }
+
+                    CascadeSemanticRecords(file.Id, store);
                     store.DeleteFile(file.Id);
                     tombstones.Add((file.RepoId, file.Id));
                     deletedVectorFileIds.Add(file.Id);
                 }
             }
 
-            DeleteVectorsForFiles(vectorStore, store, deletedVectorFileIds, warnings);
+            RemoveVectorsOfDeletedFiles(vectorStore, store, deletedVectorFileIds, deletedWithVectors, warnings);
 
             ApplyTrigramUpdates(
                 workspaceRoot, store, manifest, warnings, textCache, SqueezrPaths.TrigramIndexPath(workspaceRoot),
@@ -254,11 +263,9 @@ public sealed class WorkspaceIndexer
                     return null;
                 }
 
-                CascadeSemanticRecords(existing.Id, store);
-                store.DeleteFile(existing.Id);
+                DropFile(existing, store, vectorStore, warnings);
                 changed = [];
                 tombstones = [(existing.RepoId, existing.Id)];
-                DeleteVectorsForFiles(vectorStore, store, [existing.Id], warnings);
             }
             else if (!File.Exists(fullPath))
             {
@@ -267,11 +274,9 @@ public sealed class WorkspaceIndexer
                     return null;
                 }
 
-                CascadeSemanticRecords(existing.Id, store);
-                store.DeleteFile(existing.Id);
+                DropFile(existing, store, vectorStore, warnings);
                 changed = [];
                 tombstones = [(existing.RepoId, existing.Id)];
-                DeleteVectorsForFiles(vectorStore, store, [existing.Id], warnings);
             }
             else
             {
@@ -324,8 +329,8 @@ public sealed class WorkspaceIndexer
 
                 if (embeddings is not null && vectorStore is not null)
                 {
-                    DeleteVectorsForFiles(
-                        vectorStore, store, FilesWithStalePoints(store, priorChunkHashes), warnings);
+                    var reaped = RequeueReapedFiles(store, FilesWithStalePoints(store, priorChunkHashes));
+                    DeleteVectorsForFiles(vectorStore, store, reaped, warnings);
                     var modelKey = EmbeddingModelKey.From(
                         WithResolvedProvider(config.Embeddings, embeddingProviderResolution));
                     EmbeddingIndexPhase.Run(repoDoc, store, modelKey, embeddings, vectorStore, warnings.Add);
@@ -360,7 +365,11 @@ public sealed class WorkspaceIndexer
         }
     }
 
-    private sealed record RepoWork(RepoIndexResult Result, List<FileDocument> Changed, List<FileDocument> Deleted);
+    private sealed record RepoWork(
+        RepoIndexResult Result,
+        List<FileDocument> Changed,
+        List<FileDocument> Deleted,
+        List<uint> DeletedWithVectors);
 
     private static RepoWork IndexRepo(
         string workspaceRoot,
@@ -374,7 +383,8 @@ public sealed class WorkspaceIndexer
         IIndexProgress? progress,
         IEmbeddingProvider? embeddings,
         IVectorStore? vectorStore,
-        string? modelKey)
+        string? modelKey,
+        PacedPass? pacing)
     {
         var repoDoc = store.FindRepo(repo.Name)
                       ?? throw new WorkspaceException($"Repository '{repo.Name}' is missing from the index store.");
@@ -393,6 +403,7 @@ public sealed class WorkspaceIndexer
         var dbByPath = dbFiles.ToDictionary(f => f.Path, StringComparer.Ordinal);
         var walkedPaths = walk.Files.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
         var deleted = dbFiles.Where(f => !walkedPaths.Contains(f.Path)).ToList();
+        var deletedWithVectors = new List<uint>();
         var now = DateTime.UtcNow;
         var added = 0;
         var modified = 0;
@@ -454,6 +465,11 @@ public sealed class WorkspaceIndexer
 
         foreach (var doc in deleted)
         {
+            if (HasEmbeddedVectors(store, doc.Id))
+            {
+                deletedWithVectors.Add(doc.Id);
+            }
+
             CascadeSemanticRecords(doc.Id, store);
             store.DeleteFile(doc.Id);
         }
@@ -461,12 +477,36 @@ public sealed class WorkspaceIndexer
         Dictionary<uint, HashSet<string>> priorChunkHashes =
             vectorsEnabled ? SnapshotChunkHashes(store, reapCandidates) : [];
 
-        var csFiles = walk.Files.Where(f => f.Language == "csharp").ToList();
+        var incremental = pacing is not null && pacing.IsIncremental(repoRoot, !noSemantic);
+        HashSet<string>? touched = null;
+        if (pacing is not null)
+        {
+            if (incremental)
+            {
+                touched = TouchedPaths(changed, pacing, repoRoot);
+                pacing.Sessions.RemoveDocuments(
+                    repoRoot, deleted.Where(d => d.Language == "csharp").Select(d => d.Path).ToList());
+            }
+            else
+            {
+                // an unpaced watch pass (dropped events, ignore-file change, empty batch) cannot trust the
+                // changed set, so the pooled session goes and the next pass opens a fresh one from disk
+                pacing.Sessions.Discard(repoRoot);
+            }
+        }
+
+        var csFiles = walk.Files
+            .Where(f => f.Language == "csharp" && (touched is null || touched.Contains(f.RelativePath)))
+            .ToList();
         var changedByPath = changed.ToDictionary(c => c.Path, StringComparer.Ordinal);
         var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
 
-        var semantic = SemanticIndexPhase.Run(
-            repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add, progress);
+        var semantic = pacing is null
+            ? SemanticIndexPhase.Run(
+                repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add, progress)
+            : SemanticIndexPhase.RunPooled(
+                pacing.Sessions, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
+                noSemantic, warnings.Add, progress, syncDocuments: incremental);
         skipped += semantic.Skipped;
 
         var tsTargets = changed.Where(d => IsTreeSitterLanguage(d.Language)).ToList();
@@ -482,7 +522,8 @@ public sealed class WorkspaceIndexer
 
         if (embeddings is not null && vectorStore is not null)
         {
-            DeleteVectorsForFiles(vectorStore, store, FilesWithStalePoints(store, priorChunkHashes), warnings);
+            var reaped = RequeueReapedFiles(store, FilesWithStalePoints(store, priorChunkHashes));
+            DeleteVectorsForFiles(vectorStore, store, reaped, warnings);
             EmbeddingIndexPhase.Run(repoDoc, store, modelKey!, embeddings, vectorStore, warnings.Add, progress);
         }
 
@@ -510,7 +551,8 @@ public sealed class WorkspaceIndexer
         return new RepoWork(
             new RepoIndexResult(repo.Name, added, modified, deleted.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot),
             changed,
-            deleted);
+            deleted,
+            deletedWithVectors);
     }
 
     private static void EnsureVectorCompatibility(IEmbeddingProvider embeddings, IVectorStore vectorStore, List<string> warnings)
@@ -541,6 +583,40 @@ public sealed class WorkspaceIndexer
         store.DeleteRefsByFile(fileId);
         store.DeleteSymbolsByFile(fileId);
         store.DeleteChunksByFile(fileId);
+    }
+
+    private static bool HasEmbeddedVectors(MetaStore store, uint fileId) =>
+        store.ListChunksByFile(fileId).Any(c => c.EmbeddingStatus == "ok");
+
+    // A deleted file row is the only name a point has. When the pass carries no vector store the points it
+    // cannot remove go to the reap journal for the next pass that can — and only for files that actually held
+    // vectors: a never-embedded id has nothing to reap, and the walk hands freed ids out again.
+    private static void RemoveVectorsOfDeletedFiles(
+        IVectorStore? vectorStore,
+        MetaStore store,
+        IReadOnlyList<uint> deletedFileIds,
+        IReadOnlyList<uint> deletedWithVectors,
+        List<string> warnings)
+    {
+        if (vectorStore is not null)
+        {
+            DeleteVectorsForFiles(vectorStore, store, deletedFileIds, warnings);
+            return;
+        }
+
+        if (deletedWithVectors.Count > 0)
+        {
+            DeferReap(store, deletedWithVectors, warnings, "this pass carries no vector store");
+        }
+    }
+
+    private static void DropFile(
+        FileDocument file, MetaStore store, IVectorStore? vectorStore, List<string> warnings)
+    {
+        var hadVectors = HasEmbeddedVectors(store, file.Id);
+        CascadeSemanticRecords(file.Id, store);
+        store.DeleteFile(file.Id);
+        RemoveVectorsOfDeletedFiles(vectorStore, store, [file.Id], hadVectors ? [file.Id] : [], warnings);
     }
 
     private static bool IsTreeSitterLanguage(string language) =>
@@ -596,6 +672,20 @@ public sealed class WorkspaceIndexer
         }
 
         return stale;
+    }
+
+    // A carried marker is only honest while the point behind it exists: the reap removes every point of the
+    // file, chunks with an unchanged hash included, so the whole file goes back into the queue with it.
+    // Scoped to the reaped file — a point shared with another file (identical chunk text) is that other
+    // file's problem, and reconcile's re-queue is what closes it.
+    private static IReadOnlyList<uint> RequeueReapedFiles(MetaStore store, List<uint> fileIds)
+    {
+        foreach (var fileId in fileIds)
+        {
+            store.MarkFileChunksPending(fileId);
+        }
+
+        return fileIds;
     }
 
     private static void DeleteVectorsForFiles(
@@ -748,4 +838,29 @@ public sealed class WorkspaceIndexer
 
     private static string ResolveRepoRoot(string workspaceRoot, RepoEntry repo) =>
         Path.GetFullPath(Path.IsPathRooted(repo.Path) ? repo.Path : Path.Combine(workspaceRoot, repo.Path));
+
+    private static PacedPass? Pacing(SemanticSessionPool? sessions, IReadOnlyList<string>? changedPaths) =>
+        sessions is null ? null : new PacedPass(sessions, changedPaths ?? []);
+
+    private static HashSet<string> TouchedPaths(List<FileDocument> changed, PacedPass pacing, string repoRoot)
+    {
+        var touched = changed.Select(c => c.Path).ToHashSet(StringComparer.Ordinal);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var prefix = repoRoot + Path.DirectorySeparatorChar;
+        foreach (var path in pacing.ChangedPaths)
+        {
+            if (!Path.IsPathRooted(path))
+            {
+                continue;
+            }
+
+            var full = Path.GetFullPath(path);
+            if (full.StartsWith(prefix, comparison))
+            {
+                touched.Add(full[prefix.Length..].Replace(Path.DirectorySeparatorChar, '/'));
+            }
+        }
+
+        return touched;
+    }
 }

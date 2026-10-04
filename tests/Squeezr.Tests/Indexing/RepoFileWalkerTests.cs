@@ -204,6 +204,30 @@ public class RepoFileWalkerTests
         result.Files.Select(f => f.RelativePath).ShouldContain("build/deep.js");
     }
 
+    [Fact]
+    public void Walk_WithoutSubtreeCounting_ReportsSameFilesAndNoPrunedCounts()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "src/keep.cs", "class Keep { }");
+        WriteFile(root, "build/out.js", "var x;");
+        WriteFile(root, "build/nested/deep.js", "function deep() { }");
+        WriteFile(root, "drop.tmp", "x");
+        WriteFile(root, ".gitignore", "build/\n*.tmp\n");
+
+        var config = SqueezrConfig.CreateDefault();
+        var rules = IgnoreRuleset.For(root, config);
+        var counted = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var uncounted = Squeezr.Core.Indexing.RepoFileWalker.Walk(
+            root, rules, config.Indexing.MaxFileSizeKb, countIgnoredSubtrees: false);
+
+        counted.Ignored.ShouldBe(3);
+        uncounted.Files.Select(f => f.RelativePath).ShouldBe(counted.Files.Select(f => f.RelativePath));
+        uncounted.Skipped.ShouldBe(counted.Skipped);
+        uncounted.Ignored.ShouldBe(1);
+        uncounted.IgnoredBySource[IgnoreSource.Gitignore].ShouldBe(1);
+        uncounted.IgnoredBySource.Values.Sum().ShouldBe(uncounted.Ignored);
+    }
+
     private static IgnoreRuleset EmptyRuleset(string root)
     {
         var config = SqueezrConfig.CreateDefault() with

@@ -293,6 +293,76 @@ public class VectorPointReapTests
     }
 
     [Fact]
+    public void Index_DeletedFileWithoutVectorStore_JournalsItsPointCleanup()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var droppedId = FileIdOf(workspace, "b.cs");
+        var droppedHashes = ChunkHashes(workspace, droppedId);
+        droppedHashes.ShouldNotBeEmpty();
+        File.Delete(Path.Combine(workspace, "repo", "b.cs"));
+
+        var pass = indexer.Index(workspace);
+
+        pass.Warnings.ShouldContain(w => w.Contains("point cleanup", StringComparison.Ordinal));
+        PendingReapIds(workspace).ShouldBe([droppedId]);
+        droppedHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            store.ListChunksByFile(droppedId).ShouldBeEmpty();
+            store.CountPendingChunks(null).ShouldBe(0);
+        }
+    }
+
+    [Fact]
+    public void Index_DeferredReapFromAStorelessPass_IsReplayedByTheNextEmbeddingPass()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var droppedId = FileIdOf(workspace, "b.cs");
+        var droppedHashes = ChunkHashes(workspace, droppedId);
+        File.Delete(Path.Combine(workspace, "repo", "b.cs"));
+        indexer.Index(workspace);
+
+        vectorStore.Calls.Clear();
+        var replayed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        replayed.Warnings.ShouldContain(w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));
+        vectorStore.Calls.ShouldContain($"delete:{droppedId}");
+        PendingReapIds(workspace).ShouldBeEmpty();
+        droppedHashes.ShouldAllBe(hash => !vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
+        PointsOfFile(vectorStore, FileIdOf(workspace, "a.cs")).ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void Index_DeletedFileThatNeverHadVectors_JournalsNothing()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/b.cs", OtherSource);
+        // no embeddings and no vector store in the first pass either: nothing was ever upserted
+        new WorkspaceIndexer().Index(workspace);
+        var droppedId = FileIdOf(workspace, "b.cs");
+        ChunkHashes(workspace, droppedId).ShouldNotBeEmpty();
+
+        File.Delete(Path.Combine(workspace, "repo", "b.cs"));
+        var pass = new WorkspaceIndexer().Index(workspace);
+
+        PendingReapIds(workspace).ShouldBeEmpty();
+        pass.Warnings.ShouldNotContain(w => w.Contains("point cleanup", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void PendingReaps_SurviveStoreReopen()
     {
         var dbPath = Path.Combine(TestDirs.NewTempDir(), "meta.db");

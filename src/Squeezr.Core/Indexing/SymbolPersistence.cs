@@ -41,7 +41,7 @@ internal static class SymbolPersistence
             TokenCount = c.TokenCount,
             ChunkHash = c.ChunkHash
         }).ToList();
-        store.InsertChunks(chunkDocs);
+        store.ReplaceFileChunks(fileDoc.Id, chunkDocs);
     }
 
     private static long? FindContainingSymbol(CodeSpan span, List<SymbolDocument> symbols) =>

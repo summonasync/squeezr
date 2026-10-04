@@ -3,6 +3,8 @@ using ModelContextProtocol.Protocol;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp;
@@ -13,6 +15,7 @@ public sealed class ServeWatchTests
 
     private static readonly TimeSpan EngineTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan EngineQuietPeriod = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan EngineArmTimeout = TimeSpan.FromSeconds(20);
 
     [Fact]
     public async Task WatchFlag_ConfigDisabled_EngineIndexesEditsInBackground()
@@ -20,6 +23,7 @@ public sealed class ServeWatchTests
         var workspace = NewIndexedWorkspace(watchEnabled: false);
         await using var harness = await McpTestHarness.StartAsync(workspace, watch: true);
 
+        await WaitForEngineArmedAsync(workspace);
         WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"flaghit7\"; }");
 
         await UntilAsync(EngineTimeout, async () => await HasHitAsync(harness, "flaghit7"));
@@ -31,6 +35,7 @@ public sealed class ServeWatchTests
         var workspace = NewIndexedWorkspace(watchEnabled: true);
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
+        await WaitForEngineArmedAsync(workspace);
         WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"cfghit7\"; }");
 
         await UntilAsync(EngineTimeout, async () => await HasHitAsync(harness, "cfghit7"));
@@ -42,10 +47,16 @@ public sealed class ServeWatchTests
         var workspace = NewIndexedWorkspace(watchEnabled: false);
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
+        // Without these the ShouldBeFalse below is satisfied by a dead server or a crashed engine just as
+        // happily as by the config gate working, so pin the state first: serve answers, and it did not arm.
+        await ServerAnswersAsync(harness);
+        EngineArmed(workspace).ShouldBeFalse("serve started a watch engine although neither --watch nor watch.enabled is on");
+
         WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"offhit7\"; }");
 
         await Task.Delay(EngineQuietPeriod);
         (await HasHitAsync(harness, "offhit7")).ShouldBeFalse();
+        EngineArmed(workspace).ShouldBeFalse("watch engine armed itself during the quiet period");
     }
 
     [Fact]
@@ -54,6 +65,7 @@ public sealed class ServeWatchTests
         var workspace = NewStormWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace, watch: true);
 
+        await WaitForEngineArmedAsync(workspace);
         for (var i = 0; i < StormFiles; i++)
         {
             WriteFile(workspace, $"repo/storm/file{i:D2}.cs", $"class Storm{i} {{ string Term = \"zqxwv{i}\"; }}");
@@ -90,6 +102,36 @@ public sealed class ServeWatchTests
         batches.ShouldBeGreaterThan(0, "no parallel batches ran before the pass finished");
         (await HasHitAsync(harness, $"zqxwv{StormFiles - 1}")).ShouldBeTrue(
             $"catch-up pass did not land within {EngineTimeout.TotalSeconds}s");
+    }
+
+    // The serve host answers tool calls before it starts the watch engine, so "engine armed" is a state the
+    // test has to observe instead of assume: the heartbeat is written after the FileSystemWatchers exist.
+    private static bool EngineArmed(string workspace) =>
+        DaemonHeartbeatReader.TryRead(
+            SqueezrPaths.StoreDir(workspace), DaemonHeartbeat.ServeWatchKind)?.Pid == Environment.ProcessId;
+
+    private static async Task WaitForEngineArmedAsync(string workspace)
+    {
+        var deadline = DateTime.UtcNow + EngineArmTimeout;
+        while (DateTime.UtcNow < deadline && !EngineArmed(workspace))
+        {
+            await Task.Delay(50);
+        }
+
+        EngineArmed(workspace).ShouldBeTrue(
+            $"watch engine did not arm within {EngineArmTimeout.TotalSeconds}s — an edit written before the " +
+            "watchers exist is never observed, and a failed engine start is only reported on stderr");
+    }
+
+    private static async Task ServerAnswersAsync(McpTestHarness harness)
+    {
+        var result = await harness.Client.CallToolAsync(
+            "index_status",
+            new Dictionary<string, object?>(),
+            cancellationToken: CancellationToken.None);
+        result.IsError.ShouldNotBe(
+            true, $"index_status failed: {string.Join(" ", result.Content.Select(b => b.ToString()))}");
+        ParseEnvelope(result).GetProperty("data");
     }
 
     private static async Task<bool> HasHitAsync(McpTestHarness harness, string term)

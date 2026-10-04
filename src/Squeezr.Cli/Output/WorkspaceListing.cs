@@ -8,6 +8,7 @@ public static class WorkspaceListing
     {
         var scan = OrphanScanner.Scan();
         var huskKeys = scan.Husks.Select(husk => husk.StoreKey).ToHashSet(StringComparer.Ordinal);
+        var staleKeys = scan.Stale.Select(stale => stale.StoreKey).ToHashSet(StringComparer.Ordinal);
         var workspaces = WorkspaceRegistry.Load()
             .Select(entry => new WorkspaceListEntry(
                 entry.Name,
@@ -15,7 +16,7 @@ public static class WorkspaceListing
                 entry.StoreKey,
                 entry.CreatedAt,
                 entry.LastUsedAt,
-                Stale: !Directory.Exists(entry.RootPath),
+                Stale: staleKeys.Contains(entry.StoreKey),
                 Husk: huskKeys.Contains(entry.StoreKey) ? true : null))
             .ToList();
         var orphans = scan.Orphans

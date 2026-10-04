@@ -33,14 +33,8 @@ public static class FallbackChunker
     internal static void Persist(
         MetaStore store, RepoDocument repoDoc, FileDocument doc, string text, ChunkingConfig chunking)
     {
-        store.DeleteChunksByFile(doc.Id);
         var chunks = Chunk(text, chunking);
-        if (chunks.Count == 0)
-        {
-            return;
-        }
-
-        store.InsertChunks(chunks.Select(c => new ChunkDocument
+        store.ReplaceFileChunks(doc.Id, chunks.Select(c => new ChunkDocument
         {
             FileId = doc.Id,
             RepoId = repoDoc.Id,

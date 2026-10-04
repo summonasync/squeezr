@@ -202,6 +202,5 @@ public static class TreeSitterIndexPhase
         store.DeleteRefsByFromSymbolIds(oldIds);
         store.DeleteRefsByFile(fileId);
         store.DeleteSymbolsByFile(fileId);
-        store.DeleteChunksByFile(fileId);
     }
 }

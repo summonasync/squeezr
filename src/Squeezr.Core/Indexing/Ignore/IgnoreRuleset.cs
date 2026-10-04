@@ -12,16 +12,20 @@ public sealed record IgnoreDecision
 public sealed class IgnoreRuleset
 {
     private static readonly string[] GitignoreScanPrunedDirs = [".git", "node_modules", "bin", "obj"];
+    private static readonly IgnoreDecision Kept = new() { Excluded = false, Source = null, Pattern = null };
 
-    private readonly List<IgnorePattern> _patterns;
+    private readonly IgnoreRule[] _rules;
 
     private IgnoreRuleset(List<IgnorePattern> patterns, bool respectsGitignore)
     {
-        _patterns = patterns;
+        Patterns = [.. patterns];
+        _rules = [.. patterns.Select(pattern => new IgnoreRule(pattern))];
         RespectsGitignore = respectsGitignore;
     }
 
     public bool RespectsGitignore { get; }
+
+    internal IReadOnlyList<IgnorePattern> Patterns { get; }
 
     public static IgnoreRuleset For(string repoRoot, SqueezrConfig config, Action<string>? warn = null)
     {
@@ -43,6 +47,64 @@ public sealed class IgnoreRuleset
 
         return new IgnoreRuleset(patterns, config.Indexing.RespectGitignore);
     }
+
+    public IgnoreDecision Decision(string relativePath, bool isDirectory)
+    {
+        var normalizedPath = relativePath.Replace('\\', '/');
+        var rawSegments = normalizedPath.Split('/');
+        var loweredSegments = normalizedPath.ToLowerInvariant().Split('/');
+
+        IgnoreDecision? lastMatch = null;
+        bool anyParentExcluded = false;
+
+        foreach (var rule in _rules)
+        {
+            for (var length = 1; length <= rawSegments.Length; length++)
+            {
+                var isLast = length == rawSegments.Length;
+                var isDir = !isLast || (isLast && isDirectory);
+
+                if (!rule.Matches(rawSegments, loweredSegments, length, isDir))
+                    continue;
+
+                if (rule.Pattern.Negate)
+                {
+                    if (isLast && !anyParentExcluded)
+                    {
+                        lastMatch = Unexclude(rule);
+                    }
+                    else if (isDir)
+                    {
+                        anyParentExcluded = false;
+                        lastMatch = Unexclude(rule);
+                    }
+                }
+                else
+                {
+                    lastMatch = new IgnoreDecision
+                    {
+                        Excluded = true,
+                        Source = rule.Pattern.Source,
+                        Pattern = rule.Pattern.Raw
+                    };
+
+                    if (isDir && !isLast && rule.Pattern.DirOnly)
+                    {
+                        anyParentExcluded = true;
+                    }
+                }
+            }
+        }
+
+        return lastMatch ?? Kept;
+    }
+
+    private static IgnoreDecision Unexclude(IgnoreRule rule) => new()
+    {
+        Excluded = false,
+        Source = rule.Pattern.Source,
+        Pattern = rule.Pattern.Raw
+    };
 
     private static List<IgnorePattern> LoadConfiguredPatterns(
         string repoRoot, SqueezrConfig config, Action<string>? warn)
@@ -151,71 +213,5 @@ public sealed class IgnoreRuleset
                     patterns.Add(parsed);
             }
         }
-    }
-
-    public IgnoreDecision Decision(string relativePath, bool isDirectory)
-    {
-        var normalizedPath = relativePath.Replace('\\', '/');
-        var segments = normalizedPath.Split('/');
-
-        IgnoreDecision? lastMatch = null;
-        bool anyParentExcluded = false;
-
-        foreach (var pattern in _patterns)
-        {
-            for (var i = 1; i <= segments.Length; i++)
-            {
-                var isLast = i == segments.Length;
-                var isDir = !isLast || (isLast && isDirectory);
-                var path = string.Join('/', segments.Take(i));
-
-                if (!pattern.MatchesPathInternal(path, isDir))
-                    continue;
-
-                if (pattern.Negate)
-                {
-                    if (isLast && !anyParentExcluded)
-                    {
-                        lastMatch = new IgnoreDecision
-                        {
-                            Excluded = false,
-                            Source = pattern.Source,
-                            Pattern = pattern.Raw
-                        };
-                    }
-                    else if (isDir)
-                    {
-                        anyParentExcluded = false;
-                        lastMatch = new IgnoreDecision
-                        {
-                            Excluded = false,
-                            Source = pattern.Source,
-                            Pattern = pattern.Raw
-                        };
-                    }
-                }
-                else
-                {
-                    lastMatch = new IgnoreDecision
-                    {
-                        Excluded = true,
-                        Source = pattern.Source,
-                        Pattern = pattern.Raw
-                    };
-
-                    if (isDir && !isLast && pattern.DirOnly)
-                    {
-                        anyParentExcluded = true;
-                    }
-                }
-            }
-        }
-
-        return lastMatch ?? new IgnoreDecision
-        {
-            Excluded = false,
-            Source = null,
-            Pattern = null
-        };
     }
 }

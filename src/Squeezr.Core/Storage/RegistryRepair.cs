@@ -30,7 +30,7 @@ public static class RegistryRepair
             adopted.Add(orphan);
         }
 
-        return new RepairOutcome(adopted, needsRoot, scan.Husks);
+        return new RepairOutcome(adopted, needsRoot, scan.Husks, scan.Stale);
     }
 
     public static WorkspaceRegistryEntry AdoptWithRoot(string storeKey, string rootPath)

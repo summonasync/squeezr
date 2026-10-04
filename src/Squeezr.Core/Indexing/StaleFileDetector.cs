@@ -34,7 +34,8 @@ public static class StaleFileDetector
             }
 
             var rules = IgnoreRuleset.For(repoRoot, config);
-            var walk = RepoFileWalker.Walk(repoRoot, rules, config.Indexing.MaxFileSizeKb);
+            // staleness reads Files only; counting the pruned subtrees would walk 30k+ paths nobody reports
+            var walk = RepoFileWalker.Walk(repoRoot, rules, config.Indexing.MaxFileSizeKb, countIgnoredSubtrees: false);
             var dbByPath = dbFiles.ToDictionary(f => f.Path, StringComparer.Ordinal);
             var walkedPaths = walk.Files.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
 

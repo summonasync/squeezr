@@ -161,6 +161,43 @@ public class IncrementalIndexTests
     }
 
     [Fact]
+    public void RepoDroppedFromManifest_DropsItsSemanticRowsToo()
+    {
+        var workspace = TestDirs.NewTempDir();
+        Directory.CreateDirectory(Path.Combine(workspace, "one"));
+        Directory.CreateDirectory(Path.Combine(workspace, "two"));
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        WriteFile(workspace, "one/a.cs", "class A { void Run() { } }");
+        WriteFile(workspace, "two/b.cs", "class B { void Run() { } }");
+        manager.AddRepo("one", "one");
+        manager.AddRepo("two", "two");
+        new WorkspaceIndexer().Index(workspace);
+
+        uint droppedRepoId;
+        uint keptFileId;
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            droppedRepoId = store.FindRepo("one")!.Id;
+            keptFileId = store.ListFiles(store.FindRepo("two")!.Id).Single().Id;
+        }
+
+        var manifest = WorkspaceManifestFile.Load(workspace);
+        WorkspaceManifestFile.Save(workspace, manifest with { Repos = manifest.Repos.Where(r => r.Name == "two").ToList() });
+
+        new WorkspaceIndexer().Index(workspace);
+
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            store.ListSymbolsByRepo(droppedRepoId).ShouldBeEmpty();
+            // a row whose file row is gone is invisible to every per-file listing yet still counted by the
+            // coverage denominator, so a leaked chunk claims work the index can never reach
+            store.GetSemanticCoverage().TotalChunks.ShouldBe(store.ListChunksByFile(keptFileId).Count);
+        }
+    }
+
+    [Fact]
     public void Compact_WithoutIndex_ThrowsFriendlyError()
     {
         var workspace = NewWorkspace();

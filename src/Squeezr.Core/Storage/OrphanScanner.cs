@@ -46,7 +46,11 @@ public static class OrphanScanner
             .Select(entry => new HuskInfo(entry.Name, entry.StoreKey, entry.RootPath))
             .ToList();
 
-        return new OrphanScanResult(orphans, husks);
+        var stale = entries.Where(entry => !Directory.Exists(entry.RootPath))
+            .Select(entry => new StaleInfo(entry.Name, entry.StoreKey, entry.RootPath))
+            .ToList();
+
+        return new OrphanScanResult(orphans, husks, stale);
     }
 
     internal static WorkspaceManifest? TryLoadStoreManifest(string storeDir)

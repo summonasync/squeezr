@@ -8,14 +8,17 @@ public static class FleetListing
     public static IReadOnlyList<FleetEntry> Load()
     {
         var now = DateTime.UtcNow;
+        var staleKeys = OrphanScanner.Scan().Stale
+            .Select(stale => stale.StoreKey)
+            .ToHashSet(StringComparer.Ordinal);
         return WorkspaceRegistry.Load()
-            .Select(entry => BuildEntry(entry, now))
+            .Select(entry => BuildEntry(entry, now, staleKeys))
             .OrderByDescending(entry => entry.Watch.IsAlive || entry.ServeWatch.IsAlive)
             .ThenBy(entry => entry.Name, StringComparer.Ordinal)
             .ToList();
     }
 
-    private static FleetEntry BuildEntry(WorkspaceRegistryEntry entry, DateTime now)
+    private static FleetEntry BuildEntry(WorkspaceRegistryEntry entry, DateTime now, IReadOnlySet<string> staleKeys)
     {
         var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
         using var meta = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(entry.RootPath));
@@ -25,7 +28,7 @@ public static class FleetListing
             entry.StoreKey,
             ProbeDaemon(storeDir, DaemonHeartbeat.DefaultKind, now),
             ProbeDaemon(storeDir, DaemonHeartbeat.ServeWatchKind, now),
-            Stale: !Directory.Exists(entry.RootPath),
+            Stale: staleKeys.Contains(entry.StoreKey),
             PendingChunks: meta?.CountPendingChunks(null),
             LastIndexedAt: meta?.GetLatestFullIndexAt());
     }

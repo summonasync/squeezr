@@ -489,3 +489,4 @@ src/Squeezr.Cli/Models/
 
 # Agent tooling local state
 .claude/
+.qwen/

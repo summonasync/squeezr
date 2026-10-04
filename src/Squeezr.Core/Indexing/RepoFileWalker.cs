@@ -14,7 +14,12 @@ public static class RepoFileWalker
 {
     private static readonly string[] AlwaysSkippedDirs = [".git", ".squeezr"];
 
-    public static FileWalkResult Walk(string repoRoot, IgnoreRuleset rules, int maxFileSizeKb, Action<string>? warn = null)
+    public static FileWalkResult Walk(
+        string repoRoot,
+        IgnoreRuleset rules,
+        int maxFileSizeKb,
+        Action<string>? warn = null,
+        bool countIgnoredSubtrees = true)
     {
         var files = new List<SourceFile>();
         var skipped = 0;
@@ -72,7 +77,8 @@ public static class RepoFileWalker
                     if (dirDecision.Excluded)
                     {
                         // the walk stops at the directory, so the tree below it has to be counted by name
-                        CountIgnored(dirDecision.Source, ignoredBySource, ref ignored, CountDroppedFiles(entry));
+                        if (countIgnoredSubtrees)
+                            CountIgnored(dirDecision.Source, ignoredBySource, ref ignored, CountDroppedFiles(entry));
                         continue;
                     }
 
