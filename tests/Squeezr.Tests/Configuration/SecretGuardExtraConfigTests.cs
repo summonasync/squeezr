@@ -95,6 +95,64 @@ public class SecretGuardExtraConfigTests
     }
 
     [Fact]
+    public void Load_SecretGuardExtraIsExplicitlyNull_GuardStillClassifies()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "secretGuardExtra": null
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var extra = ConfigFile.Load(root).Indexing.SecretGuardExtra;
+
+        extra.ShouldBeNull();
+        SecretGuard.IsProtected(".env", extra).ShouldBeTrue();
+        SecretGuard.IsProtected("deploy/prod.tokens", extra).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Load_SameMaskInIgnoreAndInSecretGuardExtra_ProtectsAtTheDepthItExcludes()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [ "*.tokens" ],
+                "maxFileSizeKb": 512,
+                "secretGuardExtra": [ "*.tokens" ]
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var extra = ConfigFile.Load(root).Indexing.SecretGuardExtra;
+
+        SecretGuard.IsProtected("prod.tokens", extra).ShouldBeTrue();
+        SecretGuard.IsProtected("deploy/deep.tokens", extra).ShouldBeTrue();
+        SecretGuard.IsProtected("deploy/tokens.txt", extra).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Save_ThenLoad_RoundTripsSecretGuardExtra()
     {
         var root = TestDirs.NewTempDir();

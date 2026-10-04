@@ -59,7 +59,7 @@ public sealed partial class SecretGuardTests
     [InlineData("deploy\\tls\\server.key")]
     public void IsProtected_BuiltInMask_True(string relativePath)
     {
-        SecretGuard.IsProtected(relativePath).ShouldBeTrue(relativePath);
+        SecretGuard.IsProtected(relativePath, []).ShouldBeTrue(relativePath);
     }
 
     [Theory]
@@ -75,7 +75,7 @@ public sealed partial class SecretGuardTests
     [InlineData("a/b/c/enviroment")]
     public void IsProtected_OutsideTheSet_False(string relativePath)
     {
-        SecretGuard.IsProtected(relativePath).ShouldBeFalse(relativePath);
+        SecretGuard.IsProtected(relativePath, []).ShouldBeFalse(relativePath);
     }
 
     [Theory]
@@ -86,7 +86,7 @@ public sealed partial class SecretGuardTests
     [InlineData("App.Secret")]
     public void IsProtected_IgnoresCase(string relativePath)
     {
-        SecretGuard.IsProtected(relativePath).ShouldBeTrue(relativePath);
+        SecretGuard.IsProtected(relativePath, []).ShouldBeTrue(relativePath);
     }
 
     [Theory]
@@ -99,7 +99,7 @@ public sealed partial class SecretGuardTests
     [InlineData("ENV.EXAMPLE")]
     public void IsProtected_EnvCarveOut_False(string relativePath)
     {
-        SecretGuard.IsProtected(relativePath).ShouldBeFalse(relativePath);
+        SecretGuard.IsProtected(relativePath, []).ShouldBeFalse(relativePath);
     }
 
     [Theory]
@@ -109,7 +109,18 @@ public sealed partial class SecretGuardTests
     [InlineData("a/b/c/.env.existing")]
     public void IsProtected_EnvCarveOutIsExactName_NotAPrefix(string relativePath)
     {
-        SecretGuard.IsProtected(relativePath).ShouldBeTrue(relativePath);
+        SecretGuard.IsProtected(relativePath, []).ShouldBeTrue(relativePath);
+    }
+
+    [Theory]
+    [InlineData(".env.example")]
+    [InlineData(".env.sample")]
+    [InlineData(".env.template")]
+    public void EnvCarveOut_NameShapedLikeAnotherMask_StillProtectedByThatMask(string name)
+    {
+        SecretGuard.BuiltInPatterns.Count(mask => GlobMatcher.IsMatch(mask, $"web/{name}")).ShouldBe(1);
+
+        SecretGuard.IsProtected($"web/{name}.key", []).ShouldBeTrue(name);
     }
 
     [Fact]
@@ -139,6 +150,16 @@ public sealed partial class SecretGuardTests
         ]);
     }
 
+    [Fact]
+    public void BuiltInPatterns_IsNotAWindowIntoTheCodeList()
+    {
+        var reported = SecretGuard.BuiltInPatterns;
+
+        (reported is string[]).ShouldBeFalse();
+        Should.Throw<NotSupportedException>(() => ((IList<string>)reported)[0] = "**/*");
+        SecretGuard.BuiltInPatterns[0].ShouldBe("**/.env");
+    }
+
     [Theory]
     [InlineData(".env")]
     [InlineData("config/.env.production")]
@@ -162,7 +183,7 @@ public sealed partial class SecretGuardTests
 
         var decision = IgnoreRuleset.For(root, config).Decision(relativePath, false);
         decision.Excluded.ShouldBeFalse($"the ruleset is where '!' wins for {relativePath}");
-        SecretGuard.IsProtected(relativePath).ShouldBeTrue(relativePath);
+        SecretGuard.IsProtected(relativePath, []).ShouldBeTrue(relativePath);
     }
 
     [Fact]
@@ -177,8 +198,8 @@ public sealed partial class SecretGuardTests
         var off = on with { Indexing = on.Indexing with { RespectGitignore = false } };
         IgnoreRuleset.For(root, off).Decision(".env", false).Excluded.ShouldBeFalse();
 
-        SecretGuard.IsProtected(".env").ShouldBeTrue();
-        SecretGuard.IsProtected("deploy/server.key").ShouldBeTrue();
+        SecretGuard.IsProtected(".env", []).ShouldBeTrue();
+        SecretGuard.IsProtected("deploy/server.key", []).ShouldBeTrue();
     }
 
     [Fact]
@@ -217,25 +238,81 @@ public sealed partial class SecretGuardTests
     [InlineData("**/tokens.txt", "tokens.txt.bak", false)]
     [InlineData("deploy/vault pass/phrases.txt", "deploy/vault pass/phrases.txt", true)]
     [InlineData("*.tokens", "root.tokens", true)]
-    [InlineData("*.tokens", "src/deep.tokens", false)]
+    [InlineData("*.tokens", "src/deep.tokens", true)]
     [InlineData("deploy/*.crt", "deploy/server.crt", true)]
     public void SecretGuardExtra_WidensTheSet(string extra, string relativePath, bool expected)
     {
         SecretGuard.IsProtected(relativePath, [extra]).ShouldBe(expected, $"{extra} vs {relativePath}");
     }
 
-    [Fact]
-    public void SecretGuardExtra_NegationIsInert()
+    [Theory]
+    [InlineData("*.tokens", "root.tokens", true)]
+    [InlineData("*.tokens", "src/deep.tokens", true)]
+    [InlineData("*.tokens", "src/readme.md", false)]
+    [InlineData("prod-secrets.yaml", "deploy/prod-secrets.yaml", true)]
+    [InlineData("deploy/*.crt", "deploy/server.crt", true)]
+    [InlineData("deploy/*.crt", "deploy/sub/deep.crt", false)]
+    [InlineData("**/tokens.txt", "a/b/c/tokens.txt", true)]
+    [InlineData("**/tokens.txt", "a/b/c/tokens.txt.bak", false)]
+    [InlineData("/phrases.custom", "phrases.custom", true)]
+    [InlineData("/phrases.custom", "src/phrases.custom", false)]
+    [InlineData("secrets/", "secrets", false)]
+    public void SecretGuardExtra_MeansWhatIndexingIgnoreMeans(string extra, string relativePath, bool expected)
     {
-        SecretGuard.IsProtected(".env", ["!**/.env"]).ShouldBeTrue();
-        SecretGuard.IsProtected("tokens.txt", ["!**/tokens.txt"]).ShouldBeFalse();
+        var root = TestDirs.NewTempDir();
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Indexing = SqueezrConfig.CreateDefault().Indexing with
+            {
+                Ignore = [extra],
+                RespectGitignore = false
+            }
+        };
+
+        IgnoreRuleset.For(root, config).Decision(relativePath, false).Excluded
+            .ShouldBe(expected, $"indexing.ignore '{extra}' vs {relativePath}");
+        SecretGuard.IsProtected(relativePath, [extra]).ShouldBe(expected, $"secretGuardExtra '{extra}' vs {relativePath}");
+    }
+
+    [Theory]
+    [InlineData("  **/tokens.txt  ")]
+    [InlineData("\t**/tokens.txt")]
+    [InlineData("**/tokens.txt\n")]
+    public void SecretGuardExtra_SurroundingWhitespace_StillApplies(string extra)
+    {
+        SecretGuard.IsProtected("config/tokens.txt", [extra]).ShouldBeTrue(extra);
+    }
+
+    [Theory]
+    [InlineData("!**/.env", "prod.tokens")]
+    [InlineData("!prod.tokens", "prod.tokens")]
+    [InlineData("!!.env", "prod.tokens")]
+    [InlineData("!!.prod.tokens", "prod.tokens")]
+    [InlineData("#prod.tokens", "prod.tokens")]
+    [InlineData("secrets/", "secrets")]
+    [InlineData("[p]rod.tokens", "prod.tokens")]
+    [InlineData("deploy\\prod.tokens", "deploy/prod.tokens")]
+    [InlineData(" ", "prod.tokens")]
+    [InlineData("", "prod.tokens")]
+    [InlineData(null, "prod.tokens")]
+    public void SecretGuardExtra_CannotNameAFileShape_NeitherWidensNorNarrows(string? extra, string relativePath)
+    {
+        var extras = new[] { extra! };
+
+        SecretGuard.IsProtected(relativePath, extras).ShouldBeFalse($"{extra} vs {relativePath}");
+        SecretGuard.IsProtected("web/.env.example", extras).ShouldBeFalse(extra);
+
+        foreach (var path in BuiltInSamples)
+        {
+            SecretGuard.IsProtected(path, extras).ShouldBeTrue($"{extra} vs {path}");
+        }
     }
 
     [Fact]
     public void SecretGuardExtra_CarveOutCanBeReopenedByTheAuthor()
     {
         SecretGuard.IsProtected("web/.env.example", ["**/.env.example"]).ShouldBeTrue();
-        SecretGuard.IsProtected("web/.env.example").ShouldBeFalse();
+        SecretGuard.IsProtected("web/.env.example", []).ShouldBeFalse();
     }
 
     [Fact]
@@ -247,14 +324,39 @@ public sealed partial class SecretGuardTests
         SecretGuard.IsProtected("src/App.cs", ["", "  "]).ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData(".env/dev")]
+    [InlineData(".env/local.json")]
+    [InlineData("deploy/secrets/prod.json")]
+    [InlineData("vault/token.key/readme.md")]
+    public void DirectoryShapedSecret_LastSegmentDecides_NotProtected(string relativePath)
+    {
+        SecretGuard.IsProtected(relativePath, []).ShouldBeFalse(relativePath);
+    }
+
+    [Fact]
+    public void DirectoryShapedSecret_FilesInsideIt_AreCoveredOnlyByNameShapedMasks()
+    {
+        SecretGuard.IsProtected(".env", []).ShouldBeTrue();
+        SecretGuard.IsProtected(".env/dev", []).ShouldBeFalse();
+        SecretGuard.IsProtected(".env/prod.key", []).ShouldBeTrue();
+        SecretGuard.IsProtected("secrets/secrets.json", []).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void IsProtected_NullPath_ThrowsInsteadOfCallingItSafe()
+    {
+        Should.Throw<ArgumentNullException>(() => SecretGuard.IsProtected(null!, []));
+    }
+
     [Fact]
     public void IsProtected_PathThatDoesNotExistOnDisk_StillClassifies()
     {
         var missing = $"no/such/dir-{Guid.NewGuid():N}";
 
-        SecretGuard.IsProtected($"{missing}/.env").ShouldBeTrue();
-        SecretGuard.IsProtected($"{missing}/keystore.jks").ShouldBeTrue();
-        SecretGuard.IsProtected($"{missing}/readme.md").ShouldBeFalse();
+        SecretGuard.IsProtected($"{missing}/.env", []).ShouldBeTrue();
+        SecretGuard.IsProtected($"{missing}/keystore.jks", []).ShouldBeTrue();
+        SecretGuard.IsProtected($"{missing}/readme.md", []).ShouldBeFalse();
     }
 
     [Fact]
