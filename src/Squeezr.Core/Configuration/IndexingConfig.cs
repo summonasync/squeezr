@@ -10,5 +10,7 @@ public sealed record IndexingConfig
 
     public IReadOnlyList<string> RankExclude { get; init; } = [];
 
+    public IReadOnlyList<string> SecretGuardExtra { get; init; } = [];
+
     public bool RespectGitignore { get; init; } = true;
 }
