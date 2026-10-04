@@ -22,6 +22,8 @@ public sealed class RoslynSession : IDisposable
 
     private readonly RoslynWorkspace _workspace;
     private readonly Dictionary<string, DocumentId> _documents;
+    private readonly HashSet<string> _rejectedPaths = [];
+    private readonly HashSet<string> _unsyncedPaths = [];
     private Solution _solution;
     private readonly string _root;
 
@@ -31,7 +33,8 @@ public sealed class RoslynSession : IDisposable
         Dictionary<string, DocumentId> documents,
         bool semantic,
         List<string> warnings,
-        string root)
+        string root,
+        bool degraded)
     {
         _workspace = workspace;
         _solution = solution;
@@ -39,11 +42,20 @@ public sealed class RoslynSession : IDisposable
         Semantic = semantic;
         Warnings = warnings;
         _root = root;
+        Degraded = degraded;
     }
 
     public bool Semantic { get; }
 
+    public bool Degraded { get; }
+
     public IReadOnlyList<string> Warnings { get; }
+
+    public IReadOnlyCollection<string> RejectedPaths => _rejectedPaths;
+
+    public IReadOnlyCollection<string> UnsyncedPaths => _unsyncedPaths;
+
+    public bool HasUnsynced(string relativePath) => _unsyncedPaths.Contains(relativePath);
 
     public bool RequiresReopen { get; private set; }
 
@@ -60,10 +72,16 @@ public sealed class RoslynSession : IDisposable
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
             {
                 warnings.Add($"MSBuild workspace unavailable ({ex.Message}); falling back to ad-hoc project");
+                // a repo that does have a project to load but failed to load it today may load it tomorrow:
+                // mark it so the pool keeps retrying instead of caching the fallback for the process lifetime
+                if (HasProjectFile(root))
+                {
+                    return CreateAdHocSession(root, semantic, warnings, degraded: true);
+                }
             }
         }
 
-        return CreateAdHocSession(root, semantic, warnings);
+        return CreateAdHocSession(root, semantic, warnings, degraded: false);
     }
 
     public Document? FindDocument(string relativePath)
@@ -80,6 +98,7 @@ public sealed class RoslynSession : IDisposable
             if (!File.Exists(full))
             {
                 RemoveDocument(relativePath);
+                _unsyncedPaths.Remove(relativePath);
                 continue;
             }
 
@@ -90,10 +109,15 @@ public sealed class RoslynSession : IDisposable
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                // keeping the document would let the parse splice this snapshot's spans with the fresh
+                // disk bytes the caller reads separately; drop it and let the pass skip the file instead
+                RemoveDocument(relativePath);
+                _unsyncedPaths.Add(relativePath);
                 continue;
             }
 
-            UpsertDocument(full, text);
+            _unsyncedPaths.Remove(relativePath);
+            UpsertDocument(full, text, relativePath);
         }
     }
 
@@ -114,11 +138,12 @@ public sealed class RoslynSession : IDisposable
     private string FullPath(string relativePath) =>
         Path.GetFullPath(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-    private void UpsertDocument(string fullPath, string text)
+    private void UpsertDocument(string fullPath, string text, string relativePath)
     {
         if (_documents.TryGetValue(fullPath, out var known))
         {
             _solution = _solution.WithDocumentText(known, SourceText.From(text));
+            _rejectedPaths.Remove(relativePath);
             return;
         }
 
@@ -126,6 +151,7 @@ public sealed class RoslynSession : IDisposable
         if (project is null)
         {
             RequiresReopen = true;
+            _rejectedPaths.Add(relativePath);
             return;
         }
 
@@ -136,6 +162,7 @@ public sealed class RoslynSession : IDisposable
             loader: TextLoader.From(TextAndVersion.Create(SourceText.From(text), VersionStamp.Create())));
         _solution = _solution.AddDocument(added);
         _documents[fullPath] = added.Id;
+        _rejectedPaths.Remove(relativePath);
     }
 
     private Project? FindOwningProject(string fullPath)
@@ -191,10 +218,7 @@ public sealed class RoslynSession : IDisposable
         }
 
         var workspace = MSBuildWorkspace.Create();
-        var solutionPath = Directory.EnumerateFiles(root, "*.sln*", IgnoreCaseTopDir)
-            .Where(p => p.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => p.EndsWith("x", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
-            .FirstOrDefault();
+        var solutionPath = FindSolutionFile(root);
 
         Solution solution;
         if (solutionPath is not null)
@@ -203,8 +227,7 @@ public sealed class RoslynSession : IDisposable
         }
         else
         {
-            var project = Directory.EnumerateFiles(root, "*.csproj", IgnoreCaseAllDirs)
-                .FirstOrDefault(p => !IsBuildOutput(p));
+            var project = FindProjectFile(root);
             if (project is null)
             {
                 workspace.Dispose();
@@ -231,10 +254,32 @@ public sealed class RoslynSession : IDisposable
         }
 
         warnings.Add($"semantic mode: {solution.Projects.Count()} project(s) via {(solutionPath is null ? "project file" : Path.GetFileName(solutionPath))}");
-        return new RoslynSession(workspace, solution, documents, semantic: true, warnings, root);
+        return new RoslynSession(workspace, solution, documents, semantic: true, warnings, root, degraded: false);
     }
 
-    private static RoslynSession CreateAdHocSession(string root, bool semantic, List<string> warnings)
+    private static string? FindSolutionFile(string root) =>
+        Directory.EnumerateFiles(root, "*.sln*", IgnoreCaseTopDir)
+            .Where(p => p.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.EndsWith("x", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .FirstOrDefault();
+
+    private static string? FindProjectFile(string root) =>
+        Directory.EnumerateFiles(root, "*.csproj", IgnoreCaseAllDirs)
+            .FirstOrDefault(p => !IsBuildOutput(p));
+
+    private static bool HasProjectFile(string root)
+    {
+        try
+        {
+            return FindSolutionFile(root) is not null || FindProjectFile(root) is not null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    private static RoslynSession CreateAdHocSession(string root, bool semantic, List<string> warnings, bool degraded)
     {
         var files = Directory.EnumerateFiles(root, "*.cs", IgnoreCaseAllDirs)
             .Where(p => !IsBuildOutput(p))
@@ -275,7 +320,7 @@ public sealed class RoslynSession : IDisposable
         }
 
         warnings.Add($"ad-hoc workspace: {files.Count} file(s), project references unresolved");
-        return new RoslynSession(workspace, solution, documents, semantic, warnings, root);
+        return new RoslynSession(workspace, solution, documents, semantic, warnings, root, degraded);
     }
 
     private static PortableExecutableReference[] DefaultMetadataReferences()

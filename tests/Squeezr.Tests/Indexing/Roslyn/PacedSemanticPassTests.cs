@@ -183,7 +183,46 @@ public class PacedSemanticPassTests
     }
 
     [Fact]
-    public void ForcedPacedPass_DropsSessionAndParsesWholeRepo()
+    public void ForcedPass_WithWarmSession_KeepsSessionAndReparsesDriftOnly()
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        using var pool = new SemanticSessionPool();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], new PhaseProgress());
+
+        WriteFile(workspace, "src/Use.cs", """
+            public static class Use
+            {
+                public static int Run() => Calc.Add(1, 2);
+
+                public static int Again() => Calc.Add(3, 4);
+            }
+            """);
+        var progress = new PhaseProgress();
+        Index(workspace, pool, [], progress);
+
+        progress.Items(IndexPhase.Semantic).ShouldBe(["src/Use.cs"],
+            "a forced pass with a warm session reconciles on sha drift instead of buying a whole-repo pass");
+        pool.CreatedSessions.ShouldBe(1);
+        pool.IsWarm(RepoRoot(workspace), semantic: true).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ForcedPass_WithColdPool_ParsesWholeRepo()
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        using var pool = new SemanticSessionPool();
+        var progress = new PhaseProgress();
+
+        Index(workspace, pool, [], progress);
+
+        progress.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs", "src/Use.cs"]);
+        pool.CreatedSessions.ShouldBe(1);
+    }
+
+    [Fact]
+    public void ForcedPass_WithFullFlag_DropsSessionAndParsesWholeRepo()
     {
         var workspace = NewWorkspace();
         WriteRepo(workspace);
@@ -191,10 +230,79 @@ public class PacedSemanticPassTests
         Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], new PhaseProgress());
 
         var progress = new PhaseProgress();
-        Index(workspace, pool, [], progress);
+        new WorkspaceIndexer().Index(workspace, full: true, progress: progress, changedPaths: [], sessions: pool);
 
         progress.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs", "src/Use.cs"]);
         pool.CreatedSessions.ShouldBe(2);
+    }
+
+    [Fact]
+    public void PacedPass_WhenSessionDegrades_IsNeverTreatedAsIncremental()
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        WriteFile(workspace, "broken.csproj", "<this is not a project file");
+        using var pool = new SemanticSessionPool();
+        var cold = new PhaseProgress();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], cold);
+
+        cold.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs", "src/Use.cs"]);
+        pool.IsWarm(RepoRoot(workspace), semantic: true).ShouldBeFalse(
+            "a fallback session must not answer warm for the mode it was asked to open");
+
+        WriteFile(workspace, "src/Notes.cs", "public static class Notes { public static string Term = \"degradedneedle\"; }");
+        var second = new PhaseProgress();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], second);
+
+        second.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs", "src/Use.cs"],
+            "the degraded pass cannot scope like an incremental one");
+        pool.CreatedSessions.ShouldBe(2, "every pass retries the real project load instead of caching the fallback");
+        Symbols(workspace, "src/Notes.cs").Select(s => s.Name).ShouldContain("Term");
+    }
+
+    [Fact]
+    public void WarmPacedPass_SkippedSemanticFile_IsReparsedOnTheNextPass()
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        using var pool = new SemanticSessionPool();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], new PhaseProgress());
+
+        WriteFile(workspace, "src/Notes.cs", "??? not csharp at all\n");
+        var refused = new PhaseProgress();
+        var refusedResult = new WorkspaceIndexer().Index(
+            workspace, progress: refused, changedPaths: [RepoFile(workspace, "src/Notes.cs")], sessions: pool);
+
+        refused.Items(IndexPhase.Semantic).ShouldBe(["src/Notes.cs"]);
+        refusedResult.Warnings.ShouldContain(w => w.Contains("symbol extraction failed"),
+            "the refusal must be visible, not just a silent skip");
+        Symbols(workspace, "src/Notes.cs").Select(s => s.Name).ShouldContain("Term",
+            "a file the semantic phase refused keeps the rows it had");
+        pool.DeferredSemantic(RepoRoot(workspace)).ShouldContain("src/Notes.cs",
+            "the refusal has to be booked into the per-repo deferred set");
+
+        // the walk committed the sha of the refused bytes already, so from here a pass scoped to another
+        // file can only bring Notes.cs back through the deferred set — that is what stops the sha freeze
+        var next = new PhaseProgress();
+        Index(workspace, pool, [RepoFile(workspace, "src/Calc.cs")], next);
+
+        next.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs"],
+            "a pass scoped elsewhere must still pull the deferred file into the parse area");
+
+        WriteFile(workspace, "src/Notes.cs", """
+            public static class Notes
+            {
+                public static string Term = "flatneedle";
+
+                public static string Retry = "deferredneedle";
+            }
+            """);
+        var healed = new PhaseProgress();
+        Index(workspace, pool, [RepoFile(workspace, "src/Calc.cs")], healed);
+
+        healed.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs"],
+            "the committed sha must not freeze a file the semantic phase skipped");
+        Symbols(workspace, "src/Notes.cs").Select(s => s.Name).ShouldContain("Retry");
     }
 
     [Fact]

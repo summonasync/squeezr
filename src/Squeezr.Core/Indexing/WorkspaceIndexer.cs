@@ -13,6 +13,8 @@ public sealed class WorkspaceIndexer
 {
     private const double CompactHintThreshold = 0.3;
 
+    private static readonly string[] ProjectLayoutExtensions = [".csproj", ".sln", ".slnx", ".props", ".targets"];
+
     public IndexResult Index(
         string workspaceRoot,
         string? repoName = null,
@@ -44,6 +46,15 @@ public sealed class WorkspaceIndexer
         if (targets.Count == 0)
         {
             throw new WorkspaceException($"Repository '{repoName}' is not in the workspace.");
+        }
+
+        if (sessions is not null)
+        {
+            // a repo dropped from the manifest must drop its session too: each entry is a live Roslyn
+            // workspace worth hundreds of MB, and nothing else in the pass ever revisits composition
+            sessions.PruneTo(manifest.Repos
+                .Select(repo => ResolveRepoRoot(workspaceRoot, repo))
+                .ToList());
         }
 
         using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot), onStaleTakeover))
@@ -472,20 +483,26 @@ public sealed class WorkspaceIndexer
         Dictionary<uint, HashSet<string>> priorChunkHashes =
             vectorsEnabled ? SnapshotChunkHashes(store, reapCandidates) : [];
 
-        var incremental = pacing is not null && pacing.IsIncremental(repoRoot, !noSemantic);
+        var incremental = pacing is not null && pacing.IsIncremental(repoRoot, !noSemantic) && !full;
         HashSet<string>? touched = null;
         if (pacing is not null)
         {
+            if (incremental && ProjectLayoutChanged(pacing))
+            {
+                pacing.Sessions.Discard(repoRoot);
+            }
+
             if (incremental)
             {
                 touched = TouchedPaths(changed, pacing, repoRoot);
+                touched.UnionWith(pacing.Sessions.DeferredSemantic(repoRoot));
                 pacing.Sessions.RemoveDocuments(
                     repoRoot, deleted.Where(d => d.Language == "csharp").Select(d => d.Path).ToList());
             }
             else
             {
-                // an unpaced watch pass (dropped events, ignore-file change, empty batch) cannot trust the
-                // changed set, so the pooled session goes and the next pass opens a fresh one from disk
+                // cold pool or an explicit --full: the pass cannot scope to the changed set, so the pooled
+                // session goes and the next one opens a fresh one from disk
                 pacing.Sessions.Discard(repoRoot);
             }
         }
@@ -501,8 +518,14 @@ public sealed class WorkspaceIndexer
                 repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add, progress)
             : SemanticIndexPhase.RunPooled(
                 pacing.Sessions, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
-                noSemantic, warnings.Add, progress, syncDocuments: incremental);
+                noSemantic, warnings.Add, progress, syncDocuments: touched is not null);
         skipped += semantic.Skipped;
+        if (pacing is not null)
+        {
+            // the walk commits each sha before this phase runs, so a file the phase did not write would
+            // otherwise never come back into scope: the pool carries the set into the next pass instead
+            pacing.Sessions.ReplaceDeferredSemantic(repoRoot, semantic.Deferred ?? []);
+        }
 
         var tsTargets = changed.Where(d => IsTreeSitterLanguage(d.Language)).ToList();
         var tsResult = TreeSitterIndexPhase.Run(
@@ -890,6 +913,14 @@ public sealed class WorkspaceIndexer
 
     private static PacedPass? Pacing(SemanticSessionPool? sessions, IReadOnlyList<string>? changedPaths) =>
         sessions is null ? null : new PacedPass(sessions, changedPaths ?? []);
+
+    // a warm session carries the project metadata it opened with: references, package versions, compile
+    // items. an edited project file is the batch event that makes the session itself wrong rather than only
+    // the rows it produces, so the pass drops the session and re-opens from disk — one extra open, and that
+    // open is what heals a solution that gained a project or a package
+    private static bool ProjectLayoutChanged(PacedPass pacing) =>
+        pacing.ChangedPaths.Any(path =>
+            ProjectLayoutExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase));
 
     private static HashSet<string> TouchedPaths(List<FileDocument> changed, PacedPass pacing, string repoRoot)
     {

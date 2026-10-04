@@ -40,6 +40,7 @@ public sealed class WorkspaceWatcher
     private TimeSpan _debounceWindow;
     private TimeSpan _backoffCap;
     private DateTime _lastEventAt = DateTime.MinValue;
+    private DateTime _lastForcedEmptyBatchAt = DateTime.MinValue;
     private bool _forcePass;
     private bool _running;
 
@@ -82,6 +83,7 @@ public sealed class WorkspaceWatcher
             _pending.Clear();
             _forcePass = false;
             _lastEventAt = DateTime.MinValue;
+            _lastForcedEmptyBatchAt = DateTime.MinValue;
         }
 
         _watchers = CreateWatchers();
@@ -272,9 +274,21 @@ public sealed class WorkspaceWatcher
                 return null;
             }
 
+            // a dropped-event error carries no paths of its own, and a storm keeps re-raising it: without a
+            // settle window every error would buy the daemon a whole reconciliation pass back to back
+            if (_pending.Count == 0 && DateTime.UtcNow - _lastForcedEmptyBatchAt < _debounceWindow)
+            {
+                return null;
+            }
+
             var batch = _pending.ToList();
             _pending.Clear();
             _forcePass = false;
+            if (batch.Count == 0)
+            {
+                _lastForcedEmptyBatchAt = DateTime.UtcNow;
+            }
+
             return batch;
         }
     }

@@ -3,7 +3,11 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Core.Indexing.Roslyn;
 
-public sealed record SemanticPhaseResult(int Symbols, int Chunks, int Skipped);
+public sealed record SemanticPhaseResult(
+    int Symbols,
+    int Chunks,
+    int Skipped,
+    IReadOnlyList<string>? Deferred = null);
 
 public static class SemanticIndexPhase
 {
@@ -62,30 +66,41 @@ public static class SemanticIndexPhase
         }
 
         var session = sessions.Acquire(
-            repoRoot, !noSemantic, ex => warning($"semantic index skipped for repo '{repoDoc.Name}': {ex.Message}"));
+            repoRoot, !noSemantic, out var pooled, ex => warning($"semantic index skipped for repo '{repoDoc.Name}': {ex.Message}"));
         if (session is null)
         {
-            return new SemanticPhaseResult(0, 0, 0);
+            // the walk already committed these shas, so nothing would bring them back into scope on its own
+            return new SemanticPhaseResult(0, 0, csFiles.Count, csFiles.Select(f => f.RelativePath).ToList());
         }
 
-        if (syncDocuments)
+        try
         {
-            // the reused session holds the text it opened with: refresh every file this pass hands over
-            // before the first parse, so a declaration parsed early in the pass already sees the edits
-            // and additions made further down the same batch
-            session.SyncContent(csFiles.Select(f => f.RelativePath));
+            if (syncDocuments)
+            {
+                // the reused session holds the text it opened with: refresh every file this pass hands over
+                // before the first parse, so a declaration parsed early in the pass already sees the edits
+                // and additions made further down the same batch
+                session.SyncContent(csFiles.Select(f => f.RelativePath));
+            }
+
+            var result = RunWithSession(
+                session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
+                noSemantic, warning, progress);
+
+            if (pooled && session.RequiresReopen && sessions.ShouldReopen(repoRoot, session.RejectedPaths))
+            {
+                sessions.Discard(repoRoot);
+            }
+
+            return result;
         }
-
-        var result = RunWithSession(
-            session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
-            noSemantic, warning, progress);
-
-        if (session.RequiresReopen)
+        finally
         {
-            sessions.Discard(repoRoot);
+            if (!pooled)
+            {
+                session.Dispose();
+            }
         }
-
-        return result;
     }
 
     internal static SemanticPhaseResult RunWithSession(
@@ -103,6 +118,7 @@ public static class SemanticIndexPhase
     {
         var skipped = 0;
         var symbolsInserted = 0;
+        List<string>? deferred = null;
 
         progress?.PhaseStarted(repoDoc.Name, IndexPhase.Semantic, csFiles.Count);
 
@@ -125,6 +141,14 @@ public static class SemanticIndexPhase
         {
             try
             {
+                if (session.HasUnsynced(file.RelativePath))
+                {
+                    warning($"skipped '{file.RelativePath}': the reused session could not read it; previous data kept");
+                    skipped++;
+                    (deferred ??= []).Add(file.RelativePath);
+                    continue;
+                }
+
                 byte[] content;
                 try
                 {
@@ -134,6 +158,7 @@ public static class SemanticIndexPhase
                 {
                     warning($"skipped '{file.RelativePath}': unreadable ({ex.Message})");
                     skipped++;
+                    (deferred ??= []).Add(file.RelativePath);
                     continue;
                 }
 
@@ -144,6 +169,7 @@ public static class SemanticIndexPhase
                 {
                     warning($"skipped '{file.RelativePath}': symbol extraction failed; previous data kept");
                     skipped++;
+                    (deferred ??= []).Add(file.RelativePath);
                     continue;
                 }
 
@@ -176,6 +202,13 @@ public static class SemanticIndexPhase
                 }
                 else
                 {
+                    // a parsed file with symbols and no rows on record is a skip somebody committed:
+                    // hand it back so the next pass re-runs it instead of trusting the stored sha
+                    if (result.Symbols.Count > 0)
+                    {
+                        (deferred ??= []).Add(file.RelativePath);
+                    }
+
                     continue;
                 }
 
@@ -212,7 +245,7 @@ public static class SemanticIndexPhase
             }
         }
 
-        return new SemanticPhaseResult(store.CountSymbols(repoDoc.Id), store.CountChunks(repoDoc.Id), skipped);
+        return new SemanticPhaseResult(store.CountSymbols(repoDoc.Id), store.CountChunks(repoDoc.Id), skipped, deferred);
     }
 
     private static bool IsDegradationWarning(string sessionWarning) =>
