@@ -67,7 +67,7 @@ public sealed class SpanExpander
         RefuseIfProtected(guard, file);
 
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
-        var (entry, fileDoc) = ResolveFile(manifest, file, repo);
+        var (entry, fileDoc) = ResolveFile(manifest, file, repo, guard);
         RefuseIfProtected(guard, fileDoc.Path);
 
         var fullPath = Path.Combine(
@@ -127,10 +127,11 @@ public sealed class SpanExpander
         return taken;
     }
 
-    private (RepoEntry Entry, FileDocument File) ResolveFile(WorkspaceManifest manifest, string file, string? repo)
+    private (RepoEntry Entry, FileDocument File) ResolveFile(
+        WorkspaceManifest manifest, string file, string? repo, SecretGuardReader guard)
     {
         var normalized = file.Replace('\\', '/').TrimStart('/');
-        var direct = TryResolve(manifest, normalized, repo);
+        var direct = TryResolve(manifest, normalized, repo, guard, out var directHidden);
 
         var slash = normalized.IndexOf('/');
         var prefixRepo = slash > 0 && manifest.Repos.Any(r => string.Equals(r.Name, normalized[..slash], StringComparison.OrdinalIgnoreCase))
@@ -138,10 +139,11 @@ public sealed class SpanExpander
             : null;
 
         (RepoEntry Entry, FileDocument File)? prefixed = null;
+        var prefixHidden = false;
         if (prefixRepo is not null
             && (repo is null || string.Equals(prefixRepo, repo, StringComparison.OrdinalIgnoreCase)))
         {
-            prefixed = TryResolve(manifest, normalized[(slash + 1)..], prefixRepo);
+            prefixed = TryResolve(manifest, normalized[(slash + 1)..], prefixRepo, guard, out prefixHidden);
         }
 
         if (direct is not null && prefixed is not null
@@ -156,14 +158,27 @@ public sealed class SpanExpander
         var resolved = direct ?? prefixed;
         if (resolved is null)
         {
+            // every path that matched is one the guard hides: answer exactly like the pre-check on the
+            // requested shape, because "not in the index" would advertise that this suffix guards nothing
+            if (directHidden || prefixHidden)
+            {
+                throw guard.Refusal(file);
+            }
+
             throw new WorkspaceException($"File '{file}' is not in the index. Run 'squeezr index' if the code changed.");
         }
 
         return resolved.Value;
     }
 
-    private (RepoEntry Entry, FileDocument File)? TryResolve(WorkspaceManifest manifest, string normalized, string? repo)
+    private (RepoEntry Entry, FileDocument File)? TryResolve(
+        WorkspaceManifest manifest,
+        string normalized,
+        string? repo,
+        SecretGuardReader guard,
+        out bool hiddenAny)
     {
+        hiddenAny = false;
         var candidates = new List<(RepoEntry Entry, FileDocument File)>();
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
         foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
@@ -178,11 +193,23 @@ public sealed class SpanExpander
             var exact = files.FirstOrDefault(f => f.Path.Equals(normalized, PathComparison));
             if (exact is not null)
             {
-                candidates.Add((entry, exact));
+                if (Servable(guard, exact.Path, ref hiddenAny))
+                {
+                    candidates.Add((entry, exact));
+                }
+
                 continue;
             }
 
-            var suffix = files.Where(f => f.Path.EndsWith('/' + normalized, PathComparison)).ToList();
+            var suffix = new List<FileDocument>();
+            foreach (var match in files)
+            {
+                if (match.Path.EndsWith('/' + normalized, PathComparison) && Servable(guard, match.Path, ref hiddenAny))
+                {
+                    suffix.Add(match);
+                }
+            }
+
             if (suffix.Count > 1)
             {
                 throw AmbiguousPath(normalized, suffix.Select(f => $"{entry.Name}:{f.Path}"));
@@ -200,6 +227,19 @@ public sealed class SpanExpander
         }
 
         return candidates.Count == 1 ? candidates[0] : null;
+    }
+
+    // hiddenAny tells the caller "nothing matched" from "only secrets matched"; it is deliberately not a
+    // withheld tally, because a refusal renders no results and the reader counts results, not candidates
+    private static bool Servable(SecretGuardReader guard, string path, ref bool hiddenAny)
+    {
+        if (!guard.IsProtected(path))
+        {
+            return true;
+        }
+
+        hiddenAny = true;
+        return false;
     }
 
     private static ExpandInputException AmbiguousPath(string file, IEnumerable<string> candidates)
