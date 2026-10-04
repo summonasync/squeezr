@@ -59,6 +59,8 @@ public sealed class RoslynSession : IDisposable
 
     public bool RequiresReopen { get; private set; }
 
+    public bool Disposed { get; private set; }
+
     public static RoslynSession Create(string rootPath, bool semantic)
     {
         var warnings = new List<string>();
@@ -133,7 +135,18 @@ public sealed class RoslynSession : IDisposable
     public async Task<SemanticModel?> GetSemanticModelAsync(Document document, CancellationToken cancellationToken = default) =>
         Semantic ? await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) : null;
 
-    public void Dispose() => _workspace.Dispose();
+    public void Dispose()
+    {
+        // a second MSBuildWorkspace.Dispose is tolerated today (probed, see audits/dotnet-coder-055-t2-r3),
+        // so this is not crash insurance: it keeps Disposed a one-shot liveness signal for callers
+        if (Disposed)
+        {
+            return;
+        }
+
+        Disposed = true;
+        _workspace.Dispose();
+    }
 
     private string FullPath(string relativePath) =>
         Path.GetFullPath(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));

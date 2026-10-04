@@ -49,6 +49,109 @@ public class PacedMsBuildSessionTests : IDisposable
         RefRows(workspace, "Calculator.cs").ShouldContain(r => r.FileId == addedId);
     }
 
+    [Fact]
+    public void WarmPacedPass_ReusesThePooledSessionWithoutDisposingIt()
+    {
+        var workspace = NewWorkspaceOnFixture(out var repoRoot);
+        using var pool = new SemanticSessionPool();
+        Index(workspace, pool, []);
+        pool.CreatedSessions.ShouldBe(1);
+
+        WriteRepoFile(repoRoot, "Reused.cs", """
+            namespace Mini;
+
+            public static class Reused
+            {
+                public static int Reheat() => new Calculator().Add(1, 2);
+            }
+            """);
+        Index(workspace, pool, [Path.Combine(repoRoot, "Reused.cs")]);
+
+        AppendTo(repoRoot, "Calculator.cs", """
+
+            public class Simmer
+            {
+                public static int Value => 7;
+            }
+            """);
+        Index(workspace, pool, [Path.Combine(repoRoot, "Calculator.cs")]);
+
+        pool.CreatedSessions.ShouldBe(1, "a warm pass must not buy another solution open");
+        pool.IsWarm(repoRoot, semantic: true).ShouldBeTrue();
+
+        var held = pool.Acquire(repoRoot, semantic: true, out var owned, _ => { });
+        owned.ShouldBeTrue("the pool owns a cached session, so the caller must not dispose it");
+        held.ShouldNotBeNull().Disposed.ShouldBeFalse(
+            "the reused session has to be alive: a disposed workspace is not reuse");
+
+        Symbols(workspace, "Reused.cs").Select(s => s.Name).ShouldContain("Reheat");
+        Symbols(workspace, "Calculator.cs").Select(s => s.Name).ShouldContain("Simmer");
+    }
+
+    [Fact]
+    public void WarmPacedPass_WithFileOutsideEveryProject_RunsTheReopenHealGate()
+    {
+        var workspace = NewWorkspaceWithProjectInSubdir(out var repoRoot);
+        using var pool = new SemanticSessionPool();
+        Index(workspace, pool, []);
+        pool.CreatedSessions.ShouldBe(1);
+        pool.IsWarm(repoRoot, semantic: true).ShouldBeTrue();
+
+        // a .cs that no loaded project owns is the only reachable way to ask for a reopen: with the
+        // project at the repo root every walked file falls under its directory and nothing is ever rejected
+        WriteRepoFile(repoRoot, "Loose.cs", """
+            public static class Loose
+            {
+                public static int Value => 1;
+            }
+            """);
+        Index(workspace, pool, [Path.Combine(repoRoot, "Loose.cs")]);
+
+        pool.IsWarm(repoRoot, semantic: true).ShouldBeFalse(
+            "an unresolved project rejection on a warm pass must reach the reopen gate");
+        pool.CreatedSessions.ShouldBe(1);
+
+        Index(workspace, pool, []);
+        pool.CreatedSessions.ShouldBe(2, "the healed pass reopens once and then stays warm");
+        pool.IsWarm(repoRoot, semantic: true).ShouldBeTrue();
+
+        // touch the same orphan again: the rejection is already remembered for this root, so the gate
+        // must refuse a second reopen instead of buying a solution open every pass, and the warm
+        // session has to walk out of that pass alive
+        WriteRepoFile(repoRoot, "Loose.cs", """
+            public static class Loose
+            {
+                public static int Value => 2;
+
+                public static int Again => 3;
+            }
+            """);
+        Index(workspace, pool, [Path.Combine(repoRoot, "Loose.cs")]);
+
+        pool.CreatedSessions.ShouldBe(2, "a remembered rejection cannot keep buying reopens");
+        pool.IsWarm(repoRoot, semantic: true).ShouldBeTrue();
+        Symbols(workspace, "Loose.cs").Select(s => s.Name).ShouldContain("Again");
+    }
+
+    [Fact]
+    public void PooledSession_DoubleDispose_IsHarmless()
+    {
+        var workspace = NewWorkspaceOnFixture(out var repoRoot);
+        var pool = new SemanticSessionPool();
+        Index(workspace, pool, []);
+
+        var session = pool.Acquire(repoRoot, semantic: true, out var pooled, _ => { });
+        session.ShouldNotBeNull();
+        pooled.ShouldBeTrue();
+
+        Should.NotThrow(() => session!.Dispose());
+        Should.NotThrow(() => session.Dispose());
+        session.Disposed.ShouldBeTrue();
+
+        Should.NotThrow(() => pool.Discard(repoRoot));
+        Should.NotThrow(pool.Dispose);
+    }
+
     public void Dispose()
     {
         foreach (var dir in _tempDirs)
@@ -73,6 +176,50 @@ public class PacedMsBuildSessionTests : IDisposable
         return repoRoot;
     }
 
+    private string NewWorkspaceWithProjectInSubdir(out string repoRoot)
+    {
+        repoRoot = TestDirs.NewTempDir();
+        _tempDirs.Add(repoRoot);
+        WriteRepoFile(repoRoot, "src/Mini/Mini.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+
+            </Project>
+            """);
+        WriteRepoFile(repoRoot, "src/Mini/Calc.cs", """
+            public class Calc
+            {
+                public int Add(int a, int b) => a + b;
+            }
+            """);
+        WriteRepoFile(repoRoot, "src/Mini/Use.cs", """
+            public static class Use
+            {
+                public static int Run() => new Calc().Add(1, 2);
+            }
+            """);
+        RestoreProject(repoRoot);
+        var manager = new WorkspaceManager(repoRoot);
+        manager.Init(null);
+        manager.AddRepo(".", "demo");
+        return repoRoot;
+    }
+
+    private static void WriteRepoFile(string repoRoot, string relativePath, string content)
+    {
+        var full = Path.Combine(repoRoot, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        File.WriteAllText(full, content);
+    }
+
+    private static void AppendTo(string repoRoot, string relativePath, string content) =>
+        File.AppendAllText(Path.Combine(repoRoot, relativePath), content);
+
     private string CopyFixture(string name)
     {
         var source = Path.Combine(AppContext.BaseDirectory, "Fixtures", name);
@@ -88,7 +235,7 @@ public class PacedMsBuildSessionTests : IDisposable
 
     private static void RestoreProject(string dir)
     {
-        var csproj = Directory.EnumerateFiles(dir, "*.csproj").Single();
+        var csproj = Directory.EnumerateFiles(dir, "*.csproj", SearchOption.AllDirectories).Single();
         var startInfo = new ProcessStartInfo("dotnet", $"restore \"{csproj}\" --nologo")
         {
             RedirectStandardOutput = true,

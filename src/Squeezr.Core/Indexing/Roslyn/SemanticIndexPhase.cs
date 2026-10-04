@@ -96,6 +96,8 @@ public static class SemanticIndexPhase
         }
         finally
         {
+            // pooled is ownership: a session the pool keeps must survive this pass, only the one-shot
+            // fallback the pool refused to cache belongs to us
             if (!pooled)
             {
                 session.Dispose();

@@ -242,7 +242,8 @@ public class PacedSemanticPassTests
         var workspace = NewWorkspace();
         WriteRepo(workspace);
         WriteFile(workspace, "broken.csproj", "<this is not a project file");
-        using var pool = new SemanticSessionPool();
+        var clock = new FakeClock();
+        using var pool = new SemanticSessionPool(() => clock.Now);
         var cold = new PhaseProgress();
         Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], cold);
 
@@ -250,14 +251,57 @@ public class PacedSemanticPassTests
         pool.IsWarm(RepoRoot(workspace), semantic: true).ShouldBeFalse(
             "a fallback session must not answer warm for the mode it was asked to open");
 
+        clock.Advance(TimeSpan.FromMinutes(1));
         WriteFile(workspace, "src/Notes.cs", "public static class Notes { public static string Term = \"degradedneedle\"; }");
         var second = new PhaseProgress();
         Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], second);
 
         second.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs", "src/Use.cs"],
             "the degraded pass cannot scope like an incremental one");
-        pool.CreatedSessions.ShouldBe(2, "every pass retries the real project load instead of caching the fallback");
+        pool.CreatedSessions.ShouldBe(2, "the retry is paid again once the window passes, not cached");
         Symbols(workspace, "src/Notes.cs").Select(s => s.Name).ShouldContain("Term");
+    }
+
+    [Fact]
+    public void ThrottledPass_KeepsEveryCsharpFileInScopeForTheRetry()
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        WriteFile(workspace, "broken.csproj", "<this is not a project file");
+        var clock = new FakeClock();
+        using var pool = new SemanticSessionPool(() => clock.Now);
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], new PhaseProgress());
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+        WriteFile(
+            workspace,
+            "src/Notes.cs",
+            """
+            public static class Notes
+            {
+                public static string Term = "throttleneedle";
+
+                public static string Retry = "afterwindow";
+            }
+            """);
+        var throttled = new PhaseProgress();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], throttled);
+
+        throttled.Items(IndexPhase.Semantic).ShouldBeEmpty(
+            "inside the retry window the pass buys no session at all instead of a second solution open");
+        pool.DeferredSemantic(RepoRoot(workspace)).Order().ToList().ShouldBe(
+            ["src/Calc.cs", "src/Notes.cs", "src/Use.cs"],
+            "the walk committed these shas, so the skipped files have to stay in scope for the retry");
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        var retried = new PhaseProgress();
+        Index(workspace, pool, [], retried);
+
+        retried.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs", "src/Use.cs"]);
+        pool.DeferredSemantic(RepoRoot(workspace)).ShouldBeEmpty();
+        pool.CreatedSessions.ShouldBe(2);
+        Symbols(workspace, "src/Notes.cs").Select(s => s.Name).ShouldContain("Retry",
+            "the retry closes the hole the throttled pass left instead of freezing it");
     }
 
     [Fact]
@@ -386,6 +430,13 @@ public class PacedSemanticPassTests
         return file is null
             ? []
             : store.ListSymbolsByFile(file.Id).SelectMany(s => store.ListRefsByFromSymbol(s.Id)).ToList();
+    }
+
+    private sealed class FakeClock(DateTime? start = null)
+    {
+        public DateTime Now { get; private set; } = start ?? new DateTime(2026, 10, 4, 12, 0, 0, DateTimeKind.Utc);
+
+        public void Advance(TimeSpan by) => Now += by;
     }
 
     private sealed class PhaseProgress : IIndexProgress

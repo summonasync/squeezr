@@ -11,11 +11,13 @@ namespace Squeezr.Core.Indexing.Roslyn;
 public sealed class SemanticSessionPool : IDisposable
 {
     private static readonly TimeSpan ReopenCooldown = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan RetryCooldown = TimeSpan.FromMinutes(1);
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ReopenMemory> _reopens = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HashSet<string>> _deferred = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTime> _retryNotBefore = new(StringComparer.Ordinal);
     private readonly Func<DateTime> _utcNow;
 
     public SemanticSessionPool(Func<DateTime>? utcNow = null) =>
@@ -31,6 +33,13 @@ public sealed class SemanticSessionPool : IDisposable
         }
     }
 
+    /// <summary>
+    /// Hands out the session this root is holding, creating one when the pool is cold.
+    /// <paramref name="pooled"/> is ownership, not "was found in the cache": true means the pool keeps the
+    /// session and the caller must not dispose it, false means the caller got a one-shot fallback session
+    /// it owns. Null means there is no session for this pass, and the caller must put the files it wanted
+    /// to parse back into scope instead of trusting the committed sha.
+    /// </summary>
     public RoslynSession? Acquire(string repoRoot, bool semantic, out bool pooled, Action<Exception> createFailed)
     {
         pooled = false;
@@ -42,7 +51,18 @@ public sealed class SemanticSessionPool : IDisposable
 
         if (candidate is not null)
         {
+            pooled = true;
             return candidate;
+        }
+
+        // a root that cannot produce a cached session would otherwise pay a full solution open on every
+        // debounce — the very storm shape this serve exists to remove, so the failed attempt is remembered
+        var now = _utcNow();
+        if (IsRetryThrottled(repoRoot, now))
+        {
+            createFailed(new InvalidOperationException(
+                $"no reusable session for '{repoRoot}'; the next create attempt is throttled for one minute"));
+            return null;
         }
 
         Discard(repoRoot);
@@ -54,6 +74,7 @@ public sealed class SemanticSessionPool : IDisposable
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
         {
+            ThrottleRetry(repoRoot, now);
             createFailed(ex);
             return null;
         }
@@ -64,6 +85,7 @@ public sealed class SemanticSessionPool : IDisposable
         // cached at all: pooling one would hold the serve at fallback quality until the process dies
         if (session.Degraded || session.Semantic != semantic)
         {
+            ThrottleRetry(repoRoot, now);
             return session;
         }
 
@@ -82,6 +104,8 @@ public sealed class SemanticSessionPool : IDisposable
                 loser = existing?.Session;
                 _entries[repoRoot] = new Entry(session, session.Semantic);
             }
+
+            _retryNotBefore.Remove(repoRoot);
         }
 
         loser?.Dispose();
@@ -201,6 +225,11 @@ public sealed class SemanticSessionPool : IDisposable
             {
                 _deferred.Remove(root);
             }
+
+            foreach (var root in _retryNotBefore.Keys.Where(root => !keep.Contains(root)).ToList())
+            {
+                _retryNotBefore.Remove(root);
+            }
         }
 
         foreach (var session in dropped)
@@ -234,11 +263,28 @@ public sealed class SemanticSessionPool : IDisposable
             _entries.Clear();
             _reopens.Clear();
             _deferred.Clear();
+            _retryNotBefore.Clear();
         }
 
         foreach (var entry in entries)
         {
             entry.Session.Dispose();
+        }
+    }
+
+    private bool IsRetryThrottled(string repoRoot, DateTime now)
+    {
+        lock (_gate)
+        {
+            return _retryNotBefore.TryGetValue(repoRoot, out var notBefore) && now < notBefore;
+        }
+    }
+
+    private void ThrottleRetry(string repoRoot, DateTime now)
+    {
+        lock (_gate)
+        {
+            _retryNotBefore[repoRoot] = now + RetryCooldown;
         }
     }
 
