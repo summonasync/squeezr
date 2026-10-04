@@ -18,8 +18,10 @@ public static class SemanticHitsResolver
         IEmbeddingProvider embeddings,
         IVectorStore vectorStore,
         CancellationToken ct,
-        IReadOnlySet<uint>? fileScope = null)
+        IReadOnlySet<uint>? fileScope = null,
+        SecretGuardReader? secretGuard = null)
     {
+        var guard = secretGuard ?? SecretGuardReader.Load(workspaceRoot);
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
 
         uint? repoId = null;
@@ -61,7 +63,7 @@ public static class SemanticHitsResolver
             }
 
             var file = store.FindFileById(hit.FileId);
-            if (file is null)
+            if (file is null || guard.TryWithhold(file.Path))
             {
                 continue;
             }

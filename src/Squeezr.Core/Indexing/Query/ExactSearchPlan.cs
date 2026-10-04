@@ -13,8 +13,10 @@ public static class ExactSearchPlan
         string workspaceRoot,
         SearchQuery query,
         bool trackChunkKeys,
-        IReadOnlySet<uint>? fileScope = null)
+        IReadOnlySet<uint>? fileScope = null,
+        SecretGuardReader? secretGuard = null)
     {
+        var guard = secretGuard ?? SecretGuardReader.Load(workspaceRoot);
         var indexPath = SqueezrPaths.TrigramIndexPath(workspaceRoot);
         if (!File.Exists(indexPath))
         {
@@ -59,7 +61,7 @@ public static class ExactSearchPlan
             }
 
             var file = store.FindFileById(fileId);
-            if (file is null)
+            if (file is null || guard.TryWithhold(file.Path))
             {
                 continue;
             }

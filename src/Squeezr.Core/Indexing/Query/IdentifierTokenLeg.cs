@@ -33,15 +33,18 @@ public static class IdentifierTokenLeg
     public static List<(SearchMatch Match, string? Key)> Execute(
         string workspaceRoot,
         SearchQuery query,
-        IReadOnlySet<uint>? fileScope) =>
-        Execute(workspaceRoot, query, fileScope, null);
+        IReadOnlySet<uint>? fileScope,
+        SecretGuardReader? secretGuard = null) =>
+        Execute(workspaceRoot, query, fileScope, null, secretGuard);
 
     internal static List<(SearchMatch Match, string? Key)> Execute(
         string workspaceRoot,
         SearchQuery query,
         IReadOnlySet<uint>? fileScope,
-        ReadCounter? counter)
+        ReadCounter? counter,
+        SecretGuardReader? secretGuard = null)
     {
+        var guard = secretGuard ?? SecretGuardReader.Load(workspaceRoot);
         var tokens = Tokenize(query.Query);
         // a lone token is the phrase arm's own literal — the leg only earns its keep when no whole
         // phrase can match, so single-token queries stay byte-identical to the pre-leg pipeline
@@ -101,7 +104,7 @@ public static class IdentifierTokenLeg
                 }
 
                 var file = store.FindFileById(fileId);
-                if (file is null)
+                if (file is null || guard.TryWithhold(file.Path))
                 {
                     continue;
                 }

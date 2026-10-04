@@ -67,6 +67,38 @@ public sealed class ToolResponseCacheTests
     }
 
     [Fact]
+    public void TryGet_AfterConfigMtimeChange_Misses()
+    {
+        // a config edit moves no meta.db byte, yet indexing.rankExclude and indexing.secretGuardExtra shape
+        // the answer — without the config clock the entry computed under the older policy keeps being served
+        var (cache, _, configPath) = NewCacheWithStoreFiles();
+
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "envelope");
+        var before = cache.Generation;
+
+        File.SetLastWriteTimeUtc(configPath, DateTime.UtcNow.AddSeconds(30));
+
+        cache.Generation.ShouldNotBe(before);
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+        cache.Count.ShouldBe(0);
+        cache.TakeInvalidationWarning().ShouldBe(ToolResponseCache.InvalidationWarning);
+    }
+
+    [Fact]
+    public void Generation_ConfigOlderThanIndex_StillMovesOnTheIndexWrite()
+    {
+        // max(index, config), not a sum or a pair: a workspace that has not had its config touched for
+        // weeks must keep invalidating on every index pass
+        var (cache, metaDbPath, configPath) = NewCacheWithStoreFiles();
+        File.SetLastWriteTimeUtc(configPath, DateTime.UtcNow.AddMinutes(-30));
+        var before = cache.Generation;
+
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow);
+
+        cache.Generation.ShouldNotBe(before);
+    }
+
+    [Fact]
     public void Put_AfterIndexWriteDuringTheCall_StaleAnswerDoesNotSurviveTheNextRead()
     {
         var (cache, metaDbPath) = NewCacheWithMetaDb();
@@ -297,6 +329,17 @@ public sealed class ToolResponseCacheTests
         Directory.CreateDirectory(Path.GetDirectoryName(metaDbPath)!);
         File.WriteAllText(metaDbPath, "v1");
         return (new ToolResponseCache(root), metaDbPath);
+    }
+
+    private static (ToolResponseCache Cache, string MetaDbPath, string ConfigPath) NewCacheWithStoreFiles()
+    {
+        var root = TestDirs.NewTempDir();
+        var metaDbPath = SqueezrPaths.MetaDbPath(root);
+        Directory.CreateDirectory(Path.GetDirectoryName(metaDbPath)!);
+        File.WriteAllText(metaDbPath, "v1");
+        var configPath = SqueezrPaths.ConfigPath(root);
+        File.WriteAllText(configPath, "{}");
+        return (new ToolResponseCache(root), metaDbPath, configPath);
     }
 
     private static object SearchParams(string query, string? repo, int? maxTokens, int? topK) =>

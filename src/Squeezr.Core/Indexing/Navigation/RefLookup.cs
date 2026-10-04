@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -14,7 +15,11 @@ public sealed record SymbolRefGroup(
     int EndLine,
     IReadOnlyList<RefHit> Refs);
 
-public sealed record RefLookupResult(string Symbol, IReadOnlyList<SymbolRefGroup> Groups);
+public sealed record RefLookupResult(
+    string Symbol,
+    IReadOnlyList<SymbolRefGroup> Groups,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? GuardWarnings = null);
 
 public sealed class RefLookup
 {
@@ -25,6 +30,7 @@ public sealed class RefLookup
     public RefLookupResult Find(string name, string? repo)
     {
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
+        var guard = SecretGuardReader.Load(_workspaceRoot);
         var groups = new List<SymbolRefGroup>();
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
@@ -43,11 +49,29 @@ public sealed class RefLookup
             foreach (var symbol in matches)
             {
                 var declFile = store.FindFileById(symbol.FileId);
-                var refs = store.ListRefsByFromSymbol(symbol.Id)
-                    .OrderBy(r => r.FileId)
-                    .ThenBy(r => r.Line)
-                    .Select(r => new RefHit(store.FindFileById(r.FileId)?.Path ?? "?", r.Line, r.Kind, r.EnclosingSymbol))
-                    .ToList();
+                if (declFile is not null && guard.TryWithhold(declFile.Path))
+                {
+                    continue;
+                }
+
+                var refs = new List<RefHit>();
+                foreach (var reference in store.ListRefsByFromSymbol(symbol.Id).OrderBy(r => r.FileId).ThenBy(r => r.Line))
+                {
+                    var file = store.FindFileById(reference.FileId);
+                    if (file is null)
+                    {
+                        refs.Add(new RefHit("?", reference.Line, reference.Kind, reference.EnclosingSymbol));
+                        continue;
+                    }
+
+                    if (guard.TryWithhold(file.Path))
+                    {
+                        continue;
+                    }
+
+                    refs.Add(new RefHit(file.Path, reference.Line, reference.Kind, reference.EnclosingSymbol));
+                }
+
                 groups.Add(new SymbolRefGroup(
                     symbol.Name,
                     symbol.Kind,
@@ -61,10 +85,12 @@ public sealed class RefLookup
 
         if (groups.Count == 0)
         {
-            throw new WorkspaceException(
-                $"No symbol named '{name}' in the index. Run 'squeezr index' if the code changed.");
+            throw guard.FirstWithheldPath is { } hidden
+                ? guard.Refusal(hidden)
+                : new WorkspaceException(
+                    $"No symbol named '{name}' in the index. Run 'squeezr index' if the code changed.");
         }
 
-        return new RefLookupResult(name, groups);
+        return new RefLookupResult(name, groups, guard.Warnings);
     }
 }

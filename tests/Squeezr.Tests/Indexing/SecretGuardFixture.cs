@@ -1,0 +1,182 @@
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing;
+using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
+
+namespace Squeezr.Tests.Indexing;
+
+// A store built the way stores were built before the guard existed: the secret files are indexed,
+// chunked and addressable, so every read surface has something to leak. Each protected file carries
+// its own canary value — one query, one expected withholding.
+internal static class SecretGuardFixture
+{
+    internal const string EnvPath = ".env";
+    internal const string PemPath = "deploy/keys/monkey.pem";
+    internal const string SecretsPath = "config/secrets.json";
+    internal const string TokensPath = "notes/tokens.txt";
+    internal const string ExamplePath = ".env.example";
+    internal const string AppPath = "src/App.cs";
+
+    internal const string EnvCanary = "SS1-CANARY-ENV-VALUE";
+    internal const string PemCanary = "SS2-CANARY-PEM-VALUE";
+    internal const string SecretsCanary = "SS3-CANARY-JSON-VALUE";
+    internal const string TokensCanary = "SS4-CANARY-TOKENS-VALUE";
+    internal const string ExampleCanary = "SS5-PUBLIC-EXAMPLE-VALUE";
+    internal const string AppCanary = "SS6-APP-VALUE";
+
+    internal static readonly string[] ProtectedCanaries = [EnvCanary, PemCanary, SecretsCanary, TokensCanary];
+
+    internal static string NewIndexedWorkspace()
+    {
+        var workspace = TestDirs.NewTempDir();
+        Directory.CreateDirectory(Path.Combine(workspace, "repo"));
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        manager.AddRepo("repo", "demo");
+
+        Write(workspace, AppPath, """
+            public class App
+            {
+                public static string Greeting => "SS6-APP-VALUE";
+
+                public void Run()
+                {
+                    Console.WriteLine(Greeting);
+                }
+            }
+            """);
+        Write(workspace, EnvPath, $"OPENAI_API_KEY={EnvCanary}\n");
+        Write(workspace, ExamplePath, $"OPENAI_API_KEY={ExampleCanary}\n");
+        Write(workspace, PemPath, $"{PemCanary}\n");
+        Write(workspace, SecretsPath, $"{{ \"token\": \"{SecretsCanary}\" }}\n");
+        Write(workspace, TokensPath, $"{TokensCanary}\n");
+
+        new WorkspaceIndexer().Index(workspace);
+        return workspace;
+    }
+
+    private static DateTime _lastConfigStamp = DateTime.MinValue;
+
+    // config writes can land inside one mtime tick on coarse filesystems, and these tests reason about the
+    // cache generation that a config edit moves — so every edit gets a strictly newer stamp
+    internal static void SetGuardExtra(string workspace, params string[] globs)
+    {
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with { Indexing = config.Indexing with { SecretGuardExtra = globs } });
+
+        var now = DateTime.UtcNow;
+        _lastConfigStamp = now.Ticks > _lastConfigStamp.Ticks
+            ? now
+            : _lastConfigStamp.AddSeconds(1);
+        File.SetLastWriteTimeUtc(SqueezrPaths.ConfigPath(workspace), _lastConfigStamp);
+    }
+
+    internal static long PlantSymbol(
+        string workspace,
+        string relativePath,
+        string name,
+        string kind,
+        string? docComment = null)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var file = RequireFile(store, relativePath);
+        store.InsertSymbols(
+        [
+            new SymbolDocument
+            {
+                FileId = file.Id,
+                RepoId = file.RepoId,
+                Name = name,
+                Kind = kind,
+                Signature = $"{kind} {name}",
+                StartLine = 1,
+                EndLine = file.LineCount,
+                DocComment = docComment,
+            }
+        ]);
+        return store.ListSymbolsByFile(file.Id).First(s => s.Name == name).Id;
+    }
+
+    internal static void PlantReferenceFrom(string workspace, string symbolName, string relativePath, int line)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var source = store.ListSymbolsByRepo(RequireRepo(store).Id).First(s => s.Name == symbolName);
+        var target = RequireFile(store, relativePath);
+        store.InsertRefs(
+        [
+            new RefDocument
+            {
+                FromSymbolId = source.Id,
+                ToName = source.Name,
+                Kind = "reference",
+                FileId = target.Id,
+                Line = line,
+                EnclosingSymbol = "App." + symbolName,
+            }
+        ]);
+    }
+
+    // chunk order out of the store is not stable (the semantic phase and the fallback chunker both write),
+    // so a fixture picks the chunk that actually carries the text it wants surfaced or withheld
+    internal static (uint FileId, uint RepoId, int StartLine, int EndLine) ChunkHolding(
+        string workspace, string relativePath, string needle)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var file = RequireFile(store, relativePath);
+        var chunk = store.ListChunksByFile(file.Id)
+            .Where(c => c.Text.Contains(needle, StringComparison.Ordinal))
+            .OrderBy(c => c.StartLine)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException($"no chunk of '{relativePath}' holds '{needle}'");
+        return (file.Id, file.RepoId, chunk.StartLine, chunk.EndLine);
+    }
+
+    private static FileDocument RequireFile(MetaStore store, string relativePath) =>
+        store.ListAllFiles().FirstOrDefault(f => f.Path == relativePath)
+        ?? throw new InvalidOperationException($"'{relativePath}' is not in the fixture store");
+
+    private static RepoDocument RequireRepo(MetaStore store) =>
+        store.ListRepos().First();
+
+    private static void Write(string workspace, string relativePath, string content)
+    {
+        var fullPath = Path.Combine(workspace, "repo", relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content);
+    }
+
+    internal sealed class FixedEmbeddings : IEmbeddingProvider
+    {
+        public int Dimensions => 4;
+
+        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
+            Task.FromResult(texts.Select(_ => new[] { 0.1f, 0.2f, 0.3f, 0.4f }).ToArray());
+    }
+
+    internal sealed class ScriptedVectorStore : IVectorStore
+    {
+        public IReadOnlyList<VectorHit> Hits { get; init; } = [];
+
+        public Task<bool> IsAvailableAsync(CancellationToken ct) => Task.FromResult(true);
+
+        public Task EnsureCollectionAsync(int dimensions, CancellationToken ct) => Task.CompletedTask;
+
+        public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+            Task.FromResult(Hits);
+
+        public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)Hits.Count);
+
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ulong>>([]);
+
+        public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
+
+        public Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct) => Task.CompletedTask;
+
+        public Task DeleteCollectionAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+}

@@ -28,7 +28,9 @@ public sealed record SymbolLookupResult(
     bool Truncated,
     TruncationHint? Hint,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<string>? DidYouMean);
+    IReadOnlyList<string>? DidYouMean,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? GuardWarnings = null);
 
 public sealed class SymbolLookup
 {
@@ -61,6 +63,7 @@ public sealed class SymbolLookup
     public SymbolLookupResult Find(string name, string? repo, string? kind, int maxTokens, bool body)
     {
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
+        var guard = SecretGuardReader.Load(_workspaceRoot);
         var budget = new TokenBudget(maxTokens);
         var hits = new List<SymbolHit>();
 
@@ -88,29 +91,30 @@ public sealed class SymbolLookup
         var includeBody = body || all.Count == 1;
         foreach (var (entry, repoDoc, symbol) in all)
         {
-            if (!TryRender(symbol, entry, repoDoc, store, budget, includeBody, hits))
+            if (!TryRender(symbol, entry, repoDoc, store, budget, includeBody, hits, guard))
             {
-                return new SymbolLookupResult(hits, budget.Used, true, HintFor(hits), null);
+                return new SymbolLookupResult(hits, budget.Used, true, HintFor(hits), null, guard.Warnings);
             }
         }
 
         if (hits.Count == 0)
         {
-            var candidates = FindDidYouMean(name, repo, kind, store, manifest);
+            var candidates = FindDidYouMean(name, repo, kind, store, manifest, guard);
             IReadOnlyList<string>? didYouMean = candidates.Count > 0 ? candidates : null;
             if (didYouMean is not null)
             {
                 var suggestionText = $"did you mean: {string.Join(", ", didYouMean)}";
                 if (!budget.TryTake(suggestionText))
                 {
-                    return new SymbolLookupResult([], budget.Used, true, null, null);
+                    return new SymbolLookupResult([], budget.Used, true, null, null, guard.Warnings);
                 }
             }
 
-            return new SymbolLookupResult([], budget.Used, budget.Truncated, null, didYouMean);
+            return new SymbolLookupResult([], budget.Used, budget.Truncated, null, didYouMean, guard.Warnings);
         }
 
-        return new SymbolLookupResult(hits, budget.Used, budget.Truncated, budget.Truncated ? HintFor(hits) : null, null);
+        return new SymbolLookupResult(
+            hits, budget.Used, budget.Truncated, budget.Truncated ? HintFor(hits) : null, null, guard.Warnings);
     }
 
     private List<string> FindDidYouMean(
@@ -118,10 +122,11 @@ public sealed class SymbolLookup
         string? repo,
         string? kind,
         MetaStore store,
-        WorkspaceManifest manifest)
+        WorkspaceManifest manifest,
+        SecretGuardReader guard)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var scored = new List<(string Name, double Score)>();
+        var scored = new List<(string Name, double Score, uint FileId)>();
 
         foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
         {
@@ -146,18 +151,34 @@ public sealed class SymbolLookup
                 var score = TrigramJaccard.Similarity(name, symbol.Name);
                 if (score >= DidYouMeanThreshold)
                 {
-                    scored.Add((symbol.Name, score));
+                    scored.Add((symbol.Name, score, symbol.FileId));
                 }
             }
         }
 
-        return scored
-            .OrderByDescending(s => s.Score)
-            .ThenBy(s => s.Name.Length)
-            .ThenBy(s => s.Name, StringComparer.Ordinal)
-            .Take(DidYouMeanTopN)
-            .Select(s => s.Name)
-            .ToList();
+        // a suggestion is a name read out of a file the guard hides, so the sweep stops at the same wall;
+        // the file lookup rides only on candidates that cleared the score threshold
+        var taken = new List<string>(DidYouMeanTopN);
+        foreach (var candidate in scored
+                     .OrderByDescending(s => s.Score)
+                     .ThenBy(s => s.Name.Length)
+                     .ThenBy(s => s.Name, StringComparer.Ordinal))
+        {
+            if (taken.Count == DidYouMeanTopN)
+            {
+                break;
+            }
+
+            var file = store.FindFileById(candidate.FileId);
+            if (file is not null && guard.IsProtected(file.Path))
+            {
+                continue;
+            }
+
+            taken.Add(candidate.Name);
+        }
+
+        return taken;
     }
 
     private static TruncationHint HintFor(List<SymbolHit> hits) =>
@@ -170,9 +191,15 @@ public sealed class SymbolLookup
         MetaStore store,
         TokenBudget budget,
         bool includeBody,
-        List<SymbolHit> hits)
+        List<SymbolHit> hits,
+        SecretGuardReader guard)
     {
         var file = store.FindFileById(symbol.FileId);
+        if (file is not null && guard.TryWithhold(file.Path))
+        {
+            return true;
+        }
+
         var header = $"{symbol.Name} ({symbol.Kind}) {repoDoc.Name}:{file?.Path ?? "?"}:{symbol.StartLine}-{symbol.EndLine}";
         var signature = symbol.Signature is null ? null : $"  {symbol.Signature}";
         var doc = symbol.DocComment is null ? null : $"  doc: {symbol.DocComment.Replace('\n', ' ')}";

@@ -48,7 +48,7 @@ public sealed class SymbolLookupTool
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(name, kind, repo);
+            var parameters = Params(name, kind, repo, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("symbol_lookup", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -71,12 +71,17 @@ public sealed class SymbolLookupTool
                 result = lookup.Find(name, repo, kind, budget, body: true);
             }
 
+            if (result.GuardWarnings is { } withheld)
+            {
+                warnings.AddRange(withheld);
+            }
+
             if (result.Hint is not null)
             {
                 warnings.Add(result.Hint.ForMcp());
             }
 
-            if (result.Matches.Count == 0 && result.DidYouMean is null)
+            if (result.Matches.Count == 0 && result.DidYouMean is null && result.GuardWarnings is null)
             {
                 warnings.Add("No symbol found — use code_search for paraphrase queries.");
             }
@@ -111,8 +116,14 @@ public sealed class SymbolLookupTool
             result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
-    private static object Params(string name, string? kind, string? repo) =>
-        new { name, kind, repo };
+    // the guard re-reads its widening patterns from the config on every call, so a cached answer is only
+    // valid for the pattern set it was computed with
+    private static object Params(
+        string name,
+        string? kind,
+        string? repo,
+        IReadOnlyList<string> secretGuardExtra) =>
+        new { name, kind, repo, secretGuardExtra };
 
     private sealed record SymbolHitData(
         [property: JsonPropertyName("repo")] string Repo,

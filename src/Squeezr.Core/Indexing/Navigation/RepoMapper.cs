@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -12,7 +13,9 @@ public sealed record RepoMapResult(
     int TokensUsed,
     bool Truncated,
     TruncationHint? Hint,
-    string? ScopedPrefix = null);
+    string? ScopedPrefix = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? GuardWarnings = null);
 
 public sealed class RepoMapper
 {
@@ -44,6 +47,7 @@ public sealed class RepoMapper
 
         var normalizedPrefix = PathPrefix.Normalize(prefix);
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
+        var guard = SecretGuardReader.Load(_workspaceRoot);
         var budget = new TokenBudget(maxTokens);
         var lines = new List<MapLine>();
         var repoNames = new List<string>();
@@ -59,13 +63,16 @@ public sealed class RepoMapper
                 continue;
             }
 
-            var files = store.ListFiles(repoDoc.Id);
+            var stored = store.ListFiles(repoDoc.Id);
+            IReadOnlyList<FileDocument> files;
             if (normalizedPrefix is not null)
             {
-                var scoped = files.Where(f => PathPrefix.Matches(normalizedPrefix, f.Path)).ToList();
+                var scoped = Serve(
+                    stored.Where(f => PathPrefix.Matches(normalizedPrefix, f.Path)),
+                    guard);
                 if (scoped.Count == 0)
                 {
-                    unscopedPaths!.AddRange(files.Select(f => f.Path));
+                    unscopedPaths!.AddRange(stored.Where(f => !guard.IsProtected(f.Path)).Select(f => f.Path));
                     continue;
                 }
 
@@ -74,11 +81,15 @@ public sealed class RepoMapper
                 scopedPrefix ??= scoped[0].Path[..normalizedPrefix.Length];
                 files = scoped;
             }
+            else
+            {
+                files = Serve(stored, guard);
+            }
 
             repoNames.Add(repoDoc.Name);
             if (!Take(budget, lines, 0, $"{repoDoc.Name}/"))
             {
-                return Finish(repoNames, depth, lines, budget, scopedPrefix);
+                return Finish(repoNames, depth, lines, budget, scopedPrefix, guard.Warnings);
             }
 
             var symbolsByFile = store.ListSymbolsByRepo(repoDoc.Id)
@@ -92,7 +103,7 @@ public sealed class RepoMapper
             {
                 if (!Take(budget, lines, 1, $"{dir.Key}/ ({dir.Count()} files)"))
                 {
-                    return Finish(repoNames, depth, lines, budget, scopedPrefix);
+                    return Finish(repoNames, depth, lines, budget, scopedPrefix, guard.Warnings);
                 }
 
                 if (depth < 2)
@@ -104,7 +115,7 @@ public sealed class RepoMapper
                 {
                     if (!Take(budget, lines, 2, Path.GetFileName(file.Path)))
                     {
-                        return Finish(repoNames, depth, lines, budget, scopedPrefix);
+                        return Finish(repoNames, depth, lines, budget, scopedPrefix, guard.Warnings);
                     }
 
                     if (!symbolsByFile.TryGetValue(file.Id, out var symbols) || symbols.Count == 0)
@@ -123,7 +134,7 @@ public sealed class RepoMapper
                         var text = symbol.Signature ?? symbol.Name;
                         if (!Take(budget, lines, 3, text))
                         {
-                            return Finish(repoNames, depth, lines, budget, scopedPrefix);
+                            return Finish(repoNames, depth, lines, budget, scopedPrefix, guard.Warnings);
                         }
                     }
                 }
@@ -140,12 +151,31 @@ public sealed class RepoMapper
             throw new WorkspaceException("No repositories in the index. Run 'squeezr index' first.");
         }
 
-        return Finish(repoNames, depth, lines, budget, scopedPrefix);
+        return Finish(repoNames, depth, lines, budget, scopedPrefix, guard.Warnings);
+    }
+
+    private static List<FileDocument> Serve(IEnumerable<FileDocument> files, SecretGuardReader guard)
+    {
+        var served = new List<FileDocument>();
+        foreach (var file in files)
+        {
+            if (!guard.TryWithhold(file.Path))
+            {
+                served.Add(file);
+            }
+        }
+
+        return served;
     }
 
     private static RepoMapResult Finish(
-        List<string> repoNames, int depth, List<MapLine> lines, TokenBudget budget, string? scopedPrefix) =>
-        new(repoNames, depth, lines, budget.Used, budget.Truncated, budget.Truncated ? Truncation : null, scopedPrefix);
+        List<string> repoNames,
+        int depth,
+        List<MapLine> lines,
+        TokenBudget budget,
+        string? scopedPrefix,
+        IReadOnlyList<string>? guardWarnings) =>
+        new(repoNames, depth, lines, budget.Used, budget.Truncated, budget.Truncated ? Truncation : null, scopedPrefix, guardWarnings);
 
     private static bool Take(TokenBudget budget, List<MapLine> lines, int depth, string text)
     {

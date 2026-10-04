@@ -18,11 +18,12 @@ public sealed class SearchEngine
 
     public SearchResponse Search(SearchQuery query)
     {
-        var fileScope = ResolveFileScope(query);
-        var matches = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: false, fileScope)
+        var guard = SecretGuardReader.Load(_workspaceRoot);
+        var fileScope = ResolveFileScope(query, guard);
+        var matches = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: false, fileScope, guard)
             .Select(hit => hit.Match)
             .ToList();
-        return Finalize(matches, query, []);
+        return Finalize(matches, query, AppendWithheld([], guard));
     }
 
     public async Task<SearchResponse> SearchHybridAsync(
@@ -32,11 +33,12 @@ public sealed class SearchEngine
         CancellationToken ct,
         SemanticCoverage? coverage = null)
     {
-        var fileScope = ResolveFileScope(query);
-        var exact = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: true, fileScope);
+        var guard = SecretGuardReader.Load(_workspaceRoot);
+        var fileScope = ResolveFileScope(query, guard);
+        var exact = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: true, fileScope, guard);
         var identifierHits = query.Regex
             ? []
-            : IdentifierTokenLeg.Execute(_workspaceRoot, query, fileScope);
+            : IdentifierTokenLeg.Execute(_workspaceRoot, query, fileScope, guard);
         var semantic = new List<(string Key, SearchMatch Match)>();
         var warnings = new List<string>();
 
@@ -50,7 +52,8 @@ public sealed class SearchEngine
                 }
                 else if (await vectorStore.CountAsync(ct) > 0)
                 {
-                    semantic = await SemanticHitsResolver.Resolve(_workspaceRoot, query, embeddings, vectorStore, ct, fileScope);
+                    semantic = await SemanticHitsResolver.Resolve(
+                        _workspaceRoot, query, embeddings, vectorStore, ct, fileScope, guard);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -75,10 +78,20 @@ public sealed class SearchEngine
             .Select(hit => (hit.Key!, hit.Match))
             .ToList();
         var merged = RrfMerger.Merge(exactRanked, semantic);
-        return Finalize(merged, query, warnings);
+        return Finalize(merged, query, AppendWithheld(warnings, guard));
     }
 
-    private HashSet<uint>? ResolveFileScope(SearchQuery query)
+    private static List<string> AppendWithheld(List<string> warnings, SecretGuardReader guard)
+    {
+        if (guard.Warnings is { } withheld)
+        {
+            warnings.AddRange(withheld);
+        }
+
+        return warnings;
+    }
+
+    private HashSet<uint>? ResolveFileScope(SearchQuery query, SecretGuardReader guardReader)
     {
         var prefix = PathPrefix.Normalize(query.Prefix);
         var excluding = _rankExclusion.IsActive;
@@ -125,7 +138,8 @@ public sealed class SearchEngine
         if (!excluding || FileScope.Resolve(store, path => PathPrefix.Matches(prefix, path), repoId).Count == 0)
         {
             var indexedPaths = (repoId is { } id ? store.ListFiles(id) : store.ListAllFiles())
-                .Select(f => f.Path);
+                .Select(f => f.Path)
+                .Where(path => !guardReader.IsProtected(path));
             throw PathPrefix.NoSubtreeException(prefix, indexedPaths);
         }
 

@@ -41,7 +41,7 @@ public sealed class FindReferencesTool
         {
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(symbol, repo);
+            var parameters = Params(symbol, repo, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("find_references", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -66,6 +66,11 @@ public sealed class FindReferencesTool
             var data = BuildData(root, result);
 
             var tokensUsed = data.Sum(d => TokenCounter.Estimate($"{d.File}:{d.Line} {d.Kind}"));
+
+            if (result.GuardWarnings is { } withheld)
+            {
+                warnings.AddRange(withheld);
+            }
 
             var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale);
             var invalidated = _cache?.TakeInvalidationWarning();
@@ -144,8 +149,8 @@ public sealed class FindReferencesTool
                 .ToList(),
             StaleLockWarningSink.ToStderr);
 
-    private static object Params(string symbol, string? repo) =>
-        new { symbol, repo };
+    private static object Params(string symbol, string? repo, IReadOnlyList<string> secretGuardExtra) =>
+        new { symbol, repo, secretGuardExtra };
 
     private sealed record RefData(
         [property: JsonPropertyName("file")] string File,

@@ -60,8 +60,12 @@ public sealed class SpanExpander
             throw new ExpandInputException(ExpandInputIssue.StartLine, "startLine must be >= 1.");
         }
 
+        var guard = SecretGuardReader.Load(_workspaceRoot);
+        RefuseIfProtected(guard, file);
+
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
         var (entry, fileDoc) = ResolveFile(manifest, file, repo);
+        RefuseIfProtected(guard, fileDoc.Path);
 
         var fullPath = Path.Combine(
             NavigationContext.ResolveRepoRoot(_workspaceRoot, entry),
@@ -204,6 +208,14 @@ public sealed class SpanExpander
             $"Qualify the path with the repo prefix, e.g. '{WithRepoPrefix(matched[0])}'.",
             file,
             matched);
+    }
+
+    private static void RefuseIfProtected(SecretGuardReader guard, string path)
+    {
+        if (guard.IsProtected(path))
+        {
+            throw guard.Refusal(path);
+        }
     }
 
     private static string WithRepoPrefix(string candidate)

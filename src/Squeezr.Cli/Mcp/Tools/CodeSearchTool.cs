@@ -64,7 +64,8 @@ public sealed class CodeSearchTool
             var root = _workspace.Root;
             var normalizedPrefix = PathPrefix.Normalize(prefix);
             var rankExclusion = RankExclusion.Load(root);
-            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, rankExclusion);
+            var secretGuardExtra = SecretGuardReader.Load(root).ExtraPatterns;
+            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, rankExclusion, secretGuardExtra);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -131,7 +132,14 @@ public sealed class CodeSearchTool
             response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
-    private static object Params(string query, string? repo, string? prefix, int? maxTokens, int? topK, RankExclusion rankExclusion) =>
+    private static object Params(
+        string query,
+        string? repo,
+        string? prefix,
+        int? maxTokens,
+        int? topK,
+        RankExclusion rankExclusion,
+        IReadOnlyList<string> secretGuardExtra) =>
         new
         {
             query,
@@ -140,8 +148,9 @@ public sealed class CodeSearchTool
             maxTokens,
             topK,
             // cache generations track meta.db only, so without the patterns in the key a config
-            // edit would keep being served from the pre-exclusion envelope
-            rankExclude = rankExclusion.IsActive ? rankExclusion.Patterns : null
+            // edit would keep being served from the pre-exclusion / pre-guard envelope
+            rankExclude = rankExclusion.IsActive ? rankExclusion.Patterns : null,
+            secretGuardExtra
         };
 
     private void ResolveRuntime(string root, List<string> warnings)

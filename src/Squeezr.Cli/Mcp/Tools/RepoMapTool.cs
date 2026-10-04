@@ -41,7 +41,7 @@ public sealed class RepoMapTool
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
             var normalizedPrefix = PathPrefix.Normalize(prefix);
-            var parameters = Params(repo, normalizedPrefix, depth, maxTokens);
+            var parameters = Params(repo, normalizedPrefix, depth, maxTokens, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("repo_map", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -63,6 +63,11 @@ public sealed class RepoMapTool
             if (freshness.Refreshed.Count > 0)
             {
                 result = mapper.Build(repo, resolvedDepth, resolvedMaxTokens, normalizedPrefix);
+            }
+
+            if (result.GuardWarnings is { } withheld)
+            {
+                warnings.AddRange(withheld);
             }
 
             if (result.Hint is not null)
@@ -121,8 +126,13 @@ public sealed class RepoMapTool
             StaleLockWarningSink.ToStderr);
     }
 
-    private static object Params(string? repo, string? prefix, int? depth, int? maxTokens) =>
-        new { repo, prefix, depth, maxTokens };
+    private static object Params(
+        string? repo,
+        string? prefix,
+        int? depth,
+        int? maxTokens,
+        IReadOnlyList<string> secretGuardExtra) =>
+        new { repo, prefix, depth, maxTokens, secretGuardExtra };
 
     private sealed record MapLineData(
         [property: JsonPropertyName("depth")] int Depth,

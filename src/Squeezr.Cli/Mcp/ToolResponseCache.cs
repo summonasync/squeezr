@@ -5,8 +5,9 @@ using Squeezr.Core.Storage;
 namespace Squeezr.Cli.Mcp;
 
 // Callers must serialize the TryGet→Put pair per key (McpToolGate runs one tool call at a time). The
-// read-generation marker is what makes a stored answer describe the index it was computed from; two
-// overlapping calls on one key would let the second marker license the first caller's stale answer.
+// read-generation marker is what makes a stored answer describe the index and the config it was computed
+// from; two overlapping calls on one key would let the second caller's stale answer license the first
+// caller's stale answer.
 public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
 {
     public const string InvalidationWarning = "cache: invalidated (index changed)";
@@ -23,12 +24,20 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
     private long _announcedGeneration = long.MinValue;
     private bool _noticePending;
 
+    // Two clocks behind one number. meta.db moves when the index changes; config.json moves when a policy
+    // that shapes the answer changes (indexing.rankExclude, indexing.secretGuardExtra). Carrying the patterns
+    // in the key answers "which pattern set produced this answer"; this answers "the config moved at all",
+    // which is what stops a mask narrowed back from reconstituting its older key and resurrecting the
+    // envelope that was cached before the widening.
     public long Generation
     {
         get
         {
             var metaDbPath = SqueezrPaths.MetaDbPath(workspaceRoot);
-            return File.Exists(metaDbPath) ? File.GetLastWriteTimeUtc(metaDbPath).Ticks : 0;
+            var index = File.Exists(metaDbPath) ? File.GetLastWriteTimeUtc(metaDbPath).Ticks : 0;
+            var configPath = SqueezrPaths.ConfigPath(workspaceRoot);
+            var policy = File.Exists(configPath) ? File.GetLastWriteTimeUtc(configPath).Ticks : 0;
+            return Math.Max(index, policy);
         }
     }
 
