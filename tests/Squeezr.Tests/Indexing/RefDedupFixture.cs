@@ -134,13 +134,14 @@ internal static class RefDedupFixture
     }
 
     // same capture output the store would have produced twice for one location; the twin is picked by
-    // file and line because two callsites can share a line number and ref order across passes is not stable
-    internal static void PlantDuplicateRow(string workspace, string file, int line)
+    // file and line because two callsites can share a line number and ref order across passes is not stable,
+    // and the repo is named because a mirrored workspace holds that same path under every repository
+    internal static void PlantDuplicateRow(string workspace, string repo, string file, int line)
     {
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
-        var repo = store.ListRepos().First();
-        var target = store.ListAllFiles().First(f => f.Path == file);
-        var twin = store.ListSymbolsByRepo(repo.Id)
+        var repoDoc = RequireRepo(store, repo);
+        var target = RequireRepoFile(store, repoDoc, file);
+        var twin = store.ListSymbolsByRepo(repoDoc.Id)
             .SelectMany(s => store.ListRefsByFromSymbol(s.Id))
             .First(r => r.FileId == target.Id && r.Line == line);
         store.InsertRefs(
@@ -160,14 +161,14 @@ internal static class RefDedupFixture
 
     // one extra row on one definition only: the two blocks now overlap but are not equal, which is the
     // case where the per-block render repeats a row and the flat lists collapse it
-    internal static void PlantExtraRow(string workspace, string declFile, string file, int line)
+    internal static void PlantExtraRow(string workspace, string repo, string declFile, string file, int line)
     {
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
-        var repo = store.ListRepos().First();
-        var symbol = store.ListSymbolsByRepo(repo.Id)
+        var repoDoc = RequireRepo(store, repo);
+        var symbol = store.ListSymbolsByRepo(repoDoc.Id)
             .First(s => s.Name == Symbol && store.FindFileById(s.FileId)!.Path == declFile);
         var twin = store.ListRefsByFromSymbol(symbol.Id).First();
-        var target = store.ListAllFiles().First(f => f.Path == file);
+        var target = RequireRepoFile(store, repoDoc, file);
         store.InsertRefs(
         [
             new RefDocument
@@ -182,6 +183,13 @@ internal static class RefDedupFixture
             }
         ]);
     }
+
+    private static RepoDocument RequireRepo(MetaStore store, string name) =>
+        store.FindRepo(name) ?? throw new InvalidOperationException($"repo '{name}' is not in the fixture store");
+
+    private static FileDocument RequireRepoFile(MetaStore store, RepoDocument repo, string relativePath) =>
+        store.ListFiles(repo.Id).FirstOrDefault(f => f.Path == relativePath)
+        ?? throw new InvalidOperationException($"'{relativePath}' is not in repo '{repo.Name}'");
 
     private static void Write(string workspace, string relativePath, string content)
     {

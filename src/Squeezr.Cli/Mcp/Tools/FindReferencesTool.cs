@@ -29,7 +29,7 @@ public sealed class FindReferencesTool
         _identity = identity;
     }
 
-    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
+    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
     [McpServerTool(Name = "find_references", Title = "Find references")]
     public object Find(string symbol, string? repo = null) =>
         _gate.Run(() => FindCore(symbol, repo));
@@ -64,6 +64,7 @@ public sealed class FindReferencesTool
             }
 
             var data = BuildData(root, result);
+            var definitions = BuildDefinitions(result, data.Count);
 
             var tokensUsed = data.Sum(d => TokenCounter.Estimate($"{d.File}:{d.Line} {d.Kind}"));
 
@@ -72,7 +73,8 @@ public sealed class FindReferencesTool
                 warnings.AddRange(withheld);
             }
 
-            var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale);
+            var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale,
+                definitions: definitions);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                 tokensUsed, false, data.Count,
@@ -97,7 +99,7 @@ public sealed class FindReferencesTool
         if (flattened.All(x => x.Ref.EnclosingSymbol is not null))
         {
             return flattened
-                .Select(x => new RefData(x.Ref.File, x.Ref.Line, x.Ref.Kind, x.Ref.EnclosingSymbol))
+                .Select(x => new RefData(x.Repo, x.Ref.File, x.Ref.Line, x.Ref.Kind, x.Ref.EnclosingSymbol))
                 .ToList();
         }
 
@@ -105,11 +107,29 @@ public sealed class FindReferencesTool
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(root));
         return flattened
             .Select(x => new RefData(
+                x.Repo,
                 x.Ref.File,
                 x.Ref.Line,
                 x.Ref.Kind,
                 x.Ref.EnclosingSymbol ?? FindEnclosing(LoadSymbols(store, x.Repo, x.Ref.File, symbolsByFile), x.Ref.Line)))
             .ToList();
+    }
+
+    // the declarations behind the flat rows enter the envelope exactly where the rows cannot speak for
+    // themselves: a block collapsed two or more same-name declarations onto one callsite list, or the symbol
+    // has no callsites at all. one declaration per block with at least one row says everything the rows can,
+    // and the envelope keeps the single key set every tool answers with
+    private static IReadOnlyList<RefDefinitionData>? BuildDefinitions(RefLookupResult result, int flatRowCount)
+    {
+        var declarations = result.Groups
+            .SelectMany(g => g.Definitions, (g, d) => new RefDefinitionData(g.Repo, d.Kind, d.File, d.StartLine, d.EndLine))
+            .ToList();
+        if (flatRowCount > 0 && result.Groups.All(g => g.Definitions.Count == 1))
+        {
+            return null;
+        }
+
+        return declarations;
     }
 
     private static IReadOnlyList<SymbolDocument> LoadSymbols(
@@ -156,6 +176,7 @@ public sealed class FindReferencesTool
         new { symbol, repo, secretGuardExtra };
 
     private sealed record RefData(
+        [property: JsonPropertyName("repo")] string Repo,
         [property: JsonPropertyName("file")] string File,
         [property: JsonPropertyName("line")] int Line,
         [property: JsonPropertyName("kind")] string Kind,

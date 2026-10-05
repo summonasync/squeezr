@@ -38,7 +38,7 @@ public class RefsDedupTests
     public void Find_RowCapturedTwiceForOneLocation_IsReportedOnce()
     {
         var workspace = RefDedupFixture.NewInterfaceAndImplWorkspace();
-        RefDedupFixture.PlantDuplicateRow(workspace, "src/Guard.cs", 7);
+        RefDedupFixture.PlantDuplicateRow(workspace, "demo", "src/Guard.cs", 7);
 
         var result = new RefLookup(workspace).Find(RefDedupFixture.Symbol, null);
 
@@ -63,6 +63,22 @@ public class RefsDedupTests
     }
 
     [Fact]
+    public void Find_PlantInNamedRepository_ExtendsOnlyThatRepository()
+    {
+        var workspace = RefDedupFixture.NewMirroredWorkspace();
+        RefDedupFixture.PlantExtraRow(workspace, "beta", "src/Materializer.cs", "src/Guard.cs", 12);
+
+        var result = new RefLookup(workspace).Find(RefDedupFixture.Symbol, null);
+
+        LabeledRows(result).ShouldBe(
+        [
+            "alpha:src/Guard.cs:7", "alpha:src/Guard.cs:8", "alpha:src/Reporter.cs:7",
+            "beta:src/Guard.cs:7", "beta:src/Guard.cs:8", "beta:src/Reporter.cs:7", "beta:src/Guard.cs:12",
+        ]);
+        result.Groups.ShouldNotContain(g => g.Repo == "alpha" && g.Refs.Any(r => r.Line == 12));
+    }
+
+    [Fact]
     public void Find_ProtectedDefinitionWithPublicTwin_WithholdsTheDeclaration()
     {
         var workspace = SecretGuardFixture.NewIndexedWorkspace();
@@ -80,7 +96,7 @@ public class RefsDedupTests
     public async Task Refs_PartiallyOverlappingBlocks_RepeatPerBlockAndCollapseInFlatLists()
     {
         var root = RefDedupFixture.NewInterfaceAndImplWorkspace();
-        RefDedupFixture.PlantExtraRow(root, "src/Materializer.cs", "src/Guard.cs", 12);
+        RefDedupFixture.PlantExtraRow(root, "demo", "src/Materializer.cs", "src/Guard.cs", 12);
 
         var result = new RefLookup(root).Find(RefDedupFixture.Symbol, null);
         result.Groups.Count.ShouldBe(2);
@@ -126,14 +142,18 @@ public class RefsDedupTests
     {
         var root = SecretGuardFixture.NewIndexedWorkspace();
         SecretGuardFixture.PlantSymbol(root, SecretGuardFixture.EnvPath, "Greeting", "method");
+        SecretGuardFixture.PlantSymbol(root, SecretGuardFixture.ExamplePath, "Greeting", "method");
 
         var json = await RunCliAsync(root, "refs", "Greeting", "--json");
         json.ExitCode.ShouldBe(0);
-        json.StdOut.ShouldNotContain(SecretGuardFixture.EnvPath);
+        // the quoted needle is the whole path: a bare '.env' substring would also catch the public '.env.example'
+        json.StdOut.ShouldNotContain($"\"{SecretGuardFixture.EnvPath}\"");
         using var doc = JsonDocument.Parse(json.StdOut.Trim());
-        doc.RootElement.GetProperty("definitions").EnumerateArray()
-            .Select(d => d.GetProperty("file").GetString())
-            .ShouldNotContain(SecretGuardFixture.EnvPath);
+        var definitions = doc.RootElement.GetProperty("definitions").EnumerateArray()
+            .Select(d => d.GetProperty("file").GetString()!)
+            .ToList();
+        definitions.ShouldNotContain(SecretGuardFixture.EnvPath);
+        definitions.ShouldContain(SecretGuardFixture.ExamplePath);
         doc.RootElement.GetProperty("refs").EnumerateArray()
             .Select(r => r.GetProperty("file").GetString())
             .ShouldNotContain(SecretGuardFixture.EnvPath);
@@ -179,6 +199,9 @@ public class RefsDedupTests
 
     private static List<string> Rows(RefLookupResult result) =>
         [.. result.Groups.SelectMany(g => g.Refs).Select(r => $"{r.File}:{r.Line}")];
+
+    private static List<string> LabeledRows(RefLookupResult result) =>
+        [.. result.Groups.SelectMany(g => g.Refs.Select(r => $"{g.Repo}:{r.File}:{r.Line}")).Distinct()];
 
     private static int CountOccurrences(string haystack, string needle)
     {
