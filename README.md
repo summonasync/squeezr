@@ -181,6 +181,56 @@ Read-path (`code_search`/`symbol_lookup`/`repo_map`/`find_references`, inline-о
 
 **Breaking change (035 --json contract):** `RepoIndexResult` получил 7-ю позицию `Ignored` (int, total count) и 8-ю `IgnoredBySource` (`Dictionary<string,int>?`, ключи `defaults|config|squeezrignore|gitignore`, `null`/отсутствие — ничего не исключено). В `--json`-выводе `index`/`events` каждый `repos[]`-элемент теперь несёт поле `ignored` (int) и аддитивное `ignoredBySource` (объект со строковыми ключами — тот же словарь значений, что `ignored.bySource` в status). В `status --json` и `index_status` добавлен блок `ignored: { files, bySource }` per repo. Существующие поля не переименованы и не удалены — только аддитивные.
 
+## Секрет-гард: что отказывает и как почистить старый стор
+
+Гард решает **по форме пути**: чтобы классифицировать файл, он его не открывает — в классификаторе нет ни одного обращения к ФС (`SecretGuardTests.Classifier_SourceHasNoFileSystemProbe`). Значения секретов гард не видит и не пишет никуда: ни в отчёты, ни в `--json`, ни в телеметрию. Имена защищённых путей в отчётах прохода и чистки тоже не появляются — только счётчики. Имя звучит разве что на чтении, и там по-разному: **отказ** возвращает путь, который спрашивающий назвал сам, а **withheld-строка** называет первый снятый гардом результат — его спрашивающий мог вообще не называть (см. ниже).
+
+**Встроенный набор — 19 масок.** `SecretGuard.BuiltInPatterns`, список заморожен тестом `BuiltInPatterns_AreTheFrozenSpecList`:
+
+`**/.env`, `**/.env.*`, `**/*.key`, `**/*.pem`, `**/*.pfx`, `**/*.p12`, `**/*.jks`, `**/*.kdbx`, `**/id_rsa*`, `**/id_dsa*`, `**/id_ecdsa*`, `**/id_ed25519*`, `**/.npmrc`, `**/.netrc`, `**/.git-credentials`, `**/.pgpass`, `**/secrets.json`, `**/secrets.*.json`, `**/*.secret`
+
+Единственное исключение — конвенциональные заглушки `.env.example` / `.env.sample` / `.env.template`, и только для `.env`-семейства: имя, которое формально заглушка, но по форме попадает в остальной набор (`.env.key`), защищено всё равно.
+
+**Встроенное нельзя сузить.** Единственная конфигурационная ручка — `indexing.secretGuardExtra` (массив глобов в `config.json` воркспейса), и она **union-only**: пользовательские маски проверяются первыми, встроенные применяются всегда, вычитать из них нечем. Форма, которая ничего не называет, в `secretGuardExtra` не компилируется вообще — негатив `!`, комментарий, dir-only (`secrets/`) и остаточные неподдерживаемые формы **инертны по построению**, а не «отфильтрованы потом» (`SecretGuardTests.SecretGuardExtra_ClassesAndEscapesWidenOnly_NegationStaysInert`, `SecretGuardExtra_CannotNameAFileShape_NeitherWidensNorNarrows`). Символьные классы и `\`-эскейпы умеют только расширять маску. Пустые `indexing.ignore` и `secretGuardExtra` не сужают ничего (`EmptyIgnoreAndEmptyExtra_NarrowNothing`), а встроенные маски не входят в редактируемые дефолты (`BuiltInPatterns_AreNotPartOfTheEditableIgnoreDefaults`) — их нельзя убрать и через ignore-конфиг.
+
+**Диалект `secretGuardExtra` — тот же, что у `indexing.ignore`** (подмножество gitignore, см. «Исключения при индексации»): неанкорированная форма читается **на любой глубине** — `*.tokens` закрывает и `root.tokens`, и `src/deep.tokens`; внутренний `/` анкорит от корня репо — `deploy/*.crt` закрывает `deploy/server.crt`, но не `deploy/sub/deep.crt`; `**/tokens.txt` — любая глубина, но не `tokens.txt.bak`. Смысл совпадает с ignore-слойем дословно, ряд проверок закреплён тестом `SecretGuardExtra_MeansWhatIndexingIgnoreMeans`.
+
+**Две известные границы — это документированные limitations, а не молчание:**
+
+1. **Путь, у которого `.env` — директория, не защищён.** Классификатор решает по **последнему сегменту**: `.env/dev`, `.env/local.json`, `vault/token.key/readme.md` protected не считаются (`DirectoryShapedSecret_LastSegmentDecides_NotProtected`). Файл с секретным именем *внутри* такой директории защищён своей маской (`.env/prod.key` — да). Хвостовой разделитель при этом тримится: запрос `.env/` — это отказ, а не «not found».
+2. **`id_rsa*` матчит и публичные ключи.** `.ssh/id_rsa.pub` попадает под маску вместе с приватным ключом — публичная часть тоже не индексируется и не отдаётся. Осознанная цена: перестраховаться маской проще, чем пропустить приватный ключ.
+
+**Как выглядит отказ для агента.** Явный запрос защищённого пути — ошибка, а не пустой ответ:
+
+```
+'.env' is protected by squeezr's built-in secret guard: never indexed, never rendered
+```
+
+Имя в **отказе** — запрошенный путь (плюс у `find_references`: если все объявления символа protected, в отказе окажется файл **первого** из них — не «единственного», а просто первого по порядку; молчать про «не найдено», когда файл есть, было бы враньем).
+
+Молча пропущенные результаты считаются в `warnings` одной фразой во всех поверхностях (CLI stderr, MCP-конверт, TUI — wording не разъезжается):
+
+```
+warning: secret guard: 3 result(s) withheld ('.env' matches built-in patterns)
+```
+
+Внимание к референту: имя в этой строке — **не то, что ты набрал**, а первый результат, который гард снял. `repo_map` с префиксом `deploy/` назовёт файл под этим префиксом, запрос без префикса — защищённый путь, который вообще ни в одном аргументе не звучал. Так что сама warning-строка «безопасна для скриншота» ровно в той же мере, что и содержимое файла: не безопасна. Источник решения — `built-in patterns` либо `indexing.secretGuardExtra`; отказ же всегда говорит *built-in*, даже если решила твоя маска из extras — различает источник только tally. Тот же словарь у ingestion: `secret guard: 3 file(s) withheld from indexing (2 built-in patterns, 1 indexing.secretGuardExtra)`. Если `config.json` не прочитался, встроенные маски остаются, пользовательские выключаются, и это сказано отдельно: `could not read indexing config (…); user secret-guard masks are inactive`.
+
+**Счётчики — где их искать.** `index --json` несёт `guardWithheld` / `guardWithheldBuiltIns` / `guardDropped` в корне и те же три в каждом `repos[]`; в `--events` корневой `completed` — `guardWithheld` и `guardDropped` (третий лежит только в `repos[]`); `squeezr status` даёт колонки `Withheld`/`Dropped` плюс строку-итог; `status --json` и MCP `index_status` — объект `guard { withheld, withheldByBuiltIns, withheldByConfig, dropped }` per repo. Числа — снимок последнего прохода, не живое состояние диска. Отказ гарда считается как skipped, проход от этого не падает.
+
+**Что делает апгрейд — и чего он не делает.** Установка нового бинаря **не убирает уже проиндексированное**: центральный стор (`~/.squeezr/workspaces/<storeKey>/`) переустановка не трогает, и в старом `meta.db`, `trigram.idx` и `queries.jsonl` строки и имена protected-файлов лежат как лежали. С момента установки меняется только поведение read-пути — такие строки он больше не отдаёт. Данные уходят в один из двух моментов:
+
+- **следующий проход индексации** (`squeezr index`, включая фоновый watch-проход): защищённые пути не попадают в обход, поэтому их строки в сторе считаются удалёнными и уходят через тот же каскад (символы, чанки, ссылки, очередь чистки векторов). Имена уходят из строк файлов и из **новых** записей reap-журнала (новые ставятся без имени); ряд `pending_reaps`, оставленный прежным билдом, своего имени в этом проходе не теряет — только в `squeezr compact`;
+- **`squeezr compact`** — явный маршрут и единственная операторская команда, которая чистит стор целиком: гард вычищает оставшиеся защищённые строки, **redact-ит имена в reap-журнале**, **scrub-ит значения параметров в `queries.jsonl`** (включая repo-qualified и абсолютные формы, которые сам продукт и выводит), переписывает `trigram.idx`, перестраивает `meta.db` и возвращает освободившиеся байты.
+
+Флага `--purge` у `compact` нет: чистка по гарду выполняется всегда как часть компактификации, и без запроса оператора не чистится ничего. Отчёт — только числами:
+
+```
+secret guard: 7 path(s) purged, 186 row(s) removed · 1 reap journal name(s) redacted · 28 recorded parameter value(s) redacted · 7 point cleanup(s) queued
+```
+
+Точки, которые проход не смог снять сам, доигрывает `squeezr vectors reconcile --apply`. Сырые байты очищенного стора проверены свипом по `meta.db`/`trigram.idx`/телеметрии — evidence в `audits/store-purge-2026-10-05.md`.
+
 ## Managed services: `squeezr services`
 
 Docker-инфраструктура — qdrant и ollama — управляется одной командой, руками compose не трогаешь:

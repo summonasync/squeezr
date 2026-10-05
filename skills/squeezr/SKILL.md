@@ -201,6 +201,61 @@ serve session come from an in-memory cache; a reindex invalidates it.
 Every tool also has a CLI twin (`squeezr search`, `map`, `symbol`, `refs`,
 `expand`) for use outside an MCP session.
 
+### Secret guard: read a withheld result as a refusal, not as absence
+
+Squeezr protects secret-shaped paths — 19 built-in masks (`.env` family,
+`*.key`, `*.pem`, `*.pfx`, `*.p12`, `*.jks`, `*.kdbx`, `id_rsa*`/`id_dsa*`/
+`id_ecdsa*`/`id_ed25519*`, `.npmrc`, `.netrc`, `.git-credentials`, `.pgpass`,
+`secrets.json`, `secrets.*.json`, `*.secret`) plus whatever
+`indexing.secretGuardExtra` adds. The decision is on the **path shape only**:
+the file is never opened to classify it, never indexed, never rendered, and its
+content never reaches a log, an error message or telemetry.
+
+Two answer shapes, and neither one means "the file is missing":
+
+- You named a protected path explicitly → a **tool error**, not a miss:
+  `'.env' is protected by squeezr's built-in secret guard: never indexed, never
+  rendered`. Do not fall back to reading the file yourself and do not conclude
+  it does not exist — it exists, the index just will not serve it. A trailing
+  separator (`deploy/keys/id_ed25519/`) is trimmed before the decision, so a
+  directory-shaped path you copied still gets this refusal rather than "not in
+  the index". The name quoted in the refusal is either the path you asked about
+  or, on `find_references`, the file of the first protected declaration of the
+  symbol you named (it is the first, not proof of being the only one) — refusing
+  by name beats claiming the symbol does not exist. Note the refusal always
+  says *built-in*, even when an `indexing.secretGuardExtra` mask decided the
+  case; only the tally distinguishes origins.
+- The guard silently dropped protected results inside an otherwise-successful
+  answer → `data` is smaller than you expected and `warnings` carries one line:
+  `secret guard: 3 result(s) withheld ('.env' matches built-in patterns)`. The
+  name in that line is **the first result the guard dropped, not the path you
+  asked for**: a `repo_map` scoped to a prefix names a file under it, an
+  unscoped query names a protected path that never appeared in any argument.
+  Treat a withheld line as leaking what it names — do not quote it into a
+  report, a screenshot or a commit message. The origin suffix is either
+  `built-in patterns` or `indexing.secretGuardExtra`.
+
+What to do with that: treat the answer as **complete minus the protected part**.
+Do not widen the query hunting for a "hidden" hit, do not read an empty
+`symbol_lookup`/`code_search` with a `secret guard:` warning as evidence the
+code is absent, and keep the hints in proportion: `didYouMean` never suggests a
+name that lives only in a protected file, and the "No symbol found — use
+code_search for paraphrase queries." hint is skipped when something was
+withheld. A prefix or a whole repo
+whose content is only secrets maps empty with a withheld count instead of
+claiming the directory is bare. The same sentence rides CLI stderr, MCP
+envelopes and the TUI, so counting it across surfaces is reliable — and when
+nothing was withheld the human surfaces stay silent.
+
+Ingestion counters say whether the guard also refused files *on the way in*
+(last pass snapshot, not live disk state): `index_status` per-repo
+`guard { withheld, withheldByBuiltIns, withheldByConfig, dropped }`, `squeezr
+status` `Withheld`/`Dropped` columns, `index --json` `guardWithheld` /
+`guardWithheldBuiltIns` / `guardDropped` at the root and per repo. In the
+`--events` root `completed` line only `guardWithheld` and `guardDropped` are
+present — `guardWithheldBuiltIns` is per-repo in `repos[]`. A refusal counts as
+skipped, never as a failed index pass.
+
 ## 6. Ignore mechanics
 
 Squeezr excludes files from indexing via a layered ruleset (last-match-wins):
@@ -237,6 +292,37 @@ phrase arm degrades to a disk full-scan in the same case, so single literals kee
 their recall. The real fix is case-folded trigrams in the index — an index format
 change that needs a rebuild and has no owner in the backlog yet.
 
+### `indexing.secretGuardExtra` reads the ignore dialect, and subtracts nothing
+
+`indexing.secretGuardExtra` (array of globs in the workspace `config.json`) is
+the only guard knob, and it is **union-only**: your masks are checked first, the
+19 built-in masks always apply, nothing can shrink the built-in set. A shape
+that names no file is dropped when the extras are compiled — `!negation`,
+`#comment`, a dir-only `secrets/`, an unsupported residual form — so a negation
+is **inert by construction** rather than "un-applied later": it cannot start
+meaning "unprotect". Character classes and `\` escapes (063/T14) can only widen a
+mask, never narrow it.
+
+The dialect is the same gitignore subset as `indexing.ignore`, and it means the
+same thing: an unanchored pattern matches at **any depth** (`*.tokens` covers
+both `root.tokens` and `src/deep.tokens`), an internal `/` anchors at the repo
+root (`deploy/*.crt` covers `deploy/server.crt` but **not**
+`deploy/sub/deep.crt`), `**/tokens.txt` covers any depth but not
+`tokens.txt.bak`. To cover a whole subtree, write a file-shaped mask with a
+`**/` prefix (`**/server.crt`) or an anchored mask per depth (`deploy/*.crt`) —
+a bare trailing-slash directory (`secrets/`) names no file, so it is dropped as
+inert and protects nothing.
+
+Two boundaries of the classifier, so you do not misread a result as a leak:
+
+- It decides on the **last path segment**. A path where `.env` is a *directory*
+  (`.env/dev`, `.env/local.json`) is therefore not protected — while a file with
+  a secret-shaped name inside it (`.env/prod.key`) still is. A trailing
+  separator is trimmed before the decision, so a copied directory-shaped
+  `.env/` still refuses rather than reporting "not found".
+- `id_rsa*` matches public keys too: `.ssh/id_rsa.pub` is protected alongside
+  the private half. Over-protection is the chosen failure mode here.
+
 ## 7. Troubleshooting
 
 - **qdrant.endpoint / gRPC vs REST** — a warning saying the configured endpoint
@@ -258,3 +344,28 @@ change that needs a rebuild and has no owner in the backlog yet.
   table).
 - **Telemetry** — `squeezr stats` shows per-tool call counts, token savings
   versus reading files, and cache hit-rate; `squeezr stats --reset` clears.
+- **A store indexed before the secret guard still holds the old rows** — this is
+  the upgrade trap, and it is not a bug in the guard. Installing a newer binary
+  changes nothing in `~/.squeezr/workspaces/<storeKey>/`: the store survives a
+  reinstall, so protected rows, their names in `meta.db`/`trigram.idx` and their
+  paths in `queries.jsonl` are still on disk. What changes immediately is only
+  the read path — those rows are never served again. The data itself leaves when
+  either of these runs:
+  - the **next index pass** (`squeezr index`, including a background watch
+    pass): protected paths are not walked, so their rows go through the normal
+    deletion cascade (symbols, chunks, refs, deferred vector reaps);
+  - **`squeezr compact`** — the explicit operator route, and the only command
+    that also redacts the names in the deferred-reap journal, scrubs recorded
+    parameter values in `queries.jsonl` (including the repo-qualified and
+    absolute forms the product itself emits), rewrites `trigram.idx` and rebuilds
+    `meta.db` to give the bytes back. There is no `--purge` flag: the guard sweep
+    is part of every `compact`, and nothing purges a store nobody asked to purge.
+
+  Both report **counts only** — never paths, never values (the read-side withheld
+  tally is the one naming exception, see §5). The purge line reads
+  `secret guard: 7 path(s) purged, 186 row(s) removed · 1 reap journal name(s)
+  redacted · 28 recorded parameter value(s) redacted · 7 point cleanup(s)
+  queued`. Points the
+  pass could not remove itself are queued and drained by
+  `squeezr vectors reconcile --apply`. If a human asks why a secret still shows
+  up in a raw store file, this is the answer: run `squeezr compact`.
