@@ -181,7 +181,6 @@ public class IgnoreRulesetTests
         var ruleset = IgnoreRuleset.For(root, SqueezrConfig.CreateDefault());
 
         ruleset.Decision("a]", false).Excluded.ShouldBeFalse();
-        ruleset.Decision("b", false).Excluded.ShouldBeFalse();
     }
 
     [Theory]
@@ -205,6 +204,45 @@ public class IgnoreRulesetTests
         withoutSink.Decision("b.txt", false).Excluded.ShouldBeFalse();
         withSink.Patterns.ShouldNotContain(pattern => pattern.Unsupported);
         withoutSink.Patterns.ShouldNotContain(pattern => pattern.Unsupported);
+    }
+
+    [Theory]
+    [InlineData("[[:alpha:]]")]
+    [InlineData("![[:alpha:]]")]
+    public void UnsupportedPattern_AtThePerFileEntry_SkippedAndDecidesNothing(string ignore)
+    {
+        var root = TestDirs.NewTempDir();
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Indexing = SqueezrConfig.CreateDefault().Indexing with { Ignore = [ignore], RespectGitignore = false }
+        };
+
+        var warnings = new List<string>();
+        var scoped = IgnoreRuleset.ForFile(root, config, "a]", warnings.Add);
+
+        warnings.ShouldHaveSingleItem();
+        warnings[0].ShouldContain(ignore);
+        scoped.Decision("a]", false).Excluded.ShouldBeFalse();
+        scoped.Decision("b.txt", false).Excluded.ShouldBeFalse();
+        scoped.Patterns.ShouldNotContain(pattern => pattern.Unsupported);
+    }
+
+    [Fact]
+    public void Defaults_AreAllExpressible_AndNoneIsSkipped()
+    {
+        var root = TestDirs.NewTempDir();
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Indexing = SqueezrConfig.CreateDefault().Indexing with { Ignore = [], RespectGitignore = false }
+        };
+
+        var warnings = new List<string>();
+        var ruleset = IgnoreRuleset.For(root, config, warnings.Add);
+
+        warnings.ShouldBeEmpty();
+        ruleset.Decision("node_modules/pkg/index.js", false).Excluded.ShouldBeTrue();
+        ruleset.Decision("node_modules/pkg/index.js", false).Source.ShouldBe(IgnoreSource.Defaults);
+        ruleset.Patterns.ShouldNotContain(pattern => pattern.Unsupported);
     }
 
     [Fact]
