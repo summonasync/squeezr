@@ -8,6 +8,9 @@ namespace Squeezr.Tests.Indexing.Ignore;
 // The read path calls IgnoreRuleset.Decision once per tree entry, so the hot loop was rewritten to match on
 // pre-split path segments. This is the guard: the segment matcher must decide exactly like the nested
 // join-and-rematch algorithm it replaced, on every pattern shape and every path in the corpus.
+// The reference implementation predates character classes and backslash escapes, so the fixture keeps its
+// residual shapes ([[:alpha:]], a dangling backslash) out of the compared set — the new dialect is pinned
+// against git itself in GitignoreOracleTests, where guessing is not an option.
 public sealed class IgnoreRulesetEquivalenceTests : IDisposable
 {
     private static readonly string[] CorpusPaths =
@@ -179,8 +182,8 @@ public sealed class IgnoreRulesetEquivalenceTests : IDisposable
             !nested/deep.js
             Web/
             *.tmp
-            [bracket]
-            back\slash
+            [[:alpha:]]
+            dangling\
             İ*/
 
             """);

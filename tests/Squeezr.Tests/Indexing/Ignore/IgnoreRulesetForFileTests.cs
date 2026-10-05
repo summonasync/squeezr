@@ -41,10 +41,12 @@ public class IgnoreRulesetForFileTests
     public void ForFile_ReadsGitignoreOnlyAlongTheAncestorChain()
     {
         var root = TestDirs.NewTempDir();
-        WriteFile(root, ".gitignore", "[Cc]overage/\n");
+        // Residual forms on purpose: they are the shapes the matcher still refuses, so each file below
+        // contributes exactly one unsupported-pattern warning for the cascade/chain counts under test.
+        WriteFile(root, ".gitignore", "[[:alpha:]]overage/\n");
         for (var i = 0; i < 20; i++)
         {
-            WriteFile(root, $"branch{i:D2}/.gitignore", "[Nn]ope/\n");
+            WriteFile(root, $"branch{i:D2}/.gitignore", "[[:alpha:]]ope/\n");
             WriteFile(root, $"branch{i:D2}/src/unit.cs", "class U { }");
         }
 
@@ -102,8 +104,8 @@ public class IgnoreRulesetForFileTests
     public void ForFile_FileAtRepoRoot_ReadsRootGitignoreOnly()
     {
         var root = TestDirs.NewTempDir();
-        WriteFile(root, ".gitignore", "*.log\n[Rr]oot/\n");
-        WriteFile(root, "sibling/.gitignore", "[Ss]ibling/\n");
+        WriteFile(root, ".gitignore", "*.log\n[[:alpha:]]oot/\n");
+        WriteFile(root, "sibling/.gitignore", "[[:alpha:]]ibling/\n");
 
         var config = SqueezrConfig.CreateDefault();
         var warnings = new List<string>();

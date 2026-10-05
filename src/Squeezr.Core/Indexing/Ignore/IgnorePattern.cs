@@ -34,7 +34,7 @@ public sealed record IgnorePattern
         var rawSegments = normalizedPath.Split('/');
         return IgnoreRule.Evaluate(
             this,
-            GlobMatcher.NormalizePattern(CompiledPattern),
+            GlobMatcher.NormalizeGitignorePattern(CompiledPattern),
             IgnoreRule.SplitBase(BaseDir),
             rawSegments,
             normalizedPath.ToLowerInvariant().Split('/'),

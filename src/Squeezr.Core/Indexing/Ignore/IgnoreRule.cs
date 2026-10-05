@@ -11,7 +11,7 @@ internal sealed class IgnoreRule
     public IgnoreRule(IgnorePattern pattern)
     {
         _pattern = pattern;
-        _segments = GlobMatcher.NormalizePattern(pattern.CompiledPattern);
+        _segments = GlobMatcher.NormalizeGitignorePattern(pattern.CompiledPattern);
         _base = SplitBase(pattern.BaseDir);
     }
 

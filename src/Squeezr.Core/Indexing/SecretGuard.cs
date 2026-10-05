@@ -70,6 +70,8 @@ public static class SecretGuard
     // A negation, a comment, a directory-only shape or an unsupported one names no file the guard can see.
     // The ignore layer reads them the same way, so extras carry its dialect and subtract nothing: the
     // negated half in particular would otherwise start meaning "unprotect" in a knob that cannot subtract.
+    // Character classes and escapes join that dialect as widening-only shapes: they name more files, never
+    // fewer, and '!' still reaches this filter before any of them is compiled.
     private static CompiledExtra[] CompileExtras(IReadOnlyList<string> extraPatterns)
     {
         var compiled = new List<CompiledExtra>(extraPatterns.Count);
@@ -82,7 +84,8 @@ public static class SecretGuard
                 continue;
             }
 
-            compiled.Add(new CompiledExtra(GlobMatcher.NormalizePattern(parsed.CompiledPattern), parsed.Anchored));
+            compiled.Add(new CompiledExtra(
+                GlobMatcher.NormalizeGitignorePattern(parsed.CompiledPattern), parsed.Anchored));
         }
 
         return [.. compiled];

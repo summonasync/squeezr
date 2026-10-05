@@ -25,7 +25,7 @@ public static class GitignoreMatcher
             pattern = pattern.TrimEnd('/');
         }
 
-        if (ContainsUnsupported(pattern))
+        if (!GitignorePatternSyntax.IsExpressible(pattern))
         {
             return new IgnorePattern
             {
@@ -61,20 +61,6 @@ public static class GitignoreMatcher
             Unsupported = false,
             CompiledPattern = compiledPattern
         };
-    }
-
-    private static bool ContainsUnsupported(string pattern)
-    {
-        for (var i = 0; i < pattern.Length; i++)
-        {
-            if (pattern[i] == '\\')
-                return true;
-
-            if (pattern[i] == '[')
-                return true;
-        }
-
-        return false;
     }
 
     public static string FormatWarning(string rawPattern, string sourceFile) =>

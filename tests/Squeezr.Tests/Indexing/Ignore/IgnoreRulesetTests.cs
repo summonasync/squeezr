@@ -160,7 +160,7 @@ public class IgnoreRulesetTests
     public void UnsupportedPattern_WarnsAndSkipped()
     {
         var root = TestDirs.NewTempDir();
-        File.WriteAllText(Path.Combine(root, ".gitignore"), "[a-z].txt\n");
+        File.WriteAllText(Path.Combine(root, ".gitignore"), "[[:alpha:]].txt\n");
 
         var config = SqueezrConfig.CreateDefault();
         var warnings = new List<string>();
@@ -168,8 +168,25 @@ public class IgnoreRulesetTests
 
         warnings.Count.ShouldBe(1);
         warnings[0].ShouldContain("unsupported ignore pattern");
-        warnings[0].ShouldContain("[a-z].txt");
+        warnings[0].ShouldContain("[[:alpha:]].txt");
         ruleset.Decision("a.txt", false).Excluded.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void CharacterClassPattern_EntersTheCascadeAndExcludes()
+    {
+        var root = TestDirs.NewTempDir();
+        File.WriteAllText(Path.Combine(root, ".gitignore"), "[Dd]ebug/\nGenerated\\ Files/\n");
+
+        var warnings = new List<string>();
+        var ruleset = IgnoreRuleset.For(root, SqueezrConfig.CreateDefault(), w => warnings.Add(w));
+
+        warnings.ShouldBeEmpty();
+        ruleset.Decision("Debug/app.dll", false).Excluded.ShouldBeTrue();
+        ruleset.Decision("Debug/app.dll", false).Source.ShouldBe(IgnoreSource.Gitignore);
+        ruleset.Decision("Debug", false).Excluded.ShouldBeFalse();
+        ruleset.Decision("Generated Files/model.cs", false).Excluded.ShouldBeTrue();
+        ruleset.Decision("GeneratedFiles/model.cs", false).Excluded.ShouldBeFalse();
     }
 
     [Fact]

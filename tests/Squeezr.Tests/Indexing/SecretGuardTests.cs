@@ -240,9 +240,32 @@ public sealed partial class SecretGuardTests
     [InlineData("*.tokens", "root.tokens", true)]
     [InlineData("*.tokens", "src/deep.tokens", true)]
     [InlineData("deploy/*.crt", "deploy/server.crt", true)]
+    [InlineData("[p]rod.tokens", "prod.tokens", true)]
+    [InlineData("deploy\\prod.tokens", "deployprod.tokens", true)]
+    [InlineData("**/[Cc]redentials*", "config/Credentials.dev.json", true)]
+    [InlineData("**/[Cc]redentials*", "config/credentials.json", true)]
+    [InlineData("**/[Cc]redentials*", "config/tokens.txt", false)]
+    [InlineData("Generated\\ Files/*.tokens", "Generated Files/vault.tokens", true)]
+    [InlineData("Generated\\ Files/*.tokens", "GeneratedFiles/vault.tokens", false)]
     public void SecretGuardExtra_WidensTheSet(string extra, string relativePath, bool expected)
     {
         SecretGuard.IsProtected(relativePath, [extra]).ShouldBe(expected, $"{extra} vs {relativePath}");
+    }
+
+    // Union-only posture across the new dialect: a class or an escape may name more secrets, and a
+    // negation still cannot name fewer — not even when it carries a class.
+    [Fact]
+    public void SecretGuardExtra_ClassesAndEscapesWidenOnly_NegationStaysInert()
+    {
+        var extras = new[] { "**/[Cc]redentials*", "!**/[Cc]redentials.sample.json" };
+
+        SecretGuard.IsProtected("src/Credentials.prod.json", extras).ShouldBeTrue();
+        SecretGuard.IsProtected("src/credentials.sample.json", extras).ShouldBeTrue();
+
+        foreach (var path in BuiltInSamples)
+        {
+            SecretGuard.IsProtected(path, extras).ShouldBeTrue($"{path} under class extras");
+        }
     }
 
     [Theory]
@@ -257,6 +280,10 @@ public sealed partial class SecretGuardTests
     [InlineData("/phrases.custom", "phrases.custom", true)]
     [InlineData("/phrases.custom", "src/phrases.custom", false)]
     [InlineData("secrets/", "secrets", false)]
+    [InlineData("[p]rod.tokens", "prod.tokens", true)]
+    [InlineData("**/[Cc]redentials*", "config/Credentials.dev.json", true)]
+    [InlineData("Generated\\ Files/*.tokens", "Generated Files/vault.tokens", true)]
+    [InlineData("Generated\\ Files/*.tokens", "GeneratedFiles/vault.tokens", false)]
     public void SecretGuardExtra_MeansWhatIndexingIgnoreMeans(string extra, string relativePath, bool expected)
     {
         var root = TestDirs.NewTempDir();
@@ -290,8 +317,10 @@ public sealed partial class SecretGuardTests
     [InlineData("!!.prod.tokens", "prod.tokens")]
     [InlineData("#prod.tokens", "prod.tokens")]
     [InlineData("secrets/", "secrets")]
-    [InlineData("[p]rod.tokens", "prod.tokens")]
-    [InlineData("deploy\\prod.tokens", "deploy/prod.tokens")]
+    [InlineData("[[:alpha:]]prod.tokens", "prod.tokens")]
+    [InlineData("a\\/prod.tokens", "a/prod.tokens")]
+    [InlineData("[unclosed.tokens", "unclosed.tokens")]
+    [InlineData("dangling\\", "dangling")]
     [InlineData(" ", "prod.tokens")]
     [InlineData("", "prod.tokens")]
     [InlineData(null, "prod.tokens")]
