@@ -29,14 +29,16 @@ public sealed class RepoGuardReport
     public static RepoGuardReport? FromRepo(RepoStatus repo) =>
         From(repo.GuardWithheld, repo.GuardWithheldBuiltIns, repo.GuardDropped);
 
+    // A corrupt ledger clamps, it does not throw: this shape only reports, and a stored counter that adds up
+    // wrong must not cost the caller the whole answer — `squeezr status` has no catch and index_status would
+    // degrade to a tool error. The overshoot is the interesting half, so it is capped at `withheld`.
     public static RepoGuardReport? From(int withheld, int withheldByBuiltIns, int dropped)
     {
-        if (withheld < 0 || withheldByBuiltIns < 0 || withheldByBuiltIns > withheld || dropped < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(withheldByBuiltIns));
-        }
+        withheld = Math.Max(0, withheld);
+        var builtIns = Math.Clamp(withheldByBuiltIns, 0, withheld);
+        dropped = Math.Max(0, dropped);
 
-        return withheld == 0 && dropped == 0 ? null : new RepoGuardReport(withheld, withheldByBuiltIns, dropped);
+        return withheld == 0 && dropped == 0 ? null : new RepoGuardReport(withheld, builtIns, dropped);
     }
 
     public string Warning() =>

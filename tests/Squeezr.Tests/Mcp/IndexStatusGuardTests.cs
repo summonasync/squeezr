@@ -38,6 +38,30 @@ public class IndexStatusGuardTests
     }
 
     [Fact]
+    public async Task IndexStatus_AfterAWithheldRowIsRetired_LedgersTheDropCountWithoutNamingAPath()
+    {
+        var workspace = IngestionWorkspaces.NewWorkspaceWithSecrets();
+        SecretGuardFixture.PlantPreGuardRows(workspace, [IngestionWorkspaces.EnvPath]);
+        new WorkspaceIndexer().Index(workspace);
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "index_status", new Dictionary<string, object?>(), cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = Parse(result);
+        var payload = envelope.ToString();
+        payload.ShouldNotContain("monkey.pem");
+        payload.ShouldNotContain("\".env\"");
+
+        var repo = envelope.GetProperty("data").GetProperty("repos").EnumerateArray().ShouldHaveSingleItem();
+        repo.TryGetProperty("guard", out var block).ShouldBeTrue();
+        block.GetProperty("withheld").GetInt32().ShouldBe(2);
+        block.GetProperty("dropped").GetInt32().ShouldBe(1);
+        Warning(envelope).ShouldContain("1 protected row(s) removed from the store");
+    }
+
+    [Fact]
     public async Task IndexStatus_WithAnOrdinaryStore_OmitsTheGuardBlock()
     {
         var workspace = IngestionWorkspaces.NewWorkspaceWithPlainFile();

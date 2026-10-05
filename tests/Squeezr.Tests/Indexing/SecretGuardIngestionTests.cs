@@ -6,6 +6,7 @@ using Squeezr.Core.Indexing.Roslyn;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using System.Runtime.Versioning;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -17,12 +18,6 @@ using static Squeezr.Tests.Indexing.IngestionWorkspaces;
 // report a count without ever repeating the name it is protecting.
 public class SecretGuardIngestionTests
 {
-    private const string EnvPath = ".env";
-    private const string PemPath = "deploy/keys/monkey.pem";
-    private const string AppPath = "src/App.cs";
-    private const string EnvCanary = "T2-CANARY-ENV-VALUE";
-    private const string PemCanary = "T2-CANARY-PEM-VALUE";
-
     [Fact]
     public void Index_FullPass_WritesNoRowForAnyProtectedPath()
     {
@@ -184,14 +179,10 @@ public class SecretGuardIngestionTests
         StoredPaths(workspace).ShouldNotContain(EnvPath);
     }
 
-    [Fact]
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
     public void Walk_GuardDecidesBeforeTheUnreadableBranch_NamingNothingInAWarning()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
         var workspace = NewWorkspaceWithSecrets();
         var rules = IgnoreRuleset.For(RepoRoot(workspace), SqueezrConfig.CreateDefault());
         File.SetUnixFileMode(Full(workspace, PemPath), UnixFileMode.None);
@@ -347,7 +338,7 @@ public class SecretGuardIngestionTests
     public void WatchEventFilter_KeepsDecidingOnLanguage_NotOnTheGuard()
     {
         var workspace = NewWorkspaceWithSecrets();
-        var repoRoot = Full(workspace, string.Empty);
+        var repoRoot = RepoRoot(workspace);
         var filter = new WatchEventFilter(
             workspace, [repoRoot], new Dictionary<string, IgnoreRuleset> { [repoRoot] = IgnoreRuleset.For(repoRoot, ConfigFile.Load(workspace)) });
 
@@ -372,7 +363,6 @@ public class SecretGuardIngestionTests
         repo.GuardWithheld.ShouldBe(2);
         repo.GuardWithheldBuiltIns.ShouldBe(2);
         repo.GuardDropped.ShouldBe(0);
-        status.Repos.ShouldContain(r => r.GuardDropped == 0);
     }
 
     [Fact]
@@ -437,23 +427,6 @@ public class SecretGuardIngestionTests
 
         stale.ShouldContain("demo/src/Extra.cs");
         stale.ShouldNotContain("demo/.env");
-    }
-
-    private static string RepoRoot(string workspace) => Path.Combine(workspace, "repo");
-
-    private static string Full(string workspace, string relativePath) =>
-        Path.Combine(RepoRoot(workspace), relativePath.Replace('/', Path.DirectorySeparatorChar))
-            .TrimEnd(Path.DirectorySeparatorChar);
-
-    private static string ReadAscii(string path) =>
-        System.Text.Encoding.ASCII.GetString(File.ReadAllBytes(path));
-
-    private static void RepoGuardReportShape(WorkspaceStatus status)
-    {
-        var repo = status.Repos.ShouldHaveSingleItem();
-        repo.GuardWithheld.ShouldBe(2);
-        repo.GuardWithheldBuiltIns.ShouldBe(2);
-        repo.GuardDropped.ShouldBe(0);
     }
 
     private static SecretGuardIngestion Guard(string workspace) => SecretGuardIngestion.Load(workspace);
