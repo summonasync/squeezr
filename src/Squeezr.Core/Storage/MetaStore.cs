@@ -14,6 +14,7 @@ public sealed class MetaStore : IDisposable
     public const string PendingReapsCollection = "pending_reaps";
 
     private readonly LiteDatabase _db;
+    private readonly string _dbPath;
 
     private static readonly object MapperWarmupLock = new();
 
@@ -23,6 +24,8 @@ public sealed class MetaStore : IDisposable
         {
             throw new WorkspaceException($"Index store '{dbPath}' is missing. Run 'squeezr index' first.");
         }
+
+        _dbPath = Path.GetFullPath(dbPath);
 
         // LiteDB 5.0.21 exposes a half-built EntityMapper to concurrent readers (empty mapper is cached
         // before its members are populated), so first-time mapping of an entity type must be serialized.
@@ -118,7 +121,7 @@ public sealed class MetaStore : IDisposable
     public IReadOnlyList<SymbolDocument> ListSymbolsByRepo(uint repoId) =>
         _db.GetCollection<SymbolDocument>(SymbolsCollection).Find(s => s.RepoId == repoId).ToList();
 
-    public void DeleteSymbolsByFile(uint fileId) =>
+    public int DeleteSymbolsByFile(uint fileId) =>
         _db.GetCollection<SymbolDocument>(SymbolsCollection).DeleteMany(s => s.FileId == fileId);
 
     public void InsertSymbols(IEnumerable<SymbolDocument> symbols) =>
@@ -127,14 +130,14 @@ public sealed class MetaStore : IDisposable
     public int CountSymbols(uint repoId) =>
         _db.GetCollection<SymbolDocument>(SymbolsCollection).Count(s => s.RepoId == repoId);
 
-    public void DeleteRefsByFromSymbolIds(IReadOnlyCollection<long> symbolIds)
+    public int DeleteRefsByFromSymbolIds(IReadOnlyCollection<long> symbolIds)
     {
         if (symbolIds.Count == 0)
         {
-            return;
+            return 0;
         }
 
-        _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => symbolIds.Contains(r.FromSymbolId));
+        return _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => symbolIds.Contains(r.FromSymbolId));
     }
 
     public IReadOnlyList<RefDocument> ListRefsByFromSymbol(long symbolId) =>
@@ -143,17 +146,17 @@ public sealed class MetaStore : IDisposable
     public IReadOnlyList<RefDocument> ListRefsByFile(uint fileId) =>
         _db.GetCollection<RefDocument>(RefsCollection).Find(r => r.FileId == fileId).ToList();
 
-    public void DeleteRefsByFile(uint fileId) =>
+    public int DeleteRefsByFile(uint fileId) =>
         _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => r.FileId == fileId);
 
-    public void DeleteRefsByFileIds(IReadOnlyCollection<uint> fileIds)
+    public int DeleteRefsByFileIds(IReadOnlyCollection<uint> fileIds)
     {
         if (fileIds.Count == 0)
         {
-            return;
+            return 0;
         }
 
-        _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => fileIds.Contains(r.FileId));
+        return _db.GetCollection<RefDocument>(RefsCollection).DeleteMany(r => fileIds.Contains(r.FileId));
     }
 
     public void InsertRefs(IEnumerable<RefDocument> refs) =>
@@ -214,7 +217,7 @@ public sealed class MetaStore : IDisposable
         return stale.Count;
     }
 
-    public void DeleteChunksByFile(uint fileId) =>
+    public int DeleteChunksByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection).DeleteMany(c => c.FileId == fileId);
 
     public void InsertChunks(IEnumerable<ChunkDocument> chunks) =>
@@ -403,6 +406,28 @@ public sealed class MetaStore : IDisposable
 
     public void ClearAllPendingReaps() => _db.GetCollection(PendingReapsCollection).DeleteAll();
 
+    // An owed cleanup keeps its id (the replay still needs it) and loses its name: a queued reap for a path
+    // the secret guard refuses would otherwise keep that name alive in meta.db bytes long after the file row
+    // is gone. Identity match in replay falls back to "the id names no live row", which is exactly what a
+    // purged file is, so the point still gets reaped.
+    public int RedactPendingReapPaths(IReadOnlyCollection<long> fileIds)
+    {
+        if (fileIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var reaps = _db.GetCollection<PendingReapDocument>(PendingReapsCollection);
+        var named = reaps.Find(p => p.Path != null && fileIds.Contains(p.FileId)).ToList();
+        foreach (var reap in named)
+        {
+            reap.Path = null;
+            reaps.Update(reap);
+        }
+
+        return named.Count;
+    }
+
     public IndexStateDocument? GetIndexState(string repoName) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).FindById(repoName);
 
@@ -413,7 +438,79 @@ public sealed class MetaStore : IDisposable
     public void SaveIndexState(IndexStateDocument state) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).Upsert(state);
 
+    // A delete in LiteDB frees a record slot; it does not hand the space back to the filesystem. Checkpoint
+    // flushes what is pending, rebuild rewrites the file from live pages only — and rebuild moves the
+    // pre-rebuild file aside under a '-backup' name: a second full copy of every byte the purge just retired.
+    // Those copies go with the reclaim, the ones an earlier crashed pass left behind included, and the count
+    // of what stayed is part of the result so the pass can say it instead of reporting a clean store.
+    public StoreReclaimResult Reclaim()
+    {
+        var sizeBefore = SizeOnDisk();
+        try
+        {
+            _db.Checkpoint();
+            _db.Rebuild();
+            return new StoreReclaimResult(
+                sizeBefore, SizeOnDisk(), Reclaimed: true, SkippedReason: null, ClearSnapshotCopies(_dbPath));
+        }
+        catch (Exception ex) when (ex is LiteException or IOException or UnauthorizedAccessException)
+        {
+            return new StoreReclaimResult(
+                sizeBefore, SizeOnDisk(), Reclaimed: false, ex.Message, ClearSnapshotCopies(_dbPath));
+        }
+    }
+
     public void Dispose() => _db.Dispose();
+
+    private long SizeOnDisk() => File.Exists(_dbPath) ? new FileInfo(_dbPath).Length : 0;
+
+    // The keep-when-gone half is not caution for its own sake: the rebuild renames the live file to the backup
+    // name and the rebuilt file into the live name, so an attempt that died between those two moves leaves the
+    // backup as the only copy of the store. Clearing it there would turn a skipped reclaim into a destroyed
+    // index. Refusing to clear is not a silent answer either — the copies that stayed are counted and reported,
+    // because a snapshot next to a vanished store holds exactly the bytes the purge was meant to take back.
+    internal static int ClearSnapshotCopies(string dbPath)
+    {
+        var fullPath = Path.GetFullPath(dbPath);
+        var dir = Path.GetDirectoryName(fullPath);
+        if (dir is null || !Directory.Exists(dir))
+        {
+            return 0;
+        }
+
+        var copies = SnapshotCopies(fullPath, dir);
+        if (!File.Exists(fullPath))
+        {
+            return copies.Count;
+        }
+
+        var left = 0;
+        foreach (var copy in copies)
+        {
+            try
+            {
+                File.Delete(copy);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                left++;
+            }
+        }
+
+        return left;
+    }
+
+    private static List<string> SnapshotCopies(string dbPath, string dir)
+    {
+        var stem = Path.GetFileNameWithoutExtension(dbPath);
+        return [.. Directory.EnumerateFiles(dir, stem + "*")
+            .Select(Path.GetFullPath)
+            .Where(path => IsSnapshotCopy(path, dbPath))];
+    }
+
+    private static bool IsSnapshotCopy(string path, string dbPath) =>
+        !string.Equals(path, dbPath, StringComparison.Ordinal)
+        && Path.GetExtension(path).Equals(".db", StringComparison.OrdinalIgnoreCase);
 
     private uint NextId(string name)
     {

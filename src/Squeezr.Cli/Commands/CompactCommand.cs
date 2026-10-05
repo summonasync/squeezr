@@ -21,6 +21,11 @@ public sealed class CompactCommand : Command<CompactCommand.Settings>
             var result = WorkspaceCompactor.Compact(
                 WorkspaceRootResolver.RequireWorkspaceRoot(), StaleLockWarningSink.ToStderr);
 
+            foreach (var warning in result.Warnings ?? [])
+            {
+                Console.Error.WriteLine($"warning: {warning}");
+            }
+
             if (settings.Json)
             {
                 JsonOutput.Write(result);
@@ -34,6 +39,13 @@ public sealed class CompactCommand : Command<CompactCommand.Settings>
                 {
                     AnsiConsole.MarkupLine("[grey]legacy index rebuilt from current file contents[/]");
                 }
+
+                AnsiConsole.MarkupLine(
+                    $"[bold]meta.db[/]: {FormatKb(result.StoreSizeBeforeBytes)} → {FormatKb(result.StoreSizeAfterBytes)}");
+                if (PurgeLine(result) is { } purgeLine)
+                {
+                    AnsiConsole.MarkupLine($"[grey]{purgeLine.EscapeMarkup()}[/]");
+                }
             }
 
             return 0;
@@ -42,6 +54,37 @@ public sealed class CompactCommand : Command<CompactCommand.Settings>
         {
             return CommandError.Report(ex, settings.Json);
         }
+    }
+
+    internal static string? PurgeLine(CompactResult result)
+    {
+        if (result.PathsPurged == 0 && result.ReapJournalRedacted == 0 && result.TelemetryValuesRedacted == 0)
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+        if (result.PathsPurged > 0)
+        {
+            parts.Add($"{result.PathsPurged} path(s) purged, {result.RowsPurged} row(s) removed");
+        }
+
+        if (result.ReapJournalRedacted > 0)
+        {
+            parts.Add($"{result.ReapJournalRedacted} reap journal name(s) redacted");
+        }
+
+        if (result.TelemetryValuesRedacted > 0)
+        {
+            parts.Add($"{result.TelemetryValuesRedacted} recorded parameter value(s) redacted");
+        }
+
+        if (result.PointsQueued > 0)
+        {
+            parts.Add($"{result.PointsQueued} point cleanup(s) queued");
+        }
+
+        return "secret guard: " + string.Join(" · ", parts);
     }
 
     private static string FormatKb(long bytes) => $"{bytes / 1024.0:F1} KB";

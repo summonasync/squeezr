@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Squeezr.Core.Storage;
@@ -20,6 +21,10 @@ public sealed record QueryTelemetryEntry(
 
 public static class QueryTelemetry
 {
+    // what a recorded parameter value becomes when the guard says it names a protected path — the line stays
+    // (the counters over queries.jsonl are the reason the file exists), only the name leaves it
+    public const string RedactedPlaceholder = "[secret-guard withheld]";
+
     public static void Append(string workspaceRoot, QueryTelemetryEntry entry)
     {
         try
@@ -105,6 +110,143 @@ public static class QueryTelemetry
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return 0;
+        }
+    }
+
+    // Recorded parameters are the one place where a query that ran before the guard existed keeps quoting the
+    // path it asked about, so the purge pass rewrites them through the same classifier that refused the read.
+    // Only values the classifier calls a protected path are replaced; lines it cannot parse and values it does
+    // not recognise are written back byte for byte, which is what keeps the counters over queries.jsonl honest.
+    public static int RedactProtectedParams(string workspaceRoot, Func<string, bool> isProtectedPath)
+    {
+        var path = SqueezrPaths.QueriesLogPath(workspaceRoot);
+        if (!File.Exists(path))
+        {
+            return 0;
+        }
+
+        string[] lines;
+        try
+        {
+            lines = File.ReadAllLines(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+
+        var redacted = 0;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Length == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                if (JsonNode.Parse(lines[i]) is not JsonObject entry)
+                {
+                    continue;
+                }
+
+                if (entry["params"] is null)
+                {
+                    continue;
+                }
+
+                if (RedactTree(entry["params"]!, isProtectedPath, ref redacted) > 0)
+                {
+                    lines[i] = entry.ToJsonString();
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        if (redacted == 0)
+        {
+            return 0;
+        }
+
+        var tempPath = path + ".scrub.tmp";
+        try
+        {
+            // joined explicitly so a scrub run on one platform does not rewrite the line endings of a log
+            // another platform appended
+            File.WriteAllText(tempPath, string.Join('\n', lines) + '\n');
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            TryDeleteTemp(tempPath);
+            return 0;
+        }
+
+        return redacted;
+    }
+
+    private static int RedactTree(JsonNode node, Func<string, bool> isProtectedPath, ref int redacted)
+    {
+        var hits = 0;
+        if (node is JsonObject obj)
+        {
+            foreach (var property in obj.ToList())
+            {
+                if (NamesAProtectedPath(property.Value, isProtectedPath))
+                {
+                    obj[property.Key] = JsonValue.Create(RedactedPlaceholder);
+                    redacted++;
+                    hits++;
+                    continue;
+                }
+
+                if (property.Value is not null)
+                {
+                    hits += RedactTree(property.Value, isProtectedPath, ref redacted);
+                }
+            }
+
+            return hits;
+        }
+
+        if (node is JsonArray array)
+        {
+            for (var i = 0; i < array.Count; i++)
+            {
+                if (NamesAProtectedPath(array[i], isProtectedPath))
+                {
+                    array[i] = JsonValue.Create(RedactedPlaceholder);
+                    redacted++;
+                    hits++;
+                    continue;
+                }
+
+                if (array[i] is not null)
+                {
+                    hits += RedactTree(array[i]!, isProtectedPath, ref redacted);
+                }
+            }
+        }
+
+        return hits;
+    }
+
+    private static bool NamesAProtectedPath(JsonNode? node, Func<string, bool> isProtectedPath) =>
+        node is JsonValue value && value.TryGetValue(out string? text) && isProtectedPath(text);
+
+    private static void TryDeleteTemp(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
         }
     }
 }
