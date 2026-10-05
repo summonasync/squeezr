@@ -5,8 +5,8 @@ using Squeezr.Core.Indexing.Ignore;
 namespace Squeezr.Tests.Indexing.Ignore;
 
 // git is the oracle for every row below. Each answer was measured by materializing the path in a scratch
-// repository and asking `git check-ignore -v` (git 2.53); the generator and its raw evidence are
-// probe-t14/oracle-table.py and probe-t14/oracle-table.md, so nothing here is a guess about git.
+// repository and asking `git check-ignore -v` (git 2.53). tests/oracle/gitignore/oracle-table.py regenerates
+// the rows and rewrites its evidence table next to it, so nothing here is a guess about git.
 // The built-in default list is emptied in these fixtures so only the .gitignore under test decides.
 public sealed class GitignoreOracleTests : IDisposable
 {
@@ -140,11 +140,16 @@ public sealed class GitignoreOracleTests : IDisposable
     [InlineData("Generated\\ Files/x", "Generated Files/x/y", false, true)]
     [InlineData("foo\\", "foo\\", false, false)]
     [InlineData("foo\\", "foo", false, false)]
+    [InlineData("foo\\ ", "foo", false, false)]
     [InlineData("[bracket", "[bracket", false, false)]
     [InlineData("[bracket", "b", false, false)]
     [InlineData("x[[y", "x[y", false, false)]
     [InlineData("x[[y", "xy", false, false)]
+    [InlineData("[[:alpha:]]", "a]", false, false)]
     [InlineData("[[:alpha:]]", "1", false, false)]
+    [InlineData("[\\]", "]", false, false)]
+    [InlineData("[\\]", "\\", false, false)]
+    [InlineData("[\\\\]", "]", false, false)]
     [InlineData("a\\/b", "ab", false, false)]
     [InlineData("[a/]x", "ax", false, true)]
     [InlineData("[a/]x", "bracket/ax", false, false)]
@@ -168,15 +173,21 @@ public sealed class GitignoreOracleTests : IDisposable
     // Measured disagreements, pinned instead of hidden: git answers the other way in every row here, each
     // one the consequence of a deliberate squeezr choice. Case folding runs both ways in the matcher, so a
     // class git reads case-sensitively is a superset for us; the path side folds '\' into '/' before any
-    // pattern is compared; POSIX classes and the escaped separator stay residual forms — skipped, warned,
-    // and never ignored.
+    // pattern is compared, which is what costs the literal-backslash rows; POSIX classes — bare or nested
+    // inside a set — the escaped separator and the escaped trailing space stay residual forms: skipped,
+    // warned, and never ignored.
     [Theory]
     [InlineData("[Dd]ebug/", "DEBUG/app.dll", false)]
-    [InlineData("[A-Z]*.cs", "foo.cs", false)]
     [InlineData("*.[Cc]ache", "FOO.CACHE", false)]
+    [InlineData("[A-Z]*.cs", "foo.cs", false)]
     [InlineData("a\\\\b", "a\\b", true)]
+    [InlineData("foo\\ ", "foo ", true)]
     [InlineData("[[:alpha:]]", "b", true)]
     [InlineData("[[:digit:]]", "5", true)]
+    [InlineData("[a[:digit:]b]Q", "aQ", true)]
+    [InlineData("[a[:digit:]b]Q", "bQ", true)]
+    [InlineData("[a[:digit:]b]Q", "5Q", true)]
+    [InlineData("[\\\\]", "\\", true)]
     [InlineData("a\\/b", "a/b", true)]
     public void Decision_KnownDivergencesFromGit(string gitignore, string path, bool gitIgnored)
     {
@@ -191,13 +202,17 @@ public sealed class GitignoreOracleTests : IDisposable
     public void Decision_ResidualFormsAreSkippedAndWarn()
     {
         var warnings = new List<string>();
-        var ruleset = DecideRuleset("[[:alpha:]]x\na\\/b\nunterminated[abc\ndangling\\\n", warnings);
+        var ruleset = DecideRuleset(
+            "[[:alpha:]]x\n[a[:digit:]b]Q\n[\\]x\na\\/b\nunterminated[abc\ndangling\\\n", warnings);
 
         ruleset.Decision("bx", false).Excluded.ShouldBeFalse();
+        ruleset.Decision("bQ", false).Excluded.ShouldBeFalse();
+        ruleset.Decision("5Q", false).Excluded.ShouldBeFalse();
+        ruleset.Decision("]x", false).Excluded.ShouldBeFalse();
         ruleset.Decision("a/b", false).Excluded.ShouldBeFalse();
         ruleset.Decision("unterminated[abc", false).Excluded.ShouldBeFalse();
 
-        warnings.Count.ShouldBe(4);
+        warnings.Count.ShouldBe(6);
         warnings.ShouldAllBe(w => w.Contains("unsupported ignore pattern", StringComparison.Ordinal));
     }
 

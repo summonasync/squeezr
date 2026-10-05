@@ -29,7 +29,9 @@ public static class GitignoreMatcher
         {
             return new IgnorePattern
             {
-                Raw = trimmed,
+                // The line as it stands in the file, not the trimmed working form: 'foo\ ' loses its
+                // escaped space in the message otherwise, and the reader stops trusting the warning.
+                Raw = line,
                 Source = source,
                 SourceFile = sourceFile,
                 BaseDir = baseDir,
@@ -51,7 +53,7 @@ public static class GitignoreMatcher
 
         return new IgnorePattern
         {
-            Raw = trimmed,
+            Raw = line,
             Source = source,
             SourceFile = sourceFile,
             BaseDir = baseDir,

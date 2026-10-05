@@ -52,6 +52,7 @@ public class GlobMatcherTests
     [InlineData("[a-c].cs", "b.cs")]
     [InlineData("[!x].cs", "a.cs")]
     [InlineData("[]a].cs", "a.cs")]
+    [InlineData("[bracket].tmp", "b.tmp")]
     public void IsMatch_CharacterClassesApplyToQueryGlobs(string pattern, string path)
     {
         GlobMatcherIsMatch(pattern, path).ShouldBeTrue();
@@ -67,10 +68,13 @@ public class GlobMatcherTests
         GlobMatcherIsMatch(pattern, path).ShouldBeFalse();
     }
 
+    // A '[' that never closes is not a bracket expression: the query dialect keeps every character of it
+    // literal, which both rows assert (the ignore dialect skips such a pattern instead — pinned in
+    // GitignoreOracleTests).
     [Theory]
-    [InlineData("[bracket].tmp", "b.tmp")]
     [InlineData("x[[y", "x[[y")]
-    public void IsMatch_UnterminatedClass_FallsBackToLiteralInQueryGlobs(string pattern, string path)
+    [InlineData("[bracket", "[bracket")]
+    public void IsMatch_UnterminatedClass_StaysLiteralInQueryGlobs(string pattern, string path)
     {
         GlobMatcherIsMatch(pattern, path).ShouldBeTrue();
     }

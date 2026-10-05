@@ -172,6 +172,21 @@ public class IgnoreRulesetTests
         ruleset.Decision("a.txt", false).Excluded.ShouldBeFalse();
     }
 
+    // Characterization, not a blessing: without a warn sink the ruleset keeps the residual pattern, and the
+    // class half of it then matches a file git leaves alone. StaleFileDetector and WorkspaceWatcher build
+    // the ruleset exactly this way. Feature 062/T7 owns the policy; this row is the evidence (review W-1).
+    [Fact]
+    public void UnsupportedPattern_WithoutWarnSink_ExcludesAFileGitKeeps()
+    {
+        var root = TestDirs.NewTempDir();
+        File.WriteAllText(Path.Combine(root, ".gitignore"), "[[:alpha:]]\n");
+
+        var ruleset = IgnoreRuleset.For(root, SqueezrConfig.CreateDefault());
+
+        ruleset.Decision("a]", false).Excluded.ShouldBeTrue();
+        ruleset.Decision("b", false).Excluded.ShouldBeFalse();
+    }
+
     [Fact]
     public void CharacterClassPattern_EntersTheCascadeAndExcludes()
     {

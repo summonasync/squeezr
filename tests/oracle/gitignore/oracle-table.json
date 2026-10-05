@@ -1,0 +1,1115 @@
+[
+  {
+    "body": "[Dd]ebug/",
+    "path": "Debug",
+    "isDir": true,
+    "git": true,
+    "via": "[Dd]ebug/"
+  },
+  {
+    "body": "[Dd]ebug/",
+    "path": "Debug/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]ebug/"
+  },
+  {
+    "body": "[Dd]ebug/",
+    "path": "debug/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]ebug/"
+  },
+  {
+    "body": "[Dd]ebug/",
+    "path": "src/Debug/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]ebug/"
+  },
+  {
+    "body": "[Dd]ebug/",
+    "path": "Debugx/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Dd]ebug/",
+    "path": "DEBUG/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Dd]ebugPublic/",
+    "path": "DebugPublic/app.cs",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]ebugPublic/"
+  },
+  {
+    "body": "[Dd]ebugPublic/",
+    "path": "Debug/app.cs",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Rr]elease/",
+    "path": "Release/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Rr]elease/"
+  },
+  {
+    "body": "[Rr]elease/",
+    "path": "release/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Rr]elease/"
+  },
+  {
+    "body": "[Rr]elease/",
+    "path": "Releases/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Rr]eleases/",
+    "path": "Releases/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Rr]eleases/"
+  },
+  {
+    "body": "[Rr]eleases/",
+    "path": "Release/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Ww][Ii][Nn]32/",
+    "path": "Win32/app.exe",
+    "isDir": false,
+    "git": true,
+    "via": "[Ww][Ii][Nn]32/"
+  },
+  {
+    "body": "[Ww][Ii][Nn]32/",
+    "path": "wIn32/app.exe",
+    "isDir": false,
+    "git": true,
+    "via": "[Ww][Ii][Nn]32/"
+  },
+  {
+    "body": "[Ww][Ii][Nn]32/",
+    "path": "Win64/app.exe",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Aa][Rr][Mm]/",
+    "path": "ARM/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Aa][Rr][Mm]/"
+  },
+  {
+    "body": "[Aa][Rr][Mm]/",
+    "path": "ARM64/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Aa][Rr][Mm]64/",
+    "path": "ARM64/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Aa][Rr][Mm]64/"
+  },
+  {
+    "body": "[Aa][Rr][Mm]64/",
+    "path": "ARM/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Bb]in/",
+    "path": "bin/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Bb]in/"
+  },
+  {
+    "body": "[Bb]in/",
+    "path": "src/Bin/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Bb]in/"
+  },
+  {
+    "body": "[Bb]in/",
+    "path": "Bin/Debug/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Bb]in/"
+  },
+  {
+    "body": "[Bb]in/",
+    "path": "binx/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Oo]bj/",
+    "path": "obj/project.assets.json",
+    "isDir": false,
+    "git": true,
+    "via": "[Oo]bj/"
+  },
+  {
+    "body": "[Oo]bj/",
+    "path": "object/keep.cs",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Ll]og/",
+    "path": "log/app.txt",
+    "isDir": false,
+    "git": true,
+    "via": "[Ll]og/"
+  },
+  {
+    "body": "[Ll]og/",
+    "path": "Log",
+    "isDir": true,
+    "git": true,
+    "via": "[Ll]og/"
+  },
+  {
+    "body": "[Ll]og/",
+    "path": "Logs/app.txt",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Ll]ogs/",
+    "path": "Logs/app.txt",
+    "isDir": false,
+    "git": true,
+    "via": "[Ll]ogs/"
+  },
+  {
+    "body": "[Ll]ogs/",
+    "path": "Log/app.txt",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "Generated\\ Files/",
+    "path": "Generated Files/model.cs",
+    "isDir": false,
+    "git": true,
+    "via": "Generated\\ Files/"
+  },
+  {
+    "body": "Generated\\ Files/",
+    "path": "src/Generated Files/nested/model.cs",
+    "isDir": false,
+    "git": true,
+    "via": "Generated\\ Files/"
+  },
+  {
+    "body": "Generated\\ Files/",
+    "path": "GeneratedFiles/model.cs",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "Generated\\ Files/",
+    "path": "Generated  Files/model.cs",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Tt]est[Rr]esult*/",
+    "path": "TestResults/run.trx",
+    "isDir": false,
+    "git": true,
+    "via": "[Tt]est[Rr]esult*/"
+  },
+  {
+    "body": "[Tt]est[Rr]esult*/",
+    "path": "testResultZ/run.trx",
+    "isDir": false,
+    "git": true,
+    "via": "[Tt]est[Rr]esult*/"
+  },
+  {
+    "body": "[Tt]est[Rr]esult*/",
+    "path": "TestResult/run.trx",
+    "isDir": false,
+    "git": true,
+    "via": "[Tt]est[Rr]esult*/"
+  },
+  {
+    "body": "[Tt]est[Rr]esult*/",
+    "path": "Tests/run.trx",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Bb]uild[Ll]og.*",
+    "path": "BuildLog.txt",
+    "isDir": false,
+    "git": true,
+    "via": "[Bb]uild[Ll]og.*"
+  },
+  {
+    "body": "[Bb]uild[Ll]og.*",
+    "path": "buildlog.htm",
+    "isDir": false,
+    "git": true,
+    "via": "[Bb]uild[Ll]og.*"
+  },
+  {
+    "body": "[Bb]uild[Ll]og.*",
+    "path": "BuildLog",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Bb]uild[Ll]og.*",
+    "path": "BuildLogs.txt",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Dd]ebugPS/",
+    "path": "DebugPS/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]ebugPS/"
+  },
+  {
+    "body": "[Dd]ebugPS/",
+    "path": "Debug/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Rr]eleasePS/",
+    "path": "ReleasePS/app.dll",
+    "isDir": false,
+    "git": true,
+    "via": "[Rr]eleasePS/"
+  },
+  {
+    "body": "[Rr]eleasePS/",
+    "path": "Release/app.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*.[Rr]e[Ss]harper",
+    "path": "foo.reSharper",
+    "isDir": false,
+    "git": true,
+    "via": "*.[Rr]e[Ss]harper"
+  },
+  {
+    "body": "*.[Rr]e[Ss]harper",
+    "path": ".ReSharper",
+    "isDir": false,
+    "git": true,
+    "via": "*.[Rr]e[Ss]harper"
+  },
+  {
+    "body": "*.[Rr]e[Ss]harper",
+    "path": "src/project.resharper",
+    "isDir": false,
+    "git": true,
+    "via": "*.[Rr]e[Ss]harper"
+  },
+  {
+    "body": "*.[Rr]e[Ss]harper",
+    "path": "foo.resharperx",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*.[Rr]e[Ss]harper",
+    "path": "foo.xReSharper",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Ee]xpress/",
+    "path": "Express/app.txt",
+    "isDir": false,
+    "git": true,
+    "via": "[Ee]xpress/"
+  },
+  {
+    "body": "[Ee]xpress/",
+    "path": "expresso/app.txt",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*.[Pp]ublish.xml",
+    "path": "Web.Publish.xml",
+    "isDir": false,
+    "git": true,
+    "via": "*.[Pp]ublish.xml"
+  },
+  {
+    "body": "*.[Pp]ublish.xml",
+    "path": "web.publish.xmll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "**/[Pp]ackages/*",
+    "path": "Packages/newtonsoft.json.dll",
+    "isDir": false,
+    "git": true,
+    "via": "**/[Pp]ackages/*"
+  },
+  {
+    "body": "**/[Pp]ackages/*",
+    "path": "src/Packages/a/b.dll",
+    "isDir": false,
+    "git": true,
+    "via": "**/[Pp]ackages/*"
+  },
+  {
+    "body": "**/[Pp]ackages/*",
+    "path": "packagesx/keep.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "**/[Pp]ackages/*\n!**/[Pp]ackages/build/",
+    "path": "Packages/build/keep.dll",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "**/[Pp]ackages/*\n!**/[Pp]ackages/build/",
+    "path": "Packages/build",
+    "isDir": true,
+    "git": false,
+    "via": "!**/[Pp]ackages/build/"
+  },
+  {
+    "body": "**/[Pp]ackages/*\n!**/[Pp]ackages/build/",
+    "path": "Packages/a.dll",
+    "isDir": false,
+    "git": true,
+    "via": "**/[Pp]ackages/*"
+  },
+  {
+    "body": "*.[Cc]ache",
+    "path": "session.cache",
+    "isDir": false,
+    "git": true,
+    "via": "*.[Cc]ache"
+  },
+  {
+    "body": "*.[Cc]ache",
+    "path": "src/token.Cache",
+    "isDir": false,
+    "git": true,
+    "via": "*.[Cc]ache"
+  },
+  {
+    "body": "*.[Cc]ache",
+    "path": "session.cache2",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*.[Cc]ache",
+    "path": "FOO.CACHE",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*.[Cc]ache",
+    "path": "cache",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*.[Cc]ache\n!?*.[Cc]ache/",
+    "path": "session.cache",
+    "isDir": false,
+    "git": true,
+    "via": "*.[Cc]ache"
+  },
+  {
+    "body": "*.[Cc]ache\n!?*.[Cc]ache/",
+    "path": "session.cache",
+    "isDir": true,
+    "git": false,
+    "via": "!?*.[Cc]ache/"
+  },
+  {
+    "body": "*.[Cc]ache\n!?*.[Cc]ache/",
+    "path": "session.cache/inner.txt",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*- [Bb]ackup.rdl",
+    "path": "report - Backup.rdl",
+    "isDir": false,
+    "git": true,
+    "via": "*- [Bb]ackup.rdl"
+  },
+  {
+    "body": "*- [Bb]ackup.rdl",
+    "path": "report - backup.rdl",
+    "isDir": false,
+    "git": true,
+    "via": "*- [Bb]ackup.rdl"
+  },
+  {
+    "body": "*- [Bb]ackup.rdl",
+    "path": "report -Backup.rdl",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*- [Bb]ackup ([0-9]).rdl",
+    "path": "report - Backup (1).rdl",
+    "isDir": false,
+    "git": true,
+    "via": "*- [Bb]ackup ([0-9]).rdl"
+  },
+  {
+    "body": "*- [Bb]ackup ([0-9]).rdl",
+    "path": "report - Backup (12).rdl",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*- [Bb]ackup ([0-9]).rdl",
+    "path": "report - Backup (a).rdl",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "*- [Bb]ackup ([0-9][0-9]).rdl",
+    "path": "report - Backup (12).rdl",
+    "isDir": false,
+    "git": true,
+    "via": "*- [Bb]ackup ([0-9][0-9]).rdl"
+  },
+  {
+    "body": "*- [Bb]ackup ([0-9][0-9]).rdl",
+    "path": "report - Backup (1).rdl",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[Dd]esktop.ini",
+    "path": "Desktop.ini",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]esktop.ini"
+  },
+  {
+    "body": "[Dd]esktop.ini",
+    "path": "src/Desktop.ini",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]esktop.ini"
+  },
+  {
+    "body": "[Dd]esktop.ini",
+    "path": "desktop.ini",
+    "isDir": false,
+    "git": true,
+    "via": "[Dd]esktop.ini"
+  },
+  {
+    "body": "[Dd]esktop.ini",
+    "path": "Thumbs.db.ini",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[a-c]x",
+    "path": "bx",
+    "isDir": false,
+    "git": true,
+    "via": "[a-c]x"
+  },
+  {
+    "body": "[a-c]x",
+    "path": "dx",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[!x]y",
+    "path": "zy",
+    "isDir": false,
+    "git": true,
+    "via": "[!x]y"
+  },
+  {
+    "body": "[!x]y",
+    "path": "xy",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[^x]y",
+    "path": "zy",
+    "isDir": false,
+    "git": true,
+    "via": "[^x]y"
+  },
+  {
+    "body": "[^x]y",
+    "path": "xy",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[]a]z",
+    "path": "]z",
+    "isDir": false,
+    "git": true,
+    "via": "[]a]z"
+  },
+  {
+    "body": "[]a]z",
+    "path": "az",
+    "isDir": false,
+    "git": true,
+    "via": "[]a]z"
+  },
+  {
+    "body": "[]a]z",
+    "path": "bz",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[a-]b",
+    "path": "-b",
+    "isDir": false,
+    "git": true,
+    "via": "[a-]b"
+  },
+  {
+    "body": "[a-]b",
+    "path": "ab",
+    "isDir": false,
+    "git": true,
+    "via": "[a-]b"
+  },
+  {
+    "body": "[a-]b",
+    "path": "bb",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[--0]Q",
+    "path": ".Q",
+    "isDir": false,
+    "git": true,
+    "via": "[--0]Q"
+  },
+  {
+    "body": "[--0]Q",
+    "path": "-Q",
+    "isDir": false,
+    "git": true,
+    "via": "[--0]Q"
+  },
+  {
+    "body": "[--0]Q",
+    "path": "0Q",
+    "isDir": false,
+    "git": true,
+    "via": "[--0]Q"
+  },
+  {
+    "body": "[--0]Q",
+    "path": "aQ",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[.*]Q",
+    "path": ".Q",
+    "isDir": false,
+    "git": true,
+    "via": "[.*]Q"
+  },
+  {
+    "body": "[.*]Q",
+    "path": "*Q",
+    "isDir": false,
+    "git": true,
+    "via": "[.*]Q"
+  },
+  {
+    "body": "[.*]Q",
+    "path": "aQ",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[a^]b",
+    "path": "ab",
+    "isDir": false,
+    "git": true,
+    "via": "[a^]b"
+  },
+  {
+    "body": "[a^]b",
+    "path": "^b",
+    "isDir": false,
+    "git": true,
+    "via": "[a^]b"
+  },
+  {
+    "body": "[!^a]b",
+    "path": "ab",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[!^a]b",
+    "path": "^b",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[!^a]b",
+    "path": "bb",
+    "isDir": false,
+    "git": true,
+    "via": "[!^a]b"
+  },
+  {
+    "body": "[\\[-\\]]b",
+    "path": "[b",
+    "isDir": false,
+    "git": true,
+    "via": "[\\[-\\]]b"
+  },
+  {
+    "body": "[\\[-\\]]b",
+    "path": "]b",
+    "isDir": false,
+    "git": true,
+    "via": "[\\[-\\]]b"
+  },
+  {
+    "body": "[\\[-\\]]b",
+    "path": "ab",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[z-a]b",
+    "path": "zb",
+    "isDir": false,
+    "git": true,
+    "via": "[z-a]b"
+  },
+  {
+    "body": "[z-a]b",
+    "path": "ab",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[z-a]b",
+    "path": "-b",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[z-a]b",
+    "path": "{b",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[9-1]Q",
+    "path": "9Q",
+    "isDir": false,
+    "git": true,
+    "via": "[9-1]Q"
+  },
+  {
+    "body": "[9-1]Q",
+    "path": "1Q",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[9-1]Q",
+    "path": "5Q",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[A-Z]*.cs",
+    "path": "Foo.cs",
+    "isDir": false,
+    "git": true,
+    "via": "[A-Z]*.cs"
+  },
+  {
+    "body": "[A-Z]*.cs",
+    "path": "foo.cs",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[a]Q",
+    "path": "aQ",
+    "isDir": false,
+    "git": true,
+    "via": "[a]Q"
+  },
+  {
+    "body": "a\\*b",
+    "path": "a*b",
+    "isDir": false,
+    "git": true,
+    "via": "a\\*b"
+  },
+  {
+    "body": "a\\*b",
+    "path": "axb",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "a\\[b",
+    "path": "a[b",
+    "isDir": false,
+    "git": true,
+    "via": "a\\[b"
+  },
+  {
+    "body": "a\\\\b",
+    "path": "a\\b",
+    "isDir": false,
+    "git": true,
+    "via": "a\\\\b"
+  },
+  {
+    "body": "a\\?b",
+    "path": "a?b",
+    "isDir": false,
+    "git": true,
+    "via": "a\\?b"
+  },
+  {
+    "body": "\\#hash",
+    "path": "#hash",
+    "isDir": false,
+    "git": true,
+    "via": "\\#hash"
+  },
+  {
+    "body": "\\!bang",
+    "path": "!bang",
+    "isDir": false,
+    "git": true,
+    "via": "\\!bang"
+  },
+  {
+    "body": "Generated\\ Files/x",
+    "path": "Generated Files/x",
+    "isDir": false,
+    "git": true,
+    "via": "Generated\\ Files/x"
+  },
+  {
+    "body": "Generated\\ Files/x",
+    "path": "Generated Files/y",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "Generated\\ Files/x",
+    "path": "Generated Files/x/y",
+    "isDir": false,
+    "git": true,
+    "via": "Generated\\ Files/x"
+  },
+  {
+    "body": "foo\\",
+    "path": "foo\\",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "foo\\",
+    "path": "foo",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "foo\\ ",
+    "path": "foo ",
+    "isDir": false,
+    "git": true,
+    "via": "foo\\ "
+  },
+  {
+    "body": "foo\\ ",
+    "path": "foo",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[bracket",
+    "path": "[bracket",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[bracket",
+    "path": "b",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "x[[y",
+    "path": "x[y",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "x[[y",
+    "path": "xy",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[[:alpha:]]",
+    "path": "b",
+    "isDir": false,
+    "git": true,
+    "via": "[[:alpha:]]"
+  },
+  {
+    "body": "[[:alpha:]]",
+    "path": "a]",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[[:alpha:]]",
+    "path": "1",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[[:digit:]]",
+    "path": "5",
+    "isDir": false,
+    "git": true,
+    "via": "[[:digit:]]"
+  },
+  {
+    "body": "[a[:digit:]b]Q",
+    "path": "aQ",
+    "isDir": false,
+    "git": true,
+    "via": "[a[:digit:]b]Q"
+  },
+  {
+    "body": "[a[:digit:]b]Q",
+    "path": "bQ",
+    "isDir": false,
+    "git": true,
+    "via": "[a[:digit:]b]Q"
+  },
+  {
+    "body": "[a[:digit:]b]Q",
+    "path": "5Q",
+    "isDir": false,
+    "git": true,
+    "via": "[a[:digit:]b]Q"
+  },
+  {
+    "body": "[\\]",
+    "path": "]",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[\\]",
+    "path": "\\",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[\\\\]",
+    "path": "\\",
+    "isDir": false,
+    "git": true,
+    "via": "[\\\\]"
+  },
+  {
+    "body": "[\\\\]",
+    "path": "]",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "a\\/b",
+    "path": "a/b",
+    "isDir": false,
+    "git": true,
+    "via": "a\\/b"
+  },
+  {
+    "body": "a\\/b",
+    "path": "ab",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[a/]x",
+    "path": "ax",
+    "isDir": false,
+    "git": true,
+    "via": "[a/]x"
+  },
+  {
+    "body": "[a/]x",
+    "path": "bracket/ax",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[!a/]z",
+    "path": "bz",
+    "isDir": false,
+    "git": true,
+    "via": "[!a/]z"
+  },
+  {
+    "body": "[.-0]x",
+    "path": ".x",
+    "isDir": false,
+    "git": true,
+    "via": "[.-0]x"
+  },
+  {
+    "body": "[.-0]x",
+    "path": "0x",
+    "isDir": false,
+    "git": true,
+    "via": "[.-0]x"
+  },
+  {
+    "body": "[.-0]x",
+    "path": "-x",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  },
+  {
+    "body": "[.-/]x",
+    "path": ".x",
+    "isDir": false,
+    "git": true,
+    "via": "[.-/]x"
+  },
+  {
+    "body": "[[]",
+    "path": "[",
+    "isDir": false,
+    "git": true,
+    "via": "[[]"
+  },
+  {
+    "body": "[[]",
+    "path": "a",
+    "isDir": false,
+    "git": false,
+    "via": ""
+  }
+]

@@ -91,7 +91,11 @@ Doc-heavy repos can curate ranking without unindexing anything: set
 stop outranking source in `code_search`. It applies at query time, so no reindex
 is needed; `prefix` narrows in, `rankExclude` pushes out, and the two intersect.
 `index_status` lists the active patterns in `warnings`, and a malformed glob
-warns and is skipped instead of failing the query.
+warns and is skipped instead of failing the query. Query globs (`rankExclude`,
+`pathGlob`) read the same `[abc]`/`[a-z]`/`[!…]` classes as the ignore dialect;
+there `\` stays a directory separator rather than an escape, a class cannot
+contain `/`, and there is no residual-form skip: an unterminated `[` or a POSIX
+class is read literally instead of warned and dropped.
 
 ## 4. MCP registration
 
@@ -213,8 +217,10 @@ Supported gitignore subset: `#` comments, `!` negation, `/` anchoring, trailing
 `[a-z]`, negation with `[!…]` or `[^…]` — and `\` escapes that take the magic
 out of `* ? [ ]` (and make a literal of space, `#`, `!`). Since 063/T14 these
 are matched, not skipped; the residual forms that still warn and get skipped
-are an unterminated `[`, POSIX `[:alpha:]`-style classes, an escaped separator
-`\/`, and a trailing `\`.
+are an unterminated `[`, POSIX `[:alpha:]`-style classes — nested in a set too
+(`[a[:digit:]b]` drops the whole pattern) — an escaped separator `\/`, an
+escaped trailing space (`foo\ `: the line is trimmed before validation), and a
+trailing `\`. The warning quotes the line exactly as the file holds it.
 
 `code_search` hybrid gained an identifier-exact branch: multi-token queries with
 code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens hit a

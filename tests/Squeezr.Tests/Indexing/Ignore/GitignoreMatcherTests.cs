@@ -210,6 +210,8 @@ public class GitignoreMatcherTests
     [InlineData("x[[y")]
     [InlineData("[]")]
     [InlineData("[[:alpha:]]x")]
+    [InlineData("[a[:digit:]b]Q")]
+    [InlineData("[\\]")]
     [InlineData("a\\/b")]
     [InlineData("dangling\\")]
     public void Parse_ResidualShapes_AreMarkedUnsupported(string raw)
@@ -219,6 +221,27 @@ public class GitignoreMatcherTests
         pattern.ShouldNotBeNull();
         pattern!.Unsupported.ShouldBeTrue(raw);
         pattern.Matches(raw, false).ShouldBeFalse(raw);
+    }
+
+    [Fact]
+    public void Parse_EscapedBackslashAsClassMember_IsExpressible()
+    {
+        var pattern = GitignoreMatcher.Parse("[\\\\]", IgnoreSource.Gitignore, ".gitignore", ".");
+
+        pattern.ShouldNotBeNull();
+        pattern!.Unsupported.ShouldBeFalse();
+        pattern.CompiledPattern.ShouldBe("[\\\\]");
+    }
+
+    [Fact]
+    public void Parse_EscapedTrailingSpace_IsResidualAndWarnsAboutTheLineAsWritten()
+    {
+        var pattern = GitignoreMatcher.Parse("foo\\ ", IgnoreSource.Gitignore, ".gitignore", ".");
+
+        pattern.ShouldNotBeNull();
+        pattern!.Unsupported.ShouldBeTrue();
+        GitignoreMatcher.FormatWarning(pattern.Raw, ".gitignore")
+            .ShouldBe("unsupported ignore pattern 'foo\\ ' in .gitignore; pattern skipped.");
     }
 
     [Fact]
