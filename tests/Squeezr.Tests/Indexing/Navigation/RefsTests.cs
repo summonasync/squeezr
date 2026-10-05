@@ -30,7 +30,7 @@ public class RefsTests
         var result = new RefLookup(workspace).Find("Add", null);
 
         result.Groups.Count.ShouldBe(2);
-        result.Groups.ShouldAllBe(g => g.File == "src/Calc.cs" && g.Refs.Count == 1);
+        result.Groups.ShouldAllBe(g => g.Definitions.ShouldHaveSingleItem().File == "src/Calc.cs" && g.Refs.Count == 1);
         result.Groups.Select(g => g.Refs[0].File).OrderBy(f => f).ShouldBe(["src/Other.cs", "src/Runner.cs"]);
     }
 

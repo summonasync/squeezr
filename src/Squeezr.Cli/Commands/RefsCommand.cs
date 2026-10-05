@@ -30,7 +30,12 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             var sw = Stopwatch.StartNew();
             var result = new RefLookup(workspaceRoot).Find(settings.Symbol, settings.Repo);
-            var refs = result.Groups.SelectMany(g => g.Refs).ToList();
+            // repo belongs in the key: two repos over the same relative layout (a checkout plus its
+            // worktree) hold different callsites that render identical paths
+            var refs = result.Groups
+                .SelectMany(g => g.Refs, (g, r) => new { Repo = g.Repo, r.File, r.Line, r.Kind, r.EnclosingSymbol })
+                .DistinctBy(x => (x.Repo, x.File, x.Line, x.Kind, x.EnclosingSymbol))
+                .ToList();
 
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "refs",
                 new { symbol = settings.Symbol, repo = settings.Repo },
@@ -42,6 +47,9 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
                 JsonOutput.Write(new
                 {
                     symbol = result.Symbol,
+                    definitions = result.Groups
+                        .SelectMany(g => g.Definitions, (g, d) => new { Repo = g.Repo, d.Kind, d.File, d.StartLine, d.EndLine })
+                        .ToList(),
                     refs
                 });
             }
@@ -49,21 +57,17 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
             {
                 foreach (var group in result.Groups)
                 {
-                    AnsiConsole.MarkupLine($"[bold]{group.Name.EscapeMarkup()}[/] ({group.Kind}) " +
-                                           $"{group.Repo.EscapeMarkup()}:{group.File.EscapeMarkup()}:{group.StartLine}-{group.EndLine}");
+                    RenderHeader(group);
                     if (group.Refs.Count == 0)
                     {
                         AnsiConsole.MarkupLine("  no references");
                         continue;
                     }
 
-                    foreach (var fileGroup in group.Refs.GroupBy(r => r.File))
+                    foreach (var hit in group.Refs)
                     {
-                        foreach (var hit in fileGroup)
-                        {
-                            var enclosing = hit.EnclosingSymbol is null ? string.Empty : $" (in {hit.EnclosingSymbol.EscapeMarkup()})";
-                            AnsiConsole.MarkupLine($"  {hit.File.EscapeMarkup()}:{hit.Line} {hit.Kind.EscapeMarkup()}{enclosing}");
-                        }
+                        var enclosing = hit.EnclosingSymbol is null ? string.Empty : $" (in {hit.EnclosingSymbol.EscapeMarkup()})";
+                        AnsiConsole.MarkupLine($"  {hit.File.EscapeMarkup()}:{hit.Line} {hit.Kind.EscapeMarkup()}{enclosing}");
                     }
                 }
             }
@@ -73,6 +77,25 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
         catch (WorkspaceException ex)
         {
             return CommandError.Report(ex, settings.Json);
+        }
+    }
+
+    private static void RenderHeader(SymbolRefGroup group)
+    {
+        if (group.Definitions.Count == 1)
+        {
+            var sole = group.Definitions[0];
+            AnsiConsole.MarkupLine($"[bold]{group.Name.EscapeMarkup()}[/] ({sole.Kind}) " +
+                                   $"{group.Repo.EscapeMarkup()}:{sole.File.EscapeMarkup()}:{sole.StartLine}-{sole.EndLine}");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[bold]{group.Name.EscapeMarkup()}[/] ({group.Definitions.Count} definitions, " +
+                               $"{group.Refs.Count} references)");
+        foreach (var definition in group.Definitions)
+        {
+            AnsiConsole.MarkupLine($"  def {definition.Kind.EscapeMarkup()} " +
+                                   $"{group.Repo.EscapeMarkup()}:{definition.File.EscapeMarkup()}:{definition.StartLine}-{definition.EndLine}");
         }
     }
 }

@@ -29,7 +29,7 @@ public sealed class FindReferencesTool
         _identity = identity;
     }
 
-    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
+    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
     [McpServerTool(Name = "find_references", Title = "Find references")]
     public object Find(string symbol, string? repo = null) =>
         _gate.Run(() => FindCore(symbol, repo));
@@ -92,6 +92,7 @@ public sealed class FindReferencesTool
     {
         var flattened = result.Groups
             .SelectMany(g => g.Refs.Select(r => (g.Repo, Ref: r)))
+            .DistinctBy(x => (x.Repo, x.Ref.File, x.Ref.Line, x.Ref.Kind, x.Ref.EnclosingSymbol))
             .ToList();
         if (flattened.All(x => x.Ref.EnclosingSymbol is not null))
         {
@@ -143,7 +144,9 @@ public sealed class FindReferencesTool
         FreshnessGuard.CheckAndRefresh(
             root,
             result.Groups
-                .SelectMany(g => g.Refs.Select(r => (g.Repo, r.File)).Append((g.Repo, g.File)))
+                .SelectMany(g => g.Refs
+                    .Select(r => (g.Repo, r.File))
+                    .Concat(g.Definitions.Select(d => (g.Repo, d.File))))
                 .Distinct()
                 .Take(GuardCandidateLimit)
                 .ToList(),

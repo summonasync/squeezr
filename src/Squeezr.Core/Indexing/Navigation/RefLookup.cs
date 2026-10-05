@@ -6,13 +6,14 @@ namespace Squeezr.Core.Indexing.Navigation;
 
 public sealed record RefHit(string File, int Line, string Kind, string? EnclosingSymbol);
 
+public sealed record RefDefinition(string Kind, string File, int StartLine, int EndLine);
+
+// one block per distinct reference set: same-name definitions that resolve to the very same
+// callsites share a block and only contribute their declaration spans
 public sealed record SymbolRefGroup(
     string Name,
-    string Kind,
     string Repo,
-    string File,
-    int StartLine,
-    int EndLine,
+    IReadOnlyList<RefDefinition> Definitions,
     IReadOnlyList<RefHit> Refs);
 
 public sealed record RefLookupResult(
@@ -31,7 +32,7 @@ public sealed class RefLookup
     {
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
         var guard = SecretGuardReader.Load(_workspaceRoot);
-        var groups = new List<SymbolRefGroup>();
+        var blocks = new List<RefBlock>();
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
         foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
@@ -54,36 +55,27 @@ public sealed class RefLookup
                     continue;
                 }
 
-                var refs = new List<RefHit>();
-                foreach (var reference in store.ListRefsByFromSymbol(symbol.Id).OrderBy(r => r.FileId).ThenBy(r => r.Line))
-                {
-                    var file = store.FindFileById(reference.FileId);
-                    if (file is null)
-                    {
-                        refs.Add(new RefHit("?", reference.Line, reference.Kind, reference.EnclosingSymbol));
-                        continue;
-                    }
-
-                    if (guard.TryWithhold(file.Path))
-                    {
-                        continue;
-                    }
-
-                    refs.Add(new RefHit(file.Path, reference.Line, reference.Kind, reference.EnclosingSymbol));
-                }
-
-                groups.Add(new SymbolRefGroup(
-                    symbol.Name,
+                var refs = ReadRefs(store, guard, symbol.Id);
+                var definition = new RefDefinition(
                     symbol.Kind,
-                    repoDoc.Name,
                     declFile?.Path ?? string.Empty,
                     symbol.StartLine,
-                    symbol.EndLine,
-                    refs));
+                    symbol.EndLine);
+                var shared = blocks.Find(b => b.Repo == repoDoc.Name
+                                              && b.Name == symbol.Name
+                                              && b.Refs.SequenceEqual(refs));
+                if (shared is null)
+                {
+                    blocks.Add(new RefBlock(symbol.Name, repoDoc.Name, definition, refs));
+                }
+                else
+                {
+                    shared.Definitions.Add(definition);
+                }
             }
         }
 
-        if (groups.Count == 0)
+        if (blocks.Count == 0)
         {
             throw guard.FirstWithheldPath is { } hidden
                 ? guard.Refusal(hidden)
@@ -91,6 +83,42 @@ public sealed class RefLookup
                     $"No symbol named '{name}' in the index. Run 'squeezr index' if the code changed.");
         }
 
+        var groups = blocks
+            .Select(b => new SymbolRefGroup(b.Name, b.Repo, b.Definitions, b.Refs))
+            .ToList();
         return new RefLookupResult(name, groups, guard.Warnings);
+    }
+
+    private static List<RefHit> ReadRefs(MetaStore store, SecretGuardReader guard, long symbolId)
+    {
+        var refs = new List<RefHit>();
+        var seen = new HashSet<(string File, int Line, string Kind, string? Enclosing)>();
+        foreach (var reference in store.ListRefsByFromSymbol(symbolId).OrderBy(r => r.FileId).ThenBy(r => r.Line))
+        {
+            var file = store.FindFileById(reference.FileId);
+            if (file is not null && guard.TryWithhold(file.Path))
+            {
+                continue;
+            }
+
+            var hit = new RefHit(file?.Path ?? "?", reference.Line, reference.Kind, reference.EnclosingSymbol);
+            if (seen.Add((hit.File, hit.Line, hit.Kind, hit.EnclosingSymbol)))
+            {
+                refs.Add(hit);
+            }
+        }
+
+        return refs;
+    }
+
+    private sealed class RefBlock(string name, string repo, RefDefinition definition, List<RefHit> refs)
+    {
+        public string Name { get; } = name;
+
+        public string Repo { get; } = repo;
+
+        public List<RefDefinition> Definitions { get; } = [definition];
+
+        public List<RefHit> Refs { get; } = refs;
     }
 }

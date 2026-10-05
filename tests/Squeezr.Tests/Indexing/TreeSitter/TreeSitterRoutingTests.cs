@@ -139,8 +139,9 @@ public class TreeSitterRoutingTests
 
         var group = result.Groups.ShouldHaveSingleItem();
         group.Name.ShouldBe("mul");
-        group.Kind.ShouldBe("function");
-        group.File.ShouldBe("src/util.js");
+        var definition = group.Definitions.ShouldHaveSingleItem();
+        definition.Kind.ShouldBe("function");
+        definition.File.ShouldBe("src/util.js");
         group.Refs.ShouldContain(r =>
             r.File == "src/app.js" && r.Line == 1 && r.Kind == "import");
         group.Refs.ShouldContain(r =>
@@ -159,7 +160,7 @@ public class TreeSitterRoutingTests
 
         var result = new RefLookup(workspace).Find("mul", null);
         var group = result.Groups.ShouldHaveSingleItem();
-        group.File.ShouldBe("src/util.js");
+        group.Definitions.ShouldHaveSingleItem().File.ShouldBe("src/util.js");
         group.Refs.ShouldContain(r => r.File == "src/app.js" && r.Line == 1 && r.Kind == "import");
         group.Refs.ShouldContain(r => r.File == "src/app.js" && r.Line == 9 && r.Kind == "call");
     }
