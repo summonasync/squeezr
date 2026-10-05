@@ -140,6 +140,9 @@ public class SecretGuardRepoMapperTests
         }
 
         new WorkspaceIndexer().Index(vault);
+        // a repo of nothing but secrets indexes to an empty store now, so the map's read-side withholding is
+        // pinned over a store that predates the guard: the rows go in by hand, past the ingestion refusal
+        SecretGuardFixture.PlantPreGuardRows(vault, ["deploy/keys/monkey.pem", ".env"]);
         return vault;
     }
 }

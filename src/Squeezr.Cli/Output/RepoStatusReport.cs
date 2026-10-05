@@ -9,7 +9,8 @@ public sealed record RepoStatusReport(
     IReadOnlyList<string> StaleFiles,
     DateTime? LastIndexedAt,
     TimeSpan? IndexAge,
-    RepoIgnoredReport? Ignored = null);
+    RepoIgnoredReport? Ignored = null,
+    RepoGuardReport? Guard = null);
 
 public sealed record RepoIgnoredReport(
     int Files,

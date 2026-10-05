@@ -15,6 +15,22 @@ public sealed class WorkspaceIndexer
 
     private static readonly string[] ProjectLayoutExtensions = [".csproj", ".sln", ".slnx", ".props", ".targets"];
 
+    // Why a stored row left the index. The reason is always reported; for a row the guard refuses the path
+    // never is, because the name of the secret is exactly what such a warning would leak.
+    private enum StoreDrop
+    {
+        RepositoryGone,
+        MissingOnDisk,
+        Unreadable,
+    }
+
+    private static string StoreDropReason(StoreDrop drop) => drop switch
+    {
+        StoreDrop.RepositoryGone => "repository is not in the workspace manifest",
+        StoreDrop.MissingOnDisk => "file is missing on disk",
+        _ => "unreadable",
+    };
+
     public IndexResult Index(
         string workspaceRoot,
         string? repoName = null,
@@ -62,6 +78,7 @@ public sealed class WorkspaceIndexer
         {
             var warnings = new List<string>();
             var textCache = new Dictionary<uint, string>();
+            var guard = SecretGuardIngestion.Load(workspaceRoot);
 
             if (reembed && embeddings is not null && vectorStore is not null)
             {
@@ -99,6 +116,7 @@ public sealed class WorkspaceIndexer
             {
                 var manifestNames = manifest.Repos.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var reposById = store.ListRepos().ToDictionary(r => r.Id);
+                var protectedDrops = new Dictionary<StoreDrop, int>();
                 foreach (var file in store.ListAllFiles())
                 {
                     if (reposById.TryGetValue(file.RepoId, out var repoDoc) && manifestNames.Contains(repoDoc.Name))
@@ -106,12 +124,15 @@ public sealed class WorkspaceIndexer
                         continue;
                     }
 
-                    warnings.Add($"dropping '{file.Path}' from index store: repository is not in the workspace manifest");
+                    NoteStoreDrop(
+                        guard, protectedDrops, warnings, file.Path, StoreDrop.RepositoryGone);
                     reaps.Add(CaptureReap(store, file));
                     CascadeSemanticRecords(file.Id, store);
                     store.DeleteFile(file.Id);
                     tombstones.Add((file.RepoId, file.Id));
                 }
+
+                FlushStoreDrops(protectedDrops, warnings);
             }
 
             var deferredReaps = works.Sum(w => w.DeferredReaps) +
@@ -131,7 +152,10 @@ public sealed class WorkspaceIndexer
 
             return new IndexResult(
                 works.Select(w => w.Result).ToList(), DateTime.UtcNow, warnings,
-                deferredReaps, store.CountPendingReaps());
+                deferredReaps, store.CountPendingReaps(),
+                works.Sum(w => w.Result.GuardWithheld),
+                works.Sum(w => w.Result.GuardWithheldBuiltIns),
+                works.Sum(w => w.Result.GuardDropped));
         }
     }
 
@@ -252,10 +276,27 @@ public sealed class WorkspaceIndexer
             var repoDoc = store.FindRepo(repo.Name)
                           ?? throw new WorkspaceException($"Repository '{repo.Name}' is missing from the index store.");
             var repoRoot = ResolveRepoRoot(workspaceRoot, repo);
-            var fullPath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
             var now = DateTime.UtcNow;
             var existing = store.ListFiles(repoDoc.Id)
                 .FirstOrDefault(f => string.Equals(f.Path, relativePath, StringComparison.Ordinal));
+            var guard = SecretGuardIngestion.Load(workspaceRoot);
+
+            // The guard answers before the path is turned into a file: a protected name is never opened here,
+            // never reported unreadable, and never written back. A row that predates the guard leaves the same
+            // way an ignored path does — dropped, not thrown at — because this route is what a read call
+            // triggers, and a daemon must not fail a request over a secret it is refusing.
+            if (guard.Deny(relativePath))
+            {
+                if (existing is not null)
+                {
+                    DropFile(existing, store, vectorStore, warnings);
+                    SaveWithheldState(store, repo.Name, repoDoc, now, guard, rowDropped: true);
+                }
+
+                return null;
+            }
+
+            var fullPath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
             var rules = IgnoreRuleset.ForFile(repoRoot, config, relativePath, warnings.Add);
 
             if (embeddings is not null && vectorStore is not null)
@@ -327,7 +368,7 @@ public sealed class WorkspaceIndexer
 
                 SemanticIndexPhase.Run(
                     repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
-                    config.Indexing.NoSemantic, warnings.Add);
+                    config.Indexing.NoSemantic, guard, warnings.Add);
                 var tsResult = TreeSitterIndexPhase.Run(
                     repoRoot, repoDoc, store, tsTargets, textCache, config.Chunking, config.Indexing.NoSemantic,
                     new TreeSitterProvider(config), warnings.Add);
@@ -365,7 +406,10 @@ public sealed class WorkspaceIndexer
                     Symbols = store.CountSymbols(repoDoc.Id),
                     Chunks = store.CountChunks(repoDoc.Id),
                     IgnoredTotal = priorState?.Stats.IgnoredTotal ?? 0,
-                    IgnoredBySource = priorState?.Stats.IgnoredBySource
+                    IgnoredBySource = priorState?.Stats.IgnoredBySource,
+                    GuardWithheld = priorState?.Stats.GuardWithheld ?? 0,
+                    GuardWithheldBuiltIns = priorState?.Stats.GuardWithheldBuiltIns ?? 0,
+                    GuardDropped = priorState?.Stats.GuardDropped ?? 0
                 }
             });
             repoDoc.LastIndexedAt = now;
@@ -380,6 +424,38 @@ public sealed class WorkspaceIndexer
         List<FileDocument> Changed,
         List<FileReap> Reaps,
         int DeferredReaps);
+
+    // The ledger's row counters are recomputed from the store, the guard counters are not: this route decides
+    // one path, so whatever earlier passes refused has to survive the write. Carrying the tally forward is what
+    // the last full pass left in place of IgnoredTotal, and a single-file refusal must not erase it.
+    private static void SaveWithheldState(
+        MetaStore store,
+        string repoKey,
+        RepoDocument repoDoc,
+        DateTime now,
+        SecretGuardIngestion guard,
+        bool rowDropped)
+    {
+        var prior = store.GetIndexState(repoKey);
+        store.SaveIndexState(new IndexStateDocument
+        {
+            RepoKey = repoKey,
+            LastFullIndexAt = now,
+            Stats = new IndexStateStats
+            {
+                Files = store.CountFiles(repoDoc.Id),
+                Symbols = store.CountSymbols(repoDoc.Id),
+                Chunks = store.CountChunks(repoDoc.Id),
+                IgnoredTotal = prior?.Stats.IgnoredTotal ?? 0,
+                IgnoredBySource = prior?.Stats.IgnoredBySource,
+                GuardWithheld = (prior?.Stats.GuardWithheld ?? 0) + guard.Withheld,
+                GuardWithheldBuiltIns = (prior?.Stats.GuardWithheldBuiltIns ?? 0) + guard.WithheldByBuiltIns,
+                GuardDropped = (prior?.Stats.GuardDropped ?? 0) + (rowDropped ? 1 : 0)
+            }
+        });
+        repoDoc.LastIndexedAt = now;
+        store.UpsertRepo(repoDoc);
+    }
 
     private static RepoWork IndexRepo(
         string workspaceRoot,
@@ -406,13 +482,22 @@ public sealed class WorkspaceIndexer
 
         progress?.PhaseStarted(repo.Name, IndexPhase.Walk, 0);
         var rules = IgnoreRuleset.For(repoRoot, config, warnings.Add);
-        var walk = RepoFileWalker.Walk(repoRoot, rules, config.Indexing.MaxFileSizeKb, warnings.Add);
+        var guard = SecretGuardIngestion.Load(workspaceRoot);
+        var walk = RepoFileWalker.Walk(repoRoot, rules, guard, config.Indexing.MaxFileSizeKb, warnings.Add);
+        if (guard.WarningLine() is { } withheld)
+        {
+            warnings.Add(withheld);
+        }
+
         progress?.PhaseStarted(repo.Name, IndexPhase.Files, walk.Files.Count);
         var skipped = walk.Skipped;
         var dbFiles = store.ListFiles(repoDoc.Id);
         var dbByPath = dbFiles.ToDictionary(f => f.Path, StringComparer.Ordinal);
         var walkedPaths = walk.Files.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
         var deleted = dbFiles.Where(f => !walkedPaths.Contains(f.Path)).ToList();
+        // a protected row can only reach here through the guard's own refusal — nothing walked it, so nothing
+        // in this store may still hold it. The name stays out of the count; Deleted keeps it in the ledger.
+        var deletedProtected = deleted.Count(f => guard.IsProtected(f.Path));
         var reaps = new List<FileReap>(deleted.Count);
         var now = DateTime.UtcNow;
         var added = 0;
@@ -515,10 +600,11 @@ public sealed class WorkspaceIndexer
 
         var semantic = pacing is null
             ? SemanticIndexPhase.Run(
-                repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warnings.Add, progress)
+                repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic,
+                guard, warnings.Add, progress)
             : SemanticIndexPhase.RunPooled(
                 pacing.Sessions, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
-                noSemantic, warnings.Add, progress, syncDocuments: touched is not null);
+                noSemantic, guard, warnings.Add, progress, syncDocuments: touched is not null);
         skipped += semantic.Skipped;
         if (pacing is not null)
         {
@@ -561,14 +647,19 @@ public sealed class WorkspaceIndexer
                 Symbols = store.CountSymbols(repoDoc.Id),
                 Chunks = store.CountChunks(repoDoc.Id),
                 IgnoredTotal = walk.Ignored,
-                IgnoredBySource = ignoredSnapshot
+                IgnoredBySource = ignoredSnapshot,
+                GuardWithheld = guard.Withheld,
+                GuardWithheldBuiltIns = guard.WithheldByBuiltIns,
+                GuardDropped = deletedProtected
             }
         });
         repoDoc.LastIndexedAt = now;
         store.UpsertRepo(repoDoc);
 
         return new RepoWork(
-            new RepoIndexResult(repo.Name, added, modified, reaps.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot),
+            new RepoIndexResult(
+                repo.Name, added, modified, reaps.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot,
+                guard.Withheld, guard.WithheldByBuiltIns, deletedProtected),
             changed,
             reaps,
             deferredReaps);
@@ -602,6 +693,35 @@ public sealed class WorkspaceIndexer
         store.DeleteRefsByFile(fileId);
         store.DeleteSymbolsByFile(fileId);
         store.DeleteChunksByFile(fileId);
+    }
+
+    // A drop warning is the one line where a secret name could still reach a machine-readable stream, so a
+    // path the guard refuses trades its name for a count and keeps the reason.
+    private static void NoteStoreDrop(
+        SecretGuardIngestion guard,
+        Dictionary<StoreDrop, int> protectedDrops,
+        List<string> warnings,
+        string relativePath,
+        StoreDrop reason,
+        string detail = "")
+    {
+        if (guard.IsProtected(relativePath))
+        {
+            protectedDrops[reason] = protectedDrops.GetValueOrDefault(reason) + 1;
+            return;
+        }
+
+        warnings.Add($"dropping '{relativePath}' from index store: {StoreDropReason(reason)}{detail}");
+    }
+
+    private static void FlushStoreDrops(Dictionary<StoreDrop, int> protectedDrops, List<string> warnings)
+    {
+        foreach (var (reason, count) in protectedDrops)
+        {
+            warnings.Add(
+                $"dropping {count} protected path(s) from index store: {StoreDropReason(reason)} " +
+                "(paths withheld by the secret guard)");
+        }
     }
 
     // Identity is captured while the row is still in front of us: the journal has to name the file an id
@@ -853,12 +973,14 @@ public sealed class WorkspaceIndexer
         }
 
         var deferredReaps = 0;
+        var guard = SecretGuardIngestion.Load(workspaceRoot);
+        var protectedDrops = new Dictionary<StoreDrop, int>();
         foreach (var file in allFiles)
         {
             if (!reposById.TryGetValue(file.RepoId, out var repoDoc)
                 || !entriesByName.TryGetValue(repoDoc.Name, out var entry))
             {
-                warnings.Add($"dropping '{file.Path}' from index store: repository is not in the workspace manifest");
+                NoteStoreDrop(guard, protectedDrops, warnings, file.Path, StoreDrop.RepositoryGone);
                 deferredReaps += DropFile(file, store, vectorStore, warnings);
                 continue;
             }
@@ -875,7 +997,7 @@ public sealed class WorkspaceIndexer
                     var fullPath = Path.Combine(ResolveRepoRoot(workspaceRoot, entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
                     if (!File.Exists(fullPath))
                     {
-                        warnings.Add($"dropping '{file.Path}' from index store: file is missing on disk");
+                        NoteStoreDrop(guard, protectedDrops, warnings, file.Path, StoreDrop.MissingOnDisk);
                         deferredReaps += DropFile(file, store, vectorStore, warnings);
                         continue;
                     }
@@ -886,7 +1008,8 @@ public sealed class WorkspaceIndexer
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
-                        warnings.Add($"dropping '{file.Path}' from index store: unreadable ({ex.Message})");
+                        NoteStoreDrop(
+                            guard, protectedDrops, warnings, file.Path, StoreDrop.Unreadable, $" ({ex.Message})");
                         deferredReaps += DropFile(file, store, vectorStore, warnings);
                         continue;
                     }
@@ -904,6 +1027,7 @@ public sealed class WorkspaceIndexer
             }
         }
 
+        FlushStoreDrops(protectedDrops, warnings);
         writer.Write(targetPath);
         return deferredReaps;
     }

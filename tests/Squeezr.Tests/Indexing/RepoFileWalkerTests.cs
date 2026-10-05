@@ -1,5 +1,6 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Ignore;
 
 namespace Squeezr.Tests.Indexing;
@@ -22,7 +23,7 @@ public class RepoFileWalkerTests
 
         var config = SqueezrConfig.CreateDefault();
         var rules = IgnoreRuleset.For(root, config);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
 
         result.Files.Select(f => f.RelativePath).ShouldBe([
             "docs/readme.md",
@@ -51,7 +52,7 @@ public class RepoFileWalkerTests
         config.Indexing.Ignore.ShouldContain("**/.idea/**");
 
         var rules = IgnoreRuleset.For(root, config);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["src/Program.cs"]);
         result.Skipped.ShouldBe(0);
@@ -65,7 +66,7 @@ public class RepoFileWalkerTests
         WriteFile(root, "sub/b.js", "function b() { }");
 
         var rules = EmptyRuleset(root);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, 512);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), 512);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["a.cs", "sub/b.js"]);
         result.Skipped.ShouldBe(0);
@@ -83,7 +84,7 @@ public class RepoFileWalkerTests
         var warnings = new List<string>();
 
         var rules = EmptyRuleset(root);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, 512, warnings.Add);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), 512, warnings.Add);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["free.cs"]);
         result.Skipped.ShouldBe(1);
@@ -109,7 +110,7 @@ public class RepoFileWalkerTests
         }
 
         var rules = EmptyRuleset(root);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, 512);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), 512);
 
         result.Files.Select(f => f.RelativePath).ShouldBe(["real/a.cs"]);
     }
@@ -125,7 +126,7 @@ public class RepoFileWalkerTests
 
         var config = SqueezrConfig.CreateDefault();
         var rules = IgnoreRuleset.For(root, config);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
 
         result.Files.Select(f => f.RelativePath).ShouldBe([".gitignore", "src/keep.cs"]);
         result.Ignored.ShouldBe(2);
@@ -145,7 +146,7 @@ public class RepoFileWalkerTests
 
         var config = SqueezrConfig.CreateDefault();
         var rules = IgnoreRuleset.For(root, config);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
 
         result.Ignored.ShouldBe(3);
         result.Skipped.ShouldBe(0);
@@ -163,7 +164,7 @@ public class RepoFileWalkerTests
 
         var config = SqueezrConfig.CreateDefault();
         var rules = IgnoreRuleset.For(root, config);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
 
         result.Ignored.ShouldBe(2);
         result.IgnoredBySource[IgnoreSource.Gitignore].ShouldBe(2);
@@ -180,7 +181,7 @@ public class RepoFileWalkerTests
 
         var config = SqueezrConfig.CreateDefault();
         var rules = IgnoreRuleset.For(root, config);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
 
         result.Ignored.ShouldBe(0);
         result.IgnoredBySource.ShouldNotContainKey(IgnoreSource.Gitignore);
@@ -199,7 +200,7 @@ public class RepoFileWalkerTests
             Indexing = SqueezrConfig.CreateDefault().Indexing with { RespectGitignore = false }
         };
         var rules = IgnoreRuleset.For(root, config);
-        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
 
         result.Files.Select(f => f.RelativePath).ShouldContain("build/deep.js");
     }
@@ -216,9 +217,9 @@ public class RepoFileWalkerTests
 
         var config = SqueezrConfig.CreateDefault();
         var rules = IgnoreRuleset.For(root, config);
-        var counted = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, config.Indexing.MaxFileSizeKb);
+        var counted = Squeezr.Core.Indexing.RepoFileWalker.Walk(root, rules, Guard(root), config.Indexing.MaxFileSizeKb);
         var uncounted = Squeezr.Core.Indexing.RepoFileWalker.Walk(
-            root, rules, config.Indexing.MaxFileSizeKb, countIgnoredSubtrees: false);
+            root, rules, Guard(root), config.Indexing.MaxFileSizeKb, countIgnoredSubtrees: false);
 
         counted.Ignored.ShouldBe(3);
         uncounted.Files.Select(f => f.RelativePath).ShouldBe(counted.Files.Select(f => f.RelativePath));
@@ -227,6 +228,8 @@ public class RepoFileWalkerTests
         uncounted.IgnoredBySource[IgnoreSource.Gitignore].ShouldBe(1);
         uncounted.IgnoredBySource.Values.Sum().ShouldBe(uncounted.Ignored);
     }
+
+    private static SecretGuardIngestion Guard(string root) => SecretGuardIngestion.Load(root);
 
     private static IgnoreRuleset EmptyRuleset(string root)
     {

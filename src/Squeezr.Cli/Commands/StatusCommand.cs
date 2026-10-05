@@ -63,6 +63,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             table.AddColumn("Symbols");
             table.AddColumn("Chunks");
             table.AddColumn("Ignored");
+            table.AddColumn("Withheld");
+            table.AddColumn("Dropped");
             table.AddColumn("Last indexed");
 
             foreach (var repo in status.Repos)
@@ -74,10 +76,17 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                     repo.Symbols.ToString(),
                     repo.Chunks.ToString(),
                     repo.IgnoredTotal > 0 ? repo.IgnoredTotal.ToString() : "-",
+                    repo.GuardWithheld.ToString(),
+                    repo.GuardDropped.ToString(),
                     repo.LastIndexedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-");
             }
 
             AnsiConsole.Write(table);
+
+            if (RepoGuardReport.FromTally(status.Repos) is { } guard)
+            {
+                AnsiConsole.MarkupLine($"[grey]{guard.Warning().EscapeMarkup()}[/]");
+            }
 
             if (config is not null)
             {

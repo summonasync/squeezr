@@ -15,6 +15,7 @@ public static class FreshnessGuard
     {
         var refreshed = new List<string>();
         var stale = new List<string>();
+        var guard = SecretGuardIngestion.Load(workspaceRoot);
 
         WorkspaceManifest manifest;
         try
@@ -30,6 +31,14 @@ public static class FreshnessGuard
         {
             try
             {
+                // a protected path is never re-read from here: the row it would refresh may only exist in a
+                // store that predates the guard, and this route is how such a secret comes straight back.
+                // A skip, not a withholding — the tally belongs to the pass that refuses entry.
+                if (guard.IsProtected(candidate.Path))
+                {
+                    continue;
+                }
+
                 if (IsFresh(workspaceRoot, manifest, candidate))
                 {
                     continue;

@@ -34,16 +34,20 @@ public static class StaleFileDetector
             }
 
             var rules = IgnoreRuleset.For(repoRoot, config);
+            var guard = SecretGuardIngestion.Load(workspaceRoot);
             // staleness reads Files only; counting the pruned subtrees would walk 30k+ paths nobody reports
-            var walk = RepoFileWalker.Walk(repoRoot, rules, config.Indexing.MaxFileSizeKb, countIgnoredSubtrees: false);
+            var walk = RepoFileWalker.Walk(
+                repoRoot, rules, guard, config.Indexing.MaxFileSizeKb, countIgnoredSubtrees: false);
             var dbByPath = dbFiles.ToDictionary(f => f.Path, StringComparer.Ordinal);
             var walkedPaths = walk.Files.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
 
             stale.AddRange(walk.Files
                 .Where(f => !dbByPath.TryGetValue(f.RelativePath, out var doc) || doc.Sha256 != f.Sha256)
                 .Select(f => Key(repo.Name, f.RelativePath)));
+            // a protected row is stale by construction — the pass that meets it drops it — and naming it in a
+            // report is the exposure the guard exists to close, so it is counted, not listed
             stale.AddRange(dbFiles
-                .Where(f => !walkedPaths.Contains(f.Path))
+                .Where(f => !walkedPaths.Contains(f.Path) && !guard.IsProtected(f.Path))
                 .Select(f => Key(repo.Name, f.Path)));
         }
 

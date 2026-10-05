@@ -11,6 +11,7 @@ public sealed class SecretGuardReader
 {
     private const string RefusalReason = "protected by squeezr's built-in secret guard: never indexed, never rendered";
 
+    private readonly SecretGuard.Profile _profile;
     private readonly IReadOnlyList<string> _extraPatterns;
     private readonly string? _configReadFailure;
     private int _withheld;
@@ -20,6 +21,7 @@ public sealed class SecretGuardReader
     private SecretGuardReader(IReadOnlyList<string> extraPatterns, string? configReadFailure = null)
     {
         _extraPatterns = extraPatterns;
+        _profile = new SecretGuard.Profile(extraPatterns);
         _configReadFailure = configReadFailure;
     }
 
@@ -62,8 +64,16 @@ public sealed class SecretGuardReader
 
     // agents copy directory-shaped paths, and the classifier reads the last segment: an empty trailing
     // one would hide a live secret behind a "not found" answer, so the separator goes here, not in T1
-    public bool IsProtected(string relativePath) =>
-        SecretGuard.IsProtected(relativePath.TrimEnd('/', '\\'), _extraPatterns);
+    public bool IsProtected(string relativePath) => _profile.IsProtected(Trim(relativePath));
+
+    // origin of a decision, for the surfaces that report a count and have to say where the mask came from
+    public bool MatchesBuiltIns(string relativePath) => _profile.MatchesBuiltIns(Trim(relativePath));
+
+    private static string Trim(string relativePath)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+        return relativePath.TrimEnd('/', '\\');
+    }
 
     public bool TryWithhold(string relativePath)
     {
@@ -75,9 +85,7 @@ public sealed class SecretGuardReader
         if (_withheld == 0)
         {
             _firstWithheldPath = relativePath;
-            // the two-argument form everywhere on purpose: an empty extension list is the built-in half,
-            // and the single-argument overload is not a contract this slice may lean on
-            _firstMatchedBuiltIns = SecretGuard.IsProtected(relativePath, []);
+            _firstMatchedBuiltIns = MatchesBuiltIns(relativePath);
         }
 
         _withheld++;
@@ -88,7 +96,7 @@ public sealed class SecretGuardReader
 
     private string Format()
     {
-        var source = _firstMatchedBuiltIns ? "built-in patterns" : "indexing.secretGuardExtra";
+        var source = _firstMatchedBuiltIns ? SecretGuard.BuiltInSourceName : SecretGuard.ConfiguredSourceName;
         return $"secret guard: {_withheld} result(s) withheld ('{_firstWithheldPath}' matches {source})";
     }
 }

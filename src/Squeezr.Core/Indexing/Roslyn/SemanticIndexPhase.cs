@@ -20,6 +20,7 @@ public static class SemanticIndexPhase
         IReadOnlyDictionary<string, FileDocument> dbFilesByPath,
         SqueezrConfig config,
         bool noSemantic,
+        SecretGuardIngestion guard,
         Action<string> warning,
         IIndexProgress? progress = null)
     {
@@ -42,7 +43,8 @@ public static class SemanticIndexPhase
         using (session)
         {
             return RunWithSession(
-                session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic, warning, progress);
+                session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config, noSemantic,
+                guard, warning, progress);
         }
     }
 
@@ -56,6 +58,7 @@ public static class SemanticIndexPhase
         IReadOnlyDictionary<string, FileDocument> dbFilesByPath,
         SqueezrConfig config,
         bool noSemantic,
+        SecretGuardIngestion guard,
         Action<string> warning,
         IIndexProgress? progress = null,
         bool syncDocuments = false)
@@ -85,7 +88,7 @@ public static class SemanticIndexPhase
 
             var result = RunWithSession(
                 session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
-                noSemantic, warning, progress);
+                noSemantic, guard, warning, progress);
 
             if (pooled && session.RequiresReopen && sessions.ShouldReopen(repoRoot, session.RejectedPaths))
             {
@@ -115,6 +118,7 @@ public static class SemanticIndexPhase
         IReadOnlyDictionary<string, FileDocument> dbFilesByPath,
         SqueezrConfig config,
         bool noSemantic,
+        SecretGuardIngestion guard,
         Action<string> warning,
         IIndexProgress? progress = null)
     {
@@ -145,7 +149,7 @@ public static class SemanticIndexPhase
             {
                 if (session.HasUnsynced(file.RelativePath))
                 {
-                    warning($"skipped '{file.RelativePath}': the reused session could not read it; previous data kept");
+                    warning($"skipped {guard.Describe(file.RelativePath)}: the reused session could not read it; previous data kept");
                     skipped++;
                     (deferred ??= []).Add(file.RelativePath);
                     continue;
@@ -158,7 +162,7 @@ public static class SemanticIndexPhase
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    warning($"skipped '{file.RelativePath}': unreadable ({ex.Message})");
+                    warning($"skipped {guard.Describe(file.RelativePath)}: unreadable ({ex.Message})");
                     skipped++;
                     (deferred ??= []).Add(file.RelativePath);
                     continue;
@@ -169,7 +173,7 @@ public static class SemanticIndexPhase
                 var parseFailed = provider.Warnings.Count > warningCountBefore;
                 if (parseFailed)
                 {
-                    warning($"skipped '{file.RelativePath}': symbol extraction failed; previous data kept");
+                    warning($"skipped {guard.Describe(file.RelativePath)}: symbol extraction failed; previous data kept");
                     skipped++;
                     (deferred ??= []).Add(file.RelativePath);
                     continue;

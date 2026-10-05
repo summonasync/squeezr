@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Ignore;
@@ -78,7 +79,13 @@ public sealed class IndexStatusTool
             {
                 var repoRoot = Path.GetFullPath(Path.IsPathRooted(r.Path) ? r.Path : Path.Combine(root, r.Path));
                 var ignored = BuildIgnoredData(r, warnings);
-                repos.Add(new RepoData(r.Name, repoRoot, r.Files, r.Symbols, r.Chunks, ignored));
+                repos.Add(new RepoData(r.Name, repoRoot, r.Files, r.Symbols, r.Chunks, ignored, RepoGuardReport.FromRepo(r)));
+            }
+
+            var withheld = RepoGuardReport.FromTally(status.Repos);
+            if (withheld is not null)
+            {
+                warnings.Add(withheld.Warning());
             }
 
             var data = new IndexStatusData(
@@ -158,7 +165,9 @@ public sealed class IndexStatusTool
         [property: JsonPropertyName("symbols")] int Symbols,
         [property: JsonPropertyName("chunks")] int Chunks,
         [property: JsonPropertyName("ignored"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IgnoredData? Ignored);
+        IgnoredData? Ignored,
+        [property: JsonPropertyName("guard"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RepoGuardReport? Guard);
 
     private sealed record IgnoredData(
         [property: JsonPropertyName("files")] int Files,

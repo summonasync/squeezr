@@ -150,7 +150,7 @@ public class SemanticIndexPhaseTests
 
         SemanticIndexPhase.RunWithSession(
             session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath,
-            SqueezrConfig.CreateDefault(), noSemantic: false, _ => { });
+            SqueezrConfig.CreateDefault(), noSemantic: false, SecretGuardIngestion.Load(workspace), _ => { });
     }
 
     private static List<RefDocument> ListAllRefs(MetaStore store, uint repoId) =>

@@ -13,7 +13,9 @@ public sealed record IndexCompletedLine(
     IReadOnlyList<RepoIndexResult> Repos,
     string? Provider = null,
     int DeferredReaps = 0,
-    int PendingReaps = 0)
+    int PendingReaps = 0,
+    int GuardWithheld = 0,
+    int GuardDropped = 0)
 {
     public static IndexCompletedLine FromResult(IndexResult result, int durationMs, int? symbols, string? provider = null) =>
         new(
@@ -27,5 +29,7 @@ public sealed record IndexCompletedLine(
             result.Repos,
             provider,
             result.DeferredReaps,
-            result.PendingReaps);
+            result.PendingReaps,
+            result.GuardWithheld,
+            result.GuardDropped);
 }

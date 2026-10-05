@@ -141,7 +141,10 @@ public sealed class WorkspaceManager
                     state?.Stats.Chunks ?? 0,
                     state?.LastFullIndexAt ?? store.FindRepo(r.Name)?.LastIndexedAt,
                     state?.Stats.IgnoredTotal ?? 0,
-                    state?.Stats.IgnoredBySource);
+                    state?.Stats.IgnoredBySource,
+                    state?.Stats.GuardWithheld ?? 0,
+                    state?.Stats.GuardWithheldBuiltIns ?? 0,
+                    state?.Stats.GuardDropped ?? 0);
             })
             .ToList();
 

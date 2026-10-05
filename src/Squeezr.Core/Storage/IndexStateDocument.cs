@@ -33,4 +33,13 @@ public sealed class IndexStateStats
 
     [BsonField("ignoredBySource")]
     public Dictionary<string, int>? IgnoredBySource { get; set; }
+
+    [BsonField("guardWithheld")]
+    public int GuardWithheld { get; set; }
+
+    [BsonField("guardWithheldBuiltIns")]
+    public int GuardWithheldBuiltIns { get; set; }
+
+    [BsonField("guardDropped")]
+    public int GuardDropped { get; set; }
 }

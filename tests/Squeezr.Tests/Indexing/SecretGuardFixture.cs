@@ -1,6 +1,7 @@
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -54,7 +55,47 @@ internal static class SecretGuardFixture
         Write(workspace, TokensPath, $"{TokensCanary}\n");
 
         new WorkspaceIndexer().Index(workspace);
+
+        // Ingestion refuses the protected names now, so the pre-guard store has to be written the way a
+        // pre-guard store was written by hand: rows and postings straight into the store, no pass involved.
+        PlantPreGuardRows(workspace, [EnvPath, PemPath, SecretsPath]);
         return workspace;
+    }
+
+    internal static void PlantPreGuardRows(string workspace, IReadOnlyList<string> relativePaths)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repo = store.ListRepos().First();
+        var repoRoot = Path.GetFullPath(
+            Path.IsPathRooted(repo.Path) ? repo.Path : Path.Combine(workspace, repo.Path));
+        var chunking = ConfigFile.Load(workspace).Chunking;
+        var postings = new List<TrigramDocument>();
+
+        foreach (var relativePath in relativePaths)
+        {
+            var text = File.ReadAllText(
+                Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            var doc = new FileDocument
+            {
+                Id = store.GetNextFileId(),
+                RepoId = repo.Id,
+                Path = relativePath,
+                Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(text))).ToLowerInvariant(),
+                Language = LanguageDetector.Detect(relativePath),
+                SizeBytes = System.Text.Encoding.UTF8.GetByteCount(text),
+                LineCount = text.Count(c => c == '\n') + 1,
+                IndexedAt = DateTime.UtcNow,
+            };
+            store.UpsertFile(doc);
+            FallbackChunker.Persist(store, repo, doc, text, chunking);
+            postings.Add(new TrigramDocument(
+                doc.RepoId,
+                doc.Id,
+                TrigramExtractor.ExtractPostings(text).ToDictionary(kv => kv.Key, kv => kv.Value.ToArray())));
+        }
+
+        TrigramIndexWriter.AppendBatch(SqueezrPaths.TrigramIndexPath(workspace), postings, []);
     }
 
     private static DateTime _lastConfigStamp = DateTime.MinValue;

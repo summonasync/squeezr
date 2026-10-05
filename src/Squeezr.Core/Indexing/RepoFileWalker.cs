@@ -17,6 +17,7 @@ public static class RepoFileWalker
     public static FileWalkResult Walk(
         string repoRoot,
         IgnoreRuleset rules,
+        SecretGuardIngestion guard,
         int maxFileSizeKb,
         Action<string>? warn = null,
         bool countIgnoredSubtrees = true)
@@ -90,6 +91,14 @@ public static class RepoFileWalker
                 if (fileDecision.Excluded)
                 {
                     CountIgnored(fileDecision.Source, ignoredBySource, ref ignored, 1);
+                    continue;
+                }
+
+                // the guard decides before anything touches the file: an unreadable secret would otherwise
+                // take the reconciliation branches below and name itself in a warning
+                if (guard.Deny(relativePath))
+                {
+                    skipped++;
                     continue;
                 }
 

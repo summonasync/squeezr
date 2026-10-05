@@ -32,9 +32,16 @@ public sealed record WorkspaceStatusReport(
                     staleFiles.Where(k => k.StartsWith(r.Name + "/", StringComparison.Ordinal)).ToList(),
                     r.LastIndexedAt,
                     Age(r.LastIndexedAt),
-                    ignored);
+                    ignored,
+                    RepoGuardReport.FromRepo(r));
             })
             .ToList();
+
+        var guard = RepoGuardReport.FromTally(status.Repos);
+        if (guard is not null)
+        {
+            warnings.Add(guard.Warning());
+        }
 
         var lastIndexedAt = status.Repos.Select(r => r.LastIndexedAt).Max();
         return new WorkspaceStatusReport(

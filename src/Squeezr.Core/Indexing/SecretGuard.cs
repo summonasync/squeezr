@@ -47,21 +47,59 @@ public static class SecretGuard
 
     public static IReadOnlyList<string> BuiltInPatterns { get; } = BuiltInPatternNames.AsReadOnly();
 
-    public static bool IsProtected(string relativePath, IReadOnlyList<string> extraPatterns)
+    // the words every guard surface uses to name where a decision came from, so a read-side withholding and
+    // an ingestion-side one are reported in one vocabulary
+    public const string BuiltInSourceName = "built-in patterns";
+    public const string ConfiguredSourceName = "indexing.secretGuardExtra";
+
+    public static bool IsProtected(string relativePath, IReadOnlyList<string> extraPatterns) =>
+        new Profile(extraPatterns).IsProtected(relativePath);
+
+    // The count-and-origin phrase every withheld tally is reported with, so a pass report and a status ledger
+    // cannot drift apart in the one sentence a reader uses to decide whether to widen their masks.
+    public static string DescribeOrigins(int withheld, int withheldBuiltIns) => withheldBuiltIns switch
     {
-        ArgumentNullException.ThrowIfNull(relativePath);
+        0 => ConfiguredSourceName,
+        _ when withheldBuiltIns == withheld => BuiltInSourceName,
+        _ => $"{withheldBuiltIns} {BuiltInSourceName}, {withheld - withheldBuiltIns} {ConfiguredSourceName}",
+    };
 
-        var segments = relativePath.Replace('\\', '/').ToLowerInvariant().Split('/');
+    // Compiling the user half is the expensive part of a decision, and it is the same work for every path
+    // in a scope. A caller that classifies a store or a walk builds one of these once; the static facade
+    // above stays for one-shot questions and pays per call, which is what a single lookup can afford.
+    public sealed class Profile(IReadOnlyList<string>? extraPatterns)
+    {
+        private readonly CompiledExtra[] _extras =
+            extraPatterns is { Count: > 0 } ? CompileExtras(extraPatterns) : [];
 
-        // extras are checked first so a user glob can re-protect a name the built-in list exempts
-        if (extraPatterns is { Count: > 0 } && MatchesAnyExtra(CompileExtras(extraPatterns), segments))
+        public int CompiledExtras => _extras.Length;
+
+        public bool IsProtected(string relativePath)
         {
-            return true;
+            ArgumentNullException.ThrowIfNull(relativePath);
+
+            var segments = Segments(relativePath);
+
+            // extras are checked first so a user glob can re-protect a name the built-in list exempts
+            return MatchesAnyExtra(_extras, segments) || MatchesBuiltIns(segments);
         }
 
-        // the carve-out exempts its names from the .env family, never from the rest of the set
-        return MatchesAny(OtherBuiltInGlobs, segments)
+        // origin attribution for the withheld counters: the built-in half alone, with the user masks ignored.
+        // A name the built-ins protect is reported as built-in even when a user glob covers it too — the
+        // narrower claim is the one a reader can act on, and it matches what the read-side tally reports.
+        public bool MatchesBuiltIns(string relativePath)
+        {
+            ArgumentNullException.ThrowIfNull(relativePath);
+
+            return MatchesBuiltIns(Segments(relativePath));
+        }
+
+        private static bool MatchesBuiltIns(string[] segments) =>
+            MatchesAny(OtherBuiltInGlobs, segments)
             || (!EnvCarveOuts.Contains(segments[^1]) && MatchesAny(EnvFamilyGlobs, segments));
+
+        private static string[] Segments(string relativePath) =>
+            relativePath.Replace('\\', '/').ToLowerInvariant().Split('/');
     }
 
     private static string[][] Normalize(IEnumerable<string> patterns) =>
