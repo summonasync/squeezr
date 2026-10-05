@@ -99,6 +99,48 @@ public class GuardedPathFormsTests
         forms.NamesAProtectedPath(Path.Combine(workspace, AnchoredExtra)).ShouldBeTrue();
     }
 
+    // The T1 ruling, pinned: a value that names no file is not a shape of some file the guard refused. Folding it
+    // through every root would turn one blank parameter into 'deny', and a fold that denies on nothing is an
+    // oracle of its own — the shapes list keeps '' and '.' out at load for the same reason.
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData(".")]
+    [InlineData("./")]
+    [InlineData("..")]
+    public void Names_AValueThatNamesNoFile_IsNotSweptIntoDeny(string value)
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, AnchoredExtra);
+        var forms = Load(workspace);
+
+        forms.NamesAProtectedPath(value).ShouldBeFalse();
+    }
+
+    // The null posture is the carrier's, not the injected classifier's: the ingestion half denied a null and the
+    // reader half threw on one, which is two answers from one predicate. Denied on both planes now, and that is
+    // the same deny-wins the fold already practices — an absent value is not a licence to name a file.
+    [Fact]
+    public void Names_ANullValue_IsDeniedOnTheWritePlane()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, AnchoredExtra);
+
+        Load(workspace).NamesAProtectedPath(null).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Names_ANullValue_IsDeniedOnTheReadPlaneWithoutThrowing()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, AnchoredExtra);
+        var forms = GuardedPathForms.Load(workspace, SecretGuardReader.Load(workspace));
+
+        var answer = false;
+        Should.NotThrow(() => answer = forms.NamesAProtectedPath(null));
+        answer.ShouldBeTrue();
+    }
+
     private static GuardedPathForms Load(string workspace) =>
         GuardedPathForms.Load(workspace, SecretGuardIngestion.Load(workspace));
 }
