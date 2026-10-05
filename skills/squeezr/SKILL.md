@@ -209,8 +209,12 @@ Squeezr excludes files from indexing via a layered ruleset (last-match-wins):
    true`). Set to `false` to disable.
 
 Supported gitignore subset: `#` comments, `!` negation, `/` anchoring, trailing
-`/` for dirs, `*`, `?`, `**`. NOT supported: `[character-classes]` and `\`
-escapes — they produce a warning and are skipped.
+`/` for dirs, `*`, `?`, `**`, `[character-classes]` — sets `[abc]`, ranges
+`[a-z]`, negation with `[!…]` or `[^…]` — and `\` escapes that take the magic
+out of `* ? [ ]` (and make a literal of space, `#`, `!`). Since 063/T14 these
+are matched, not skipped; the residual forms that still warn and get skipped
+are an unterminated `[`, POSIX `[:alpha:]`-style classes, an escaped separator
+`\/`, and a trailing `\`.
 
 `code_search` hybrid gained an identifier-exact branch: multi-token queries with
 code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens hit a
