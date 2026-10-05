@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Squeezr.Core.Storage;
@@ -322,24 +323,24 @@ public class McpSecretGuardToolsTests
         {
             var envelope = ParseEnvelope(await harness.Client.CallToolAsync(
                 tool, arguments, cancellationToken: CancellationToken.None));
-            var named = NamedFields(tool, envelope);
 
             Warnings(envelope).Any(w => w.StartsWith("secret guard:", StringComparison.Ordinal))
                 .ShouldBeTrue($"{tool} owes a withheld count");
 
-            foreach (var path in hidden)
+            AssertAnswersNeverNameTheSecret(tool, envelope, hidden, hiddenDirs);
+
+            foreach (var canary in SecretGuardFixture.ProtectedCanaries)
             {
-                named.Contains(path).ShouldBeFalse($"{tool} put a protected path in a result field");
-                named.Contains(System.IO.Path.GetFileName(path))
-                    .ShouldBeFalse($"{tool} put a protected file name in a result field");
+                envelope.GetRawText().ShouldNotContain(canary, customMessage: $"{tool} rendered a protected value");
             }
-
-            named.Any(text => hiddenDirs.Any(dir => text.Contains(dir, StringComparison.Ordinal)))
-                .ShouldBeFalse($"{tool} put a directory that only holds protected files in a result field");
-
-            envelope.GetProperty("data").GetRawText()
-                .ShouldNotContain("CANARY-ENV-VALUE", customMessage: "data holds values, warnings hold paths");
         }
+
+        // the ledger tool owes no withheld count, but it is the field set the guard wall has to hold for
+        // too, so it rides the same sweep
+        AssertAnswersNeverNameTheSecret("index_status",
+            ParseEnvelope(await harness.Client.CallToolAsync(
+                "index_status", new Dictionary<string, object?>(), cancellationToken: CancellationToken.None)),
+            hidden, hiddenDirs);
     }
 
     [Fact]
@@ -351,34 +352,82 @@ public class McpSecretGuardToolsTests
 
         // the near name really does surface while the file is unprotected, so the widened call below fails
         // on the guard rather than on a suggestion path that never worked
-        NamedFields("symbol_lookup", ParseEnvelope(await Suggest(harness))).ShouldContain("VaultToken");
+        AnswerText(ParseEnvelope(await Suggest(harness))).ShouldContain("VaultToken");
 
         SecretGuardFixture.SetGuardExtra(workspace, "**/tokens.txt");
 
-        var named = NamedFields("symbol_lookup", ParseEnvelope(await Suggest(harness)));
+        var answer = AnswerText(ParseEnvelope(await Suggest(harness)));
 
-        named.ShouldNotContain("VaultToken");
-        named.ShouldNotContain(SecretGuardFixture.TokensPath);
+        answer.ShouldNotContain("VaultToken");
+        answer.ShouldNotContain(SecretGuardFixture.TokensPath);
     }
 
-    // the strings a result structure uses to name files: tree labels, hit paths, match files, ref files,
-    // and the did-you-mean list, which names symbols read out of the files the guard hides
-    private static IReadOnlyList<string> NamedFields(string tool, JsonElement envelope) =>
-        tool switch
+    // Whole-envelope sweep instead of a hand-kept map of the fields that name files: every additive field
+    // (definitions, staleFiles, whatever ships next) is covered the moment it appears, instead of the
+    // moment somebody remembers to extend the map.
+    private static void AssertAnswersNeverNameTheSecret(
+        string tool,
+        JsonElement envelope,
+        IReadOnlyList<string> hiddenPaths,
+        IReadOnlyList<string> hiddenDirs)
+    {
+        var answer = AnswerText(envelope);
+
+        foreach (var path in hiddenPaths)
         {
-            "repo_map" => [.. envelope.GetProperty("data").EnumerateArray()
-                .Select(line => line.GetProperty("text").GetString()!)],
-            "code_search" => [.. envelope.GetProperty("data").EnumerateArray()
-                .Select(hit => hit.GetProperty("file").GetString()!)],
-            "symbol_lookup" => [.. envelope.GetProperty("data").EnumerateArray()
-                    .Select(match => match.GetProperty("file").GetString()!),
-                .. envelope.TryGetProperty("didYouMean", out var suggestions)
-                    ? suggestions.EnumerateArray().Select(suggestion => suggestion.GetString()!)
-                    : []],
-            "find_references" => [.. envelope.GetProperty("data").EnumerateArray()
-                .Select(reference => reference.GetProperty("file").GetString()!)],
-            _ => throw new InvalidOperationException($"no field mapping for {tool}"),
-        };
+            answer.ShouldNotContain(path, customMessage: $"{tool} named a protected path outside its warnings");
+            answer.ShouldNotContain(
+                System.IO.Path.GetFileName(path),
+                customMessage: $"{tool} named a protected file outside its warnings");
+        }
+
+        foreach (var dir in hiddenDirs)
+        {
+            answer.ShouldNotContain(dir, customMessage: $"{tool} named a directory that only holds protected files");
+        }
+    }
+
+    // The withheld sentence is the one place a protected path is required to appear, so exactly those lines are
+    // cut out of the sweep — every other warning stays under it, or the wall would silently stop covering a
+    // future warning that quotes a path. The conventional .env placeholders are masked because each of them
+    // literally contains a protected name (SecretGuard.EnvCarveOuts) while staying in the answer on purpose.
+    private static string AnswerText(JsonElement envelope)
+    {
+        var answer = JsonNode.Parse(envelope.GetRawText())!.AsObject();
+        if (answer["warnings"] is JsonArray warnings)
+        {
+            answer["warnings"] =
+                new JsonArray([.. warnings.Where(line => !IsWithheldCount(line)).Select(line => line?.DeepClone())]);
+        }
+
+        var text = answer.ToJsonString();
+        foreach (var placeholder in new[] { ".env.example", ".env.sample", ".env.template" })
+        {
+            text = text.Replace(placeholder, string.Empty, StringComparison.Ordinal);
+        }
+
+        return text;
+    }
+
+    private static bool IsWithheldCount(JsonNode? line) =>
+        line is JsonValue value
+        && value.TryGetValue<string>(out var text)
+        && text.StartsWith("secret guard:", StringComparison.Ordinal);
+
+    [Fact]
+    public void AnswerText_CutsOnlyTheWithheldSentenceOutOfTheSweep()
+    {
+        var envelope = JsonDocument.Parse("""
+            {"data":[],"warnings":[
+              "secret guard: 1 result(s) withheld ('.env' matches built-in patterns)",
+              "vector store is unavailable, falling back to exact search only"]}
+            """).RootElement;
+
+        var answer = AnswerText(envelope);
+
+        answer.ShouldContain("vector store is unavailable");
+        answer.ShouldNotContain(".env");
+    }
 
     private static ValueTask<CallToolResult> Lookup(McpTestHarness harness) =>
         harness.Client.CallToolAsync(

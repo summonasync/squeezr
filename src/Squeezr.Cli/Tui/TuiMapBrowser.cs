@@ -1,4 +1,5 @@
 using Spectre.Console;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -103,17 +104,37 @@ public static class TuiMapBrowser
                 return cached;
             }
 
+            // the browser lists the store, so withholding has to happen here rather than in the reader:
+            // a protected name is content once it is a row, and its symbols are content in the drill-down
+            var guard = SecretGuardReader.Load(root);
             List<FileDocument> files;
             Dictionary<uint, List<SymbolDocument>> symbolsByFile;
             using (var store = new MetaStore(SqueezrPaths.MetaDbPath(root)))
             {
-                files = store.ListFiles(repo.Id).ToList();
+                var served = new List<FileDocument>();
+                foreach (var file in store.ListFiles(repo.Id))
+                {
+                    if (!guard.TryWithhold(file.Path))
+                    {
+                        served.Add(file);
+                    }
+                }
+
+                files = served;
+                var servedIds = served.Select(f => f.Id).ToHashSet();
                 symbolsByFile = store.ListSymbolsByRepo(repo.Id)
+                    .Where(s => servedIds.Contains(s.FileId))
                     .GroupBy(s => s.FileId)
                     .ToDictionary(g => g.Key, g => g.ToList());
             }
 
-            var snapshot = new RepoSnapshot { Repo = repo, Files = files, SymbolsByFile = symbolsByFile };
+            var snapshot = new RepoSnapshot
+            {
+                Repo = repo,
+                Files = files,
+                SymbolsByFile = symbolsByFile,
+                GuardLines = guard.Warnings ?? [],
+            };
             snapshots[repo.Name] = snapshot;
             return snapshot;
         }
@@ -123,31 +144,42 @@ public static class TuiMapBrowser
         IAnsiConsole console, DirFrame frame, CancellationToken cancellationToken)
     {
         var (dirs, files) = ListLevel(frame.Snapshot, frame.Dir);
+        var guardLines = frame.Snapshot.GuardLines;
 
         var items = new List<string> { ".." };
         items.AddRange(dirs.Select(d => (d + "/").EscapeMarkup()));
         items.AddRange(files.Select(f => Path.GetFileName(f.Path).EscapeMarkup()));
+        items.AddRange(guardLines.Select(line => line.EscapeMarkup()));
 
         var title = frame.Dir.Length == 0
             ? $"[bold]{frame.Snapshot.Repo.Name.EscapeMarkup()}[/]"
             : $"[bold]{frame.Snapshot.Repo.Name.EscapeMarkup()}/{frame.Dir.EscapeMarkup()}[/]";
-        var pick = await new SelectionPrompt<string>()
-            .Title(title)
-            .AddChoices(items)
-            .ShowAsync(console, cancellationToken);
-        if (pick == "..")
+        while (true)
         {
-            return null;
-        }
+            var pick = await new SelectionPrompt<string>()
+                .Title(title)
+                .AddChoices(items)
+                .ShowAsync(console, cancellationToken);
+            if (pick == "..")
+            {
+                return null;
+            }
 
-        var index = items.IndexOf(pick) - 1;
-        if (index < dirs.Count)
-        {
-            var subdir = frame.Dir.Length == 0 ? dirs[index] : frame.Dir + "/" + dirs[index];
-            return new DirFrame(frame.Snapshot, subdir);
-        }
+            var index = items.IndexOf(pick) - 1;
+            if (index < dirs.Count)
+            {
+                var subdir = frame.Dir.Length == 0 ? dirs[index] : frame.Dir + "/" + dirs[index];
+                return new DirFrame(frame.Snapshot, subdir);
+            }
 
-        return new FileFrame(frame.Snapshot, files[index - dirs.Count]);
+            // a withheld row names nothing to open, so picking it leaves the listing where it was
+            if (index >= dirs.Count + files.Count)
+            {
+                continue;
+            }
+
+            return new FileFrame(frame.Snapshot, files[index - dirs.Count]);
+        }
     }
 
     private static async Task<bool> ShowSymbolsAsync(
@@ -239,5 +271,7 @@ public static class TuiMapBrowser
         public required IReadOnlyList<FileDocument> Files { get; init; }
 
         public required IReadOnlyDictionary<uint, List<SymbolDocument>> SymbolsByFile { get; init; }
+
+        public IReadOnlyList<string> GuardLines { get; init; } = [];
     }
 }

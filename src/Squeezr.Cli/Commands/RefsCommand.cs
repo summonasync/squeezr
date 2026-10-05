@@ -55,6 +55,7 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
             }
             else
             {
+                GuardOutput.WriteWithheld(result.GuardWarnings);
                 foreach (var group in result.Groups)
                 {
                     RenderHeader(group);

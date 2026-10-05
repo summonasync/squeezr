@@ -1,4 +1,7 @@
 using System.Text.Json;
+using Squeezr.Core.Indexing;
+using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Storage;
 
@@ -113,6 +116,8 @@ public static class QueryTelemetrySummary
     {
         using var store = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(workspaceRoot));
         var indexedFiles = store?.ListAllFiles();
+        var guard = SecretGuardReader.Load(workspaceRoot);
+        var recordedPaths = RecordedPathShapes.Load(workspaceRoot);
 
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
         long counterfactual = 0;
@@ -126,6 +131,14 @@ public static class QueryTelemetrySummary
 
             var file = ExtractFile(entry.Params);
             if (file is null)
+            {
+                continue;
+            }
+
+            // the guard classifies by path shape, and a mask written against a repo root ('infra/VaultKeys.cs')
+            // matches no other shape: the ledger keeps whatever the caller typed, so every shape it could mean
+            // has to be asked before either bucket
+            if (recordedPaths.IsProtected(guard, file))
             {
                 continue;
             }
@@ -147,6 +160,12 @@ public static class QueryTelemetrySummary
             }
 
             var indexed = indexedFiles is null ? null : FindByPath(indexedFiles, file);
+            // the stored row is the one shape the mask was authored against — an alias nobody typed still dies here
+            if (indexed is not null && guard.IsProtected(indexed.Path))
+            {
+                continue;
+            }
+
             if (indexed is null)
             {
                 unknownFiles++;
@@ -193,6 +212,123 @@ public static class QueryTelemetrySummary
 
     private static int DistinctCacheSessions(IReadOnlyList<QueryTelemetryEntry> entries) =>
         entries.Where(e => e.CacheHit).Select(e => e.SessionId).Distinct().Count();
+
+    // A ledger row keeps the shape the caller typed, masks are authored against a repo root, and between those
+    // sit four shapes of the same file: repo-qualified ('demo/infra/VaultKeys.cs', what the ambiguity hint tells
+    // agents to write), workspace-relative with any number of segments ('repos/demo/infra/VaultKeys.cs'), absolute,
+    // and any of those with a '..' in the middle. So every typed shape is resolved against every root and then read
+    // back relative to every root — that is what collapses '..' and multi-segment prefixes at once. Asking the raw
+    // string alone is a silent fail-open, and for a row 064/T4 already purged there is no stored row left for the
+    // belt below to catch. Reading a workspace-relative path through a repo-root mask can over-exclude a plain file
+    // from an advisory savings number; it can never name or serve anything.
+    private sealed class RecordedPathShapes
+    {
+        private readonly string _workspaceRoot;
+        private readonly IReadOnlyList<RepoShape> _repos;
+
+        private RecordedPathShapes(string workspaceRoot, IReadOnlyList<RepoShape> repos)
+        {
+            _workspaceRoot = workspaceRoot;
+            _repos = repos;
+        }
+
+        internal static RecordedPathShapes Load(string workspaceRoot)
+        {
+            try
+            {
+                if (!WorkspaceManifestFile.Exists(workspaceRoot))
+                {
+                    return new RecordedPathShapes(workspaceRoot, []);
+                }
+
+                var manifest = WorkspaceManifestFile.Load(workspaceRoot);
+                return new RecordedPathShapes(workspaceRoot,
+                    [.. manifest.Repos.Select(repo => new RepoShape(
+                        repo.Name, NavigationContext.ResolveRepoRoot(workspaceRoot, repo)))]);
+            }
+            catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
+            {
+                return new RecordedPathShapes(workspaceRoot, []);
+            }
+        }
+
+        internal bool IsProtected(SecretGuardReader guard, string recorded) =>
+            Shapes(recorded).Any(guard.IsProtected);
+
+        private IEnumerable<string> Shapes(string recorded)
+        {
+            var typed = recorded.Replace('\\', '/');
+            yield return typed;
+
+            foreach (var repo in _repos)
+            {
+                if (WithoutFirstSegment(typed, repo.Name) is { } qualified)
+                {
+                    yield return qualified;
+                }
+            }
+
+            foreach (var absolute in ResolvedForms(typed))
+            {
+                foreach (var root in Roots())
+                {
+                    if (RelativeTo(root, absolute) is { } relative)
+                    {
+                        yield return relative;
+                    }
+                }
+            }
+        }
+
+        private List<string> ResolvedForms(string typed)
+        {
+            var resolved = new List<string>(_repos.Count + 1);
+            foreach (var root in Roots())
+            {
+                try
+                {
+                    var absolute = Path.GetFullPath(typed, root);
+                    if (!resolved.Contains(absolute, PathComparer))
+                    {
+                        resolved.Add(absolute);
+                    }
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                }
+            }
+
+            return resolved;
+        }
+
+        private string[] Roots() => [.. new[] { _workspaceRoot }, .. _repos.Select(repo => repo.Root)];
+
+        private static string? WithoutFirstSegment(string typed, string prefix) =>
+            typed.Length > prefix.Length + 1 && typed.StartsWith($"{prefix}/", StringComparison.Ordinal)
+                ? typed[(prefix.Length + 1)..]
+                : null;
+
+        private static string? RelativeTo(string root, string absolute)
+        {
+            try
+            {
+                var relative = Path.GetRelativePath(root, absolute).Replace('\\', '/');
+                return relative is "." or ".." || relative.StartsWith("../", StringComparison.Ordinal)
+                    || Path.IsPathRooted(relative)
+                        ? null
+                        : relative;
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return null;
+            }
+        }
+
+        private static StringComparer PathComparer =>
+            OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+        private sealed record RepoShape(string Name, string Root);
+    }
 
     private static CacheStats SummarizeCache(IReadOnlyList<QueryTelemetryEntry> entries, int hits, double hitRate)
     {

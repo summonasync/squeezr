@@ -115,6 +115,21 @@ public sealed class StaleFileDetectorTests
     }
 
     [Fact]
+    public void Detect_MissingRepoDir_NeverNamesAProtectedRow()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        Directory.Delete(Path.Combine(workspace, "repo"), recursive: true);
+
+        var stale = StaleFileDetector.Detect(workspace);
+
+        stale.ShouldNotContain($"demo/{SecretGuardFixture.EnvPath}");
+        stale.ShouldNotContain($"demo/{SecretGuardFixture.PemPath}");
+        stale.ShouldNotContain($"demo/{SecretGuardFixture.SecretsPath}");
+        stale.ShouldContain($"demo/{SecretGuardFixture.AppPath}");
+        stale.ShouldContain($"demo/{SecretGuardFixture.ExamplePath}");
+    }
+
+    [Fact]
     public void Detect_UninitializedWorkspace_Throws()
     {
         var workspace = TestDirs.NewTempDir();

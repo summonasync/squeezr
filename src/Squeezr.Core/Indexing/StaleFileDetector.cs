@@ -22,6 +22,7 @@ public static class StaleFileDetector
         var stale = new List<string>();
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
+        var guard = SecretGuardIngestion.Load(workspaceRoot);
         foreach (var repo in manifest.Repos)
         {
             var repoDoc = store.FindRepo(repo.Name);
@@ -29,12 +30,15 @@ public static class StaleFileDetector
             var repoRoot = NavigationContext.ResolveRepoRoot(workspaceRoot, repo);
             if (!Directory.Exists(repoRoot))
             {
-                stale.AddRange(dbFiles.Select(f => Key(repo.Name, f.Path)));
+                // a vanished repo still lists its rows, and a row is a name — the guard does not lapse
+                // because the directory behind the store is gone
+                stale.AddRange(dbFiles
+                    .Where(f => !guard.IsProtected(f.Path))
+                    .Select(f => Key(repo.Name, f.Path)));
                 continue;
             }
 
             var rules = IgnoreRuleset.For(repoRoot, config);
-            var guard = SecretGuardIngestion.Load(workspaceRoot);
             // staleness reads Files only; counting the pruned subtrees would walk 30k+ paths nobody reports
             var walk = RepoFileWalker.Walk(
                 repoRoot, rules, guard, config.Indexing.MaxFileSizeKb, countIgnoredSubtrees: false);

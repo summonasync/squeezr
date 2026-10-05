@@ -51,6 +51,7 @@ public sealed class MapCommand : Command<MapCommand.Settings>
             }
             else
             {
+                GuardOutput.WriteWithheld(result.GuardWarnings);
                 foreach (var line in result.Lines)
                 {
                     Console.WriteLine($"{new string(' ', line.Depth * 2)}{line.Text}");

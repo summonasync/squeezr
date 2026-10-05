@@ -55,6 +55,7 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
             }
             else
             {
+                GuardOutput.WriteWithheld(result.GuardWarnings);
                 foreach (var hit in result.Matches)
                 {
                     AnsiConsole.MarkupLine($"[bold]{hit.Name.EscapeMarkup()}[/] ({hit.Kind}) " +

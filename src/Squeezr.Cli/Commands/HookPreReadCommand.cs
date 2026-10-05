@@ -92,12 +92,18 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
             return null;
         }
 
-        return RequestsBulkRead(input.ToolInput!) && WorkspaceRegistry.FindContainingPath(filePath) is not null
+        if (WorkspaceRegistry.FindContainingPath(filePath) is not { } workspace)
+        {
+            return null;
+        }
+
+        return RequestsBulkRead(input.ToolInput!, filePath, workspace)
             ? new HookPreReadAdvice(new HookPreReadAdviceOutput(PreToolUseEvent, NudgeText))
             : null;
     }
 
-    private static bool RequestsBulkRead(HookPreReadToolInput toolInput)
+    private static bool RequestsBulkRead(
+        HookPreReadToolInput toolInput, string filePath, WorkspaceRegistryEntry workspace)
     {
         if (toolInput.Limit is < WideRangeLines)
         {
@@ -109,7 +115,13 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
             return true;
         }
 
-        var file = new FileInfo(toolInput.FilePath!);
+        // the size branch is the one that proves a path exists, so the guard answers before the disk does
+        if (HookSecretPaths.IsGuarded(Path.GetFullPath(filePath), workspace))
+        {
+            return false;
+        }
+
+        var file = new FileInfo(filePath);
         return file.Exists && file.Length >= LargeFileBytes;
     }
 }

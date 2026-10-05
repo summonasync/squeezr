@@ -1,5 +1,8 @@
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
+using Squeezr.Tests.Indexing;
 
 namespace Squeezr.Tests.Cli;
 
@@ -126,6 +129,51 @@ public sealed class HookPreReadCommandTests
 
         result.ExitCode.ShouldBe(0);
         result.StdOut.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task LargeProtectedFile_AnswersLikeAMissingOne()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var secret = Path.Combine(root, ".env");
+        await File.WriteAllTextAsync(secret, new string('x', 300 * 1024));
+
+        var protectedRun = await CliTestProcess.RunPipedAsync(
+            home, ReadPayload(secret), root, "hook", "pre-read");
+        var missingRun = await CliTestProcess.RunPipedAsync(
+            home, ReadPayload(Path.Combine(root, "does-not-exist.cs")), root, "hook", "pre-read");
+
+        protectedRun.ExitCode.ShouldBe(0);
+        protectedRun.StdOut.ShouldBeEmpty();
+        missingRun.StdOut.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task LargeFileProtectedByAnchoredExtension_AnswersLikeAMissingOne()
+    {
+        // the workspace is built in-process here so the config edit lands in the store the child reads
+        var root = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(root);
+        manager.Init(null);
+        Directory.CreateDirectory(Path.Combine(root, "repo", "infra"));
+        var secret = Path.Combine(root, "repo", "infra", "VaultKeys.cs");
+        await File.WriteAllTextAsync(secret, new string('x', 300 * 1024));
+        await File.WriteAllTextAsync(Path.Combine(root, "generated.cs"), new string('x', 300 * 1024));
+        manager.AddRepo("repo", "demo");
+        SecretGuardFixture.SetGuardExtra(root, "infra/VaultKeys.cs");
+
+        var controlRun = await CliTestProcess.RunPipedAsync(
+            SqueezrHome.Resolve(), ReadPayload(Path.Combine(root, "generated.cs")), root, "hook", "pre-read");
+        var protectedRun = await CliTestProcess.RunPipedAsync(
+            SqueezrHome.Resolve(), ReadPayload(secret), root, "hook", "pre-read");
+        var missingRun = await CliTestProcess.RunPipedAsync(
+            SqueezrHome.Resolve(), ReadPayload(Path.Combine(root, "does-not-exist.cs")), root, "hook", "pre-read");
+
+        controlRun.StdOut.ShouldContain("expand_span");
+        protectedRun.ExitCode.ShouldBe(0);
+        protectedRun.StdOut.ShouldBeEmpty();
+        missingRun.StdOut.ShouldBeEmpty();
     }
 
     [Fact]
