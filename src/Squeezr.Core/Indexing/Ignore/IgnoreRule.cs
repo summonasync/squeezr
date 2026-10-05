@@ -25,6 +25,11 @@ internal sealed class IgnoreRule
         IgnorePattern pattern, string[] segments, string[]? baseSegments,
         string[] rawSegments, string[] loweredSegments, int length, bool isDirectory)
     {
+        // the ruleset load drops these already; a caller that hands a rule over directly must still get no
+        // decision out of a pattern the matcher cannot express
+        if (pattern.Unsupported)
+            return false;
+
         if (pattern.DirOnly && !isDirectory)
             return false;
 

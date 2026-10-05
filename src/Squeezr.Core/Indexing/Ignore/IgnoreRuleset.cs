@@ -116,20 +116,16 @@ public sealed class IgnoreRuleset
         foreach (var pattern in defaults)
         {
             var parsed = GitignoreMatcher.Parse(pattern, IgnoreSource.Defaults, "defaults", ".");
+            AddPattern(patterns, parsed, warn);
             if (parsed is not null)
-            {
-                patterns.Add(parsed);
                 seenRaw.Add(pattern);
-            }
         }
 
         foreach (var pattern in config.Indexing.Ignore)
         {
             if (seenRaw.Contains(pattern))
                 continue;
-            var parsed = GitignoreMatcher.Parse(pattern, IgnoreSource.Config, "config", ".");
-            if (parsed is not null)
-                patterns.Add(parsed);
+            AddPattern(patterns, GitignoreMatcher.Parse(pattern, IgnoreSource.Config, "config", "."), warn);
         }
 
         var squeezrignorePath = Path.Combine(repoRoot, ".squeezrignore");
@@ -138,14 +134,10 @@ public sealed class IgnoreRuleset
             var lines = File.ReadAllLines(squeezrignorePath);
             foreach (var line in lines)
             {
-                var parsed = GitignoreMatcher.Parse(line, IgnoreSource.Squeezrignore, squeezrignorePath, ".");
-                if (parsed is not null)
-                {
-                    if (parsed.Unsupported && warn is not null)
-                        warn(GitignoreMatcher.FormatWarning(parsed.Raw, squeezrignorePath));
-                    else
-                        patterns.Add(parsed);
-                }
+                AddPattern(
+                    patterns,
+                    GitignoreMatcher.Parse(line, IgnoreSource.Squeezrignore, squeezrignorePath, "."),
+                    warn);
             }
         }
 
@@ -204,14 +196,27 @@ public sealed class IgnoreRuleset
 
         foreach (var line in lines)
         {
-            var parsed = GitignoreMatcher.Parse(line, IgnoreSource.Gitignore, gitignorePath, relativeBase);
-            if (parsed is not null)
-            {
-                if (parsed.Unsupported && warn is not null)
-                    warn(GitignoreMatcher.FormatWarning(parsed.Raw, gitignorePath));
-                else
-                    patterns.Add(parsed);
-            }
+            AddPattern(
+                patterns,
+                GitignoreMatcher.Parse(line, IgnoreSource.Gitignore, gitignorePath, relativeBase),
+                warn);
         }
+    }
+
+    // One policy for every source: a shape the matcher cannot express is never carried, so it can never
+    // decide. The sink only chooses whether the author hears about it, never whether the file survives.
+    private static void AddPattern(List<IgnorePattern> patterns, IgnorePattern? parsed, Action<string>? warn)
+    {
+        if (parsed is null)
+            return;
+
+        if (parsed.Unsupported)
+        {
+            if (warn is not null)
+                warn(GitignoreMatcher.FormatWarning(parsed.Raw, parsed.SourceFile));
+            return;
+        }
+
+        patterns.Add(parsed);
     }
 }

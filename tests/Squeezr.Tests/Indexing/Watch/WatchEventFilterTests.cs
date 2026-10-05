@@ -40,6 +40,20 @@ public class WatchEventFilterTests
     }
 
     [Fact]
+    public void ShouldTrack_ResidualGitignorePattern_KeepsTrackingTheFile()
+    {
+        var root = TestDirs.NewTempDir();
+        var repoRoot = Path.GetFullPath(Path.Combine(root, "Repo"));
+        Directory.CreateDirectory(repoRoot);
+        File.WriteAllText(Path.Combine(repoRoot, ".gitignore"), "[[:alpha:]]\n");
+
+        var rules = IgnoreRuleset.For(repoRoot, SqueezrConfig.CreateDefault());
+        var filter = new WatchEventFilter(root, [repoRoot], new Dictionary<string, IgnoreRuleset> { [repoRoot] = rules });
+
+        filter.ShouldTrack(Path.Combine(repoRoot, "a]"), pathMayBeGone: true).ShouldBeTrue();
+    }
+
+    [Fact]
     public void ShouldTrack_ExcludedFile_ReturnsFalse()
     {
         var root = TestDirs.NewTempDir();

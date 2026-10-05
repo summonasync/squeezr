@@ -172,19 +172,52 @@ public class IgnoreRulesetTests
         ruleset.Decision("a.txt", false).Excluded.ShouldBeFalse();
     }
 
-    // Characterization, not a blessing: without a warn sink the ruleset keeps the residual pattern, and the
-    // class half of it then matches a file git leaves alone. StaleFileDetector and WorkspaceWatcher build
-    // the ruleset exactly this way. Feature 062/T7 owns the policy; this row is the evidence (review W-1).
     [Fact]
-    public void UnsupportedPattern_WithoutWarnSink_ExcludesAFileGitKeeps()
+    public void UnsupportedPattern_WithoutWarnSink_KeepsTheFileGitKeeps()
     {
         var root = TestDirs.NewTempDir();
         File.WriteAllText(Path.Combine(root, ".gitignore"), "[[:alpha:]]\n");
 
         var ruleset = IgnoreRuleset.For(root, SqueezrConfig.CreateDefault());
 
-        ruleset.Decision("a]", false).Excluded.ShouldBeTrue();
+        ruleset.Decision("a]", false).Excluded.ShouldBeFalse();
         ruleset.Decision("b", false).Excluded.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("config")]
+    [InlineData("squeezrignore")]
+    [InlineData("gitignore")]
+    public void UnsupportedPattern_FromEverySource_SameOutcomeWithAndWithoutWarnSink(string source)
+    {
+        var root = TestDirs.NewTempDir();
+        var config = FixtureForUnsupportedSource(source, root);
+
+        var warnings = new List<string>();
+        var withSink = IgnoreRuleset.For(root, config, warnings.Add);
+        var withoutSink = IgnoreRuleset.For(root, config);
+
+        warnings.ShouldHaveSingleItem();
+        warnings[0].ShouldContain("[[:alpha:]]");
+        withSink.Decision("a]", false).Excluded.ShouldBeFalse();
+        withoutSink.Decision("a]", false).Excluded.ShouldBeFalse();
+        withSink.Decision("b.txt", false).Excluded.ShouldBeFalse();
+        withoutSink.Decision("b.txt", false).Excluded.ShouldBeFalse();
+        withSink.Patterns.ShouldNotContain(pattern => pattern.Unsupported);
+        withoutSink.Patterns.ShouldNotContain(pattern => pattern.Unsupported);
+    }
+
+    [Fact]
+    public void Evaluator_GivenUnsupportedPattern_DecidesNothing()
+    {
+        var pattern = GitignoreMatcher.Parse("[[:alpha:]]", IgnoreSource.Config, "config", ".")!;
+        pattern.Unsupported.ShouldBeTrue();
+
+        var rule = new IgnoreRule(pattern);
+
+        rule.Matches(["a]"], ["a]"], 1, isDirectory: false).ShouldBeFalse();
+        pattern.MatchesPathInternal("a]", isDirectory: false).ShouldBeFalse();
+        pattern.Matches("a]", isDirectory: false).ShouldBeFalse();
     }
 
     [Fact]
@@ -282,6 +315,31 @@ public class IgnoreRulesetTests
 
         ruleset.Decision("app.js", false).Excluded.ShouldBeTrue();
         ruleset.Decision("web/x.js", false).Excluded.ShouldBeFalse();
+    }
+
+    private static SqueezrConfig FixtureForUnsupportedSource(string source, string root)
+    {
+        var indexing = SqueezrConfig.CreateDefault().Indexing;
+        switch (source)
+        {
+            case "config":
+                return SqueezrConfig.CreateDefault() with
+                {
+                    Indexing = indexing with { Ignore = ["[[:alpha:]]"], RespectGitignore = false }
+                };
+            case "squeezrignore":
+                File.WriteAllText(Path.Combine(root, ".squeezrignore"), "[[:alpha:]]\n");
+                return SqueezrConfig.CreateDefault() with
+                {
+                    Indexing = indexing with { Ignore = [], RespectGitignore = false }
+                };
+            default:
+                File.WriteAllText(Path.Combine(root, ".gitignore"), "[[:alpha:]]\n");
+                return SqueezrConfig.CreateDefault() with
+                {
+                    Indexing = indexing with { Ignore = [], RespectGitignore = true }
+                };
+        }
     }
 
     private static string NewWorkspaceWithConfig(string json)

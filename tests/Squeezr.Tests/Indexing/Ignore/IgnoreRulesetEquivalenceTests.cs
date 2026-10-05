@@ -8,9 +8,10 @@ namespace Squeezr.Tests.Indexing.Ignore;
 // The read path calls IgnoreRuleset.Decision once per tree entry, so the hot loop was rewritten to match on
 // pre-split path segments. This is the guard: the segment matcher must decide exactly like the nested
 // join-and-rematch algorithm it replaced, on every pattern shape and every path in the corpus.
-// The reference implementation predates character classes and backslash escapes, so the fixture keeps its
-// residual shapes ([[:alpha:]], a dangling backslash) out of the compared set — the new dialect is pinned
-// against git itself in GitignoreOracleTests, where guessing is not an option.
+// The reference implementation predates character classes and backslash escapes. Residual shapes it cannot
+// speak about never reach this harness at all: IgnoreRuleset drops an unsupported pattern from the ruleset,
+// so the compared set is exactly the patterns the ruleset carries. The new dialect is pinned against git
+// itself in GitignoreOracleTests, where guessing is not an option.
 public sealed class IgnoreRulesetEquivalenceTests : IDisposable
 {
     private static readonly string[] CorpusPaths =
@@ -267,7 +268,7 @@ public sealed class IgnoreRulesetEquivalenceTests : IDisposable
                 var isDir = !isLast || (isLast && isDirectory);
                 var path = string.Join('/', segments.Take(i));
 
-                if (!LegacyPatternMatches(pattern, path, isDir, respectUnsupportedFlag: false))
+                if (!LegacyPatternMatches(pattern, path, isDir))
                     continue;
 
                 if (pattern.Negate)
@@ -295,13 +296,9 @@ public sealed class IgnoreRulesetEquivalenceTests : IDisposable
         return lastMatch ?? new IgnoreDecision { Excluded = false, Source = null, Pattern = null };
     }
 
-    private static bool LegacyPatternMatches(IgnorePattern pattern, string path, bool isDirectory) =>
-        LegacyPatternMatches(pattern, path, isDirectory, respectUnsupportedFlag: true);
-
-    private static bool LegacyPatternMatches(
-        IgnorePattern pattern, string path, bool isDirectory, bool respectUnsupportedFlag)
+    private static bool LegacyPatternMatches(IgnorePattern pattern, string path, bool isDirectory)
     {
-        if (respectUnsupportedFlag && pattern.Unsupported)
+        if (pattern.Unsupported)
             return false;
 
         if (pattern.DirOnly && !isDirectory)

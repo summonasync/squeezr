@@ -70,6 +70,18 @@ public sealed class StaleFileDetectorTests
     }
 
     [Fact]
+    public void Detect_ResidualGitignorePattern_KeepsTheFileGitKeeps()
+    {
+        var workspace = NewIndexedWorkspace(out _);
+        WriteFile(workspace, "repo/a]", "plain text, no extension\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        WriteFile(workspace, "repo/.gitignore", "[[:alpha:]]\n");
+
+        StaleFileDetector.Detect(workspace).ShouldBe(["repo/.gitignore"]);
+    }
+
+    [Fact]
     public void Detect_NewFileInsideIgnoredSubtree_IsNotStale()
     {
         var workspace = NewIndexedWorkspace(out _);
