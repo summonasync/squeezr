@@ -115,21 +115,25 @@ Squeezr не мусорит в проекте: `squeezr init` не создаё�
 ```
 ~/.squeezr/                          # стор (override: env SQUEEZR_HOME)
 ├── workspaces.json               # реестр: name/rootPath/storeKey/createdAt/lastUsedAt
+├── workspaces.lock                  # lock реестра — одна операция записи workspaces.json за раз
 ├── workspaces/<storeKey>/          # index store одного workspace
 │   ├── workspace.json               # манифест (репозитории)
 │   ├── config.json                  # конфиг (embeddings, watch, ...)
 │   ├── meta.db                      # LiteDB
 │   ├── trigram.idx                  # триграммный индекс
 │   ├── index.lock
+│   ├── watch.owner                  # claim watch-цикла: pid+host+kind, эксклюзивное создание; чужой host переживается только временем (×4 stale-окна), не pid
 │   ├── watch.heartbeat              # пока жив демон `watch` (флот, см. раздел про fleet)
 │   ├── serve-watch.heartbeat        # ...или `serve --watch` от MCP-клиента
-│   └── queries.jsonl                # телеметрия запросов для `stats` (локально, drop сносит)
+│   ├── queries.jsonl                # телеметрия запросов для `stats` (локально, drop сносит)
+│   └── queries.lock                 # сериализует аппенды телеметрии против scrub'а при compact (appends ждут, scrub уходит по бюджету — не теряет строк)
 ├── models/                         # ONNX-модели эмбеддингов
 └── infra/docker-compose.yml        # qdrant + ollama (генерируется `squeezr services up`)
 ```
 
 - **Discovery как у git:** любая команда, запущенная из любого сабдиректория воркспейса, находит его сама (поиск вверх по реестру). «Зашёл не в ту папку» исчезло как класс.
 - **Реестр:** `squeezr workspace list` показывает все воркспейсы из `workspaces.json`; записи, чей rootPath исчез с диска, помечаются `stale` — удаляются поодиночке через `squeezr drop --store-key <key>` или пакетно через `squeezr workspace repair --dry-run` / `--yes` (с размерами store-директорий). Записи с rootPath = `$HOME` или родитель стора (наследие инцидентов) помечаются `husk` с тем же хинтом на drop.
+- **Форма storeKey:** `<slug имени>-<первые 8 hex SHA1 от канонического rootPath>` (slug: lower, буквы/цифры, разделители в `-`; пустое имя → `workspace`). Ключ — всегда ровно один сегмент внутри `workspaces/`; `drop --store-key` и prune-свип в repair отказывают ключам другой формы (`.`, `..`, сепараторы, NUL, двоеточие — на обеих платформах) до первого обращения к файловой системе: отказ не читает и не удаляет ничего.
 - **Сироты и repair:** если store-директория пережила потерю реестра (крах, ручная чистка `workspaces.json`), `workspace list` показывает её как `orphan — adoptable` (манифест с rootPath, ключ сходится) или `orphan — needs root` (старый манифест без rootPath). `squeezr workspace repair` возвращает adoptable-сирот в реестр одной командой; для legacy — `squeezr workspace repair --store-key <key> --root <path>` (путь верифицируется: хэш name+root обязан совпасть с ключом, чужой стор подсунуть нельзя). Пакетная чистка stale-записей требует явного подтверждения: `--dry-run` только показывает список, `--yes` или ответ в TTY подтверждают; без терминала и без `--yes` repair отказывается (отсутствие промпта — не согласие). Удаление идёт тем же единственным путём, что и `drop` (ряд + store-директория), adoptable-сироты и живые записи не удаляются; перед реальной чисткой — датированная копия `workspaces.json`. Запасной путь: `squeezr init` в корне проекта — поверх существующего store-дира он работает как lossless-adoption: живые `config.json`, манифест (со списком репо) и индекс (`meta.db`) сохраняются, сброса в дефолты нет.
 
 ```
