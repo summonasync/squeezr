@@ -29,7 +29,7 @@ public sealed class IndexStatusTool
         _identity = identity;
     }
 
-    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, semantic coverage (embedded share of chunks, 0..1; null when there is nothing to embed), Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed.")]
+    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, semantic coverage (embedded share of chunks, 0..1; null when there is nothing to embed), Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed. When more than one workspace is registered, data.workspaces also lists them as {name, rootPath, storeKey, current, stale} (up to 12 rows, the rest counted in workspacesOmitted) — an absent workspaces key means this session's workspace is the only one the registry knows.")]
     [McpServerTool(Name = "index_status", Title = "Index status")]
     public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
         _gate.RunAsync(GetCore, cancellationToken);
@@ -88,6 +88,7 @@ public sealed class IndexStatusTool
                 warnings.Add(withheld.Warning());
             }
 
+            var siblings = WorkspaceSiblingSnapshot.Build(root);
             var data = new IndexStatusData(
                 status.Name,
                 root,
@@ -95,7 +96,9 @@ public sealed class IndexStatusTool
                 new EmbeddingsData(
                     qdrant.PendingChunks,
                     new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio),
-                new QdrantData(qdrant.Available, qdrant.Points));
+                new QdrantData(qdrant.Available, qdrant.Points),
+                BuildWorkspaceRows(siblings),
+                siblings.Omitted);
 
             var envelope = ToolEnvelope.Wrap(data, 0, false, warnings, root, staleFiles: null);
             QueryTelemetry.Record(root, _workspace.SessionId, "index_status",
@@ -108,6 +111,20 @@ public sealed class IndexStatusTool
         {
             return ToolErrors.From(ex, _workspace.Root);
         }
+    }
+
+    private static IReadOnlyList<WorkspaceData>? BuildWorkspaceRows(WorkspaceSiblingSnapshot snapshot)
+    {
+        if (snapshot.Workspaces.Count == 0)
+            return null;
+
+        var rows = new List<WorkspaceData>(snapshot.Workspaces.Count);
+        foreach (var entry in snapshot.Workspaces)
+        {
+            rows.Add(new WorkspaceData(entry.Name, entry.RootPath, entry.StoreKey, entry.Current, entry.Stale));
+        }
+
+        return rows;
     }
 
     private static IgnoredData? BuildIgnoredData(RepoStatus repo, List<string> warnings)
@@ -156,7 +173,18 @@ public sealed class IndexStatusTool
         [property: JsonPropertyName("rootPath")] string RootPath,
         [property: JsonPropertyName("repos")] IReadOnlyList<RepoData> Repos,
         [property: JsonPropertyName("embeddings")] EmbeddingsData Embeddings,
-        [property: JsonPropertyName("qdrant")] QdrantData Qdrant);
+        [property: JsonPropertyName("qdrant")] QdrantData Qdrant,
+        [property: JsonPropertyName("workspaces"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<WorkspaceData>? Workspaces = null,
+        [property: JsonPropertyName("workspacesOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        int WorkspacesOmitted = 0);
+
+    private sealed record WorkspaceData(
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("rootPath")] string RootPath,
+        [property: JsonPropertyName("storeKey")] string StoreKey,
+        [property: JsonPropertyName("current")] bool Current,
+        [property: JsonPropertyName("stale")] bool Stale);
 
     private sealed record RepoData(
         [property: JsonPropertyName("name")] string Name,

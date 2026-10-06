@@ -186,6 +186,13 @@ plain grep/read is correct, not a violation.
   not directories: everything under a pruned directory (`out/`) is included,
   counted by name only. The ignored numbers are a snapshot from the last index
   pass, not live disk state — they stay stable until the next `squeezr index`.
+  Additive to the same contract: when the registry holds two or more workspaces,
+  `data` also carries `workspaces` — `{ name, rootPath, storeKey, current, stale }`
+  rows, this session's listed first, at most 12 of them with the rest counted in
+  `workspacesOmitted` — so you can tell a wrong-scope answer from an absent one
+  (`squeezr add <path> --name <name>` joins a sibling repo into this workspace).
+  A single-workspace machine gets neither key, and its `data` is byte-identical
+  to the pre-`workspaces` payload.
 
 Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
 and sets `truncated` when it overflows — narrow the query or adjust maxTokens
