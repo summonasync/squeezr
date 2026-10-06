@@ -86,7 +86,7 @@ public sealed class FindReferencesTool
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
-            return ToolErrors.From(ex, _workspace.Root);
+            return ToolErrors.From(ex, _workspace);
         }
     }
 

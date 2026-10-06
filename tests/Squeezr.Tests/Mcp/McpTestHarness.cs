@@ -20,7 +20,8 @@ internal sealed class McpTestHarness : IAsyncDisposable
 
     public McpClient Client { get; }
 
-    public static async Task<McpTestHarness> StartAsync(string workspaceRoot, bool watch = false)
+    public static async Task<McpTestHarness> StartAsync(
+        string workspaceRoot, bool watch = false, string? sessionDirectory = null)
     {
         var toServer = new Pipe();
         var fromServer = new Pipe();
@@ -30,6 +31,7 @@ internal sealed class McpTestHarness : IAsyncDisposable
             toServer.Reader.AsStream(),
             fromServer.Writer.AsStream(),
             workspaceRoot,
+            sessionDirectory ?? workspaceRoot,
             serverCts.Token,
             watch);
 

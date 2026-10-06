@@ -5,11 +5,20 @@ namespace Squeezr.Cli.Mcp;
 
 public sealed class McpWorkspace
 {
-    public McpWorkspace(string root) => Root = Path.GetFullPath(root);
+    public McpWorkspace(string root, string sessionDirectory)
+    {
+        Root = Path.GetFullPath(root);
+        SessionDirectory = SessionLocation.Display(sessionDirectory);
+        SessionOutsideRoot = !SessionLocation.IsWithinRoot(Root, SessionDirectory);
+    }
 
     public Guid SessionId { get; } = Guid.NewGuid();
 
     public string Root { get; }
+
+    public string SessionDirectory { get; }
+
+    public bool SessionOutsideRoot { get; }
 
     public bool IsWorkspace => File.Exists(SqueezrPaths.ManifestPath(Root));
 
@@ -17,9 +26,13 @@ public sealed class McpWorkspace
     {
         if (!IsWorkspace)
         {
-            throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr init' first.",
-                WorkspaceException.NotInitializedCode);
+            throw new WorkspaceException(NotInitializedMessage(), WorkspaceException.NotInitializedCode);
         }
     }
+
+    private string NotInitializedMessage() =>
+        SessionOutsideRoot
+            ? $"Workspace is not initialized at '{Root}' and the session directory '{SessionDirectory}' is outside it. " +
+              "Do not initialize a store to work around this: this server only reads the root above."
+            : "Workspace is not initialized. Run 'squeezr init' first.";
 }

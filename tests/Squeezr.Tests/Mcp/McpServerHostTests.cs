@@ -12,7 +12,7 @@ public class McpServerHostTests
 
         var output = Warn(root, root);
 
-        output.ShouldBeEmpty();
+        output.ShouldBe(string.Empty);
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public class McpServerHostTests
 
         var output = Warn(root, nested);
 
-        output.ShouldBeEmpty();
+        output.ShouldBe(string.Empty);
     }
 
     [Fact]
@@ -34,11 +34,9 @@ public class McpServerHostTests
 
         var output = Warn(root, outside);
 
-        var line = output.TrimEnd('\n', '\r');
-        line.ShouldStartWith("warning:");
-        line.ShouldContain(root);
-        line.ShouldContain(outside);
-        line.ShouldNotContain('\n');
+        output.ShouldBe(
+            $"warning: session directory '{outside}' is outside the workspace root '{root}'; " +
+            "tools serve that workspace's index, not the current project" + Environment.NewLine);
     }
 
     [Fact]

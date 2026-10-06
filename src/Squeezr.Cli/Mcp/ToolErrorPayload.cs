@@ -8,4 +8,6 @@ public sealed record ToolErrorPayload(
     [property: JsonPropertyName("rootPath"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? RootPath = null,
     [property: JsonPropertyName("nextSteps"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<string>? NextSteps = null);
+    IReadOnlyList<string>? NextSteps = null,
+    [property: JsonPropertyName("cause"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Cause = null);

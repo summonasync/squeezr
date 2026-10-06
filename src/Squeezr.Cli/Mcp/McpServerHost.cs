@@ -9,7 +9,6 @@ using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Watch;
-using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp;
@@ -33,26 +32,21 @@ public static class McpServerHost
         StaleRegistrationNudge.TryWrite(Console.Error, homeDir, Environment.ProcessPath);
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
-        await RunAsync(inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, ct, watch, events);
+        await RunAsync(
+            inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, startDirectory, ct, watch, events);
         await forwardTask;
     }
 
     internal static void WarnIfSessionOutsideWorkspace(string workspaceRoot, string sessionDirectory, TextWriter stderr)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var root = WorkspaceCanonicalPath.Canonicalize(workspaceRoot)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var session = WorkspaceCanonicalPath.Canonicalize(sessionDirectory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (string.Equals(session, root, comparison)
-            || session.StartsWith(root + Path.DirectorySeparatorChar, comparison))
+        if (SessionLocation.IsWithinRoot(workspaceRoot, sessionDirectory))
         {
             return;
         }
 
         stderr.WriteLine(
-            $"warning: session directory '{session}' is outside the workspace root '{root}'; " +
-            "tools serve that workspace's index, not the current project");
+            $"warning: session directory '{SessionLocation.Display(sessionDirectory)}' is outside the workspace root " +
+            $"'{SessionLocation.Display(workspaceRoot)}'; tools serve that workspace's index, not the current project");
     }
 
     private static async Task ForwardStdinAsync(PipeWriter writer, CancellationToken ct)
@@ -72,9 +66,15 @@ public static class McpServerHost
     }
 
     public static async Task RunAsync(
-        Stream input, Stream output, string workspaceRoot, CancellationToken ct, bool watch = false, bool events = false)
+        Stream input,
+        Stream output,
+        string workspaceRoot,
+        string sessionDirectory,
+        CancellationToken ct,
+        bool watch = false,
+        bool events = false)
     {
-        var workspace = new McpWorkspace(workspaceRoot);
+        var workspace = new McpWorkspace(workspaceRoot, sessionDirectory);
         if (!workspace.IsWorkspace)
         {
             Console.Error.WriteLine(

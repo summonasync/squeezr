@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using Shouldly;
@@ -43,7 +44,7 @@ public class McpServerSmokeTests
     }
 
     [Fact]
-    public async Task ToolCallOutsideWorkspace_ReturnsStructuredError_ServerStaysAlive()
+    public async Task ToolCallUninitializedWorkspace_ReturnsStructuredError_ServerStaysAlive()
     {
         await using var harness = await McpTestHarness.StartAsync(TestDirs.NewTempDir());
 
@@ -61,7 +62,7 @@ public class McpServerSmokeTests
     }
 
     [Fact]
-    public async Task ToolCallOutsideWorkspace_StructuredBlockCarriesCodeAndRemedy()
+    public async Task ToolCallSessionAtRoot_StructuredBlockCarriesInitRemedy()
     {
         var root = TestDirs.NewTempDir();
         await using var harness = await McpTestHarness.StartAsync(root);
@@ -73,8 +74,10 @@ public class McpServerSmokeTests
 
         var payload = result.StructuredContent.ShouldNotBeNull();
         payload.GetProperty("code").GetString().ShouldBe("workspace_not_initialized");
+        payload.GetProperty("cause").GetString().ShouldBe("root_without_manifest");
         payload.GetProperty("rootPath").GetString().ShouldBe(Path.GetFullPath(root));
-        payload.GetProperty("nextSteps").GetArrayLength().ShouldBeGreaterThan(0);
+        Steps(payload).ShouldContain(step => step.Contains("squeezr init", StringComparison.Ordinal));
+        payload.ToString().ShouldNotContain("install");
 
         result.IsError.ShouldBe(true);
         result.Content.ShouldHaveSingleItem().ShouldBeOfType<TextContentBlock>().Text
@@ -82,16 +85,50 @@ public class McpServerSmokeTests
     }
 
     [Fact]
+    public async Task ToolCallSessionOutsideRoot_StructuredBlockRebindsAndCarriesNoInitCommand()
+    {
+        var root = TestDirs.NewTempDir();
+        var session = TestDirs.NewTempDir();
+        await using var harness = await McpTestHarness.StartAsync(root, sessionDirectory: session);
+
+        var result = await harness.Client.CallToolAsync(
+            "code_search",
+            new Dictionary<string, object?> { ["query"] = "SessionLocation" },
+            cancellationToken: CancellationToken.None);
+
+        var payload = result.StructuredContent.ShouldNotBeNull();
+        payload.GetProperty("code").GetString().ShouldBe("workspace_not_initialized");
+        payload.GetProperty("cause").GetString().ShouldBe("session_outside_root");
+        payload.GetProperty("rootPath").GetString().ShouldBe(Path.GetFullPath(root));
+
+        var steps = Steps(payload);
+        steps.ShouldContain(step => step.Contains("squeezr mcp install", StringComparison.Ordinal));
+        steps.ShouldContain(step => step.Contains("squeezr serve", StringComparison.Ordinal));
+        steps.ShouldAllBe(step => step.StartsWith($"cd '{session}' && squeezr", StringComparison.Ordinal));
+        payload.ToString().ShouldNotContain("squeezr init");
+
+        result.Content.ShouldHaveSingleItem().ShouldBeOfType<TextContentBlock>().Text
+            .ShouldContain("Do not initialize a store");
+        result.IsError.ShouldBe(true);
+    }
+
+    private static List<string> Steps(JsonElement payload) =>
+        payload.GetProperty("nextSteps").EnumerateArray()
+            .Select(step => step.GetString()!).ToList();
+
+    [Fact]
     public async Task RunAsync_Cancellation_CompletesGracefully()
     {
         var toServer = new System.IO.Pipelines.Pipe();
         var fromServer = new System.IO.Pipelines.Pipe();
         using var cts = new CancellationTokenSource();
+        var root = TestDirs.NewTempDir();
 
         var serverTask = McpServerHost.RunAsync(
             toServer.Reader.AsStream(),
             fromServer.Writer.AsStream(),
-            TestDirs.NewTempDir(),
+            root,
+            root,
             cts.Token);
 
         cts.Cancel();
