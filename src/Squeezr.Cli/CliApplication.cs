@@ -80,7 +80,7 @@ public static class CliApplication
                 workspace.AddCommand<WorkspaceListCommand>("list")
                     .WithDescription("List registered workspaces");
                 workspace.AddCommand<WorkspaceRepairCommand>("repair")
-                    .WithDescription("Adopt orphaned workspace stores back into the registry (never deletes anything)");
+                    .WithDescription("Adopt orphaned workspace stores back into the registry, prune stale rows after confirmation (--dry-run lists, --yes confirms)");
             });
             config.AddBranch("vectors", vectors =>
             {
