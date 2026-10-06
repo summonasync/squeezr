@@ -12,7 +12,7 @@ public static class NavigationContext
         var root = Path.GetFullPath(workspaceRoot);
         if (!File.Exists(SqueezrPaths.TrigramIndexPath(root)))
         {
-            throw new WorkspaceException(MissingIndexMessage);
+            throw new WorkspaceException(MissingIndexMessage, WorkspaceException.IndexNotBuiltCode);
         }
 
         return root;

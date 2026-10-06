@@ -2,6 +2,8 @@ using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Squeezr.Cli.Mcp;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp;
@@ -84,7 +86,7 @@ public class ToolErrorsTests
             .Cause.ShouldBe(ToolErrorCause.RootWithoutManifest);
 
         Payload(From(NotInitializedMessage, WorkspaceException.NotInitializedCode,
-                new McpWorkspace(RootPath, InsideSession)))
+                new McpWorkspace(RootPath, InsideSession, null)))
             .Cause.ShouldBe(ToolErrorCause.RootWithoutManifest);
 
         Payload(From(NotInitializedMessage, WorkspaceException.NotInitializedCode, WorkspaceOutsideRoot()))
@@ -105,7 +107,7 @@ public class ToolErrorsTests
     public void EnvelopeOfWorkspaceThrownAtRoot_PrescribesInitAndIndex()
     {
         var root = TestDirs.NewTempDir();
-        var result = EnvelopeForUninitialized(new McpWorkspace(root, root));
+        var result = EnvelopeForUninitialized(new McpWorkspace(root, root, null));
 
         var steps = Payload(result).NextSteps!.ToList();
         steps[0].ShouldBe($"cd '{root}' && squeezr init");
@@ -123,7 +125,7 @@ public class ToolErrorsTests
         var root = Path.Combine(baseDir, "it's-a-root");
         var quotedRoot = Path.Combine(baseDir, @"it'\''s-a-root");
 
-        var result = EnvelopeForUninitialized(new McpWorkspace(root, root));
+        var result = EnvelopeForUninitialized(new McpWorkspace(root, root, null));
 
         var steps = Payload(result).NextSteps!.ToList();
         steps[0].ShouldBe($"cd '{quotedRoot}' && squeezr init");
@@ -138,7 +140,7 @@ public class ToolErrorsTests
         var session = Path.Combine(baseDir, "it's-a-session");
         var quotedSession = Path.Combine(baseDir, @"it'\''s-a-session");
 
-        var steps = Payload(EnvelopeForUninitialized(new McpWorkspace(root, session))).NextSteps!.ToList();
+        var steps = Payload(EnvelopeForUninitialized(new McpWorkspace(root, session, null))).NextSteps!.ToList();
 
         steps.ShouldContain($"cd '{quotedSession}' && squeezr serve");
         steps.ShouldContain($"cd '{quotedSession}' && squeezr mcp install --client <client> --scope project");
@@ -148,7 +150,7 @@ public class ToolErrorsTests
     public void EnvelopeOfWorkspaceThrownOutsideRoot_PrescribesRebindAndCarriesNoInitCommand()
     {
         var result = EnvelopeForUninitialized(
-            new McpWorkspace(TestDirs.NewTempDir(), TestDirs.NewTempDir()));
+            new McpWorkspace(TestDirs.NewTempDir(), TestDirs.NewTempDir(), null));
 
         var wire = Wire(result);
         wire.ShouldContain($"\"cause\":\"{ToolErrorCause.SessionOutsideRoot}\"");
@@ -161,12 +163,125 @@ public class ToolErrorsTests
     }
 
     [Fact]
-    public void From_IndexNotBuilt_KeepsTheIndexStepAndGainsNoCause()
+    public void From_IndexNotBuiltWithoutConfig_AnchorsIndexStepAndGainsNoCause()
     {
         var payload = Payload(From(IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode));
 
-        payload.NextSteps.ShouldBe(["squeezr index"]);
+        payload.NextSteps.ShouldBe([$"cd '{RootPath}' && squeezr index"]);
         payload.Cause.ShouldBeNull();
+    }
+
+    [Fact]
+    public void From_IndexNotBuiltWithOllama_SuggestsServicesBeforeTheAnchoredIndexStep()
+    {
+        var payload = Payload(From(
+            IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceAtRoot("ollama")));
+
+        payload.NextSteps.ShouldBe(["squeezr services up", $"cd '{RootPath}' && squeezr index"]);
+        payload.Cause.ShouldBe(ToolErrorCause.ProviderNeedsServices);
+    }
+
+    [Fact]
+    public void From_IndexNotBuiltWithAuto_ServicesComeFirstBecauseAutoPrefersTheManagedEndpoint()
+    {
+        var payload = Payload(From(
+            IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceAtRoot("auto")));
+
+        payload.NextSteps.ShouldBe(["squeezr services up", $"cd '{RootPath}' && squeezr index"]);
+        payload.Cause.ShouldBe(ToolErrorCause.ProviderNeedsServices);
+    }
+
+    [Theory]
+    [InlineData("onnx")]
+    [InlineData("openai")]
+    public void From_IndexNotBuiltWithProviderThatNeedsNoService_KeepsOnlyTheIndexStep(string provider)
+    {
+        var payload = Payload(From(
+            IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceAtRoot(provider)));
+
+        payload.NextSteps.ShouldBe([$"cd '{RootPath}' && squeezr index"]);
+        payload.Cause.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("ollama")]
+    [InlineData("auto")]
+    [InlineData("onnx")]
+    [InlineData("openai")]
+    [InlineData(null)]
+    public void From_IndexNotBuilt_AlwaysCarriesTheIndexStep(string? provider)
+    {
+        var steps = Payload(From(
+            IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceAtRoot(provider)))
+            .NextSteps!.ToList();
+
+        steps.ShouldContain(step => step == $"cd '{RootPath}' && squeezr index");
+        steps.ShouldAllBe(step => step == "squeezr services up" ||
+            step.StartsWith($"cd '{RootPath}' && ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void From_IndexNotBuilt_NeverSuggestsInitializingAStoreThatAlreadyExists()
+    {
+        foreach (var provider in new string?[] { "ollama", "onnx", null })
+        {
+            Wire(From(IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceAtRoot(provider)))
+                .ShouldNotContain("squeezr init");
+        }
+    }
+
+    [Fact]
+    public void From_IndexNotBuilt_SessionOutsideRoot_AnchorsTheRootAndNotTheSession()
+    {
+        var result = From(
+            IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceOutsideRoot("ollama"));
+
+        var steps = Payload(result).NextSteps!.ToList();
+        steps.ShouldContain($"cd '{RootPath}' && squeezr index");
+        steps.ShouldNotContain(step => step.Contains(OutsideSession, StringComparison.Ordinal));
+        Payload(result).RootPath.ShouldBe(RootPath);
+    }
+
+    [Fact]
+    public void From_IndexNotBuilt_RootWithApostrophe_IndexStepStaysExecutableInPosixSh()
+    {
+        var root = "/work/it's-root";
+
+        var steps = Payload(From(
+            IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode,
+            new McpWorkspace(root, root, "ollama"))).NextSteps!.ToList();
+
+        steps.ShouldContain(@"cd '/work/it'\''s-root' && squeezr index");
+    }
+
+    [Fact]
+    public void From_IndexNotBuilt_AnswersFromTheCapturedFactNotFromTheConfigOnDisk()
+    {
+        var root = TestDirs.NewTempDir();
+        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        {
+            Embeddings = new EmbeddingsConfig { Provider = "onnx" }
+        });
+        var workspace = new McpWorkspace(root, root, "ollama");
+
+        File.Delete(SqueezrPaths.ConfigPath(root));
+        var payload = Payload(From(IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, workspace));
+
+        payload.NextSteps!.ShouldContain("squeezr services up");
+        payload.Cause.ShouldBe(ToolErrorCause.ProviderNeedsServices);
+    }
+
+    [Fact]
+    public void From_IndexNotBuilt_ServiceAdvice_KeepsFiveWireFieldsAndTheVerbatimTextBlock()
+    {
+        var result = From(
+            IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceAtRoot("ollama"));
+
+        var json = Wire(result);
+        json.ShouldContain("\"nextSteps\":[\"squeezr services up\",");
+        json.ShouldContain($"\"cause\":\"{ToolErrorCause.ProviderNeedsServices}\"");
+        result.Content.ShouldHaveSingleItem().ShouldBeOfType<TextContentBlock>().Text
+            .ShouldBe(IndexNotBuiltMessage);
     }
 
     [Theory]
@@ -224,9 +339,10 @@ public class ToolErrorsTests
         return ToolErrors.From(ex, workspace);
     }
 
-    private static McpWorkspace WorkspaceAtRoot() => new(RootPath, RootPath);
+    private static McpWorkspace WorkspaceAtRoot(string? provider = null) => new(RootPath, RootPath, provider);
 
-    private static McpWorkspace WorkspaceOutsideRoot() => new(RootPath, OutsideSession);
+    private static McpWorkspace WorkspaceOutsideRoot(string? provider = null) =>
+        new(RootPath, OutsideSession, provider);
 
     private static CallToolResult From(string message, string code, McpWorkspace? workspace = null) =>
         ToolErrors.From(new WorkspaceException(message, code), workspace ?? WorkspaceAtRoot());

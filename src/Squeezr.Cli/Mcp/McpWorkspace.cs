@@ -5,11 +5,12 @@ namespace Squeezr.Cli.Mcp;
 
 public sealed class McpWorkspace
 {
-    public McpWorkspace(string root, string sessionDirectory)
+    public McpWorkspace(string root, string sessionDirectory, string? embeddingsProvider)
     {
         Root = Path.GetFullPath(root);
         SessionDirectory = SessionLocation.Display(sessionDirectory);
         SessionOutsideRoot = !SessionLocation.IsWithinRoot(Root, SessionDirectory);
+        EmbeddingsProvider = embeddingsProvider;
     }
 
     public Guid SessionId { get; } = Guid.NewGuid();
@@ -17,6 +18,8 @@ public sealed class McpWorkspace
     public string Root { get; }
 
     public string SessionDirectory { get; }
+
+    public string? EmbeddingsProvider { get; }
 
     public bool SessionOutsideRoot { get; }
 

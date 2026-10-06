@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Workspace;
 
@@ -28,6 +29,7 @@ public static class ToolErrors
     {
         WorkspaceException.NotInitializedCode when workspace.SessionOutsideRoot => ToolErrorCause.SessionOutsideRoot,
         WorkspaceException.NotInitializedCode => ToolErrorCause.RootWithoutManifest,
+        WorkspaceException.IndexNotBuiltCode when NeedsManagedService(workspace) => ToolErrorCause.ProviderNeedsServices,
         _ => null
     };
 
@@ -36,9 +38,20 @@ public static class ToolErrors
     {
         WorkspaceException.NotInitializedCode when workspace.SessionOutsideRoot => RebindSteps(workspace),
         WorkspaceException.NotInitializedCode => InitializeSteps(workspace),
-        WorkspaceException.IndexNotBuiltCode => ["squeezr index"],
+        WorkspaceException.IndexNotBuiltCode => IndexSteps(workspace),
         _ => null
     };
+
+    private static IReadOnlyList<string> IndexSteps(McpWorkspace workspace)
+    {
+        var index = $"cd {ShellPath.Quote(workspace.Root)} && squeezr index";
+        return NeedsManagedService(workspace)
+            ? ["squeezr services up", index]
+            : [index];
+    }
+
+    private static bool NeedsManagedService(McpWorkspace workspace) =>
+        EmbeddingProviderServices.RequiresManagedService(workspace.EmbeddingsProvider);
 
     private static IReadOnlyList<string> InitializeSteps(McpWorkspace workspace) =>
     [

@@ -74,7 +74,8 @@ public static class McpServerHost
         bool watch = false,
         bool events = false)
     {
-        var workspace = new McpWorkspace(workspaceRoot, sessionDirectory);
+        var startupConfig = TryReadStartupConfig(workspaceRoot);
+        var workspace = new McpWorkspace(workspaceRoot, sessionDirectory, startupConfig?.Embeddings.Provider);
         if (!workspace.IsWorkspace)
         {
             Console.Error.WriteLine(
@@ -111,7 +112,8 @@ public static class McpServerHost
         identity.Attach(provider.GetRequiredService<McpServer>());
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();
         await server.StartAsync(ct);
-        var watcher = await TryStartWatchEngineAsync(workspace, watch, ct, events);
+        var watcher = await TryStartWatchEngineAsync(
+            workspace, watch, startupConfig?.Watch.Enabled ?? false, ct, events);
         lifetime.MarkStarted();
         try
         {
@@ -130,9 +132,9 @@ public static class McpServerHost
     }
 
     private static async Task<WorkspaceWatcher?> TryStartWatchEngineAsync(
-        McpWorkspace workspace, bool watchRequested, CancellationToken ct, bool events)
+        McpWorkspace workspace, bool watchRequested, bool watchEnabledInConfig, CancellationToken ct, bool events)
     {
-        if (!watchRequested && !ConfigRequestsWatch(workspace.Root))
+        if (!watchRequested && !watchEnabledInConfig)
         {
             if (events)
             {
@@ -176,15 +178,15 @@ public static class McpServerHost
         }
     }
 
-    private static bool ConfigRequestsWatch(string workspaceRoot)
+    private static SqueezrConfig? TryReadStartupConfig(string workspaceRoot)
     {
         try
         {
-            return ConfigFile.Load(workspaceRoot).Watch.Enabled;
+            return ConfigFile.Load(workspaceRoot);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or WorkspaceException or ArgumentException)
         {
-            return false;
+            return null;
         }
     }
 

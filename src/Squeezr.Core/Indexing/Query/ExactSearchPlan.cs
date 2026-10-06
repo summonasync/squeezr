@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -20,7 +21,7 @@ public static class ExactSearchPlan
         if (!File.Exists(indexPath))
         {
             throw new WorkspaceException(
-                "Index is not built. Run 'squeezr index' first.",
+                NavigationContext.MissingIndexMessage,
                 WorkspaceException.IndexNotBuiltCode);
         }
 

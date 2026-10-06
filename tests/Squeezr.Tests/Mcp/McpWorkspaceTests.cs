@@ -11,7 +11,7 @@ public class McpWorkspaceTests
     public void RequireWorkspace_MissingManifest_ThrowsNotInitializedCode()
     {
         var root = TestDirs.NewTempDir();
-        var workspace = new McpWorkspace(root, root);
+        var workspace = new McpWorkspace(root, root, null);
 
         var ex = Should.Throw<WorkspaceException>(workspace.RequireWorkspace);
 
@@ -23,7 +23,7 @@ public class McpWorkspaceTests
     public void RequireWorkspace_MissingManifest_KeepsTheHumanSentenceVerbatim()
     {
         var root = TestDirs.NewTempDir();
-        var workspace = new McpWorkspace(root, root);
+        var workspace = new McpWorkspace(root, root, null);
 
         var ex = Should.Throw<WorkspaceException>(workspace.RequireWorkspace);
 
@@ -36,13 +36,13 @@ public class McpWorkspaceTests
         var root = TestDirs.NewTempDir();
         File.WriteAllText(SqueezrPaths.ManifestPath(root), "{}");
 
-        Should.NotThrow(() => new McpWorkspace(root, root).RequireWorkspace());
+        Should.NotThrow(() => new McpWorkspace(root, root, null).RequireWorkspace());
     }
 
     [Fact]
     public void RequireWorkspace_SessionOutsideRoot_NamesBothPathsAndNeverSuggestsInit()
     {
-        var workspace = new McpWorkspace(TestDirs.NewTempDir(), TestDirs.NewTempDir());
+        var workspace = new McpWorkspace(TestDirs.NewTempDir(), TestDirs.NewTempDir(), null);
 
         var ex = Should.Throw<WorkspaceException>(workspace.RequireWorkspace);
 
@@ -59,7 +59,7 @@ public class McpWorkspaceTests
         var root = TestDirs.NewTempDir();
         var nested = Path.Combine(root, "src", "Squeezr.Core");
         Directory.CreateDirectory(nested);
-        var workspace = new McpWorkspace(root, nested);
+        var workspace = new McpWorkspace(root, nested, null);
 
         var ex = Should.Throw<WorkspaceException>(workspace.RequireWorkspace);
 
@@ -73,8 +73,8 @@ public class McpWorkspaceTests
         var nested = Path.Combine(root, "deep");
         Directory.CreateDirectory(nested);
 
-        new McpWorkspace(root, nested).SessionOutsideRoot.ShouldBeFalse();
-        new McpWorkspace(root, root + Path.DirectorySeparatorChar).SessionOutsideRoot.ShouldBeFalse();
+        new McpWorkspace(root, nested, null).SessionOutsideRoot.ShouldBeFalse();
+        new McpWorkspace(root, root + Path.DirectorySeparatorChar, null).SessionOutsideRoot.ShouldBeFalse();
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public class McpWorkspaceTests
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(sibling);
 
-        new McpWorkspace(root, sibling).SessionOutsideRoot.ShouldBeTrue();
+        new McpWorkspace(root, sibling, null).SessionOutsideRoot.ShouldBeTrue();
     }
 
     [Fact]
@@ -95,9 +95,23 @@ public class McpWorkspaceTests
         var root = TestDirs.NewTempDir();
         var session = TestDirs.NewTempDir();
 
-        var workspace = new McpWorkspace(root, session);
+        var workspace = new McpWorkspace(root, session, null);
 
         workspace.Root.ShouldBe(Path.GetFullPath(root));
         workspace.SessionDirectory.ShouldBe(session);
+    }
+
+    [Theory]
+    [InlineData("ollama")]
+    [InlineData("onnx")]
+    [InlineData(null)]
+    public void EmbeddingsProvider_IsTheCarriedStartupFact_NotASecondRead(string? provider)
+    {
+        var root = TestDirs.NewTempDir();
+
+        var workspace = new McpWorkspace(root, root, provider);
+
+        workspace.EmbeddingsProvider.ShouldBe(provider);
+        File.Exists(SqueezrPaths.ConfigPath(root)).ShouldBeFalse();
     }
 }
