@@ -29,8 +29,11 @@ public static class QueryTelemetry
     {
         try
         {
-            Directory.CreateDirectory(SqueezrPaths.StoreDir(workspaceRoot));
-            File.AppendAllText(SqueezrPaths.QueriesLogPath(workspaceRoot), JsonSerializer.Serialize(entry) + '\n');
+            var line = JsonSerializer.Serialize(entry) + '\n';
+            // waiting behind a scrub is the discipline; writing anyway once the budget runs out is the price of
+            // never dropping telemetry — a wedged holder is the only way to reach it, and it is already late
+            using var writer = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(workspaceRoot));
+            File.AppendAllText(SqueezrPaths.QueriesLogPath(workspaceRoot), line);
         }
         catch
         {
@@ -121,6 +124,15 @@ public static class QueryTelemetry
     {
         var path = SqueezrPaths.QueriesLogPath(workspaceRoot);
         if (!File.Exists(path))
+        {
+            return 0;
+        }
+
+        // the writer lock spans snapshot → temp → move, which is the window where a line that arrived after the
+        // read used to be published away together with the file it had been written into; a holder that outlasts
+        // the budget means this pass skips rather than eats somebody's row, and the next compact gets the value
+        using var writer = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(workspaceRoot));
+        if (writer is null)
         {
             return 0;
         }
