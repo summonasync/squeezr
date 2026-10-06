@@ -61,6 +61,27 @@ public class McpServerSmokeTests
     }
 
     [Fact]
+    public async Task ToolCallOutsideWorkspace_StructuredBlockCarriesCodeAndRemedy()
+    {
+        var root = TestDirs.NewTempDir();
+        await using var harness = await McpTestHarness.StartAsync(root);
+
+        var result = await harness.Client.CallToolAsync(
+            "index_status",
+            new Dictionary<string, object?>(),
+            cancellationToken: CancellationToken.None);
+
+        var payload = result.StructuredContent.ShouldNotBeNull();
+        payload.GetProperty("code").GetString().ShouldBe("workspace_not_initialized");
+        payload.GetProperty("rootPath").GetString().ShouldBe(Path.GetFullPath(root));
+        payload.GetProperty("nextSteps").GetArrayLength().ShouldBeGreaterThan(0);
+
+        result.IsError.ShouldBe(true);
+        result.Content.ShouldHaveSingleItem().ShouldBeOfType<TextContentBlock>().Text
+            .ShouldBe("Workspace is not initialized. Run 'squeezr init' first.");
+    }
+
+    [Fact]
     public async Task RunAsync_Cancellation_CompletesGracefully()
     {
         var toServer = new System.IO.Pipelines.Pipe();

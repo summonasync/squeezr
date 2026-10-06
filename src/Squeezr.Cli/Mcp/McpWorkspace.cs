@@ -17,7 +17,9 @@ public sealed class McpWorkspace
     {
         if (!IsWorkspace)
         {
-            throw new WorkspaceException($"Workspace is not initialized. Run 'squeezr init' first.");
+            throw new WorkspaceException(
+                "Workspace is not initialized. Run 'squeezr init' first.",
+                WorkspaceException.NotInitializedCode);
         }
     }
 }

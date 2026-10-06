@@ -106,7 +106,7 @@ public sealed class SymbolLookupTool
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
-            return ToolErrors.From(ex);
+            return ToolErrors.From(ex, _workspace.Root);
         }
     }
 
