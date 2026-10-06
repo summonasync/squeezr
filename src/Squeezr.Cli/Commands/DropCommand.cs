@@ -32,6 +32,10 @@ public sealed class DropCommand : Command<DropCommand.Settings>
         {
             return CommandError.Report(ex, settings.Json);
         }
+        catch (WorkspaceStoreRemovalException ex)
+        {
+            return CommandError.Report(ex, settings.Json);
+        }
     }
 
     private static int DropCurrentWorkspace(bool json, CancellationToken cancellationToken)
@@ -54,6 +58,8 @@ public sealed class DropCommand : Command<DropCommand.Settings>
 
     private static int DropByStoreKey(string storeKey, bool json, CancellationToken cancellationToken)
     {
+        _ = WorkspaceStorePaths.RequireStoreDir(storeKey);
+
         var entry = WorkspaceRootResolver.GuardRegistryIo(() => WorkspaceRegistry.FindByStoreKey(storeKey));
         if (entry is null)
         {
@@ -66,7 +72,7 @@ public sealed class DropCommand : Command<DropCommand.Settings>
             var config = ConfigFile.Load(entry.RootPath);
             vectorStore = new QdrantVectorStore(config.Qdrant, entry.RootPath);
         }
-        catch (Exception ex) when (ex is WorkspaceException or IOException)
+        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"warning: Qdrant config unavailable for '{entry.RootPath}': {ex.Message}");
         }

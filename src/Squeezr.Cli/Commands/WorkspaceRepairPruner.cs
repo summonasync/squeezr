@@ -143,7 +143,7 @@ internal static class WorkspaceRepairPruner
 
     private static WorkspaceRepairPrunedEntry Drop(WorkspaceRepairStaleEntry candidate)
     {
-        if (!IsSingleSegmentKey(candidate.StoreKey))
+        if (!WorkspaceStorePaths.IsSingleSegmentKey(candidate.StoreKey))
         {
             return new WorkspaceRepairPrunedEntry(
                 candidate.StoreKey,
@@ -179,10 +179,16 @@ internal static class WorkspaceRepairPruner
             DescribeFailure(ex));
 
     // Exception messages here carry the store path, and the sweep must not name a path it did not delete.
-    private static string DescribeFailure(Exception ex) =>
-        ex is WorkspaceLockedException locked
-            ? locked.Message
-            : $"{ex.GetType().Name}: a store dir could not be removed";
+    // The removal primitive tags store-side failures, so anything untagged here came from the registry.
+    private static string DescribeFailure(Exception ex) => ex switch
+    {
+        WorkspaceLockedException locked => locked.Message,
+        WorkspaceStoreRemovalException removal => $"{InnerType(removal)}: a store dir could not be removed",
+        _ => $"{ex.GetType().Name}: the registry row could not be pruned",
+    };
+
+    private static string InnerType(WorkspaceStoreRemovalException removal) =>
+        (removal.InnerException ?? removal).GetType().Name;
 
     private static long RemovedStoreBytes(IReadOnlyList<WorkspaceRepairPrunedEntry> rows) =>
         rows.Where(row => row.Action == ActionRowAndStore).Sum(row => row.StoreBytes ?? 0);
@@ -192,12 +198,12 @@ internal static class WorkspaceRepairPruner
 
     private static (string State, long? Bytes) MeasureStore(string storeKey)
     {
-        if (!IsSingleSegmentKey(storeKey))
+        if (!WorkspaceStorePaths.IsSingleSegmentKey(storeKey))
         {
             return (StoreNotMeasured, null);
         }
 
-        var storeDir = Path.Combine(SqueezrHome.WorkspacesDir, storeKey);
+        var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
         if (!Directory.Exists(storeDir))
         {
             return (StoreMissing, null);
@@ -223,25 +229,5 @@ internal static class WorkspaceRepairPruner
         {
             return (StoreUnreadable, null);
         }
-    }
-
-    // DropByStoreKey resolves workspaces/<storeKey> recursively, so a hand-edited registry row carrying
-    // a traversal key would delete outside the store root. Repair sweeps whole categories at once and
-    // refuses such keys instead of feeding them to the deletion primitive; drop --store-key stays as-is.
-    // The guard is about containment, not charset: WorkspaceStoreKeys.Slug emits non-ASCII letters, so an
-    // alphabet check would reject rows this command is supposed to prune and be stricter than drop.
-    private static bool IsSingleSegmentKey(string storeKey)
-    {
-        if (storeKey.Length == 0 || storeKey is "." or ".." || storeKey.IndexOfAny('/', '\\', '\0') >= 0)
-        {
-            return false;
-        }
-
-        var workspaces = SqueezrHome.WorkspacesDir;
-        var resolved = Path.GetFullPath(Path.Combine(workspaces, storeKey));
-        var root = Path.TrimEndingDirectorySeparator(workspaces) + Path.DirectorySeparatorChar;
-        return resolved.Length > root.Length
-               && resolved.StartsWith(root, StringComparison.Ordinal)
-               && resolved.IndexOf(Path.DirectorySeparatorChar, root.Length, resolved.Length - root.Length) < 0;
     }
 }

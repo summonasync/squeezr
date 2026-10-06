@@ -53,7 +53,7 @@ public static class WorkspaceRootResolver
         {
             return operation();
         }
-        catch (IOException ex)
+        catch (IOException ex) when (ex is not WorkspaceStoreRemovalException)
         {
             throw new WorkspaceException(RegistryBusyMessage, WorkspaceException.RegistryBusyCode, ex);
         }

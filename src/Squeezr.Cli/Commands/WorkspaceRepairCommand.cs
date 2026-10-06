@@ -276,9 +276,10 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             _ => "size not measured",
         };
 
-    // Aggregate wording follows the rows, never the byte sum: a store dir can be empty and still exist.
+    // Aggregate wording follows the removal fact, never the byte sum or the row shape: a store dir can be
+    // empty, or it can exist behind a refused key and simply not have been touched by this sweep.
     private static string RemovedStoresText(int stores, long bytes) =>
-        stores > 0 ? $"{stores} store dir(s) removed ({StoreSizeText.Format(bytes)})" : "no store dirs existed";
+        stores > 0 ? $"{stores} store dir(s) removed ({StoreSizeText.Format(bytes)})" : "no store dirs removed";
 
     private static string DryRunStoresText(IReadOnlyList<WorkspaceRepairStaleEntry> candidates, long bytes)
     {
@@ -289,7 +290,7 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         {
             return candidates.Any(row => row.StoreState == WorkspaceRepairPruner.StoreNotMeasured)
                 ? "store dirs could not be checked for every row"
-                : "registry rows only — no store dirs exist";
+                : "registry rows only — no store dirs to remove";
         }
 
         var total = present.Any(row => row.StoreBytes is null)

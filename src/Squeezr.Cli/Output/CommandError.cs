@@ -24,6 +24,7 @@ public static class CommandError
     public static string CodeFor(Exception ex) => ex switch
     {
         WorkspaceException workspace => workspace.Code,
+        WorkspaceStoreRemovalException => WorkspaceException.DefaultCode,
         ServicesException services => services.Code,
         McpUsageException => "invalid_usage",
         InvalidDataException => "invalid_data",

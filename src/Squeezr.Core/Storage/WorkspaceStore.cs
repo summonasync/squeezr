@@ -32,22 +32,34 @@ public static class WorkspaceStore
 
     public static IReadOnlyList<string> DropByStoreKey(string storeKey, Action<string>? onStaleTakeover = null)
     {
+        var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
         var entry = WorkspaceRegistry.FindByStoreKey(storeKey)
                     ?? throw new WorkspaceException($"No workspace is registered with store key '{storeKey}'.");
-        var storeDir = StoreDirFor(entry.StoreKey);
         var removed = new List<string>();
         if (Directory.Exists(storeDir))
+        {
+            RemoveStoreDir(storeDir, storeKey, onStaleTakeover);
+            removed.Add(storeDir);
+        }
+
+        WorkspaceRegistry.RemoveByStoreKey(entry.StoreKey);
+        return removed;
+    }
+
+    private static void RemoveStoreDir(string storeDir, string storeKey, Action<string>? onStaleTakeover)
+    {
+        try
         {
             using (IndexLock.Acquire(storeDir, onStaleTakeover))
             {
             }
 
             Directory.Delete(storeDir, recursive: true);
-            removed.Add(storeDir);
         }
-
-        WorkspaceRegistry.RemoveByStoreKey(entry.StoreKey);
-        return removed;
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new WorkspaceStoreRemovalException(storeKey, ex);
+        }
     }
 
     private static WorkspaceResolution ResolveUpward(string canonicalStart)
