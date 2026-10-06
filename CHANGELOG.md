@@ -4,7 +4,7 @@ All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
-The post-release dogfood wave: the gitignore engine learned the two forms the field kept tripping on, `find_references` started answering once per callsite, and the secret-path guard moved from read refusal to ingestion, store purge and every human surface. Full suite 1705 → 2122.
+The post-release dogfood wave: the gitignore engine learned the two forms the field kept tripping on, `find_references` started answering once per callsite, and the secret-path guard moved from read refusal to ingestion, store purge and every human surface. Full suite 1705 → 2169.
 
 ### Added
 - **Character classes and `\-` escapes in the gitignore dialect (063/T14).** `[Dd]ebug/`, `*.[Rr]e[Ss]harper`, `*- [Bb]ackup ([0-9]).rdl`, `Generated\ Files/` — every form the 1.0.8 index pass was warning about (57 warnings, 27 unique shapes in this repo's own `.gitignore`) now parses and matches with git semantics pinned by measurement, not guesswork: 147 agreement rows + 12 documented divergences, all from `git check-ignore -v` (git 2.53) over materialized files — the oracle generator and its committed evidence live in `tests/oracle/gitignore/` and regenerate byte-for-byte. Residual forms stay warn+skip and the warning now prints the file line as it is written (`foo\ ` no longer renders trimmed). The same dialect feeds `indexing.secretGuardExtra`: classes widen a mask, they never subtract from it — union-only posture pinned by test.
