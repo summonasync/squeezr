@@ -70,11 +70,14 @@ public static class WorkspaceStore
             var entry = WorkspaceRegistry.FindByRootPath(current);
             if (entry is not null)
             {
-                var completedPartialMigration = CompleteLegacyMigration(entry);
+                // A row read off disk can name a store key that is not one segment; then nothing
+                // may be resolved or migrated through it, because both would land outside workspaces/.
+                var keyIsOneSegment = WorkspaceStorePaths.IsSingleSegmentKey(entry.StoreKey);
+                var completedPartialMigration = keyIsOneSegment && CompleteLegacyMigration(entry);
                 return new WorkspaceResolution(
                     entry.RootPath,
                     entry.StoreKey,
-                    StoreDirFor(entry.StoreKey),
+                    keyIsOneSegment ? StoreDirFor(entry.StoreKey) : null,
                     IsWorkspace: true,
                     completedPartialMigration);
             }

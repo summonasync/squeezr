@@ -161,6 +161,12 @@ public sealed class WorkspaceManager
     {
         var wasRegistered = WorkspaceRegistry.TryGetStoreDir(_root, out _);
         var storeDir = SqueezrPaths.StoreDir(_root);
+        if (SqueezrHome.IsCentralStore(storeDir))
+        {
+            throw new WorkspaceException(
+                $"Refusing to drop '{_root}': '{storeDir}' is the central squeezr store, not a workspace store.");
+        }
+
         if (!Directory.Exists(storeDir))
         {
             throw new WorkspaceException("Nothing to drop: no workspace store is registered for this directory.");

@@ -88,6 +88,31 @@ public sealed class CentralStoreGuardTests : IDisposable
     }
 
     [Fact]
+    public void Drop_StoreParentWithUntrustedRow_ThrowsAndKeepsStore()
+    {
+        var projectRoot = NewProject("projA");
+        new WorkspaceManager(projectRoot).Init("projA");
+        var projectStoreDir = SqueezrPaths.StoreDir(projectRoot);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            "home",
+            WorkspaceCanonicalPath.Canonicalize(_home),
+            "..",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow));
+        File.WriteAllText(Path.Combine(_storeDir, "home-payload.txt"), "home payload");
+
+        Should.Throw<WorkspaceException>(() => new WorkspaceManager(_home).Drop())
+            .Message.ShouldContain("central squeezr store");
+
+        Directory.Exists(_storeDir).ShouldBeTrue();
+        File.ReadAllText(Path.Combine(_storeDir, "home-payload.txt")).ShouldBe("home payload");
+        StoreFilesExist(projectStoreDir).ShouldBeTrue();
+        OnlyExpectedStoreDirs([Path.GetFileName(projectStoreDir)]);
+        File.Exists(WorkspaceRegistry.FilePath).ShouldBeTrue();
+        WorkspaceRegistry.Load().Count.ShouldBe(2);
+    }
+
+    [Fact]
     public void Init_StoreParent_ThrowsAndWritesNothing()
     {
         Should.Throw<WorkspaceException>(() => new WorkspaceManager(_home).Init("home"))

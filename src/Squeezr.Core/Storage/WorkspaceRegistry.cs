@@ -150,10 +150,13 @@ public static class WorkspaceRegistry
         }
     }
 
+    // Registry rows come off disk, so a row naming a store key with separators would resolve every
+    // store path in the product (SqueezrPaths funnel) outside workspaces/. Such a row keeps existing
+    // in Load() for repair to report, it just stops resolving a store dir.
     public static bool TryGetStoreDir(string rootPath, out string storeDir)
     {
         var entry = FindByRootPath(rootPath);
-        if (entry is not null)
+        if (entry is not null && WorkspaceStorePaths.IsSingleSegmentKey(entry.StoreKey))
         {
             storeDir = Path.Combine(SqueezrHome.WorkspacesDir, entry.StoreKey);
             return true;

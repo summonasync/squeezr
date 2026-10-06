@@ -35,7 +35,7 @@ public static class RegistryRepair
 
     public static WorkspaceRegistryEntry AdoptWithRoot(string storeKey, string rootPath)
     {
-        var storeDir = Path.Combine(SqueezrHome.WorkspacesDir, storeKey);
+        var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
         var manifest = OrphanScanner.TryLoadStoreManifest(storeDir)
                        ?? throw new WorkspaceException(
                            $"Workspace store '{storeKey}' is missing or its manifest is not valid JSON.");
