@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Shouldly;
 using Squeezr.Core.Storage;
+using Squeezr.Tests.Indexing;
 
 namespace Squeezr.Tests.Cli;
 
@@ -202,6 +203,52 @@ public sealed class StatsCommandTests
         json.StdOut.ShouldNotContain("to clear");
         using var document = JsonDocument.Parse(json.StdOut);
         document.RootElement.GetProperty("period").GetProperty("records").GetInt32().ShouldBe(50_001);
+    }
+
+    [Fact]
+    public async Task Stats_DegradedGuard_HumanWarnsOnStderr_JsonCarriesTheSameSentence()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        (await RunCliAsync(root, "expand", "src/Big.cs", "2")).ExitCode.ShouldBe(0);
+        SecretGuardFixture.SetGuardExtra(root, "**/notes.txt");
+        SecretGuardFixture.CorruptConfig(root);
+
+        var human = await RunCliAsync(root, "stats");
+        human.ExitCode.ShouldBe(0);
+        human.StdErr.ShouldContain(
+            "warning: could not read indexing config (");
+        human.StdErr.ShouldContain("user secret-guard masks are inactive");
+        human.StdOut.ShouldNotContain("could not read indexing config");
+
+        var json = await RunCliAsync(root, "stats", "--json");
+        json.ExitCode.ShouldBe(0);
+        json.StdErr.ShouldNotContain("user secret-guard masks are inactive");
+        using var document = JsonDocument.Parse(json.StdOut);
+        var warnings = document.RootElement.GetProperty("guardWarnings");
+        warnings.GetArrayLength().ShouldBe(1);
+        warnings[0].GetString().ShouldNotBeNull().ShouldMatch(
+            @"^could not read indexing config \(.*\); user secret-guard masks are inactive$");
+    }
+
+    [Fact]
+    public async Task Stats_CleanGuard_HumanStaysSilent_JsonShapeIsUnchanged()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        (await RunCliAsync(root, "expand", "src/Big.cs", "2")).ExitCode.ShouldBe(0);
+        SecretGuardFixture.SetGuardExtra(root, "**/notes.txt");
+
+        var human = await RunCliAsync(root, "stats");
+        human.ExitCode.ShouldBe(0);
+        human.StdErr.ShouldNotContain("warning:");
+        human.StdOut.ShouldNotContain("secret guard");
+
+        var json = await RunCliAsync(root, "stats", "--json");
+        json.ExitCode.ShouldBe(0);
+        using var document = JsonDocument.Parse(json.StdOut);
+        var body = document.RootElement;
+        body.TryGetProperty("guardWarnings", out _).ShouldBeFalse();
+        string.Join(",", body.EnumerateObject().Select(p => p.Name))
+            .ShouldBe("totalRequests,byTool,savings,cache,period,agents,sessions");
     }
 
     private static async Task<string> NewIndexedCliWorkspaceAsync()

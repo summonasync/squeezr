@@ -37,6 +37,7 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
                 return 0;
             }
 
+            GuardOutput.WriteWithheld(summary.GuardWarnings);
             Render(AnsiConsole.Console, summary);
             return 0;
         }

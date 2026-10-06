@@ -9,7 +9,8 @@ public sealed record StatsJsonReport(
     CacheStats Cache,
     StatsJsonReport.PeriodJson Period,
     IReadOnlyList<StatsJsonReport.AgentJson> Agents,
-    IReadOnlyList<StatsJsonReport.SessionJson> Sessions)
+    IReadOnlyList<StatsJsonReport.SessionJson> Sessions,
+    IReadOnlyList<string>? GuardWarnings = null)
 {
     public sealed record SavingsJson(
         long Actual,
@@ -47,5 +48,6 @@ public sealed record StatsJsonReport(
         summary.Agents.Select(a => new AgentJson(a.Client, a.ClientVersion, a.Count, a.LastSeen)).ToList(),
         summary.Sessions
             .Select(s => new SessionJson(s.SessionId, s.Client, s.Count, s.LastSeen, s.TopTools))
-            .ToList());
+            .ToList(),
+        summary.GuardWarnings);
 }

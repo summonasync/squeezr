@@ -40,7 +40,8 @@ public sealed record QueryStatsSummary(
     DateTime? To,
     int Records,
     IReadOnlyList<AgentStats> Agents,
-    IReadOnlyList<SessionStats> Sessions);
+    IReadOnlyList<SessionStats> Sessions,
+    IReadOnlyList<string>? GuardWarnings = null);
 
 public static class QueryTelemetrySummary
 {
@@ -58,7 +59,7 @@ public static class QueryTelemetrySummary
             .OrderBy(t => t.Tool, StringComparer.Ordinal)
             .ToList();
 
-        var (counterfactual, unknownFiles) = EstimateCounterfactual(entries, workspaceRoot);
+        var (counterfactual, unknownFiles, guardWarnings) = EstimateCounterfactual(entries, workspaceRoot);
         var actual = entries.Sum(e => (long)e.TokensUsed);
         var saved = Math.Max(0, counterfactual - actual);
         var ratio = counterfactual == 0 || actual == 0 ? 0 : counterfactual / (double)actual;
@@ -76,7 +77,8 @@ public static class QueryTelemetrySummary
             entries.Count == 0 ? null : entries.Max(e => e.Ts),
             entries.Count,
             AggregateAgents(entries),
-            AggregateSessions(entries));
+            AggregateSessions(entries),
+            guardWarnings);
     }
 
     public static IReadOnlyList<AgentStats> AggregateAgents(IReadOnlyList<QueryTelemetryEntry> entries) =>
@@ -109,7 +111,11 @@ public static class QueryTelemetrySummary
             .ThenBy(s => s.SessionId, StringComparer.Ordinal)
             .ToList();
 
-    private static (long Counterfactual, int UnknownFiles) EstimateCounterfactual(
+    // the guard that decides which rows leave the baseline is the same guard whose masks can be dead: when the
+    // extension list cannot be read, protected files stay in the arithmetic, and only the reader's warnings say
+    // so. The tally is withheld from stats — IsProtected is all this pass asks — so the degradation line is the
+    // one that can appear here.
+    private static (long Counterfactual, int UnknownFiles, IReadOnlyList<string>? GuardWarnings) EstimateCounterfactual(
         IReadOnlyList<QueryTelemetryEntry> entries, string workspaceRoot)
     {
         using var store = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(workspaceRoot));
@@ -173,7 +179,7 @@ public static class QueryTelemetrySummary
             counterfactual += Math.Max(1, (int)Math.Ceiling(indexed.SizeBytes / 4.0 * 1.1));
         }
 
-        return (counterfactual, unknownFiles);
+        return (counterfactual, unknownFiles, guard.Warnings);
     }
 
     private static string? ExtractFile(object? parameters)
