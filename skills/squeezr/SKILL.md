@@ -190,7 +190,7 @@ plain grep/read is correct, not a violation.
   `data` also carries `workspaces` — `{ name, rootPath, storeKey, current, stale }`
   rows, this session's listed first, at most 12 of them with the rest counted in
   `workspacesOmitted` — so you can tell a wrong-scope answer from an absent one
-  (`squeezr add <path> --name <name>` joins a sibling repo into this workspace).
+  (`squeezr add <path> --name <repo>` joins a sibling repo into this workspace).
   A single-workspace machine gets neither key, and its `data` is byte-identical
   to the pre-`workspaces` payload.
 
@@ -200,6 +200,13 @@ instead of reading files. In big workspaces prefer `prefix` over raising
 maxTokens: a scoped map or search usually fits the default budget. Pass `topK`
 to cap how many files come back when a few strong hits are enough — `code_search`
 returns one hit per file, so `topK` counts distinct files, not spans.
+
+Errors ride a second plane: when a call comes back `isError: true`, the machine
+contract is in `structuredContent` — `{code, message, rootPath, nextSteps,
+cause?}` — and `nextSteps` are exact commands, safe to run verbatim. On
+`workspace_not_initialized` check `cause` first: `root_without_manifest` means
+init+index the named root; `session_outside_root` means your session sits
+outside that root — rebind the client instead of initializing a second store.
 
 Freshness and cache: reads refresh modified files inline or report them in
 `staleFiles` (then suggest `squeezr index`). Identical repeated calls within one
@@ -351,6 +358,11 @@ Two boundaries of the classifier, so you do not misread a result as a leak:
   table).
 - **Telemetry** — `squeezr stats` shows per-tool call counts, token savings
   versus reading files, and cache hit-rate; `squeezr stats --reset` clears.
+- **Vector drift** — `squeezr vectors reconcile` compares Qdrant points and
+  embedded markers against the chunk hashes in `meta.db` and reports orphans
+  and stale markers. Dry run is the default; `--apply` is the destructive half —
+  it deletes orphan points and resets stale embedded markers, nothing is
+  written without it. `--json` renders the report machine-readable.
 - **A store indexed before the secret guard still holds the old rows** — this is
   the upgrade trap, and it is not a bug in the guard. Installing a newer binary
   changes nothing in `~/.squeezr/workspaces/<storeKey>/`: the store survives a

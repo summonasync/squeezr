@@ -126,7 +126,7 @@ Squeezr не мусорит в проекте: `squeezr init` не создаё�
 │   ├── watch.heartbeat              # пока жив демон `watch` (флот, см. раздел про fleet)
 │   ├── serve-watch.heartbeat        # ...или `serve --watch` от MCP-клиента
 │   ├── queries.jsonl                # телеметрия запросов для `stats` (локально, drop сносит)
-│   └── queries.lock                 # сериализует аппенды телеметрии против scrub'а при compact (appends ждут, scrub уходит по бюджету — не теряет строк)
+│   └── queries.lock                 # сериализует писателей queries.jsonl: аппенды, scrub при compact и stats --reset (пишущие ждут бюджет; reset при занятом локе отказывается, ничего не снеся)
 ├── models/                         # ONNX-модели эмбеддингов
 └── infra/docker-compose.yml        # qdrant + ollama (генерируется `squeezr services up`)
 ```
@@ -135,6 +135,7 @@ Squeezr не мусорит в проекте: `squeezr init` не создаё�
 - **Реестр:** `squeezr workspace list` показывает все воркспейсы из `workspaces.json`; записи, чей rootPath исчез с диска, помечаются `stale` — удаляются поодиночке через `squeezr drop --store-key <key>` или пакетно через `squeezr workspace repair --dry-run` / `--yes` (с размерами store-директорий). Записи с rootPath = `$HOME` или родитель стора (наследие инцидентов) помечаются `husk` с тем же хинтом на drop.
 - **Форма storeKey:** `<slug имени>-<первые 8 hex SHA1 от канонического rootPath>` (slug: lower, буквы/цифры, разделители в `-`; пустое имя → `workspace`). Ключ — всегда ровно один сегмент внутри `workspaces/`; `drop --store-key` и prune-свип в repair отказывают ключам другой формы (`.`, `..`, сепараторы, NUL, двоеточие — на обеих платформах) до первого обращения к файловой системе: отказ не читает и не удаляет ничего.
 - **Сироты и repair:** если store-директория пережила потерю реестра (крах, ручная чистка `workspaces.json`), `workspace list` показывает её как `orphan — adoptable` (манифест с rootPath, ключ сходится) или `orphan — needs root` (старый манифест без rootPath). `squeezr workspace repair` возвращает adoptable-сирот в реестр одной командой; для legacy — `squeezr workspace repair --store-key <key> --root <path>` (путь верифицируется: хэш name+root обязан совпасть с ключом, чужой стор подсунуть нельзя). Пакетная чистка stale-записей требует явного подтверждения: `--dry-run` только показывает список, `--yes` или ответ в TTY подтверждают; без терминала и без `--yes` repair отказывается (отсутствие промпта — не согласие). Удаление идёт тем же единственным путём, что и `drop` (ряд + store-директория), adoptable-сироты и живые записи не удаляются; перед реальной чисткой — датированная копия `workspaces.json`. Запасной путь: `squeezr init` в корне проекта — поверх существующего store-дира он работает как lossless-adoption: живые `config.json`, манифест (со списком репо) и индекс (`meta.db`) сохраняются, сброса в дефолты нет.
+- **Side-car-файлы:** `index.lock`, `watch.owner` и `queries.lock` лежат в store-каталоге рядом с данными, но в `workspace.json` не регистрируются — это примитивы координации писателей, а не метаданные воркспейса.
 
 ```
 $ squeezr workspace list
@@ -159,7 +160,7 @@ The path is absolute or relative (resolved against the workspace root); `--name`
 - One workspace, many repos: `squeezr index` covers them all, and the watch daemon keeps each one fresh.
 - Per-repo filtering: the `repo` parameter of `repo_map` / `code_search` / `symbol_lookup` / `find_references` (CLI twins: `--repo` on `search` and `map`).
 - Subtree scoping: the `prefix` parameter of `repo_map` / `code_search` (CLI twins: `--prefix` on `map` and `search`) answers only inside a directory subtree, matched against stored relative paths. An empty subtree is an error naming the nearest directories, not a silent empty answer.
-- Ranking curation: `indexing.rankExclude` in the workspace config (`["audits/**", "BACKLOG/**"]`) keeps doc trees out of `code_search` ranking — both arms — without unindexing them: `expand_span` / `find_references` / `symbol_lookup` still reach every excluded file, and no reindex is needed (query-time only). `prefix` narrows in, `rankExclude` pushes out, the two intersect. `index_status` lists the active patterns in `warnings`; a malformed glob produces a warning and is skipped instead of breaking the query.
+- Ranking curation: `indexing.rankExclude` in the workspace config (`["audits/**", "BACKLOG/**"]`) keeps doc trees out of `code_search` ranking — both arms — without unindexing them: `expand_span` / `find_references` / `symbol_lookup` still reach every excluded file, and no reindex is needed (query-time only). `prefix` narrows in, `rankExclude` pushes out, the two intersect. `index_status` lists the active patterns in `warnings`, `squeezr status` prints them next to the embeddings provider; a malformed glob produces a warning and is skipped instead of breaking the query. A value with a broken shape (a bare string instead of the array, non-string entries) no longer takes the whole config down: the string is salvaged as a one-pattern list, junk entries are dropped, and `squeezr status` still prints the surviving patterns. Drive-letter patterns (`C:/repo/**`, `C:\repo\**`) are rejected with a warning — patterns are repository-relative, so a drive prefix can never match anything.
 - Query globs (`indexing.rankExclude`, MCP/CLI `pathGlob`) read the same classes as the ignore dialect — `[abc]`, `[a-z]`, `[!…]`/`[^…]`, `?`, `**` — since 063/T14 they match there too. They differ in two places: there `\` stays a directory separator (`src\**\*.cs`), not an escape, and nothing guards residual shapes — an unterminated `[` or a POSIX `[:alpha:]` reads as literal characters and a plain member set instead of being skipped with a warning the way the ignore layer does. The separator asymmetry also means a query class cannot contain `/` — the splitter has no bracket awareness. So `**/[Bb]in/**` really excludes `src/Bin/…`, while a glob written to name literal brackets (`audits/[v1]/**`) no longer names that directory — it reads as a one-character set over `v`/`1`.
 - Coverage is visible before you query: `index_status` and `squeezr status` show per-repo file/symbol/chunk counts; `embeddings.coverage` in `index_status` adds the semantic share (embedded / total chunks).
 
@@ -418,6 +419,31 @@ Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`
 
 Повторные запросы почти бесплатны: дорогие тулы (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) кэшируют ответы внутри serve-сессии — LRU на 100 записей, ключ по каноническому JSON параметров (порядок свойств и null-и-absent на ключ не влияют). Идентичный запрос в той же сессии = мгновенный повтор сохранённого конверта, телеметрия помечает его `cacheHit: true` (и он виден в hit-rate у `squeezr stats`). Любая переиндексация — watch-проход или внешний `squeezr index` — меняет поколение кэша (mtime meta.db): мёртвые записи выбрасываются сразу, не дожидаясь LRU-эвикции, а первый ответ после смены поколения несёт в `warnings` строку `cache: invalidated (index changed)` — один раз на поколение за сессию, в сам кэшируемый конверт она не попадает и при повторах не размножается. Такой запрос помечается в телеметрии `cacheInvalidated: true`, так что «кэш умер» отличимо от «кэша просто не было». `expand_span` не кэшируется (читает живой файл с диска), `index_status` дешёвый сам по себе.
 
+### Error-плоскость: structuredContent
+
+Успех и ошибка едут в разных плоскостях — клиент должен уметь читать обе. Успех — `content[0].text` с JSON-конвертом выше. Ошибка — `isError: true`, человекочитаемый текст в `content[0].text` и машиночитаемый контракт в `structuredContent`:
+
+```json
+{
+  "isError": true,
+  "structuredContent": {
+    "code": "workspace_not_initialized",
+    "message": "Workspace is not initialized. Run 'squeezr init' first.",
+    "rootPath": "/path/to/workspace",
+    "nextSteps": ["cd '/path/to/workspace' && squeezr init", "cd '/path/to/workspace' && squeezr index"],
+    "cause": "root_without_manifest"
+  }
+}
+```
+
+- `code` — машина-читаемая причина (`workspace_not_initialized`, `index_not_built`, …), стабильна между релизами в рамках аддитивного контракта 035.
+- `nextSteps` — точные команды для следующего шага, в одном словаре с `squeezr mcp doctor` и `hook pre-read`.
+- `cause` — уточнение внутри кода, там где причин несколько: у `workspace_not_initialized` это `root_without_manifest` (сессия внутри рута — инициализируй и проиндексируй его) или `session_outside_root` (сессия вне рута — перерегистрируй клиента, **не сей второй стор**).
+
+В CLI-плоскости (`--json` у команд, не в MCP-тулах) конверт ошибки дополнительно несёт `error.removedPaths` на drop-операциях: что уже удалилось, когда реестр обновить не удалось.
+
+`mcp doctor` (поле `indexState` в `--json`) и `hook pre-read` печатают тот же словарь кодов и команд; doctor видит сессионную директорию и в состоянии `session_outside_root` (сессия вне анкоренного рута) выдаёт rebind-шаги вместо запрещённой инициализации, а `workspaceIndexed` выводится из той же классификации, что и `indexState` — флаг и блок состояния не противоречат друг другу.
+
 ## Watch-режим: индекс догоняет рабочее дерево сам
 
 Индекс по требованию — это компромисс: правишь файл, а `code_search` ещё отвечает про старую версию. FreshnessGuard освежает точечно при чтении, но полный догоняющий проход запускаешь руками. Watch-режим убирает и это.
@@ -429,9 +455,11 @@ squeezr watch            # человек: демон в терминале, Ctr
 squeezr serve --watch    # агент: тот же движок внутри MCP-сервера
 ```
 
-Как работает: `FileSystemWatcher` на корнях репо → фильтрация (те же ignore-глобы и расширения, что у индексации; служебные файлы стора не считаются — они живут вне проекта) → изменённые пути копятся в changed-сет → после окна тишины один инкрементальный проход по всему накопленному. «Save-all из 50 файлов» = один проход. Индекс занят (ручной `index`, TUI, второй serve) — движок ждёт с экспоненциальным backoff и никогда не отбирает лок. Живой статус: в терминале — Live-грид (workspace / status / last pass / error), в pipe — строки `pass started: N changed paths` / `pass completed: +A ~M -D` в stdout. Для программного потребления — `serve --watch --events`: NDJSON-ивенты проходов (`started` с `changedPaths` → `fileIndexed` → `completed`) на stderr, JSON-RPC на stdout не тронут (схема — в разделе про `--json` выше). Без `--events` serve про долг тоже не молчит: как только журнал отложенных чисток точек непустой (или пополнился этим проходом), в stderr уходит машиночитаемая строка `{"type":"watchPass","deferredReaps":N,"pendingReaps":M}` — watch-проход эмбеддингов не делает и векторного стора не носит, так что копит этот журнал именно он.
+Как работает: `FileSystemWatcher` на корнях репо → фильтрация (те же ignore-глобы и расширения, что у индексации; служебные файлы стора не считаются — они живут вне проекта) → изменённые пути копятся в changed-сет → после окна тишины один инкрементальный проход по всему накопленному. «Save-all из 50 файлов» = один проход. Индекс занят (ручной `index`, TUI, второй serve) — движок ждёт с экспоненциальным backoff и никогда не отбирает лок. Живой статус: в терминале — Live-грид (workspace / status / last pass / error), в pipe — строки `pass started: N changed paths` / `pass completed: +A ~M -D` в stdout. Для программного потребления — `serve --watch --events`: NDJSON-ивенты проходов (`started` с `changedPaths` → `fileIndexed` → `completed`, у `completed` есть счётчик `embedded`) на stderr, JSON-RPC на stdout не тронут (схема — в разделе про `--json` выше). Без `--events` serve не молчит в двух местах: журнал отложенных чисток точек — строка `{"type":"watchPass","deferredReaps":N,"pendingReaps":M}`, дренаж эмбеддингов — строка `{"type":"watchDrain","at":"…","embedded":N}` на каждый проход, что что-то вдребезжал (или `{"type":"watchDrain","at":"…","embedded":0,"idleReason":"…"}` один раз на причину простоя — недоступный провайдер или векторный стор).
 
-Удаления — полный жизненный цикл (tombstone триграмм, чистка документов/чанков, drop Qdrant-точек файла): после `git checkout`/`git clean` выдача не содержит призраков. Watch-проход векторного стора не носит, поэтому его удаление уходит в журнал `pending_reaps` и доигрывается следующим `squeezr index` с эмбеддингами — и не молча: `deferredReaps`/`pendingReaps` в отчёте прохода. `serve --watch` не блокирует JSON-RPC — тулы отвечают и во время фонового прохода, конверт не меняется. FreshnessGuard остаётся страховкой: пока watch не догнал, конверт честно показывает `staleFiles`.
+Дренаж эмбеддингов: `serve --watch` носит провайдер и векторный стор и сам доэмбеддит `embeddings.pending` до нуля — ручной `squeezr index` для догоняния не нужен. Провайдер + стор конструируются один раз на процесс serve, в фоне, до старта JSON-RPC это не доходит (тулы отвечают сразу, даже пока onnx грузит модель или resolver пробивает эндпоинт). Темп дренажа ограничен бюджетом `watch.embedBudgetPerPass` чанков на проход; как только проход выбрал бюджет целиком, движок сам перевзводит следующий пустой проход — догоняющая очередь размазывается по проходам с шагом debounce-окна, а не долбит в провайдер без паузы. На старте дренажа и по каждому проходу в stderr уходят строки провайдера (`watch embed drain ready (provider=ollama)`), отключения (`watch embed drain off (…)` с причиной) и счётчика `watchDrain` — по ним считается скорость (чанков/мин) и видна причина простоя. Эмбед-фейлы деградируют в warnings: чанки остаются в `embeddings.pending` (видны в `index_status`/`fleet`), serve живёт; упавший посреди прохода стор просто съедает остаток бюджета — недоэмбедденные чанки подбирает следующий проход. Смена модели (auto→onnx→ollama, другая модель/профиль) — это смена modelKey у чанков: вся очередь переэмбеддится один раз под новый ключ, проход честно предупредит `model key of repo … changed: N chunk(s) carry vectors from another embedding model`; старые ключи молча не переписываются, точки перезаписываются по тем же hash-id. Интерактивный `squeezr watch` дренаж не носит — это человеческий режим наблюдения; FreshnessGuard в query-пути тоже остаётся embed-free, чтобы не платить загрузкой модели за чтение.
+
+Удаления — полный жизненный цикл (tombstone триграмм, чистка документов/чанков, drop Qdrant-точек файла): после `git checkout`/`git clean` выдача не содержит призраков. `serve --watch` с дренажем доигрывает журнал `pending_reaps` сам в ближайшем проходе; у watch без дренажа (интерактивный `squeezr watch`, `--no-embed-watch`) удаление уходит в журнал и доигрывается следующим `squeezr index` с эмбеддингами — и не молча: `deferredReaps`/`pendingReaps` в отчёте прохода. `serve --watch` не блокирует JSON-RPC — тулы отвечают и во время фонового прохода, конверт не меняется. FreshnessGuard остаётся страховкой: пока watch не догнал, конверт честно показывает `staleFiles`.
 
 Конфиг — секция `watch` в конфиге воркспейса (`~/.squeezr/workspaces/<storeKey>/config.json`):
 
@@ -440,12 +468,14 @@ squeezr serve --watch    # агент: тот же движок внутри MCP
   "watch": {
     "enabled": false,
     "debounceSeconds": 2,
-    "backoffMaxSeconds": 30
+    "backoffMaxSeconds": 30,
+    "embedPending": true,
+    "embedBudgetPerPass": 256
   }
 }
 ```
 
-`enabled` включает движок у `serve` без флага (флаг главнее конфига); явный `squeezr watch` — всегда намерение пользователя, конфиг не консультируется. Отсутствие секции или невалидные значения = дефолты.
+`enabled` включает движок у `serve` без флага (флаг главнее конфига); явный `squeezr watch` — всегда намерение пользователя, конфиг не консультируется. `embedPending: false` выключает дренаж эмбеддингов у `serve --watch` (проходы остаются, эмбедов нет); `embedBudgetPerPass` — потолок чанков на проход дренажа, ноль и отрицательные значения невалидны и нарочно откатываются к дефолту (не «выключить по-другому»: единственный способ глушить дренаж — `embedPending: false` или `--no-embed-watch`). Флаг `--no-embed-watch` у `serve` глушит дренаж независимо от конфига. Отсутствие секции или невалидные значения = дефолты (движок выключен, дренаж включён, бюджет 256).
 
 ## Fleet: все демоны разом
 
