@@ -36,11 +36,14 @@ public class WatchConfigTests
     [Fact]
     public void Load_ExplicitWatchSection_ReadsExactValues()
     {
-        var config = LoadWatchSection("""{ "enabled": true, "debounceSeconds": 5, "backoffMaxSeconds": 90 }""");
+        var config = LoadWatchSection(
+            """{ "enabled": true, "debounceSeconds": 5, "backoffMaxSeconds": 90, "embedPending": false, "embedBudgetPerPass": 7 }""");
 
         config.Watch.Enabled.ShouldBeTrue();
         config.Watch.DebounceSeconds.ShouldBe(5);
         config.Watch.BackoffMaxSeconds.ShouldBe(90);
+        config.Watch.EmbedPending.ShouldBeFalse();
+        config.Watch.EmbedBudgetPerPass.ShouldBe(7);
     }
 
     [Fact]
@@ -95,6 +98,25 @@ public class WatchConfigTests
         config.Watch.BackoffMaxSeconds.ShouldBe(30);
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    public void Load_NonPositiveEmbedBudgetPerPass_FallsBackToDefault(int value)
+    {
+        var config = LoadWatchSection($$"""{ "embedBudgetPerPass": {{value}} }""");
+
+        config.Watch.EmbedBudgetPerPass.ShouldBe(WatchConfig.DefaultEmbedBudgetPerPass);
+    }
+
+    [Fact]
+    public void Load_EmbedPendingAsString_FallsBackToDefault()
+    {
+        var config = LoadWatchSection("""{ "embedPending": "off", "embedBudgetPerPass": 9 }""");
+
+        config.Watch.EmbedPending.ShouldBeTrue();
+        config.Watch.EmbedBudgetPerPass.ShouldBe(9);
+    }
+
     [Fact]
     public void Load_UnknownNestedPropertyInWatchSection_SkipsItAndKeepsKnownFields()
     {
@@ -112,7 +134,14 @@ public class WatchConfigTests
         var root = TestDirs.NewTempDir();
         var config = SqueezrConfig.CreateDefault() with
         {
-            Watch = new WatchConfig { Enabled = true, DebounceSeconds = 7, BackoffMaxSeconds = 120 }
+            Watch = new WatchConfig
+            {
+                Enabled = true,
+                DebounceSeconds = 7,
+                BackoffMaxSeconds = 120,
+                EmbedPending = false,
+                EmbedBudgetPerPass = 32
+            }
         };
 
         ConfigFile.Save(root, config);
@@ -121,6 +150,8 @@ public class WatchConfigTests
         loaded.Watch.Enabled.ShouldBeTrue();
         loaded.Watch.DebounceSeconds.ShouldBe(7);
         loaded.Watch.BackoffMaxSeconds.ShouldBe(120);
+        loaded.Watch.EmbedPending.ShouldBeFalse();
+        loaded.Watch.EmbedBudgetPerPass.ShouldBe(32);
     }
 
     private static void AssertDefaults(SqueezrConfig config)
@@ -128,6 +159,8 @@ public class WatchConfigTests
         config.Watch.Enabled.ShouldBeFalse();
         config.Watch.DebounceSeconds.ShouldBe(2);
         config.Watch.BackoffMaxSeconds.ShouldBe(30);
+        config.Watch.EmbedPending.ShouldBeTrue();
+        config.Watch.EmbedBudgetPerPass.ShouldBe(WatchConfig.DefaultEmbedBudgetPerPass);
     }
 
     private static SqueezrConfig LoadWatchSection(string watchValue)

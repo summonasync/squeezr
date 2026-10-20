@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
@@ -230,6 +232,72 @@ public class RepoFileWalkerTests
     }
 
     private static SecretGuardIngestion Guard(string root) => SecretGuardIngestion.Load(root);
+
+    [SupportedOSPlatform("linux")]
+    [DllImport("libc", SetLastError = true)]
+    private static extern int chmod(string path, uint mode);
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Walk_UnreadableFile_IsLedgeredAndKeptOutOfFiles()
+    {
+        var root = TestDirs.NewTempDir();
+        var lockedPath = Path.Combine(root, "src", "locked.cs");
+        WriteFile(root, "src/locked.cs", "class Locked { }");
+        WriteFile(root, "src/open.cs", "class Open { }");
+        File.SetUnixFileMode(lockedPath, UnixFileMode.None);
+        Should.Throw<UnauthorizedAccessException>(() => File.ReadAllText(lockedPath));
+
+        var warnings = new List<string>();
+        var config = SqueezrConfig.CreateDefault();
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(
+            root, IgnoreRuleset.For(root, config), Guard(root), config.Indexing.MaxFileSizeKb, warnings.Add);
+
+        result.Files.Select(f => f.RelativePath).ShouldBe(["src/open.cs"]);
+        result.UnreadableFiles.ShouldBe(["src/locked.cs"]);
+        result.Skipped.ShouldBe(1);
+        result.Keeps("src/locked.cs").ShouldBeTrue();
+        result.Keeps("src/open.cs").ShouldBeFalse();
+        warnings.ShouldContain(w => w.Contains("unreadable 'src/locked.cs'", StringComparison.Ordinal));
+        warnings.ShouldContain(w => w.Contains("index rows kept", StringComparison.Ordinal));
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Walk_UnreadableDirectory_LedgersItsPrefixSoTheSubtreeSurvivesReconciliation()
+    {
+        var root = TestDirs.NewTempDir();
+        WriteFile(root, "open.cs", "class Open { }");
+        WriteFile(root, "vault/inner/deep.cs", "class Deep { }");
+        var vaultPath = Path.Combine(root, "vault");
+        chmod(vaultPath, 0);
+        Should.Throw<UnauthorizedAccessException>(() => Directory.EnumerateFileSystemEntries(vaultPath).ToList());
+
+        var warnings = new List<string>();
+        var config = SqueezrConfig.CreateDefault();
+        var result = Squeezr.Core.Indexing.RepoFileWalker.Walk(
+            root, IgnoreRuleset.For(root, config), Guard(root), config.Indexing.MaxFileSizeKb, warnings.Add);
+        chmod(vaultPath, 0b111_101_101);
+
+        result.Files.Select(f => f.RelativePath).ShouldBe(["open.cs"]);
+        result.UnreadableDirs.ShouldBe(["vault"]);
+        result.Keeps("vault/inner/deep.cs").ShouldBeTrue();
+        result.Keeps("open.cs").ShouldBeFalse();
+        warnings.ShouldContain(w => w.Contains("unreadable directory 'vault'", StringComparison.Ordinal));
+        warnings.ShouldContain(w => w.Contains("index rows under it kept", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Keeps_UnreadableLedger_MatchesExactFilesAndDirectoryPrefixes()
+    {
+        var result = new FileWalkResult(
+            [], 0, 0, new Dictionary<IgnoreSource, int>(), ["a.cs"], ["sub"]);
+
+        result.Keeps("a.cs").ShouldBeTrue();
+        result.Keeps("sub/inner/deep.cs").ShouldBeTrue();
+        result.Keeps("subx/other.cs").ShouldBeFalse();
+        result.Keeps("b.cs").ShouldBeFalse();
+    }
 
     private static IgnoreRuleset EmptyRuleset(string root)
     {

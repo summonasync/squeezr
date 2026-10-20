@@ -3,7 +3,7 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Core.Indexing;
 
-public sealed record EmbeddingPhaseResult(int Embedded);
+public sealed record EmbeddingPhaseResult(int Embedded, bool Completed = true);
 
 public static class EmbeddingIndexPhase
 {
@@ -17,7 +17,8 @@ public static class EmbeddingIndexPhase
         IEmbeddingProvider provider,
         IVectorStore vectorStore,
         Action<string> warning,
-        IIndexProgress? progress = null)
+        IIndexProgress? progress = null,
+        int? maxChunks = null)
     {
         if (!IsStoreAvailable(vectorStore, repoDoc, warning))
         {
@@ -55,6 +56,7 @@ public static class EmbeddingIndexPhase
 
         progress?.PhaseStarted(repoDoc.Name, IndexPhase.Embeddings, totalPending);
 
+        var remaining = maxChunks;
         while (true)
         {
             var pending = store.ListPendingChunks(repoDoc.Id, modelKey, PendingQueryLimit);
@@ -67,6 +69,16 @@ public static class EmbeddingIndexPhase
             for (var i = 0; i < pending.Count; i += EmbedBatchSize)
             {
                 var count = Math.Min(EmbedBatchSize, pending.Count - i);
+                if (remaining is { } left)
+                {
+                    if (left == 0)
+                    {
+                        return new EmbeddingPhaseResult(embedded);
+                    }
+
+                    count = Math.Min(count, left);
+                }
+
                 var batch = new List<ChunkDocument>(count);
                 for (var j = i; j < i + count; j++)
                 {
@@ -82,10 +94,14 @@ public static class EmbeddingIndexPhase
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException and not VectorDimensionMismatchException)
                 {
                     warning($"embeddings skipped for repo '{repoDoc.Name}': {ex.Message}");
-                    return new EmbeddingPhaseResult(embedded);
+                    return new EmbeddingPhaseResult(embedded, Completed: false);
                 }
 
                 embedded += batch.Count;
+                if (remaining is not null)
+                {
+                    remaining -= batch.Count;
+                }
 
                 if (progress is not null)
                 {

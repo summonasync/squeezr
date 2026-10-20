@@ -8,7 +8,30 @@ public sealed record FileWalkResult(
     IReadOnlyList<SourceFile> Files,
     int Skipped,
     int Ignored,
-    IReadOnlyDictionary<IgnoreSource, int> IgnoredBySource);
+    IReadOnlyDictionary<IgnoreSource, int> IgnoredBySource,
+    IReadOnlyList<string> UnreadableFiles,
+    IReadOnlyList<string> UnreadableDirs)
+{
+    // An unreadable path is not a deleted one: the deleted-file reconciliation checks this before
+    // reaping, so a chmod or a failed read keeps its rows until the path reads again or really disappears.
+    public bool Keeps(string relativePath)
+    {
+        if (UnreadableFiles.Contains(relativePath))
+        {
+            return true;
+        }
+
+        foreach (var dir in UnreadableDirs)
+        {
+            if (dir == "." || relativePath.StartsWith(dir + "/", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
 
 public static class RepoFileWalker
 {
@@ -20,15 +43,31 @@ public static class RepoFileWalker
         SecretGuardIngestion guard,
         int maxFileSizeKb,
         Action<string>? warn = null,
-        bool countIgnoredSubtrees = true)
+        bool countIgnoredSubtrees = true,
+        CancellationToken cancellationToken = default)
     {
         var files = new List<SourceFile>();
         var skipped = 0;
         var ignored = 0;
         var ignoredBySource = new Dictionary<IgnoreSource, int>();
+        var unreadableFiles = new List<string>();
+        var unreadableDirs = new List<string>();
         var maxBytes = (long)maxFileSizeKb * 1024;
         var pending = new Queue<string>();
         pending.Enqueue(repoRoot);
+
+        void LedgerReadFailure(string relativePath, Exception ex)
+        {
+            skipped++;
+            if (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                warn?.Invoke($"skipped '{relativePath}': {ex.Message}");
+                return;
+            }
+
+            unreadableFiles.Add(relativePath);
+            warn?.Invoke($"unreadable '{relativePath}': {ex.Message}; index rows kept");
+        }
 
         while (pending.Count > 0)
         {
@@ -38,17 +77,15 @@ public static class RepoFileWalker
             {
                 entries = Directory.EnumerateFileSystemEntries(directory);
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
-            {
+                LedgerUnreadableDirectory(repoRoot, directory, unreadableDirs, warn, ex);
                 continue;
             }
 
             foreach (var entry in entries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var relativePath = Path.GetRelativePath(repoRoot, entry).Replace('\\', '/');
 
                 if (Directory.Exists(entry))
@@ -58,12 +95,9 @@ public static class RepoFileWalker
                     {
                         attributes = File.GetAttributes(entry);
                     }
-                    catch (IOException)
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
-                        continue;
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
+                        LedgerUnreadableDirectory(repoRoot, entry, unreadableDirs, warn, ex);
                         continue;
                     }
 
@@ -102,6 +136,17 @@ public static class RepoFileWalker
                     continue;
                 }
 
+                // FileAttributes reports Normal for a FIFO and File.Exists answers true for any
+                // non-directory, so neither can see special files; stat can. Opening a writerless FIFO
+                // blocks open() forever, and the 2026-10-03 wedge was exactly that: a pass blocked here
+                // held the store lock for 95 minutes.
+                if (!UnixFileType.IsRegularFile(entry))
+                {
+                    skipped++;
+                    warn?.Invoke($"skipped '{relativePath}': not a regular file (fifo, socket, device or dangling link)");
+                    continue;
+                }
+
                 FileInfo info;
                 try
                 {
@@ -120,8 +165,8 @@ public static class RepoFileWalker
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    warn?.Invoke($"skipped '{relativePath}': {ex.Message}");
-                    isBinary = null;
+                    LedgerReadFailure(relativePath, ex);
+                    continue;
                 }
 
                 if (info.Length > maxBytes || isBinary != false)
@@ -137,8 +182,7 @@ public static class RepoFileWalker
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    warn?.Invoke($"skipped '{relativePath}': {ex.Message}");
-                    skipped++;
+                    LedgerReadFailure(relativePath, ex);
                     continue;
                 }
 
@@ -147,7 +191,15 @@ public static class RepoFileWalker
         }
 
         files.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
-        return new FileWalkResult(files, skipped, ignored, ignoredBySource);
+        return new FileWalkResult(files, skipped, ignored, ignoredBySource, unreadableFiles, unreadableDirs);
+    }
+
+    private static void LedgerUnreadableDirectory(
+        string repoRoot, string directory, List<string> unreadableDirs, Action<string>? warn, Exception ex)
+    {
+        var relativePath = Path.GetRelativePath(repoRoot, directory).Replace('\\', '/');
+        unreadableDirs.Add(relativePath);
+        warn?.Invoke($"unreadable directory '{relativePath}': {ex.Message}; index rows under it kept");
     }
 
     private static void CountIgnored(

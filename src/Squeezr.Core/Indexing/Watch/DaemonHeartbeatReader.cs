@@ -31,7 +31,7 @@ public static class DaemonHeartbeatReader
         return (isProcessAlive ?? IsProcessAlive)(heartbeat.Pid);
     }
 
-    private static bool IsProcessAlive(int pid)
+    public static bool IsProcessAlive(int pid)
     {
         try
         {

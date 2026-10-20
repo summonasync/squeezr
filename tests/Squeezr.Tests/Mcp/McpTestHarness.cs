@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using Squeezr.Cli.Mcp;
+using Squeezr.Core.Indexing.Watch;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -21,7 +22,8 @@ internal sealed class McpTestHarness : IAsyncDisposable
     public McpClient Client { get; }
 
     public static async Task<McpTestHarness> StartAsync(
-        string workspaceRoot, bool watch = false, string? sessionDirectory = null)
+        string workspaceRoot, bool watch = false, string? sessionDirectory = null, WatchOwnerClaim? claimOverride = null,
+        bool embedWatch = true, WatchEmbeddingRuntime? embeddingRuntime = null)
     {
         var toServer = new Pipe();
         var fromServer = new Pipe();
@@ -33,7 +35,11 @@ internal sealed class McpTestHarness : IAsyncDisposable
             workspaceRoot,
             sessionDirectory ?? workspaceRoot,
             serverCts.Token,
-            watch);
+            watch,
+            events: false,
+            claimOverride,
+            embedWatch,
+            embeddingRuntime is null ? null : Task.FromResult<WatchEmbeddingRuntime?>(embeddingRuntime));
 
         var transport = new StreamClientTransport(
             toServer.Writer.AsStream(),

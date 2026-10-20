@@ -13,6 +13,9 @@ public sealed class ServeCommand : Command<ServeCommand.Settings>
 
         [CommandOption("--events")]
         public bool Events { get; set; }
+
+        [CommandOption("--no-embed-watch")]
+        public bool NoEmbedWatch { get; set; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -28,7 +31,7 @@ public sealed class ServeCommand : Command<ServeCommand.Settings>
         {
             McpServerHost.RunStdioAsync(
                 WorkspaceRootResolver.LaunchDirectory(),
-                cts.Token, settings.Watch, settings.Events).GetAwaiter().GetResult();
+                cts.Token, settings.Watch, settings.Events, !settings.NoEmbedWatch).GetAwaiter().GetResult();
         }
         catch (WorkspaceException ex)
         {

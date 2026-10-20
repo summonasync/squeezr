@@ -81,4 +81,18 @@ public class IndexEventWriterTests
         doc.RootElement.GetProperty("deferredReaps").GetInt32().ShouldBe(0);
         doc.RootElement.GetProperty("pendingReaps").GetInt32().ShouldBe(0);
     }
+
+    [Fact]
+    public void Completed_CarriesThePassEmbedCount()
+    {
+        var writer = new StringWriter();
+        var result = new IndexResult(
+            [new RepoIndexResult("demo", 0, 1, 0, 0, 2, 0, null, 0, 0, 0, 9)], DateTime.UtcNow, [],
+            Embedded: 9);
+
+        new IndexEventWriter(writer).Completed(result, 7, null);
+
+        using var doc = JsonDocument.Parse(writer.ToString());
+        doc.RootElement.GetProperty("embedded").GetInt32().ShouldBe(9);
+    }
 }

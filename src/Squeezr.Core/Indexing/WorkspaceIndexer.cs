@@ -43,12 +43,14 @@ public sealed class WorkspaceIndexer
         Action<string>? onStaleTakeover = null,
         EmbeddingProviderResolution? embeddingProviderResolution = null,
         IReadOnlyList<string>? changedPaths = null,
-        SemanticSessionPool? sessions = null)
+        SemanticSessionPool? sessions = null,
+        int? embedBudgetPerPass = null,
+        CancellationToken cancellationToken = default)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
             throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr init' first.",
+                RemedyText.WorkspaceNotInitialized,
                 WorkspaceException.NotInitializedCode);
         }
 
@@ -104,9 +106,21 @@ public sealed class WorkspaceIndexer
                 ReplayPendingReaps(vectorStore, store, warnings);
             }
 
-            var works = targets
-                .Select(repo => IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings, textCache, progress, embeddings, vectorStore, modelKey, Pacing(sessions, changedPaths)))
-                .ToList();
+            var works = new List<RepoWork>();
+            var embedRemaining = embedBudgetPerPass;
+            foreach (var repo in targets)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var work = IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings,
+                    textCache, progress, embeddings, vectorStore, modelKey, embedRemaining, Pacing(sessions, changedPaths),
+                    cancellationToken);
+                if (embedRemaining is not null)
+                {
+                    embedRemaining = Math.Max(0, embedRemaining.Value - work.Result.Embedded);
+                }
+
+                works.Add(work);
+            }
 
             var changedDocs = works.SelectMany(w => w.Changed).ToList();
             var reaps = works.SelectMany(w => w.Reaps).ToList();
@@ -155,7 +169,9 @@ public sealed class WorkspaceIndexer
                 deferredReaps, store.CountPendingReaps(),
                 works.Sum(w => w.Result.GuardWithheld),
                 works.Sum(w => w.Result.GuardWithheldBuiltIns),
-                works.Sum(w => w.Result.GuardDropped));
+                works.Sum(w => w.Result.GuardDropped),
+                works.Sum(w => w.Result.Embedded),
+                works.All(w => w.Result.EmbeddingsCompleted));
         }
     }
 
@@ -259,7 +275,7 @@ public sealed class WorkspaceIndexer
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
             throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr index' first.",
+                RemedyText.WorkspaceNotInitialized,
                 WorkspaceException.NotInitializedCode);
         }
 
@@ -318,7 +334,7 @@ public sealed class WorkspaceIndexer
                 changed = [];
                 tombstones = [(existing.RepoId, existing.Id)];
             }
-            else if (!File.Exists(fullPath))
+            else if (!File.Exists(fullPath) || !UnixFileType.IsRegularFile(fullPath))
             {
                 if (existing is null)
                 {
@@ -470,7 +486,9 @@ public sealed class WorkspaceIndexer
         IEmbeddingProvider? embeddings,
         IVectorStore? vectorStore,
         string? modelKey,
-        PacedPass? pacing)
+        int? embedBudget,
+        PacedPass? pacing,
+        CancellationToken cancellationToken)
     {
         var repoDoc = store.FindRepo(repo.Name)
                       ?? throw new WorkspaceException($"Repository '{repo.Name}' is missing from the index store.");
@@ -483,7 +501,9 @@ public sealed class WorkspaceIndexer
         progress?.PhaseStarted(repo.Name, IndexPhase.Walk, 0);
         var rules = IgnoreRuleset.For(repoRoot, config, warnings.Add);
         var guard = SecretGuardIngestion.Load(workspaceRoot);
-        var walk = RepoFileWalker.Walk(repoRoot, rules, guard, config.Indexing.MaxFileSizeKb, warnings.Add);
+        var walk = RepoFileWalker.Walk(
+            repoRoot, rules, guard, config.Indexing.MaxFileSizeKb, warnings.Add,
+            cancellationToken: cancellationToken);
         if (guard.WarningLine() is { } withheld)
         {
             warnings.Add(withheld);
@@ -494,7 +514,11 @@ public sealed class WorkspaceIndexer
         var dbFiles = store.ListFiles(repoDoc.Id);
         var dbByPath = dbFiles.ToDictionary(f => f.Path, StringComparer.Ordinal);
         var walkedPaths = walk.Files.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
-        var deleted = dbFiles.Where(f => !walkedPaths.Contains(f.Path)).ToList();
+        // unreadable is not missing: the walk ledgers every path it could not read and the reconciliation
+        // must not reap those rows — they survive until the file reads again or is really gone
+        var deleted = dbFiles
+            .Where(f => !walkedPaths.Contains(f.Path) && !walk.Keeps(f.Path))
+            .ToList();
         // a protected row can only reach here through the guard's own refusal — nothing walked it, so nothing
         // in this store may still hold it. The name stays out of the count; Deleted keeps it in the ledger.
         var deletedProtected = deleted.Count(f => guard.IsProtected(f.Path));
@@ -511,6 +535,7 @@ public sealed class WorkspaceIndexer
 
         foreach (var file in walk.Files)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             progress?.ItemProcessed(repo.Name, file.RelativePath);
 
             var isNew = !dbByPath.TryGetValue(file.RelativePath, out var existing);
@@ -625,11 +650,19 @@ public sealed class WorkspaceIndexer
         IndexFallbackChunks(store, repoDoc, changedByPath, providerPaths, config.Chunking, textCache);
 
         var deferredReaps = 0;
+        var embedded = 0;
+        var embeddingsCompleted = true;
         if (embeddings is not null && vectorStore is not null)
         {
             var reaped = RequeueReapedFiles(store, FilesWithStalePoints(store, priorChunkHashes));
             deferredReaps = DeleteVectorsForFiles(vectorStore, store, reaped, warnings, guard);
-            EmbeddingIndexPhase.Run(repoDoc, store, modelKey!, embeddings, vectorStore, warnings.Add, progress);
+            if (embedBudget is null or > 0)
+            {
+                var phase = EmbeddingIndexPhase.Run(
+                    repoDoc, store, modelKey!, embeddings, vectorStore, warnings.Add, progress, embedBudget);
+                embedded = phase.Embedded;
+                embeddingsCompleted = phase.Completed;
+            }
         }
 
         var totalFiles = store.CountFiles(repoDoc.Id);
@@ -659,7 +692,7 @@ public sealed class WorkspaceIndexer
         return new RepoWork(
             new RepoIndexResult(
                 repo.Name, added, modified, reaps.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot,
-                guard.Withheld, guard.WithheldByBuiltIns, deletedProtected),
+                guard.Withheld, guard.WithheldByBuiltIns, deletedProtected, embedded, embeddingsCompleted),
             changed,
             reaps,
             deferredReaps);
@@ -1085,6 +1118,36 @@ public sealed class WorkspaceIndexer
         var deferredReaps = 0;
         var guard = SecretGuardIngestion.Load(workspaceRoot);
         var protectedDrops = new Dictionary<StoreDrop, int>();
+        TrigramIndexReader? previousIndex = null;
+        Dictionary<uint, uint>? previousDocIds = null;
+
+        // unreadable is not missing: the row survives and the previous index donates its postings, so
+        // search keeps answering with the old content until the path reads again. A protected path is the
+        // exception — its content may not stay in the store at all, so it goes the way an ignored path does.
+        void KeepUnreadableRow(FileDocument row, string reason)
+        {
+            if (guard.IsProtected(row.Path))
+            {
+                NoteStoreDrop(guard, protectedDrops, warnings, row.Path, StoreDrop.Unreadable, $" ({reason})");
+                deferredReaps += DropFile(row, store, vectorStore, warnings, guard).ReapsQueued;
+                return;
+            }
+
+            warnings.Add($"keeping '{row.Path}' in the index store: unreadable ({reason}); rows kept");
+            if (previousIndex is null)
+            {
+                previousIndex = TryOpenTrigramIndex(targetPath);
+                previousDocIds = MapDocIds(previousIndex);
+            }
+
+            if (!CarryTrigramPostings(previousIndex, previousDocIds!, writer, row))
+            {
+                warnings.Add(
+                    $"keeping '{row.Path}' in the index store: its postings are not in the previous " +
+                    "trigram index — search misses it until the file reads again");
+            }
+        }
+
         foreach (var file in allFiles)
         {
             if (!reposById.TryGetValue(file.RepoId, out var repoDoc)
@@ -1112,15 +1175,21 @@ public sealed class WorkspaceIndexer
                         continue;
                     }
 
+                    // a path that stopped being a regular file after the walk is a rebuild-time race, not
+                    // a deletion: the open below would park the whole rebuild inside a blocking syscall
+                    if (!UnixFileType.IsRegularFile(fullPath))
+                    {
+                        KeepUnreadableRow(file, "not a regular file (fifo, socket, device or dangling link)");
+                        continue;
+                    }
+
                     try
                     {
                         text = File.ReadAllText(fullPath);
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
-                        NoteStoreDrop(
-                            guard, protectedDrops, warnings, file.Path, StoreDrop.Unreadable, $" ({ex.Message})");
-                        deferredReaps += DropFile(file, store, vectorStore, warnings, guard).ReapsQueued;
+                        KeepUnreadableRow(file, ex.Message);
                         continue;
                     }
                 }
@@ -1144,6 +1213,51 @@ public sealed class WorkspaceIndexer
 
     private static string ResolveRepoRoot(string workspaceRoot, RepoEntry repo) =>
         Path.GetFullPath(Path.IsPathRooted(repo.Path) ? repo.Path : Path.Combine(workspaceRoot, repo.Path));
+
+    private static TrigramIndexReader? TryOpenTrigramIndex(string path)
+    {
+        try
+        {
+            return new TrigramIndexReader(path);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            return null;
+        }
+    }
+
+    private static Dictionary<uint, uint> MapDocIds(TrigramIndexReader? index)
+    {
+        if (index is null)
+        {
+            return [];
+        }
+
+        var docIdsByFile = new Dictionary<uint, uint>();
+        for (uint docId = 0; docId < index.DocCount; docId++)
+        {
+            var (_, fileId) = index.GetDoc(docId);
+            docIdsByFile[fileId] = docId;
+        }
+
+        return docIdsByFile;
+    }
+
+    private static bool CarryTrigramPostings(
+        TrigramIndexReader? previousIndex,
+        Dictionary<uint, uint> docIdsByFile,
+        TrigramIndexWriter writer,
+        FileDocument file)
+    {
+        if (previousIndex is null || !docIdsByFile.TryGetValue(file.Id, out var docId))
+        {
+            return false;
+        }
+
+        writer.AddDocument(new TrigramDocument(
+            file.RepoId, file.Id, previousIndex.GetDocumentPostings(docId)));
+        return true;
+    }
 
     private static PacedPass? Pacing(SemanticSessionPool? sessions, IReadOnlyList<string>? changedPaths) =>
         sessions is null ? null : new PacedPass(sessions, changedPaths ?? []);

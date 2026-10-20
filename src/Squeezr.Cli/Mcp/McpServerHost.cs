@@ -4,11 +4,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp;
@@ -18,7 +19,7 @@ public static class McpServerHost
     private static readonly TimeSpan StdinEofGrace = TimeSpan.FromSeconds(1);
 
     public static async Task RunStdioAsync(
-        string startDirectory, CancellationToken ct, bool watch = false, bool events = false)
+        string startDirectory, CancellationToken ct, bool watch = false, bool events = false, bool embedWatch = true)
     {
         var resolution = WorkspaceRootResolver.Resolve(startDirectory);
         if (resolution.ViaClaudeProjectDir)
@@ -33,7 +34,8 @@ public static class McpServerHost
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
         await RunAsync(
-            inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, startDirectory, ct, watch, events);
+            inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, startDirectory, ct,
+            watch, events, claimOverride: null, embedWatch: embedWatch);
         await forwardTask;
     }
 
@@ -65,7 +67,7 @@ public static class McpServerHost
         }
     }
 
-    public static async Task RunAsync(
+    public static Task RunAsync(
         Stream input,
         Stream output,
         string workspaceRoot,
@@ -74,7 +76,26 @@ public static class McpServerHost
         bool watch = false,
         bool events = false)
     {
-        var startupConfig = TryReadStartupConfig(workspaceRoot);
+        return RunAsync(input, output, workspaceRoot, sessionDirectory, ct, watch, events, claimOverride: null);
+    }
+
+    // Test-only injection points, mirroring the claim seam: one process cannot hold two claims by pid, so
+    // multi-participant scenarios hand in a claim built with the claim's seam-only ctor, and drain scenarios
+    // hand in an already-resolved embedding runtime so tests never construct a real provider. Production
+    // callers pass null and the host builds the runtime itself.
+    internal static async Task RunAsync(
+        Stream input,
+        Stream output,
+        string workspaceRoot,
+        string sessionDirectory,
+        CancellationToken ct,
+        bool watch,
+        bool events,
+        WatchOwnerClaim? claimOverride,
+        bool embedWatch = true,
+        Task<WatchEmbeddingRuntime?>? embeddingRuntime = null)
+    {
+        var startupConfig = StartupConfig.TryRead(workspaceRoot);
         var workspace = new McpWorkspace(workspaceRoot, sessionDirectory, startupConfig?.Embeddings.Provider);
         if (!workspace.IsWorkspace)
         {
@@ -112,8 +133,10 @@ public static class McpServerHost
         identity.Attach(provider.GetRequiredService<McpServer>());
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();
         await server.StartAsync(ct);
+        var embedDrainReason = ResolveEmbedDrainReason(embedWatch, startupConfig?.Watch.EmbedPending);
         var watcher = await TryStartWatchEngineAsync(
-            workspace, watch, startupConfig?.Watch.Enabled ?? false, ct, events);
+            workspace, watch, startupConfig?.Watch.Enabled ?? false, ct, events, claimOverride,
+            embedDrainReason, embeddingRuntime);
         lifetime.MarkStarted();
         try
         {
@@ -132,7 +155,8 @@ public static class McpServerHost
     }
 
     private static async Task<WorkspaceWatcher?> TryStartWatchEngineAsync(
-        McpWorkspace workspace, bool watchRequested, bool watchEnabledInConfig, CancellationToken ct, bool events)
+        McpWorkspace workspace, bool watchRequested, bool watchEnabledInConfig, CancellationToken ct, bool events,
+        WatchOwnerClaim? claimOverride, string? embedDrainReason, Task<WatchEmbeddingRuntime?>? embeddingRuntime)
     {
         if (!watchRequested && !watchEnabledInConfig)
         {
@@ -152,6 +176,29 @@ public static class McpServerHost
 
         try
         {
+            var claim = claimOverride
+                ?? new WatchOwnerClaim(SqueezrPaths.StoreDir(workspace.Root), DaemonHeartbeat.ServeWatchKind);
+            var outcome = claim.TryAcquire();
+            if (outcome.Status == WatchOwnerStatus.RaceLost)
+            {
+                outcome = claim.TryAcquire();
+            }
+
+            if (!outcome.IsOwner)
+            {
+                Console.Error.WriteLine("warning: watch engine is off: another process owns the watch for this workspace");
+                return null;
+            }
+
+            var runtimeTask = embedDrainReason is null
+                ? embeddingRuntime ?? Task.Run(
+                    () => CreateWatchEmbeddingRuntime(workspace.Root), CancellationToken.None)
+                : null;
+            if (embedDrainReason is not null)
+            {
+                Console.Error.WriteLine($"squeezr serve: watch embed drain off ({embedDrainReason})");
+            }
+
             WorkspaceWatcher watcher;
             if (events)
             {
@@ -159,15 +206,25 @@ public static class McpServerHost
                 var renderer = new IndexEventsRenderer(writer);
                 watcher = new WorkspaceWatcher(
                     new WatchEventsStatus(writer, workspace.Root, renderer), renderer,
-                    StaleLockWarningSink.ToStderr);
+                    StaleLockWarningSink.ToStderr, claim, runtimeTask);
             }
             else
             {
                 watcher = new WorkspaceWatcher(
-                    new ServeWatchStatus(Console.Error), onStaleTakeover: StaleLockWarningSink.ToStderr);
+                    new ServeWatchStatus(Console.Error), onStaleTakeover: StaleLockWarningSink.ToStderr, claim: claim,
+                    embeddings: runtimeTask);
             }
 
-            await watcher.StartAsync(workspace.Root, ct, daemonKind: DaemonHeartbeat.ServeWatchKind);
+            try
+            {
+                await watcher.StartAsync(workspace.Root, ct, daemonKind: DaemonHeartbeat.ServeWatchKind);
+            }
+            catch
+            {
+                claim.Release();
+                throw;
+            }
+
             Console.Error.WriteLine("squeezr serve: watch engine running");
             return watcher;
         }
@@ -178,14 +235,37 @@ public static class McpServerHost
         }
     }
 
-    private static SqueezrConfig? TryReadStartupConfig(string workspaceRoot)
+    private static string? ResolveEmbedDrainReason(bool embedWatch, bool? embedPendingInConfig) =>
+        embedWatch switch
+        {
+            false => "--no-embed-watch",
+            _ when embedPendingInConfig == false => "watch.embedPending=false",
+            _ => null
+        };
+
+    // Runs on a worker thread off the JSON-RPC startup path: provider resolution may probe an HTTP
+    // endpoint and an onnx provider loads its model. Whatever happens here, serve must keep answering.
+    private static WatchEmbeddingRuntime? CreateWatchEmbeddingRuntime(string workspaceRoot)
     {
         try
         {
-            return ConfigFile.Load(workspaceRoot);
+            var warnings = EmbeddingRuntimeFactory.TryCreate(
+                workspaceRoot, withProvider: true, out var provider, out var store, out var resolution);
+            if (provider is null || store is null)
+            {
+                Console.Error.WriteLine(
+                    "warning: watch embed drain off: " +
+                    (warnings.Count > 0 ? warnings[0] : "embedding runtime unavailable"));
+                return null;
+            }
+
+            var providerName = resolution?.Provider ?? "unknown";
+            Console.Error.WriteLine($"squeezr serve: watch embed drain ready (provider={providerName})");
+            return new WatchEmbeddingRuntime(provider, store, resolution);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or WorkspaceException or ArgumentException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
+            Console.Error.WriteLine($"warning: watch embed drain off: {ex.Message}");
             return null;
         }
     }
