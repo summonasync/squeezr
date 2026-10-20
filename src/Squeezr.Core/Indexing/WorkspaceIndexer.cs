@@ -13,7 +13,7 @@ public sealed class WorkspaceIndexer
 {
     private const double CompactHintThreshold = 0.3;
 
-    private static readonly string[] ProjectLayoutExtensions = [".csproj", ".sln", ".slnx", ".props", ".targets"];
+    internal static readonly string[] ProjectLayoutExtensions = [".csproj", ".sln", ".slnx", ".props", ".targets"];
 
     // Why a stored row left the index. The reason is always reported; for a row the guard refuses the path
     // never is, because the name of the secret is exactly what such a warning would leak.

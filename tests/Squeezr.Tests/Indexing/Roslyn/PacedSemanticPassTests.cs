@@ -363,6 +363,77 @@ public class PacedSemanticPassTests
         progress.Items(IndexPhase.Semantic).ShouldBe(["src/Calc.cs", "src/Notes.cs", "src/Use.cs"]);
     }
 
+    [Theory]
+    [InlineData("Directory.Build.props")]
+    [InlineData("Directory.Build.targets")]
+    [InlineData("src/Extras.slnx")]
+    public void WarmPacedPass_WithProjectLayoutFileInBatch_ReopensSessionAndKeepsTheParseAreaScoped(string relativePath)
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        using var pool = new SemanticSessionPool();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], new PhaseProgress());
+        pool.CreatedSessions.ShouldBe(1);
+        pool.IsWarm(RepoRoot(workspace), semantic: true).ShouldBeTrue();
+
+        WriteFile(workspace, relativePath, "<Project><PropertyGroup><Version>2</Version></PropertyGroup></Project>");
+        WriteFile(workspace, "src/Notes.cs", "public static class Notes { public static string Term = \"reopenneedle\"; }");
+        var progress = new PhaseProgress();
+        Index(workspace, pool, [RepoFile(workspace, relativePath), RepoFile(workspace, "src/Notes.cs")], progress);
+
+        pool.CreatedSessions.ShouldBe(2, $"'{relativePath}' in the batch makes the opened project graph wrong, so the session reopens from disk");
+        pool.IsWarm(RepoRoot(workspace), semantic: true).ShouldBeTrue();
+        progress.Items(IndexPhase.Semantic).ShouldBe(["src/Notes.cs"],
+            "the reopen is one solution open, not a whole-repo semantic pass");
+        Symbols(workspace, "src/Notes.cs").Select(s => s.Name).ShouldContain("Term");
+    }
+
+    [Fact]
+    public void WarmPacedPass_WithLayoutFileOnlyInBatch_DropsTheSessionAndParsesNothing()
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        using var pool = new SemanticSessionPool();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], new PhaseProgress());
+
+        WriteFile(workspace, "Directory.Packages.props", "<Project />");
+        var progress = new PhaseProgress();
+        Index(workspace, pool, [RepoFile(workspace, "Directory.Packages.props")], progress);
+
+        pool.IsWarm(RepoRoot(workspace), semantic: true).ShouldBeFalse(
+            "a restructured solution cannot be healed by a scoped parse, so the stale session must not survive");
+        pool.CreatedSessions.ShouldBe(1, "the drop itself buys no second solution open while the batch holds no csharp work");
+        progress.Items(IndexPhase.Semantic).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void WarmPacedPass_WithLayoutLookalikesInBatch_KeepsTheSession()
+    {
+        var workspace = NewWorkspace();
+        WriteRepo(workspace);
+        using var pool = new SemanticSessionPool();
+        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], new PhaseProgress());
+
+        WriteFile(workspace, "Squeezr.slnx.bak", "<Project />");
+        WriteFile(workspace, "MyApp.csproj.user", "<Project />");
+        WriteFile(workspace, "notes.unknownext", "noise");
+        WriteFile(workspace, "src/Notes.cs", "public static class Notes { public static string Term = \"keptneedle\"; }");
+        var progress = new PhaseProgress();
+        Index(
+            workspace, pool,
+            [
+                RepoFile(workspace, "Squeezr.slnx.bak"),
+                RepoFile(workspace, "MyApp.csproj.user"),
+                RepoFile(workspace, "notes.unknownext"),
+                RepoFile(workspace, "src/Notes.cs")
+            ],
+            progress);
+
+        pool.CreatedSessions.ShouldBe(1, "an editor backup or a temp file is not a layout change");
+        pool.IsWarm(RepoRoot(workspace), semantic: true).ShouldBeTrue();
+        progress.Items(IndexPhase.Semantic).ShouldBe(["src/Notes.cs"]);
+    }
+
     private static void Index(
         string workspace,
         SemanticSessionPool pool,

@@ -30,6 +30,11 @@ public sealed class WatchEventFilter
         return IgnoreFileNames.Contains(name, StringComparer.OrdinalIgnoreCase);
     }
 
+    // routing by the layout role, exact extension only: the catalog labels content, this list decides
+    // what must wake the watcher, and the two were drifting apart when .slnx/.props/.targets edits went silent
+    private static bool IsProjectLayoutFile(string fullPath) =>
+        WorkspaceIndexer.ProjectLayoutExtensions.Contains(Path.GetExtension(fullPath), StringComparer.OrdinalIgnoreCase);
+
     public bool ShouldTrack(string fullPath, bool pathMayBeGone)
     {
         if (IsInsideStore(fullPath))
@@ -55,7 +60,9 @@ public sealed class WatchEventFilter
             return false;
         }
 
-        return pathMayBeGone || LanguageDetector.Detect(fullPath) != "unknown";
+        return pathMayBeGone
+            || IsProjectLayoutFile(fullPath)
+            || LanguageDetector.Detect(fullPath) != "unknown";
     }
 
     private bool IsInsideStore(string fullPath) =>
