@@ -7,9 +7,6 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class FleetCommand : Command<FleetCommand.Settings>
 {
-    private const string StaleDropHint =
-        "run 'squeezr drop --store-key <key>' to remove this entry and its store";
-
     public sealed class Settings : CommandSettings
     {
         [CommandOption("--json")]
@@ -56,7 +53,9 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
         foreach (var entry in fleet)
         {
             table.AddRow(
-                entry.Name.EscapeMarkup(),
+                entry.NameCollision == true
+                    ? $"{entry.Name.EscapeMarkup()} [yellow](name shared)[/]"
+                    : entry.Name.EscapeMarkup(),
                 entry.RootPath.EscapeMarkup(),
                 entry.StoreKey.EscapeMarkup(),
                 FormatDaemon(entry.Watch),
@@ -71,7 +70,9 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
         foreach (var stale in fleet.Where(entry => entry.Stale))
         {
             Console.Error.WriteLine(
-                $"warning: workspace '{stale.Name}' is stale: root path '{stale.RootPath}' does not exist; {StaleDropHint}.");
+                $"warning: workspace '{stale.Name}' is stale (storeKey '{stale.StoreKey}'): " +
+                $"root path '{stale.RootPath}' does not exist; run 'squeezr drop --store-key {stale.StoreKey}' " +
+                "to remove this entry and its store.");
         }
 
         return 0;

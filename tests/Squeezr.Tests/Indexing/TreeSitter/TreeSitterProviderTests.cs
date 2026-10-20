@@ -177,6 +177,31 @@ public class TreeSitterProviderTests
     }
 
     [Fact]
+    public void TypeScript_ClassConstructor_KindParityWithCSharp()
+    {
+        var result = Parse("widget.ts", """
+            export class Widget {
+              private size: number;
+
+              constructor(size: number) {
+                this.size = size;
+              }
+
+              grow(): number {
+                return this.size + 1;
+              }
+            }
+            """);
+
+        var ctor = result.Symbols.Single(s => s.Name == "constructor");
+        ctor.Kind.ShouldBe(SymbolKind.Constructor);
+        ctor.ContainerName.ShouldBe("Widget");
+        ctor.Span.ShouldBe(new CodeSpan(4, 6));
+
+        result.Symbols.Single(s => s.Name == "grow").Kind.ShouldBe(SymbolKind.Method);
+    }
+
+    [Fact]
     public void Tsx_ComponentFunction_ExtractedWithJsxBody()
     {
         var result = Parse("badge.tsx", """

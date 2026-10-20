@@ -83,6 +83,9 @@ public sealed partial class McpThrowSiteGuardTests
         WiringViolations("return ToolErrors.From(ex, _workspace!);").ShouldBeEmpty();
         WiringViolations("return ToolErrors.From(\n    ex,\n    _workspace);").ShouldBeEmpty();
         WiringViolations("return ToolErrors.From(Resolve(\"a, b\"), _workspace);").ShouldBeEmpty();
+
+        WiringViolations("// ToolErrors.From(ex, \"x\") was the old shape").ShouldHaveSingleItem();
+        WiringViolations("return ToolErrors.From(ex, workspace: _workspace);").ShouldHaveSingleItem();
     }
 
     [Fact]

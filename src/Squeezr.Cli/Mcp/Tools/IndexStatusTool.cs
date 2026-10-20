@@ -89,6 +89,15 @@ public sealed class IndexStatusTool
             }
 
             var siblings = WorkspaceSiblingSnapshot.Build(root);
+            if (status.Repos.Count == 1)
+            {
+                var scopeHint = RemedyText.ScopeBlindSiblings(siblings.LiveSiblings);
+                if (scopeHint is not null)
+                {
+                    warnings.Add(scopeHint);
+                }
+            }
+
             var data = new IndexStatusData(
                 status.Name,
                 root,

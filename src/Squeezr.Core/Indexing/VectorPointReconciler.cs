@@ -30,7 +30,7 @@ public static class VectorPointReconciler
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
             throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr init' first.",
+                RemedyText.WorkspaceNotInitialized,
                 WorkspaceException.NotInitializedCode);
         }
 
@@ -38,14 +38,14 @@ public static class VectorPointReconciler
         if (!File.Exists(dbPath))
         {
             throw new WorkspaceException(
-                "Index is not built. Run 'squeezr index' first.",
+                RemedyText.IndexNotBuilt,
                 WorkspaceException.IndexNotBuiltCode);
         }
 
         if (!await vectorStore.IsAvailableAsync(ct))
         {
             throw new WorkspaceException(
-                "Qdrant is unavailable — start it with 'squeezr services up' and retry.");
+                $"Qdrant is unavailable — start it with '{RemedyText.ServicesUp}' and retry.");
         }
 
         // The lock keeps an index pass from re-chunking files under the comparison: chunk rows rewritten
@@ -61,7 +61,7 @@ public static class VectorPointReconciler
             {
                 throw new WorkspaceException(
                     $"The index holds no chunks, but the collection carries {pointIds.Count} point(s) — " +
-                    "refusing to treat every point as an orphan. Run 'squeezr index' first.");
+                    $"refusing to treat every point as an orphan. Run '{RemedyText.IndexCommand}' first.");
             }
 
             var orphans = pointIds.Where(id => !liveIds.Contains(id)).ToList();

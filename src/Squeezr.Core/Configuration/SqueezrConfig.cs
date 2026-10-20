@@ -34,6 +34,8 @@ public sealed record SqueezrConfig
                     "**/.vs/**",
                     "**/.idea/**",
                     "**/.claude/worktrees/**",
+                    "**/.mindlash/worktrees/**",
+                    "**/.qwen/worktrees/**",
                     "**/*.min.js",
                     "**/*.tsbuildinfo",
                     "**/web/out/**",

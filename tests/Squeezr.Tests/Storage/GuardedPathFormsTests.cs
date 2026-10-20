@@ -141,6 +141,53 @@ public class GuardedPathFormsTests
         answer.ShouldBeTrue();
     }
 
+    // W-4: a manifest this pass cannot read leaves the qualified readings unanswered, and until the reader
+    // says so the verdicts simply change. The missing manifest stays silent on purpose — no manifest means
+    // no repos, so no shape was lost; a broken one is a degradation and has to be named.
+    [Fact]
+    public void Load_UnreadableManifest_TheReaderCarriesTheFoldDegradation()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, AnchoredExtra);
+        var guard = SecretGuardReader.Load(workspace);
+
+        File.WriteAllText(SqueezrPaths.ManifestPath(workspace), "null");
+        var forms = GuardedPathForms.Load(workspace, guard);
+
+        forms.NamesAProtectedPath(Qualified).ShouldBeFalse();
+        guard.Warnings.ShouldNotBeNull().ShouldContain(w =>
+            w.StartsWith("could not read workspace manifest (", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Load_MissingManifest_TheReaderStaysSilent()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, AnchoredExtra);
+        var guard = SecretGuardReader.Load(workspace);
+
+        File.Delete(SqueezrPaths.ManifestPath(workspace));
+
+        GuardedPathForms.Load(workspace, guard);
+        guard.Warnings.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Load_CorruptManifestJson_DegradesInsteadOfThrowingAndSaysSo()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, AnchoredExtra);
+        var guard = SecretGuardReader.Load(workspace);
+
+        File.WriteAllText(SqueezrPaths.ManifestPath(workspace), "{garbage");
+
+        var forms = GuardedPathForms.Load(workspace, guard);
+        Should.NotThrow(() => GuardedPathForms.Load(workspace, guard));
+        forms.NamesAProtectedPath(Qualified).ShouldBeFalse();
+        guard.Warnings.ShouldNotBeNull().ShouldContain(w =>
+            w.StartsWith("could not read workspace manifest (", StringComparison.Ordinal));
+    }
+
     private static GuardedPathForms Load(string workspace) =>
         GuardedPathForms.Load(workspace, SecretGuardIngestion.Load(workspace));
 }

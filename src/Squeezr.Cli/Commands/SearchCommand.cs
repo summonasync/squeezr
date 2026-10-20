@@ -110,7 +110,8 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     response.Matches.Count,
                     response.TokensUsed,
                     settings.MaxTokens,
-                    response.Truncated));
+                    response.Truncated,
+                    response.Hint));
                 return 0;
             }
 
@@ -127,9 +128,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 }
             }
 
-            if (response.Truncated)
+            if (response.Truncated && response.Hint is { } truncationHint)
             {
-                AnsiConsole.MarkupLine("[grey]truncated: refine the query or raise --max-tokens[/]");
+                AnsiConsole.MarkupLine($"[grey]truncated: {truncationHint.ForCli()}[/]");
             }
 
             if (vectorStoreUnavailable)

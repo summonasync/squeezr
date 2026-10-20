@@ -1,3 +1,5 @@
+using Squeezr.Core.Indexing.Navigation;
+
 namespace Squeezr.Cli.Output;
 
 public sealed record SearchSummaryLine(
@@ -5,4 +7,5 @@ public sealed record SearchSummaryLine(
     int Matches,
     int TokensUsed,
     int? MaxTokens,
-    bool Truncated);
+    bool Truncated,
+    TruncationHint? Hint = null);

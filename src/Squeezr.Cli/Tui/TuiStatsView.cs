@@ -16,6 +16,14 @@ public static class TuiStatsView
         }
 
         var summary = QueryTelemetrySummary.Summarize(QueryTelemetry.ReadAll(workspaceRoot), workspaceRoot);
+        if (summary.GuardWarnings is { } warnings)
+        {
+            foreach (var warning in warnings)
+            {
+                console.MarkupLine($"[yellow]warning:[/] {warning.EscapeMarkup()}");
+            }
+        }
+
         StatsCommand.Render(console, summary);
         return Task.CompletedTask;
     }

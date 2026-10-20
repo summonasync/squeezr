@@ -87,15 +87,38 @@ public sealed class ToolResponseCacheTests
     [Fact]
     public void Generation_ConfigOlderThanIndex_StillMovesOnTheIndexWrite()
     {
-        // max(index, config), not a sum or a pair: a workspace that has not had its config touched for
-        // weeks must keep invalidating on every index pass
+        // the pair's index component, not a blended number: a workspace that has not had its config
+        // touched for weeks must keep invalidating on every index pass
         var (cache, metaDbPath, configPath) = NewCacheWithStoreFiles();
         File.SetLastWriteTimeUtc(configPath, DateTime.UtcNow.AddMinutes(-30));
         var before = cache.Generation;
 
         File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow);
 
+        var after = cache.Generation;
+        after.Index.ShouldBeGreaterThan(before.Index);
+        after.Policy.ShouldBe(before.Policy);
         cache.Generation.ShouldNotBe(before);
+    }
+
+    [Fact]
+    public void TryGet_FutureDatedConfig_IndexPassStillEvicts()
+    {
+        // a config mtime ahead of meta.db (stepped clock, cp -p from a backup) froze the old max() blend
+        // on the config stamp, so an index pass evicted nothing until the config itself was touched again
+        var (cache, metaDbPath, configPath) = NewCacheWithStoreFiles();
+        File.SetLastWriteTimeUtc(configPath, DateTime.UtcNow.AddMinutes(30));
+        cache.Put("code_search", SearchParams("Add", "demo", 2000, 5), "envelope");
+        var before = cache.Generation;
+
+        File.SetLastWriteTimeUtc(metaDbPath, DateTime.UtcNow);
+
+        var after = cache.Generation;
+        after.Index.ShouldBeGreaterThan(before.Index);
+        after.Index.ShouldBeLessThan(after.Policy);
+        cache.TryGet("code_search", SearchParams("Add", "demo", 2000, 5), out _).ShouldBeFalse();
+        cache.Count.ShouldBe(0);
+        cache.TakeInvalidationWarning().ShouldBe(ToolResponseCache.InvalidationWarning);
     }
 
     [Fact]
@@ -152,6 +175,25 @@ public sealed class ToolResponseCacheTests
 
         cache.TryGet("code_search", parameters, out _).ShouldBeFalse(
             "an answer computed across a backwards clock step cannot be served as fresh when the stamp returns");
+    }
+
+    [Fact]
+    public void Put_WhenThePolicyClockMovedBackwards_DoesNotCache()
+    {
+        var (cache, _, configPath) = NewCacheWithStoreFiles();
+        var parameters = SearchParams("Add", "demo", 2000, 5);
+        var readStamp = DateTime.UtcNow;
+
+        File.SetLastWriteTimeUtc(configPath, readStamp);
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse();
+
+        File.SetLastWriteTimeUtc(configPath, readStamp.AddSeconds(-30));
+        cache.Put("code_search", parameters, "answer across a rolled-back config");
+
+        File.SetLastWriteTimeUtc(configPath, readStamp);
+
+        cache.TryGet("code_search", parameters, out _).ShouldBeFalse(
+            "the backwards refusal tracks either pair component, the policy clock included");
     }
 
     [Fact]

@@ -169,6 +169,29 @@ public class McpToolsTests
         envelope.GetProperty("tokensUsed").GetInt32().ShouldBeLessThanOrEqualTo(2000);
         envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
         envelope.GetProperty("data").EnumerateArray().ShouldNotBeEmpty();
+        envelope.GetRawText().ShouldNotContain("--");
+        envelope.GetProperty("warnings").EnumerateArray()
+            .Select(w => w.GetString()!)
+            .ShouldContain("raise maxTokens or narrow (repo, prefix)");
+    }
+
+    [Fact]
+    public async Task CodeSearch_WithinBudget_WarnsNothingAboutTruncation()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "code_search",
+            new Dictionary<string, object?> { ["query"] = "uniqneedle" },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
+        envelope.GetProperty("warnings").EnumerateArray()
+            .Select(w => w.GetString()!)
+            .ShouldNotContain(w => w.Contains("narrow") || w.Contains("raise"));
     }
 
     [Fact]

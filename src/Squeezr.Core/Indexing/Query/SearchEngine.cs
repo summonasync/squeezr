@@ -1,4 +1,5 @@
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Core.Indexing.Query;
@@ -6,6 +7,12 @@ namespace Squeezr.Core.Indexing.Query;
 public sealed class SearchEngine
 {
     public const string VectorStoreUnavailableWarning = "vector store is unavailable, falling back to exact search only";
+
+    private static readonly TruncationHint Truncation = new(
+    [
+        new("raise", ["maxTokens"]),
+        new("narrow", ["repo", "prefix"])
+    ]);
 
     private readonly string _workspaceRoot;
     private readonly RankExclusion _rankExclusion;
@@ -180,6 +187,6 @@ public sealed class SearchEngine
             taken.Add(match);
         }
 
-        return new SearchResponse(taken, tokensUsed, truncated) { Warnings = warnings };
+        return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null) { Warnings = warnings };
     }
 }

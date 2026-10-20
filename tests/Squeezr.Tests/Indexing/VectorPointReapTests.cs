@@ -8,6 +8,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing;
 
+[Collection("CliProcessGlobals")]
 public class VectorPointReapTests
 {
     private const string Source = """

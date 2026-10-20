@@ -51,11 +51,6 @@ public sealed class SymbolLookup
     private const double DidYouMeanThreshold = 0.34;
     private const int DidYouMeanTopN = 3;
 
-    private static readonly HashSet<string> TypeKinds = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "class", "interface", "enum"
-    };
-
     private readonly string _workspaceRoot;
 
     public SymbolLookup(string workspaceRoot) => _workspaceRoot = NavigationContext.RequireIndex(workspaceRoot);

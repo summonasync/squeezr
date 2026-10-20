@@ -16,9 +16,16 @@ public static class JsonOutput
         Console.Out.Flush();
     }
 
-    public static void WriteError(string code, string message) =>
+    public static void WriteError(
+        string code,
+        string message,
+        IReadOnlyList<string>? removedPaths = null,
+        IReadOnlyList<string>? nextSteps = null) =>
         Console.Error.WriteLine(
-            JsonSerializer.Serialize(new { error = new JsonErrorBody(code, message) }, Options));
+            JsonSerializer.Serialize(new { error = new JsonErrorBody(code, message, removedPaths, nextSteps) }, Options));
+
+    public static void WriteWarnings(IReadOnlyList<JsonWarningBody> warnings) =>
+        Console.Error.WriteLine(JsonSerializer.Serialize(new { warnings }, Options));
 
     private static JsonSerializerOptions CliOptions()
     {

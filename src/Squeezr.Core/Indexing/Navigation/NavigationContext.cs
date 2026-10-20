@@ -5,7 +5,7 @@ namespace Squeezr.Core.Indexing.Navigation;
 
 public static class NavigationContext
 {
-    public const string MissingIndexMessage = "Index is not built. Run 'squeezr index' first.";
+    public const string MissingIndexMessage = RemedyText.IndexNotBuilt;
 
     public static string RequireIndex(string workspaceRoot)
     {

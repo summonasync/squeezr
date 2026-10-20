@@ -15,4 +15,5 @@ public sealed record McpClientDiagnostics(
     string? ProjectCommand = null,
     bool UserStale = false,
     bool ProjectStale = false,
-    string? ExpectedCommand = null);
+    string? ExpectedCommand = null,
+    ToolErrorPayload? IndexState = null);

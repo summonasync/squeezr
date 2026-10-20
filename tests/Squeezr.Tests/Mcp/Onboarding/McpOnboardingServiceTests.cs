@@ -158,6 +158,7 @@ public sealed class McpOnboardingServiceTests
         FakeCli.Install(binDir, "squeezr");
         new WorkspaceManager(workspace).Init("demo");
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        File.WriteAllText(SqueezrPaths.TrigramIndexPath(workspace), "not-a-real-index");
         File.Exists(SqueezrPaths.MetaDbPath(workspace)).ShouldBeTrue();
         Directory.Exists(Path.Combine(workspace, ".squeezr")).ShouldBeFalse();
         var client = McpClientRegistry.Get(McpClientId.Kimi);
@@ -170,6 +171,7 @@ public sealed class McpOnboardingServiceTests
         diagnostics.ProjectScopeMethod.ShouldBe("writer");
         diagnostics.SqueezrInPath.ShouldBeTrue();
         diagnostics.WorkspaceIndexed.ShouldBeTrue();
+        diagnostics.IndexState.ShouldBeNull();
         diagnostics.HeadlessStatus.ShouldBeNull();
     }
 

@@ -20,7 +20,8 @@ public sealed record CacheStats(
     double HitRate,
     int SessionsWithCache,
     int Invalidations = 0,
-    DateTime? LastInvalidation = null);
+    DateTime? LastInvalidation = null,
+    int EligibleQueries = 0);
 
 public sealed record AgentStats(string Client, string? ClientVersion, int Count, DateTime LastSeen);
 
@@ -65,14 +66,15 @@ public static class QueryTelemetrySummary
         var ratio = counterfactual == 0 || actual == 0 ? 0 : counterfactual / (double)actual;
         var baselineApplies = counterfactual > actual;
 
-        var hits = entries.Count(e => e.CacheHit);
-        var hitRate = entries.Count == 0 ? 0 : hits / (double)entries.Count;
+        var cacheEligible = entries.Where(e => CacheEligibleTools.Includes(e.Tool)).ToList();
+        var hits = cacheEligible.Count(e => e.CacheHit);
+        var hitRate = cacheEligible.Count == 0 ? 0 : hits / (double)cacheEligible.Count;
 
         return new QueryStatsSummary(
             entries.Count,
             byTool,
             new SavingsStats(actual, counterfactual, saved, ratio, unknownFiles, WholeFileBaselineLabel, baselineApplies),
-            SummarizeCache(entries, hits, hitRate),
+            SummarizeCache(cacheEligible, hits, hitRate),
             entries.Count == 0 ? null : entries.Min(e => e.Ts),
             entries.Count == 0 ? null : entries.Max(e => e.Ts),
             entries.Count,
@@ -226,6 +228,7 @@ public static class QueryTelemetrySummary
             hitRate,
             DistinctCacheSessions(entries),
             invalidated.Count,
-            invalidated.Count == 0 ? null : invalidated.Max());
+            invalidated.Count == 0 ? null : invalidated.Max(),
+            entries.Count);
     }
 }

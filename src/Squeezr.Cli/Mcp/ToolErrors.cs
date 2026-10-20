@@ -10,58 +10,51 @@ public static class ToolErrors
 {
     public static CallToolResult From(Exception ex, McpWorkspace workspace)
     {
-        var code = CommandError.CodeFor(ex);
-        var message = ex is WorkspaceException ? ex.Message : $"Internal error: {ex.Message}";
-        var cause = CauseFor(code, workspace);
-        var nextSteps = NextStepsFor(code, workspace);
-        var payload = nextSteps is null
-            ? new ToolErrorPayload(code, message)
-            : new ToolErrorPayload(code, message, workspace.Root, nextSteps, cause);
+        var payload = PayloadFor(ex, workspace);
         return new CallToolResult
         {
             IsError = true,
-            Content = [new TextContentBlock { Text = message }],
+            Content = [new TextContentBlock { Text = payload.Message }],
             StructuredContent = JsonSerializer.SerializeToElement(payload)
         };
     }
 
-    private static string? CauseFor(string code, McpWorkspace workspace) => code switch
+    internal static ToolErrorPayload PayloadFor(Exception ex, McpWorkspace workspace)
     {
-        WorkspaceException.NotInitializedCode when workspace.SessionOutsideRoot => ToolErrorCause.SessionOutsideRoot,
-        WorkspaceException.NotInitializedCode => ToolErrorCause.RootWithoutManifest,
-        WorkspaceException.IndexNotBuiltCode when NeedsManagedService(workspace) => ToolErrorCause.ProviderNeedsServices,
-        _ => null
-    };
-
-    // only a code with a known remedy carries the advice block; the rest stays message-only
-    private static IReadOnlyList<string>? NextStepsFor(string code, McpWorkspace workspace) => code switch
-    {
-        WorkspaceException.NotInitializedCode when workspace.SessionOutsideRoot => RebindSteps(workspace),
-        WorkspaceException.NotInitializedCode => InitializeSteps(workspace),
-        WorkspaceException.IndexNotBuiltCode => IndexSteps(workspace),
-        _ => null
-    };
-
-    private static IReadOnlyList<string> IndexSteps(McpWorkspace workspace)
-    {
-        var index = $"cd {ShellPath.Quote(workspace.Root)} && squeezr index";
-        return NeedsManagedService(workspace)
-            ? ["squeezr services up", index]
-            : [index];
+        var code = CommandError.CodeFor(ex);
+        var message = ex is WorkspaceException ? ex.Message : $"Internal error: {ex.Message}";
+        var (cause, nextSteps) = RemedyFor(code, workspace);
+        return nextSteps is null
+            ? new ToolErrorPayload(code, message)
+            : new ToolErrorPayload(code, message, workspace.Root, nextSteps, cause);
     }
 
-    private static bool NeedsManagedService(McpWorkspace workspace) =>
-        EmbeddingProviderServices.RequiresManagedService(workspace.EmbeddingsProvider);
+    internal static (string? Cause, IReadOnlyList<string> NextSteps) IndexRemedyFor(string root, string? provider)
+    {
+        var index = RemedyText.AnchorIndex(root);
+        return EmbeddingProviderServices.RequiresManagedService(provider)
+            ? (ToolErrorCause.ProviderNeedsServices, [RemedyText.ServicesUp, index])
+            : (null, [index]);
+    }
+
+    // only a code with a known remedy carries the advice block; the rest stays message-only
+    private static (string? Cause, IReadOnlyList<string>? NextSteps) RemedyFor(string code, McpWorkspace workspace) => code switch
+    {
+        WorkspaceException.NotInitializedCode when workspace.SessionOutsideRoot => (ToolErrorCause.SessionOutsideRoot, RebindSteps(workspace)),
+        WorkspaceException.NotInitializedCode => (ToolErrorCause.RootWithoutManifest, InitializeSteps(workspace)),
+        WorkspaceException.IndexNotBuiltCode => IndexRemedyFor(workspace.Root, workspace.EmbeddingsProvider),
+        _ => (null, null)
+    };
 
     private static IReadOnlyList<string> InitializeSteps(McpWorkspace workspace) =>
     [
-        $"cd {ShellPath.Quote(workspace.Root)} && squeezr init",
-        $"cd {ShellPath.Quote(workspace.Root)} && squeezr index"
+        RemedyText.AnchorInit(workspace.Root),
+        RemedyText.AnchorIndex(workspace.Root)
     ];
 
     private static IReadOnlyList<string> RebindSteps(McpWorkspace workspace) =>
     [
-        $"cd {ShellPath.Quote(workspace.SessionDirectory)} && squeezr mcp install --client <client> --scope project",
-        $"cd {ShellPath.Quote(workspace.SessionDirectory)} && squeezr serve"
+        RemedyText.RebindInstall(workspace.SessionDirectory),
+        RemedyText.RebindServe(workspace.SessionDirectory)
     ];
 }

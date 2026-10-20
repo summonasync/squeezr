@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization;
 using Squeezr.Core.Indexing.Ignore;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Output;
@@ -13,10 +15,16 @@ public sealed record WorkspaceStatusReport(
     IReadOnlyList<RepoStatusReport> Repos,
     QdrantStatus? Qdrant,
     string? EmbeddingsProvider = null,
-    IReadOnlyList<string> Warnings = default!)
+    IReadOnlyList<string> Warnings = default!,
+    IReadOnlyList<WorkspaceSiblingEntry>? Workspaces = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    int WorkspacesOmitted = 0)
 {
     public static WorkspaceStatusReport Create(
-        WorkspaceStatus status, IReadOnlyList<string> staleFiles, string? embeddingsProvider = null)
+        WorkspaceStatus status,
+        IReadOnlyList<string> staleFiles,
+        string? embeddingsProvider = null,
+        WorkspaceSiblingSnapshot? siblings = null)
     {
         var warnings = new List<string>();
         var repos = status.Repos
@@ -54,8 +62,13 @@ public sealed record WorkspaceStatusReport(
             repos,
             status.Qdrant,
             embeddingsProvider,
-            warnings);
+            warnings,
+            ListedWorkspaces(siblings),
+            siblings?.Omitted ?? 0);
     }
+
+    private static IReadOnlyList<WorkspaceSiblingEntry>? ListedWorkspaces(WorkspaceSiblingSnapshot? siblings) =>
+        siblings?.Workspaces is { Count: > 0 } listed ? listed : null;
 
     private static RepoIgnoredReport? BuildIgnoredReport(RepoStatus repo, List<string> warnings)
     {

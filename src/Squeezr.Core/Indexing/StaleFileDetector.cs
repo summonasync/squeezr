@@ -13,7 +13,7 @@ public static class StaleFileDetector
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
             throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr init' first.",
+                RemedyText.WorkspaceNotInitialized,
                 WorkspaceException.NotInitializedCode);
         }
 

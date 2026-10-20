@@ -11,14 +11,20 @@ public static class FleetListing
         var staleKeys = OrphanScanner.Scan().Stale
             .Select(stale => stale.StoreKey)
             .ToHashSet(StringComparer.Ordinal);
-        return WorkspaceRegistry.Load()
-            .Select(entry => BuildEntry(entry, now, staleKeys))
+        var entries = WorkspaceRegistry.Load();
+        var collidingNames = CollidingNames.SharedByLiveEntries(entries);
+        return entries
+            .Select(entry => BuildEntry(entry, now, staleKeys, collidingNames.Contains(entry.Name)))
             .OrderByDescending(entry => entry.Watch.IsAlive || entry.ServeWatch.IsAlive)
             .ThenBy(entry => entry.Name, StringComparer.Ordinal)
             .ToList();
     }
 
-    private static FleetEntry BuildEntry(WorkspaceRegistryEntry entry, DateTime now, IReadOnlySet<string> staleKeys)
+    private static FleetEntry BuildEntry(
+        WorkspaceRegistryEntry entry,
+        DateTime now,
+        IReadOnlySet<string> staleKeys,
+        bool nameCollision)
     {
         var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
         using var meta = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(entry.RootPath));
@@ -30,7 +36,8 @@ public static class FleetListing
             ProbeDaemon(storeDir, DaemonHeartbeat.ServeWatchKind, now),
             Stale: staleKeys.Contains(entry.StoreKey),
             PendingChunks: meta?.CountPendingChunks(null),
-            LastIndexedAt: meta?.GetLatestFullIndexAt());
+            LastIndexedAt: meta?.GetLatestFullIndexAt(),
+            NameCollision: nameCollision ? true : null);
     }
 
     private static FleetDaemonState ProbeDaemon(string storeDir, string kind, DateTime now)

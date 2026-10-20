@@ -10,7 +10,7 @@ public sealed class TelemetryWriteLock : IDisposable
 {
     public const string FileName = "queries.lock";
 
-    public static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(2);
+    internal static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(2);
 
     private const int RetryDelayMs = 1;
 

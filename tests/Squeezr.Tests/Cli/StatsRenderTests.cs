@@ -127,6 +127,42 @@ public sealed class StatsRenderTests
         output.ShouldNotContain("no hits yet");
     }
 
+    [Fact]
+    public void Render_MixedCliAndServeWorkload_RateNamesTheEligibleDenominator()
+    {
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", BigFileBytes);
+        var session = Guid.NewGuid();
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("code_search", 120, sessionId: session),
+            Entry("code_search", 90, sessionId: session, cacheHit: true),
+            Entry("expand", 100, file: "src/Big.cs", sessionId: session),
+            Entry("search", 40, sessionId: session)
+        };
+
+        var output = Render(entries, root);
+
+        output.ShouldContain("Cache hit-rate: 50.0 % across 1 session(s) over 2 cache-eligible queries");
+        output.ShouldNotContain("no cache-eligible queries yet");
+    }
+
+    [Fact]
+    public void Render_CliOnlyStore_SaysThereIsNothingBehindTheServeCache()
+    {
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", BigFileBytes);
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("search", 40),
+            Entry("expand", 100, file: "src/Big.cs")
+        };
+
+        var output = Render(entries, root);
+
+        output.ShouldContain("Cache hit-rate: no cache-eligible queries yet");
+        output.ShouldNotContain("no hits yet");
+        output.ShouldNotContain("Cache hit-rate: 0.0 %");
+    }
+
     private static string Render(IReadOnlyList<QueryTelemetryEntry> entries, string root)
     {
         var summary = QueryTelemetrySummary.Summarize(entries, root);

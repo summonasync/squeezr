@@ -29,11 +29,6 @@ public sealed class RepoMapper
         new("raise", ["maxTokens"])
     ]);
 
-    private static readonly HashSet<string> TypeKinds = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "class", "interface", "enum"
-    };
-
     private readonly string _workspaceRoot;
 
     public RepoMapper(string workspaceRoot) => _workspaceRoot = NavigationContext.RequireIndex(workspaceRoot);

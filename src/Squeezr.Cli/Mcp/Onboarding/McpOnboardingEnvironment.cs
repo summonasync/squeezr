@@ -1,15 +1,21 @@
 namespace Squeezr.Cli.Mcp.Onboarding;
 
-public sealed record McpOnboardingEnvironment(string HomeDir, string WorkspaceRoot, string CommandPath, string? ClientHomeOverride)
+public sealed record McpOnboardingEnvironment(
+    string HomeDir,
+    string WorkspaceRoot,
+    string CommandPath,
+    string? ClientHomeOverride,
+    string? SessionDirectory = null)
 {
-    public static McpOnboardingEnvironment Create(string workspaceRoot)
+    public static McpOnboardingEnvironment Create(string workspaceRoot, string? sessionDirectory = null)
     {
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
         return new(
             HomeDir: homeDir,
             WorkspaceRoot: Path.GetFullPath(workspaceRoot),
             CommandPath: StableCommandPath.Resolve(homeDir, Environment.ProcessPath),
-            ClientHomeOverride: ResolveClientHomeOverride());
+            ClientHomeOverride: ResolveClientHomeOverride(),
+            SessionDirectory: sessionDirectory);
     }
 
     private static string? ResolveClientHomeOverride()

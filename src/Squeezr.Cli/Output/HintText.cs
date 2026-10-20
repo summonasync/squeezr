@@ -12,6 +12,7 @@ public static class HintText
         ["kind"] = "--kind",
         ["depth"] = "--depth",
         ["maxTokens"] = "--max-tokens",
+        ["prefix"] = "--prefix",
         ["expand_span"] = "expand <file> <line>"
     };
 

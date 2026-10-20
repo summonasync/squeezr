@@ -69,10 +69,14 @@ public static class SecretGuard
     // above stays for one-shot questions and pays per call, which is what a single lookup can afford.
     public sealed class Profile(IReadOnlyList<string>? extraPatterns)
     {
-        private readonly CompiledExtra[] _extras =
-            extraPatterns is { Count: > 0 } ? CompileExtras(extraPatterns) : [];
+        private readonly (CompiledExtra[] Compiled, IReadOnlyList<MaskFailureCount> Failed) _compiled =
+            extraPatterns is { Count: > 0 } ? CompileExtras(extraPatterns) : ([], []);
 
-        public int CompiledExtras => _extras.Length;
+        public int CompiledExtras => _compiled.Compiled.Length;
+
+        // the configured masks that protect nothing, grouped by why — the reader turns these into the
+        // degradation lines; the shapes themselves are dead ends, never a narrower protection
+        internal IReadOnlyList<MaskFailureCount> FailedMasks => _compiled.Failed;
 
         public bool IsProtected(string relativePath)
         {
@@ -81,7 +85,7 @@ public static class SecretGuard
             var segments = Segments(relativePath);
 
             // extras are checked first so a user glob can re-protect a name the built-in list exempts
-            return MatchesAnyExtra(_extras, segments) || MatchesBuiltIns(segments);
+            return MatchesAnyExtra(_compiled.Compiled, segments) || MatchesBuiltIns(segments);
         }
 
         // origin attribution for the withheld counters: the built-in half alone, with the user masks ignored.
@@ -109,16 +113,25 @@ public static class SecretGuard
     // The ignore layer reads them the same way, so extras carry its dialect and subtract nothing: the
     // negated half in particular would otherwise start meaning "unprotect" in a knob that cannot subtract.
     // Character classes and escapes join that dialect as widening-only shapes: they name more files, never
-    // fewer, and '!' still reaches this filter before any of them is compiled.
-    private static CompiledExtra[] CompileExtras(IReadOnlyList<string> extraPatterns)
+    // fewer, and '!' still reaches this filter before any of them is compiled. A null parse is a blank or a
+    // comment — no mask was attempted, so it fails no count either.
+    private static (CompiledExtra[] Compiled, IReadOnlyList<MaskFailureCount> Failed) CompileExtras(
+        IReadOnlyList<string> extraPatterns)
     {
         var compiled = new List<CompiledExtra>(extraPatterns.Count);
+        var failures = new Dictionary<SecretMaskFailure, int>();
 
         foreach (var raw in extraPatterns)
         {
             var parsed = GitignoreMatcher.Parse(raw ?? string.Empty, IgnoreSource.Config, "config.json", ".");
-            if (parsed is null || parsed.Negate || parsed.DirOnly || parsed.Unsupported)
+            if (parsed is null)
             {
+                continue;
+            }
+
+            if (FailureOf(parsed) is { } failure)
+            {
+                failures[failure] = failures.TryGetValue(failure, out var count) ? count + 1 : 1;
                 continue;
             }
 
@@ -126,8 +139,17 @@ public static class SecretGuard
                 GlobMatcher.NormalizeGitignorePattern(parsed.CompiledPattern), parsed.Anchored));
         }
 
-        return [.. compiled];
+        return ([.. compiled],
+            [.. failures.Select(f => new MaskFailureCount(f.Key, f.Value)).OrderBy(f => f.Reason)]);
     }
+
+    private static SecretMaskFailure? FailureOf(IgnorePattern parsed) => parsed switch
+    {
+        { Negate: true } => SecretMaskFailure.Negated,
+        { DirOnly: true } => SecretMaskFailure.DirectoryOnly,
+        { Unsupported: true } => SecretMaskFailure.UnsupportedPattern,
+        _ => null,
+    };
 
     private static bool MatchesAnyExtra(CompiledExtra[] extras, string[] loweredSegments)
     {

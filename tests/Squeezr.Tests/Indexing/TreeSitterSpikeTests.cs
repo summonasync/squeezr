@@ -38,7 +38,7 @@ public class TreeSitterSpikeTests
     {
         using var language = new Language("JavaScript");
         using var parser = new Parser(language);
-        using var tree = Parse(parser, 
+        using var tree = Parse(parser,
             "function add(a, b) { return a + b; }\nfunction mul(a, b) { return a * b; }\n");
         using var query = new TsQuery(language, "(function_declaration name: (identifier) @fn)");
 

@@ -81,6 +81,11 @@ public sealed class RankExclusion
             return "must stay relative to the repository root — drop the leading '/'";
         }
 
+        if (segments[0].Length == 2 && segments[0][1] == ':' && char.IsAsciiLetter(segments[0][0]))
+        {
+            return "names a drive letter — patterns are repository-relative, so it can never match; drop the drive";
+        }
+
         if (segments.Contains("..", StringComparer.Ordinal))
         {
             return "cannot climb above the repository root";

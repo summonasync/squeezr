@@ -100,6 +100,11 @@ public sealed class CodeSearchTool
                 }
             }
 
+            if (response.Hint is not null)
+            {
+                warnings.Add(response.Hint.ForMcp());
+            }
+
             var data = response.Matches.Select(m => new SearchHitData(
                 m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet,
                 m.AlsoMatched == 0 ? null : m.AlsoMatched)).ToList();

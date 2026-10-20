@@ -1,6 +1,6 @@
-namespace Squeezr.Cli.Mcp;
+namespace Squeezr.Core.Infra;
 
-internal static class ShellPath
+public static class ShellPath
 {
     public static string Quote(string path) => $"'{path.Replace("'", @"'\''")}'";
 }

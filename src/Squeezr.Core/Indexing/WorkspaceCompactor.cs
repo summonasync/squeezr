@@ -29,7 +29,7 @@ public static class WorkspaceCompactor
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
             throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr init' first.",
+                RemedyText.WorkspaceNotInitialized,
                 WorkspaceException.NotInitializedCode);
         }
 
@@ -37,7 +37,7 @@ public static class WorkspaceCompactor
         if (!File.Exists(trigramPath))
         {
             throw new WorkspaceException(
-                "Index is not built. Run 'squeezr index' first.",
+                RemedyText.IndexNotBuilt,
                 WorkspaceException.IndexNotBuiltCode);
         }
 
@@ -62,8 +62,16 @@ public static class WorkspaceCompactor
             var guard = SecretGuardIngestion.Load(workspaceRoot);
             purge = WorkspaceIndexer.PurgeProtectedPaths(workspaceRoot, store, guard, warnings);
             telemetryRedacted = QueryTelemetry.RedactProtectedParams(
-                workspaceRoot, GuardedPathForms.Load(workspaceRoot, guard).NamesAProtectedPath);
-            if (telemetryRedacted > 0)
+                workspaceRoot,
+                GuardedPathForms.Load(workspaceRoot, guard).NamesAProtectedPath,
+                out var telemetryScrubBusy);
+            if (telemetryScrubBusy)
+            {
+                warnings.Add(
+                    "queries.jsonl scrub skipped: the telemetry write lock stayed busy past the wait budget — " +
+                    "protected names can survive in recorded parameters until the next compact");
+            }
+            else if (telemetryRedacted > 0)
             {
                 warnings.Add(
                     $"secret guard: {telemetryRedacted} recorded parameter value(s) redacted in queries.jsonl " +

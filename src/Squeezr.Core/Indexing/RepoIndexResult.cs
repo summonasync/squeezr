@@ -9,4 +9,6 @@ public sealed record RepoIndexResult(
     IReadOnlyDictionary<string, int>? IgnoredBySource = null,
     int GuardWithheld = 0,
     int GuardWithheldBuiltIns = 0,
-    int GuardDropped = 0);
+    int GuardDropped = 0,
+    int Embedded = 0,
+    bool EmbeddingsCompleted = true);

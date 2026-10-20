@@ -56,6 +56,7 @@ internal static class TsSymbolExtractor
         var kind = node.Type switch
         {
             "function_declaration" => SymbolKind.Function,
+            "method_definition" when name == "constructor" => SymbolKind.Constructor,
             "method_definition" => SymbolKind.Method,
             "class_declaration" => SymbolKind.Class,
             "interface_declaration" => SymbolKind.Interface,

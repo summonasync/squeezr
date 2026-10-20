@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Mcp.Onboarding;
 
@@ -116,6 +117,7 @@ public sealed class McpOnboardingService
         }
         var userStale = userEntry && userCommand is not null && expectedPath is not null && !PathsMatch(userCommand, expectedPath);
         var projectStale = projectEntry && projectCommand is not null && expectedPath is not null && !PathsMatch(projectCommand, expectedPath);
+        var indexState = WorkspaceState(environment.WorkspaceRoot, environment.SessionDirectory ?? environment.WorkspaceRoot);
         var warnings = new List<string>();
         var userWarning = userDecision.Warning;
         if (userWarning is not null)
@@ -138,14 +140,36 @@ public sealed class McpOnboardingService
             MethodName(userDecision.Method),
             MethodName(projectDecision.Method),
             _locator.Locate(ClientCliBridge.ServerName) is not null,
-            File.Exists(SqueezrPaths.MetaDbPath(environment.WorkspaceRoot)),
+            indexState is null,
             await ProbeHeadlessAsync(client, cancellationToken),
             warnings,
             userCommand,
             projectCommand,
             userStale,
             projectStale,
-            expectedPath);
+            expectedPath,
+            indexState);
+    }
+
+    private static ToolErrorPayload? WorkspaceState(string workspaceRoot, string sessionDirectory)
+    {
+        var workspace = new McpWorkspace(
+            workspaceRoot,
+            sessionDirectory,
+            StartupConfig.TryRead(workspaceRoot)?.Embeddings.Provider);
+        if (!workspace.IsWorkspace)
+        {
+            return ToolErrors.PayloadFor(workspace.NotInitializedException(), workspace);
+        }
+
+        if (!File.Exists(SqueezrPaths.TrigramIndexPath(workspaceRoot)))
+        {
+            return ToolErrors.PayloadFor(
+                new WorkspaceException(RemedyText.IndexNotBuilt, WorkspaceException.IndexNotBuiltCode),
+                workspace);
+        }
+
+        return null;
     }
 
     private async Task<string?> ProbeHeadlessAsync(McpClientDescriptor client, CancellationToken cancellationToken)

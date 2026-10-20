@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Workspace;
 
@@ -33,14 +34,17 @@ public sealed class GuardedPathForms
     }
 
     // the write plane asks the ingestion classifier, the read planes ask the reader; the fold is the same work
-    // either way, and so is the answer for a value no shape can be read from it — that one is owned below
+    // either way, and so is the answer for a value no shape can be read from it — that one is owned below.
+    // The reader overload also carries the news: a manifest this pass cannot read is a degradation, and the
+    // reader's warnings are the channel every read surface already prints.
     public static GuardedPathForms Load(string workspaceRoot, SecretGuardIngestion guard) =>
         Load(workspaceRoot, guard.IsProtected);
 
     public static GuardedPathForms Load(string workspaceRoot, SecretGuardReader guard) =>
-        Load(workspaceRoot, guard.IsProtected);
+        Load(workspaceRoot, guard.IsProtected, guard);
 
-    private static GuardedPathForms Load(string workspaceRoot, Func<string, bool> classify)
+    private static GuardedPathForms Load(
+        string workspaceRoot, Func<string, bool> classify, SecretGuardReader? reader = null)
     {
         var shapes = new List<string> { Trim(workspaceRoot) };
         var roots = new List<string> { Trim(workspaceRoot) };
@@ -58,10 +62,12 @@ public sealed class GuardedPathForms
                 }
             }
         }
-        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException
+            or JsonException)
         {
             // a manifest this pass cannot read is not a licence to trust the raw shapes: the workspace root and
             // the classifier stay in play, the qualified forms simply have nothing to fold against
+            reader?.NoteUnreadableManifest(ex.Message);
         }
 
         return new GuardedPathForms(classify, KeptForms(shapes), KeptForms(roots));

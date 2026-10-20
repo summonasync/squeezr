@@ -101,7 +101,10 @@ internal static class SecretGuardFixture
     private static DateTime _lastConfigStamp = DateTime.MinValue;
 
     // config writes can land inside one mtime tick on coarse filesystems, and these tests reason about the
-    // cache generation that a config edit moves — so every edit gets a strictly newer stamp
+    // cache generation that a config edit moves — so every edit gets a strictly newer stamp. Back-to-back
+    // calls within a second step the stamp into the future relative to meta.db, which is exactly the
+    // future-dated-config state; that is disclosed and safe since the cache evicts on a change of either
+    // generation component, not on a max() blend — ToolResponseCacheTests pins it from both directions.
     internal static void SetGuardExtra(string workspace, params string[] globs)
     {
         var config = ConfigFile.Load(workspace);

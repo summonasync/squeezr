@@ -49,12 +49,7 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
 
     private static int Reset(string workspaceRoot, bool json)
     {
-        var removed = QueryTelemetry.Count(workspaceRoot);
-        var path = SqueezrPaths.QueriesLogPath(workspaceRoot);
-        if (File.Exists(path))
-        {
-            File.WriteAllText(path, string.Empty);
-        }
+        var removed = QueryTelemetry.Reset(workspaceRoot);
 
         if (json)
         {
@@ -116,17 +111,23 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
         var cache = summary.Cache;
         if (cache.SessionsWithCache > 0)
         {
+            var plural = cache.EligibleQueries == 1 ? "query" : "queries";
             console.MarkupLine(
                 $"Cache hit-rate: {cache.HitRate.ToString("P1", CultureInfo.InvariantCulture)} " +
-                $"across {cache.SessionsWithCache} session(s)");
+                $"across {cache.SessionsWithCache} session(s) over {cache.EligibleQueries} cache-eligible {plural}");
         }
-        else
+        else if (cache.EligibleQueries > 0)
         {
             var invalidation = cache.LastInvalidation is { } lastInvalidated
                 ? $" — the index changed {cache.Invalidations} time(s), last at {lastInvalidated:yyyy-MM-dd HH:mm}"
                 : string.Empty;
             console.MarkupLine(
                 $"[grey]Cache hit-rate: no hits yet across {summary.Sessions.Count} recorded session(s){invalidation}[/]");
+        }
+        else
+        {
+            console.MarkupLine(
+                "[grey]Cache hit-rate: no cache-eligible queries yet — recorded tools run outside the serve cache[/]");
         }
 
         var agentTable = new Table { Border = TableBorder.Rounded, Title = new TableTitle("By agent") };

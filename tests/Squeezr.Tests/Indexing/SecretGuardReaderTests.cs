@@ -71,6 +71,62 @@ public class SecretGuardReaderTests
         guard.IsProtected(SecretGuardFixture.AppPath).ShouldBeFalse();
     }
 
+    [Fact]
+    public void Warnings_PartiallyDeadExtraMask_ReportsTheDeadOneAndKeepsTheLiveHalf()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, "**/tokens.txt", "**/tokens.txt/");
+
+        var guard = SecretGuardReader.Load(workspace);
+
+        guard.IsProtected(SecretGuardFixture.TokensPath).ShouldBeTrue();
+        var lines = guard.Warnings.ShouldNotBeNull();
+        lines.ShouldContain(w => w.StartsWith(DeadMaskLinePrefix, StringComparison.Ordinal));
+        lines.ShouldContain(w => w.Contains("directory-only form names no file to protect", StringComparison.Ordinal));
+        string.Join("|", lines).ShouldNotContain("tokens.txt");
+    }
+
+    [Fact]
+    public void Warnings_DeadExtraMaskAlone_NamesTheReasonWhileTheFileStaysUnprotected()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, "**/tokens.txt/");
+
+        var guard = SecretGuardReader.Load(workspace);
+
+        guard.IsProtected(SecretGuardFixture.TokensPath).ShouldBeFalse();
+        guard.Warnings.ShouldNotBeNull().ShouldContain(w => w.StartsWith(
+            $"{DeadMaskLinePrefix}1 of the user secret-guard masks in {SecretGuard.ConfiguredSourceName} "
+            + "(directory-only form names no file to protect); the affected masks protect nothing",
+            StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("!**/tokens.txt", "negation would subtract, and masks only widen protection")]
+    [InlineData("**/tokens[.txt", "unsupported pattern form")]
+    public void Warnings_EachUnusableShape_ReportsItsOwnReason(string mask, string reason)
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, mask);
+
+        var guard = SecretGuardReader.Load(workspace);
+
+        guard.Warnings.ShouldNotBeNull().ShouldContain(w =>
+            w.StartsWith(DeadMaskLinePrefix, StringComparison.Ordinal)
+            && w.Contains(reason, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Warnings_BlankOrCommentEntries_NameNoMaskAndStaySilent()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.SetGuardExtra(workspace, "", "# just a note");
+
+        SecretGuardReader.Load(workspace).Warnings.ShouldBeNull();
+    }
+
+    private const string DeadMaskLinePrefix = "could not compile ";
+
     private static string Degradation(SecretGuardReader guard) =>
         guard.Warnings.ShouldNotBeNull()
             .Single(w => w.StartsWith("could not read indexing config (", StringComparison.Ordinal));

@@ -29,13 +29,16 @@ public sealed class McpWorkspace
     {
         if (!IsWorkspace)
         {
-            throw new WorkspaceException(NotInitializedMessage(), WorkspaceException.NotInitializedCode);
+            throw NotInitializedException();
         }
     }
+
+    internal WorkspaceException NotInitializedException() =>
+        new WorkspaceException(NotInitializedMessage(), WorkspaceException.NotInitializedCode);
 
     private string NotInitializedMessage() =>
         SessionOutsideRoot
             ? $"Workspace is not initialized at '{Root}' and the session directory '{SessionDirectory}' is outside it. " +
               "Do not initialize a store to work around this: this server only reads the root above."
-            : "Workspace is not initialized. Run 'squeezr init' first.";
+            : RemedyText.WorkspaceNotInitialized;
 }

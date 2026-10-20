@@ -3,6 +3,7 @@ using Spectre.Console.Testing;
 using Squeezr.Cli.Tui;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Tests.Indexing;
 
 namespace Squeezr.Tests.Tui;
 
@@ -56,6 +57,37 @@ public class TuiStatsViewTests
     }
 
     [Fact]
+    public async Task Render_DegradedGuard_ShowsTheProducerWarningLine()
+    {
+        var workspace = NewWorkspace();
+        QueryTelemetry.Append(workspace, new QueryTelemetryEntry(
+            DateTime.UtcNow, Guid.NewGuid(), "search", null, 10, false, 0, 1, false, null, "cli", null));
+        SecretGuardFixture.SetGuardExtra(workspace, "**/notes.txt", "**/notes.txt/");
+        var console = WideInteractiveConsole();
+
+        await TuiStatsView.RenderAsync(console, workspace);
+
+        console.Output.ShouldContain("warning: could not compile 1 of the user secret-guard masks");
+        console.Output.ShouldContain("directory-only form names no file to protect");
+        console.Output.ShouldContain("Savings:");
+    }
+
+    [Fact]
+    public async Task Render_CleanGuard_RendersNoWarningLine()
+    {
+        var workspace = NewWorkspace();
+        QueryTelemetry.Append(workspace, new QueryTelemetryEntry(
+            DateTime.UtcNow, Guid.NewGuid(), "search", null, 10, false, 0, 1, false, null, "cli", null));
+        SecretGuardFixture.SetGuardExtra(workspace, "**/notes.txt");
+        var console = WideInteractiveConsole();
+
+        await TuiStatsView.RenderAsync(console, workspace);
+
+        console.Output.ShouldNotContain("warning:");
+        console.Output.ShouldContain("Savings:");
+    }
+
+    [Fact]
     public async Task MainMenu_TokenStatsEntry_OpensStatsScreenAndExits()
     {
         var workspace = NewWorkspace();
@@ -70,6 +102,15 @@ public class TuiStatsViewTests
         code.ShouldBe(0);
         console.Output.ShouldContain("Token stats");
         console.Output.ShouldContain("Savings:");
+    }
+
+    // the producer sentence is longer than the default 80-column test console, and a wrapped warning would
+    // make the substring assertions here about line breaks instead of about the guard
+    private static TestConsole WideInteractiveConsole()
+    {
+        var console = TuiTestHarness.InteractiveConsole();
+        console.Width(240);
+        return console;
     }
 
     private static string NewWorkspace()

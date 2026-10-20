@@ -20,6 +20,7 @@ public static class UsageAnalytics
 {
     public static UsageRollup Rollup(
         IReadOnlyList<(WorkspaceRegistryEntry Workspace, IReadOnlyList<QueryTelemetryEntry> Entries)> workspaces,
+        IReadOnlySet<string> staleKeys,
         string? agent = null,
         string? workspaceStoreKey = null,
         DateTime? since = null)
@@ -46,7 +47,7 @@ public static class UsageAnalytics
                 workspace.StoreKey,
                 workspace.RootPath,
                 filtered.Count,
-                !Directory.Exists(workspace.RootPath),
+                staleKeys.Contains(workspace.StoreKey),
                 QueryTelemetrySummary.AggregateAgents(filtered)));
         }
 

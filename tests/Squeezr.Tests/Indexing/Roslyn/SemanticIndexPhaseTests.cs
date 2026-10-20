@@ -70,6 +70,55 @@ public class SemanticIndexPhaseTests
     }
 
     [Fact]
+    public void RunWithSession_SemanticSessionWithDriftedSignature_ReprocessesTheUnchangedFile()
+    {
+        var workspace = NewWorkspaceWithRepo();
+        WriteCalcAndUse(workspace);
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoDoc = store.FindRepo("demo")!;
+        var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+        var calcFileId = dbFilesByPath["src/Calc.cs"].Id;
+        var stored = store.ListSymbolsByFile(calcFileId).ToList();
+        var names = stored.Select(s => s.Name).ToList();
+        stored.Single(s => s.Name == "Add").Signature = "syntax-only stand-in";
+        store.DeleteSymbolsByFile(calcFileId);
+        store.InsertSymbols(stored);
+
+        RunSemanticPhase(workspace, store, repoDoc, []);
+
+        var reprocessed = store.ListSymbolsByFile(calcFileId).ToList();
+        reprocessed.Select(s => s.Name).OrderBy(n => n).ShouldBe(names.OrderBy(n => n));
+        reprocessed.Single(s => s.Name == "Add").Signature.ShouldNotBe("syntax-only stand-in");
+        reprocessed.Single(s => s.Name == "Add").Signature!.ShouldContain("Add(int a, int b)");
+    }
+
+    [Fact]
+    public void RunWithSession_SemanticSessionWithoutDrift_KeepsStoredRowsUntouched()
+    {
+        var workspace = NewWorkspaceWithRepo();
+        WriteCalcAndUse(workspace);
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoDoc = store.FindRepo("demo")!;
+        var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+        var calcFileId = dbFilesByPath["src/Calc.cs"].Id;
+        var before = store.ListSymbolsByFile(calcFileId).ToDictionary(s => s.Name, StringComparer.Ordinal);
+
+        RunSemanticPhase(workspace, store, repoDoc, []);
+
+        var after = store.ListSymbolsByFile(calcFileId).ToDictionary(s => s.Name, StringComparer.Ordinal);
+        after.Keys.OrderBy(k => k).ShouldBe(before.Keys.OrderBy(k => k));
+        foreach (var (name, symbol) in before)
+        {
+            after[name].Id.ShouldBe(symbol.Id);
+            after[name].Signature.ShouldBe(symbol.Signature);
+        }
+    }
+
+    [Fact]
     public async Task InsertRefs_LinkedFileSharedByTwoProjects_StoresEachLocationOnce()
     {
         var workspace = NewWorkspaceWithRepo();
@@ -147,6 +196,31 @@ public class SemanticIndexPhaseTests
 
         using var session = RoslynSession.Create(repoRoot, semantic: false);
         session.Semantic.ShouldBeFalse();
+
+        SemanticIndexPhase.RunWithSession(
+            session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath,
+            SqueezrConfig.CreateDefault(), noSemantic: false, SecretGuardIngestion.Load(workspace), _ => { });
+    }
+
+    private static void RunSemanticPhase(
+        string workspace,
+        MetaStore store,
+        RepoDocument repoDoc,
+        Dictionary<string, FileDocument> changedByPath)
+    {
+        var repoRoot = Path.Combine(workspace, "repo");
+        var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+        var csFiles = dbFilesByPath.Values
+            .Select(f => new SourceFile(
+                f.Path,
+                Path.Combine(repoRoot, f.Path.Replace('/', Path.DirectorySeparatorChar)),
+                "csharp",
+                f.SizeBytes,
+                f.Sha256))
+            .ToList();
+
+        using var session = RoslynSession.Create(repoRoot, semantic: true);
+        session.Semantic.ShouldBeTrue();
 
         SemanticIndexPhase.RunWithSession(
             session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath,

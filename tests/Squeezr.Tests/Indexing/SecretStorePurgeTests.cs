@@ -198,6 +198,30 @@ public class SecretStorePurgeTests
     }
 
     [Fact]
+    public void Compact_TelemetryLockBusy_SaysSoInTheReportInsteadOfASilentZero()
+    {
+        var workspace = IndexedStoreHoldingSecrets();
+        QueryTelemetry.Record(
+            workspace, Guid.NewGuid(), "expand", new { file = EnvPath, startLine = 3 },
+            40, false, 1, 4);
+
+        using (var held = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(workspace)))
+        {
+            held.ShouldNotBeNull();
+            var busy = WorkspaceCompactor.Compact(workspace);
+
+            busy.TelemetryValuesRedacted.ShouldBe(0);
+            busy.Warnings.ShouldNotBeNull()
+                .ShouldContain(w => w.Contains("queries.jsonl scrub skipped"));
+        }
+
+        var retried = WorkspaceCompactor.Compact(workspace);
+
+        retried.TelemetryValuesRedacted.ShouldBe(1);
+        File.ReadAllText(SqueezrPaths.QueriesLogPath(workspace)).ShouldNotContain(EnvPath);
+    }
+
+    [Fact]
     public void Index_VectorStoreUnavailable_QueuesTheReapsWithoutWritingTheProtectedNames()
     {
         var workspace = IndexedStoreHoldingSecrets();

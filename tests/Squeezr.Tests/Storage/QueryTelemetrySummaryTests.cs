@@ -105,6 +105,53 @@ public class QueryTelemetrySummaryTests
         summary.Cache.SessionsWithCache.ShouldBe(2);
         summary.Cache.Invalidations.ShouldBe(0);
         summary.Cache.LastInvalidation.ShouldBeNull();
+        summary.Cache.EligibleQueries.ShouldBe(4);
+    }
+
+    [Fact]
+    public void Summarize_MixedCliAndServeRows_DenominatorCountsOnlyCacheEligibleTools()
+    {
+        var sessionA = Guid.NewGuid();
+        var sessionB = Guid.NewGuid();
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("code_search", 10, cacheHit: true, sessionId: sessionA),
+            Entry("code_search", 10, cacheHit: false, sessionId: sessionA),
+            Entry("symbol_lookup", 10, cacheHit: true, sessionId: sessionB),
+            Entry("search", 10, cacheHit: false, sessionId: Guid.NewGuid()),
+            Entry("expand_span", 10, cacheHit: false, sessionId: Guid.NewGuid()),
+            Entry("index_status", 10, cacheHit: false, sessionId: Guid.NewGuid())
+        };
+
+        var summary = QueryTelemetrySummary.Summarize(entries, TestDirs.NewTempDir());
+
+        summary.TotalRequests.ShouldBe(6);
+        summary.Cache.EligibleQueries.ShouldBe(3);
+        summary.Cache.Hits.ShouldBe(2);
+        summary.Cache.Misses.ShouldBe(1);
+        summary.Cache.HitRate.ShouldBe(2 / 3.0, tolerance: 0.0001);
+        summary.Cache.SessionsWithCache.ShouldBe(2);
+    }
+
+    [Fact]
+    public void Summarize_CliOnlyRows_CacheArithmeticStaysEmpty()
+    {
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("search", 10),
+            Entry("map", 10),
+            Entry("expand", 10, file: "src/Big.cs")
+        };
+
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", sizeBytes: 4000);
+        var summary = QueryTelemetrySummary.Summarize(entries, root);
+
+        summary.TotalRequests.ShouldBe(3);
+        summary.Cache.EligibleQueries.ShouldBe(0);
+        summary.Cache.Hits.ShouldBe(0);
+        summary.Cache.Misses.ShouldBe(0);
+        summary.Cache.HitRate.ShouldBe(0);
+        summary.Cache.SessionsWithCache.ShouldBe(0);
     }
 
     [Fact]

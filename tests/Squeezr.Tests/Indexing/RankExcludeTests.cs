@@ -49,6 +49,9 @@ public class RankExcludeTests
     [InlineData("../sibling/**", "climb above the repository root")]
     [InlineData("**.md", "degrades to '*'")]
     [InlineData("src/a**b.cs", "degrades to '*'")]
+    [InlineData("C:/repo/generated/**", "names a drive letter")]
+    [InlineData(@"C:\repo\generated\**", "names a drive letter")]
+    [InlineData("z:/**", "names a drive letter")]
     public void Parse_MalformedPattern_WarnsAndKeepsTheRest(string pattern, string reason)
     {
         var exclusion = RankExclusion.Parse(["audits/**", pattern]);

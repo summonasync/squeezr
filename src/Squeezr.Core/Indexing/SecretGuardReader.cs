@@ -14,6 +14,7 @@ public sealed class SecretGuardReader
     private readonly SecretGuard.Profile _profile;
     private readonly IReadOnlyList<string> _extraPatterns;
     private readonly string? _configReadFailure;
+    private string? _manifestReadFailure;
     private int _withheld;
     private string? _firstWithheldPath;
     private bool _firstMatchedBuiltIns;
@@ -31,6 +32,11 @@ public sealed class SecretGuardReader
     // widening the config list must not keep serving the envelope computed before the widening
     public IReadOnlyList<string> ExtraPatterns => _extraPatterns;
 
+    // the path-forms fold is the one place that learns a workspace manifest went unreadable, and the reader
+    // is the one channel surfaces already print — so the fold hands its degradation here rather than opening
+    // a second transport. One instance belongs to one pass, which is what makes the note safe.
+    internal void NoteUnreadableManifest(string reason) => _manifestReadFailure ??= reason;
+
     public IReadOnlyList<string>? Warnings
     {
         get
@@ -44,6 +50,17 @@ public sealed class SecretGuardReader
             if (_configReadFailure is { } failure)
             {
                 lines.Add($"could not read indexing config ({failure}); user secret-guard masks are inactive");
+            }
+
+            foreach (var failed in _profile.FailedMasks)
+            {
+                lines.Add(Format(failed));
+            }
+
+            if (_manifestReadFailure is { } manifest)
+            {
+                lines.Add("could not read workspace manifest "
+                    + $"({manifest}); qualified and absolute path readings are not folded for the secret guard");
             }
 
             return lines.Count == 0 ? null : lines;
@@ -98,5 +115,20 @@ public sealed class SecretGuardReader
     {
         var source = _firstMatchedBuiltIns ? SecretGuard.BuiltInSourceName : SecretGuard.ConfiguredSourceName;
         return $"secret guard: {_withheld} result(s) withheld ('{_firstWithheldPath}' matches {source})";
+    }
+
+    // counts and reasons only: a mask quoted back into a warning would be config echoed through the same
+    // channel that exists to keep names out of it
+    private static string Format(MaskFailureCount failed)
+    {
+        var reason = failed.Reason switch
+        {
+            SecretMaskFailure.Negated => "negation would subtract, and masks only widen protection",
+            SecretMaskFailure.DirectoryOnly => "directory-only form names no file to protect",
+            _ => "unsupported pattern form",
+        };
+
+        return $"could not compile {failed.Count} of the user secret-guard masks "
+            + $"in {SecretGuard.ConfiguredSourceName} ({reason}); the affected masks protect nothing";
     }
 }

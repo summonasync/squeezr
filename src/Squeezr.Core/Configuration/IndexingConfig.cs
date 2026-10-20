@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Squeezr.Core.Configuration;
 
 public sealed record IndexingConfig
@@ -8,6 +10,7 @@ public sealed record IndexingConfig
 
     public bool NoSemantic { get; init; }
 
+    [JsonConverter(typeof(RankExcludeJsonConverter))]
     public IReadOnlyList<string> RankExclude { get; init; } = [];
 
     public IReadOnlyList<string> SecretGuardExtra { get; init; } = [];

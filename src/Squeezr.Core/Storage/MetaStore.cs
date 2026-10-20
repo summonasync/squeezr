@@ -22,7 +22,7 @@ public sealed class MetaStore : IDisposable
     {
         if (!createIfMissing && !File.Exists(dbPath))
         {
-            throw new WorkspaceException($"Index store '{dbPath}' is missing. Run 'squeezr index' first.");
+            throw new WorkspaceException($"Index store '{dbPath}' is missing. Run '{RemedyText.IndexCommand}' first.");
         }
 
         _dbPath = Path.GetFullPath(dbPath);

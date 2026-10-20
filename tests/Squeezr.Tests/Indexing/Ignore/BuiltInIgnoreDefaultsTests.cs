@@ -173,6 +173,8 @@ public class BuiltInIgnoreDefaultsTests
         missing.ShouldContain("**/.qwen/tmp/**");
         missing.ShouldContain("**/coverage/**");
         missing.ShouldContain("**/TestResults/**");
+        missing.ShouldContain("**/.mindlash/worktrees/**");
+        missing.ShouldContain("**/.qwen/worktrees/**");
         missing.ShouldNotContain("**/node_modules/**");
         missing.ShouldNotContain("**/bin/**");
         missing.ShouldNotContain("**/obj/**");
@@ -233,5 +235,32 @@ public class BuiltInIgnoreDefaultsTests
         defaults.Count(d => d is "**/web/out/**" or "**/.qwen/tmp/**"
             or "**/coverage/**" or "**/.turbo/**" or "**/.pytest_cache/**"
             or "**/.gradle/**" or "**/TestResults/**").ShouldBe(7);
+    }
+
+    [Theory]
+    [InlineData(".claude/worktrees/fix-041/src/App.cs")]
+    [InlineData(".mindlash/worktrees/eslint-10-followups/BACKLOG.md")]
+    [InlineData(".qwen/worktrees/agent-a1b2c3d/src/App.cs")]
+    [InlineData("services/.mindlash/worktrees/x/Program.cs")]
+    public void AgentWorktreeCopies_AreExcludedByDefaults(string path)
+    {
+        var root = TestDirs.NewTempDir();
+        var ruleset = IgnoreRuleset.For(root, SqueezrConfig.CreateDefault());
+
+        var decision = ruleset.Decision(path, isDirectory: false);
+        decision.Excluded.ShouldBeTrue();
+        decision.Source.ShouldBe(IgnoreSource.Defaults);
+    }
+
+    [Fact]
+    public void AgentWorktreeDefaults_DoNotMatchTrackedSources()
+    {
+        var root = TestDirs.NewTempDir();
+        var ruleset = IgnoreRuleset.For(root, SqueezrConfig.CreateDefault());
+
+        ruleset.Decision("worktrees/README.md", false).Excluded.ShouldBeFalse();
+        ruleset.Decision("docs/mindlash/worktrees.md", false).Excluded.ShouldBeFalse();
+        ruleset.Decision(".mindlash/config.json", false).Excluded.ShouldBeFalse();
+        ruleset.Decision(".qwen/agents/reviewer.md", false).Excluded.ShouldBeFalse();
     }
 }

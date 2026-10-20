@@ -26,7 +26,7 @@ public class UsageAnalyticsTests
             (RegistryEntry("beta", rootB), [Entry(T2, "claude-code", "2.0")]),
         };
 
-        var rollup = UsageAnalytics.Rollup(workspaces);
+        var rollup = UsageAnalytics.Rollup(workspaces, NoStale());
 
         rollup.Workspaces.Count.ShouldBe(2);
         var alpha = rollup.Workspaces[0];
@@ -58,13 +58,13 @@ public class UsageAnalyticsTests
             (RegistryEntry("alpha", root), [Entry(T1, "kimi-code", "1.0"), Entry(T2, "cli", null)]),
         };
 
-        var rollup = UsageAnalytics.Rollup(workspaces, agent: "KIMI-CODE");
+        var rollup = UsageAnalytics.Rollup(workspaces, NoStale(), agent: "KIMI-CODE");
 
         rollup.Totals.Records.ShouldBe(1);
         rollup.Totals.Agents.Single().Client.ShouldBe("kimi-code");
 
-        UsageAnalytics.Rollup(workspaces, agent: "kimi").Totals.Records.ShouldBe(0);
-        UsageAnalytics.Rollup(workspaces, agent: "unknown").Totals.Records.ShouldBe(0);
+        UsageAnalytics.Rollup(workspaces, NoStale(), agent: "kimi").Totals.Records.ShouldBe(0);
+        UsageAnalytics.Rollup(workspaces, NoStale(), agent: "unknown").Totals.Records.ShouldBe(0);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class UsageAnalyticsTests
             (RegistryEntry("alpha", root), [Entry(T1, null, null), Entry(T2, "cli", null)]),
         };
 
-        var rollup = UsageAnalytics.Rollup(workspaces, agent: "UNKNOWN");
+        var rollup = UsageAnalytics.Rollup(workspaces, NoStale(), agent: "UNKNOWN");
 
         rollup.Totals.Records.ShouldBe(1);
         rollup.Totals.Agents.Single().Client.ShouldBe("unknown");
@@ -91,7 +91,7 @@ public class UsageAnalyticsTests
             (RegistryEntry("alpha", root), [Entry(Old, "cli", null), Entry(T1, "cli", null)]),
         };
 
-        var rollup = UsageAnalytics.Rollup(workspaces, since: new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc));
+        var rollup = UsageAnalytics.Rollup(workspaces, NoStale(), since: new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc));
 
         rollup.Totals.Records.ShouldBe(1);
         rollup.Period.From.ShouldBe(T1);
@@ -110,31 +110,30 @@ public class UsageAnalyticsTests
             (RegistryEntry("beta", rootB), [Entry(T2, "kimi-code", "1.0")]),
         };
 
-        var byKey = UsageAnalytics.Rollup(workspaces, workspaceStoreKey: entryA.StoreKey);
+        var byKey = UsageAnalytics.Rollup(workspaces, NoStale(), workspaceStoreKey: entryA.StoreKey);
         byKey.Workspaces.Single().StoreKey.ShouldBe(entryA.StoreKey);
         byKey.Totals.Records.ShouldBe(2);
 
         var byKeyAndAgent = UsageAnalytics.Rollup(
-            workspaces, agent: "kimi-code", workspaceStoreKey: entryA.StoreKey);
+            workspaces, NoStale(), agent: "kimi-code", workspaceStoreKey: entryA.StoreKey);
         byKeyAndAgent.Totals.Records.ShouldBe(1);
         byKeyAndAgent.Totals.Agents.Single().Client.ShouldBe("kimi-code");
 
-        UsageAnalytics.Rollup(workspaces, workspaceStoreKey: "missing-key").Totals.Records.ShouldBe(0);
+        UsageAnalytics.Rollup(workspaces, NoStale(), workspaceStoreKey: "missing-key").Totals.Records.ShouldBe(0);
     }
 
     [Fact]
-    public void Rollup_MissingRootDirectory_MarkedStaleWithoutThrowing()
+    public void Rollup_ConsumesTheCoreStaleVerdict_DoesNotProbeTheFilesystem()
     {
-        var missing = Path.Combine(TestDirs.NewTempDir(), "gone");
+        var root = TestDirs.NewTempDir();
+        var entry = RegistryEntry("alpha", root);
         var workspaces = new List<(WorkspaceRegistryEntry, IReadOnlyList<QueryTelemetryEntry>)>
         {
-            (RegistryEntry("alpha", missing), [Entry(T1, "cli", null)]),
+            (entry, [Entry(T1, "cli", null)]),
         };
 
-        var rollup = UsageAnalytics.Rollup(workspaces);
-
-        rollup.Workspaces.Single().Stale.ShouldBeTrue();
-        rollup.Totals.Records.ShouldBe(1);
+        UsageAnalytics.Rollup(workspaces, StaleKeys(entry.StoreKey)).Workspaces.Single().Stale.ShouldBeTrue();
+        UsageAnalytics.Rollup(workspaces, NoStale()).Workspaces.Single().Stale.ShouldBeFalse();
     }
 
     [Fact]
@@ -146,7 +145,7 @@ public class UsageAnalyticsTests
             (RegistryEntry("alpha", root), [Entry(T1, "cli", null)]),
         };
 
-        var rollup = UsageAnalytics.Rollup(workspaces, agent: "kimi-code");
+        var rollup = UsageAnalytics.Rollup(workspaces, NoStale(), agent: "kimi-code");
 
         rollup.Workspaces.ShouldBeEmpty();
         rollup.Totals.Records.ShouldBe(0);
@@ -157,6 +156,11 @@ public class UsageAnalyticsTests
 
     private static WorkspaceRegistryEntry RegistryEntry(string name, string rootPath) =>
         new(name, rootPath, WorkspaceStoreKeys.Create(name, WorkspaceCanonicalPath.Canonicalize(rootPath)), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+    private static IReadOnlySet<string> NoStale() => new HashSet<string>(StringComparer.Ordinal);
+
+    private static IReadOnlySet<string> StaleKeys(params string[] keys) =>
+        new HashSet<string>(keys, StringComparer.Ordinal);
 
     private static QueryTelemetryEntry Entry(DateTime ts, string? client, string? clientVersion) =>
         new(ts, Guid.NewGuid(), "search", null, 10, false, 0, 1, false, null, client, clientVersion);

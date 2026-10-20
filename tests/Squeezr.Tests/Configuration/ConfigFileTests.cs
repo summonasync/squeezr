@@ -436,6 +436,113 @@ public class ConfigFileTests
         error.Message.ShouldContain("'no-such-profile'");
     }
 
+    [Fact]
+    public void Load_RankExcludeAsBareString_SalvagesThePatternAndKeepsSiblings()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "embeddings": { "provider": "onnx" },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "rankExclude": "audits/**"
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Indexing.RankExclude.ShouldBe(["audits/**"]);
+        config.Embeddings.Provider.ShouldBe("onnx");
+        config.Chunking.MaxTokensPerChunk.ShouldBe(512);
+        config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
+    }
+
+    [Fact]
+    public void Load_RankExcludeWithNonStringEntries_SkipsTheJunkKeepsTheStrings()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "rankExclude": [ "audits/**", 5, null, { "nested": true }, "BACKLOG/**" ]
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Indexing.RankExclude.ShouldBe(["audits/**", "BACKLOG/**"]);
+        config.Embeddings.Provider.ShouldBe("auto");
+    }
+
+    [Fact]
+    public void Load_RankExcludeAsScalar_ConfigStillLoadsAndTheListEmpties()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512,
+                "rankExclude": 42
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Indexing.RankExclude.ShouldBeEmpty();
+        config.Chunking.MaxTokensPerChunk.ShouldBe(512);
+        config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
+    }
+
+    [Fact]
+    public void Save_ThenLoad_RankExcludeRoundTripsAsAProperArray()
+    {
+        var root = TestDirs.NewTempDir();
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Indexing = SqueezrConfig.CreateDefault().Indexing with
+            {
+                RankExclude = ["audits/**", "BACKLOG/**"]
+            }
+        };
+
+        ConfigFile.Save(root, config);
+
+        File.ReadAllText(SqueezrPaths.ConfigPath(root))
+            .ShouldContain("\"rankExclude\": [\n");
+        ConfigFile.Load(root).Indexing.RankExclude.ShouldBe(["audits/**", "BACKLOG/**"]);
+    }
+
     private static string NewWorkspaceWithConfig(string json)
     {
         var root = TestDirs.NewTempDir();

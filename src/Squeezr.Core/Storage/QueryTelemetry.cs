@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Storage;
 
@@ -116,12 +117,43 @@ public static class QueryTelemetry
         }
     }
 
+    // reset empties the file, which makes it the one writer whose effect an append that slipped past the count
+    // would silently reverse — so it joins the same lock append and scrub queue on. Telemetry appends fail open,
+    // but reset is asked destruction: a holder that outlasts the budget means the file is not this process's to
+    // truncate, and refusing clears nothing rather than half of somebody's race. onLockHeld runs where the lock
+    // is exclusive — the deterministic seam the interleaving pins are written through.
+    public static int Reset(string workspaceRoot, Action? onLockHeld = null)
+    {
+        using var writer = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(workspaceRoot));
+        if (writer is null)
+        {
+            throw new WorkspaceException(
+                "stats --reset refused: the telemetry write lock stayed busy past the wait budget; nothing was cleared");
+        }
+
+        onLockHeld?.Invoke();
+
+        var removed = Count(workspaceRoot);
+        var path = SqueezrPaths.QueriesLogPath(workspaceRoot);
+        if (File.Exists(path))
+        {
+            File.WriteAllText(path, string.Empty);
+        }
+
+        return removed;
+    }
+
     // Recorded parameters are the one place where a query that ran before the guard existed keeps quoting the
     // path it asked about, so the purge pass rewrites them through the same classifier that refused the read.
     // Only values the classifier calls a protected path are replaced; lines it cannot parse and values it does
     // not recognise are written back byte for byte, which is what keeps the counters over queries.jsonl honest.
-    public static int RedactProtectedParams(string workspaceRoot, Func<string, bool> isProtectedPath)
+    public static int RedactProtectedParams(string workspaceRoot, Func<string, bool> isProtectedPath) =>
+        RedactProtectedParams(workspaceRoot, isProtectedPath, out _);
+
+    public static int RedactProtectedParams(
+        string workspaceRoot, Func<string, bool> isProtectedPath, out bool lockBusy)
     {
+        lockBusy = false;
         var path = SqueezrPaths.QueriesLogPath(workspaceRoot);
         if (!File.Exists(path))
         {
@@ -130,10 +162,12 @@ public static class QueryTelemetry
 
         // the writer lock spans snapshot → temp → move, which is the window where a line that arrived after the
         // read used to be published away together with the file it had been written into; a holder that outlasts
-        // the budget means this pass skips rather than eats somebody's row, and the next compact gets the value
+        // the budget means this pass skips rather than eats somebody's row — and the skip is reported as a skip,
+        // because a silent zero is indistinguishable from "nothing to hide" and hides the unscrubbed values
         using var writer = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(workspaceRoot));
         if (writer is null)
         {
+            lockBusy = true;
             return 0;
         }
 

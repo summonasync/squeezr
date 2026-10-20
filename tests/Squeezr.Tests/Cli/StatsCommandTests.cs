@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Shouldly;
 using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing;
 
 namespace Squeezr.Tests.Cli;
@@ -249,6 +250,73 @@ public sealed class StatsCommandTests
         body.TryGetProperty("guardWarnings", out _).ShouldBeFalse();
         string.Join(",", body.EnumerateObject().Select(p => p.Name))
             .ShouldBe("totalRequests,byTool,savings,cache,period,agents,sessions");
+    }
+
+    [Fact]
+    public async Task Stats_DeadExtraMask_HumanWarnsOnStderr_JsonCarriesTheSameLine()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        (await RunCliAsync(root, "expand", "src/Big.cs", "2")).ExitCode.ShouldBe(0);
+        SecretGuardFixture.SetGuardExtra(root, "**/notes.txt", "**/notes.txt/");
+
+        var human = await RunCliAsync(root, "stats");
+        human.ExitCode.ShouldBe(0);
+        human.StdErr.ShouldContain("warning: could not compile 1 of the user secret-guard masks");
+        human.StdErr.ShouldContain("directory-only form names no file to protect");
+        human.StdOut.ShouldNotContain("could not compile");
+
+        var json = await RunCliAsync(root, "stats", "--json");
+        json.ExitCode.ShouldBe(0);
+        json.StdErr.ShouldNotContain("could not compile");
+        using var document = JsonDocument.Parse(json.StdOut);
+        var warnings = document.RootElement.GetProperty("guardWarnings");
+        warnings.GetArrayLength().ShouldBe(1);
+        warnings[0].GetString().ShouldNotBeNull().ShouldMatch(
+            @"^could not compile 1 of the user secret-guard masks in indexing\.secretGuardExtra \(directory-only form names no file to protect\); the affected masks protect nothing$");
+    }
+
+    [Fact]
+    public async Task Stats_UnreadableManifest_HumanWarnsAboutTheBlindFold()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        (await RunCliAsync(root, "expand", "src/Big.cs", "2")).ExitCode.ShouldBe(0);
+        SecretGuardFixture.SetGuardExtra(root, "**/notes.txt");
+        File.WriteAllText(SqueezrPaths.ManifestPath(root), "null");
+
+        var human = await RunCliAsync(root, "stats");
+        human.ExitCode.ShouldBe(0);
+        human.StdErr.ShouldContain("warning: could not read workspace manifest (");
+        human.StdErr.ShouldContain("qualified and absolute path readings are not folded for the secret guard");
+
+        var json = await RunCliAsync(root, "stats", "--json");
+        json.ExitCode.ShouldBe(0);
+        using var document = JsonDocument.Parse(json.StdOut);
+        document.RootElement.GetProperty("guardWarnings")[0].GetString().ShouldNotBeNull().ShouldMatch(
+            @"^could not read workspace manifest \(.*\); qualified and absolute path readings are not folded for the secret guard$");
+    }
+
+    [Fact]
+    public async Task StatsReset_BusyTelemetryLock_RefusesWithAnErrorEnvelopeAndClearsNothing()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        (await RunCliAsync(root, "search", "alpha", "--json")).ExitCode.ShouldBe(0);
+
+        using (var held = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(root)))
+        {
+            held.ShouldNotBeNull();
+            var reset = await RunCliAsync(root, "stats", "--reset", "--json");
+            reset.ExitCode.ShouldBe(1);
+            reset.StdOut.ShouldBeEmpty();
+            using var error = JsonDocument.Parse(reset.StdErr.Trim());
+            var envelope = error.RootElement.GetProperty("error");
+            envelope.GetProperty("code").GetString().ShouldBe(WorkspaceException.DefaultCode);
+            envelope.GetProperty("message").GetString()!.ShouldContain("refused");
+        }
+
+        QueryTelemetry.Count(root).ShouldBe(1);
+        var retry = await RunCliAsync(root, "stats", "--reset", "--json");
+        retry.ExitCode.ShouldBe(0);
+        QueryTelemetry.Count(root).ShouldBe(0);
     }
 
     private static async Task<string> NewIndexedCliWorkspaceAsync()

@@ -4,6 +4,7 @@ using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -25,6 +26,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             var manager = new WorkspaceManager(workspaceRoot);
             var status = manager.GetStatus();
             var config = LoadConfigIfReadable(workspaceRoot);
+            var siblings = WorkspaceSiblingSnapshot.Build(workspaceRoot);
 
             var warnings = EmbeddingRuntimeFactory.TryCreate(
                 workspaceRoot, withProvider: false, out _, out var vectorStore);
@@ -44,7 +46,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             if (settings.Json)
             {
                 var staleFiles = StaleFileDetector.Detect(workspaceRoot);
-                var report = WorkspaceStatusReport.Create(status, staleFiles, config?.Embeddings.Provider);
+                var report = WorkspaceStatusReport.Create(
+                    status, staleFiles, config?.Embeddings.Provider, siblings);
                 JsonOutput.Write(report);
                 foreach (var warning in report.Warnings)
                 {
@@ -88,9 +91,16 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                 AnsiConsole.MarkupLine($"[grey]{guard.Warning().EscapeMarkup()}[/]");
             }
 
+            RenderWorkspaces(siblings);
+
             if (config is not null)
             {
                 AnsiConsole.MarkupLine($"Embeddings provider: {config.Embeddings.Provider.EscapeMarkup()}");
+                if (RankExclusion.Parse(config.Indexing.RankExclude) is { IsActive: true, Patterns: var patterns })
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[grey]Rank exclude: {patterns.Count} pattern(s) — {string.Join(", ", patterns).EscapeMarkup()}[/]");
+                }
             }
 
             if (qdrant.Available)
@@ -122,6 +132,36 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio is { } ratio
             ? $", semantic coverage {(int)Math.Round(ratio * 100, MidpointRounding.AwayFromZero)}%"
             : string.Empty;
+
+    private static void RenderWorkspaces(WorkspaceSiblingSnapshot siblings)
+    {
+        if (siblings.Workspaces.Count == 0)
+        {
+            return;
+        }
+
+        var table = new Table { Border = TableBorder.Rounded, Title = new TableTitle("Workspaces") };
+        table.AddColumn("Name");
+        table.AddColumn("Root path");
+        table.AddColumn("Store key");
+        table.AddColumn("Current");
+        table.AddColumn("Stale");
+        foreach (var entry in siblings.Workspaces)
+        {
+            table.AddRow(
+                entry.Name.EscapeMarkup(),
+                entry.RootPath.EscapeMarkup(),
+                entry.StoreKey.EscapeMarkup(),
+                entry.Current ? "[green]current[/]" : "-",
+                entry.Stale ? "[yellow]stale[/]" : "-");
+        }
+
+        AnsiConsole.Write(table);
+        if (siblings.Omitted > 0)
+        {
+            AnsiConsole.MarkupLine($"[grey]{siblings.Omitted} more workspace(s) registered — not listed.[/]");
+        }
+    }
 
     private static SqueezrConfig? LoadConfigIfReadable(string workspaceRoot)
     {

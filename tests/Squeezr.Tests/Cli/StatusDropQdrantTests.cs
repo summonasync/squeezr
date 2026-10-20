@@ -106,6 +106,26 @@ public sealed class StatusDropQdrantTests
     }
 
     [Fact]
+    public async Task Status_Pretty_ListsActiveRankExcludePatterns_OnlyWhenTheyExist()
+    {
+        var root = TestDirs.NewTempDir();
+        (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        PointConfigAtDeadEndpoint(root);
+
+        var bare = await RunCliAsync(root, "status");
+
+        bare.ExitCode.ShouldBe(0);
+        bare.StdOut.ShouldNotContain("Rank exclude:");
+
+        TestWorkspaceConfig.SetRankExclude(root, "audits/**", "BACKLOG/**");
+
+        var curated = await RunCliAsync(root, "status");
+
+        curated.ExitCode.ShouldBe(0);
+        curated.StdOut.ShouldContain("Rank exclude: 2 pattern(s) — audits/**, BACKLOG/**");
+    }
+
+    [Fact]
     public async Task Drop_QdrantDown_DropsLocally_WithWarning_AndExit0()
     {
         var root = TestDirs.NewTempDir();
@@ -135,11 +155,18 @@ public sealed class StatusDropQdrantTests
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(root));
         var chunks = Enumerable.Range(0, pending).Select(i => new ChunkDocument
         {
-            RepoId = 1, FileId = 1, Text = $"p{i}", ChunkHash = $"p{i}"
+            RepoId = 1,
+            FileId = 1,
+            Text = $"p{i}",
+            ChunkHash = $"p{i}"
         }).Concat(Enumerable.Range(0, embedded).Select(i => new ChunkDocument
         {
-            RepoId = 1, FileId = 1, Text = $"e{i}", ChunkHash = $"e{i}",
-            EmbeddingStatus = "ok", ModelKey = "m1"
+            RepoId = 1,
+            FileId = 1,
+            Text = $"e{i}",
+            ChunkHash = $"e{i}",
+            EmbeddingStatus = "ok",
+            ModelKey = "m1"
         }));
         store.InsertChunks(chunks);
         return root;

@@ -15,6 +15,9 @@ public sealed record WorkspaceSiblingSnapshot(
 
     public static WorkspaceSiblingSnapshot Empty { get; } = new([], 0);
 
+    public IReadOnlyList<WorkspaceSiblingEntry> LiveSiblings =>
+        [.. Workspaces.Where(entry => !entry.Current && !entry.Stale)];
+
     public static WorkspaceSiblingSnapshot Build(string? currentRootPath)
     {
         var entries = WorkspaceRegistry.Load();

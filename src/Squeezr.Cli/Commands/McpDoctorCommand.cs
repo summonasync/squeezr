@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
 
@@ -38,7 +39,8 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         try
         {
             environment = McpOnboardingEnvironment.Create(
-                WorkspaceRootResolver.ResolveCurrentDirectory().RootPath);
+                WorkspaceRootResolver.ResolveCurrentDirectory().RootPath,
+                WorkspaceRootResolver.LaunchDirectory());
         }
         catch (InvalidOperationException ex)
         {
@@ -80,7 +82,7 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         return diagnostics.All(entry => entry.UserScopeEntry || entry.ProjectScopeEntry) ? 0 : 1;
     }
 
-    private static void Render(IReadOnlyList<McpClientDiagnostics> diagnostics)
+    internal static void Render(IReadOnlyList<McpClientDiagnostics> diagnostics)
     {
         foreach (var entry in diagnostics)
         {
@@ -92,12 +94,23 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
             AnsiConsole.MarkupLine(
                 $"  squeezr in PATH: {Flag(entry.SqueezrInPath)}   workspace indexed: {Flag(entry.WorkspaceIndexed)}" +
                 $"   headless: {Markup.Escape(entry.HeadlessStatus ?? "n/a")}");
+            RenderIndexRemedy(entry);
             RenderStale(entry);
             foreach (var warning in entry.Warnings)
             {
                 AnsiConsole.MarkupLine($"  [yellow]warning:[/] {Markup.Escape(warning)}");
             }
         }
+    }
+
+    private static void RenderIndexRemedy(McpClientDiagnostics entry)
+    {
+        if (entry.IndexState?.NextSteps is not { Count: > 0 } steps)
+        {
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"  [yellow]remedy:[/] {Markup.Escape(string.Join(" && ", steps))}");
     }
 
     private static void RenderStale(McpClientDiagnostics entry)
@@ -111,13 +124,13 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         {
             AnsiConsole.MarkupLine(
                 $"  [yellow]stale (user):[/] registered={Markup.Escape(entry.UserCommand ?? "")} → expected={Markup.Escape(expected)}");
-            AnsiConsole.MarkupLine($"  [yellow]repair:[/] squeezr mcp install --client {Markup.Escape(entry.Client)} --yes");
+            AnsiConsole.MarkupLine($"  [yellow]repair:[/] {Markup.Escape(RemedyText.McpInstallRepair(entry.Client))}");
         }
         if (entry.ProjectStale)
         {
             AnsiConsole.MarkupLine(
                 $"  [yellow]stale (project):[/] registered={Markup.Escape(entry.ProjectCommand ?? "")} → expected={Markup.Escape(expected)}");
-            AnsiConsole.MarkupLine($"  [yellow]repair:[/] squeezr mcp install --client {Markup.Escape(entry.Client)} --yes");
+            AnsiConsole.MarkupLine($"  [yellow]repair:[/] {Markup.Escape(RemedyText.McpInstallRepair(entry.Client))}");
         }
     }
 

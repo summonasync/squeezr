@@ -56,6 +56,11 @@ public static class SymbolExtractor
             MethodDeclarationSyntax method => method.Identifier.Text,
             // generic arity stays in ContainerName; the ctor name is the bare type name
             ConstructorDeclarationSyntax ctor => ctor.Identifier.Text,
+            DestructorDeclarationSyntax dtor => $"~{dtor.Identifier.Text}",
+            // the conversion target rides along so two conversions in one type stay distinct by name
+            ConversionOperatorDeclarationSyntax conversion =>
+                $"{conversion.ImplicitOrExplicitKeyword.ValueText} operator {conversion.Type}",
+            OperatorDeclarationSyntax op => $"operator {op.OperatorToken.ValueText}",
             PropertyDeclarationSyntax property => property.Identifier.Text,
             VariableDeclaratorSyntax variable => variable.Identifier.Text,
             _ => declaration.ToString().Split('(', ' ', ':')[0],

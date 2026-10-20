@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Spectre.Console.Cli;
 using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
 
@@ -12,11 +13,6 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
     private const long LargeFileBytes = 256 * 1024;
     private const int WideRangeLines = 400;
     private const int MaxStdinChars = 64 * 1024;
-
-    private const string NudgeText =
-        "This workspace is indexed by squeezr. For a read this size, code_search or symbol_lookup can locate " +
-        "the relevant lines, and expand_span(file, startLine, endLine) returns just that span from the live file. " +
-        "If the file or repo is not in the index, a plain Read is correct.";
 
     public sealed class Settings : CommandSettings
     {
@@ -98,7 +94,7 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
         }
 
         return RequestsBulkRead(input.ToolInput!, filePath, workspace)
-            ? new HookPreReadAdvice(new HookPreReadAdviceOutput(PreToolUseEvent, NudgeText))
+            ? new HookPreReadAdvice(new HookPreReadAdviceOutput(PreToolUseEvent, RemedyText.BulkReadNudge))
             : null;
     }
 

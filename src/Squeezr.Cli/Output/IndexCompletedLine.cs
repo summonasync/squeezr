@@ -15,7 +15,8 @@ public sealed record IndexCompletedLine(
     int DeferredReaps = 0,
     int PendingReaps = 0,
     int GuardWithheld = 0,
-    int GuardDropped = 0)
+    int GuardDropped = 0,
+    int Embedded = 0)
 {
     public static IndexCompletedLine FromResult(IndexResult result, int durationMs, int? symbols, string? provider = null) =>
         new(
@@ -31,5 +32,6 @@ public sealed record IndexCompletedLine(
             result.DeferredReaps,
             result.PendingReaps,
             result.GuardWithheld,
-            result.GuardDropped);
+            result.GuardDropped,
+            result.Embedded);
 }

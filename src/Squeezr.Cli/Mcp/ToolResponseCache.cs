@@ -19,17 +19,21 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
     private readonly Dictionary<string, LinkedListNode<CachedEntry>> _index = new();
     private readonly LinkedList<CachedEntry> _recent = new();
     private readonly HashSet<string> _invalidatedKeys = new();
-    private readonly Dictionary<string, long> _readGenerations = new();
-    private long _observedGeneration;
-    private long _announcedGeneration = long.MinValue;
+    private readonly Dictionary<string, (long Index, long Policy)> _readGenerations = new();
+    private (long Index, long Policy) _observedGeneration;
+    private (long Index, long Policy) _announcedGeneration = (long.MinValue, long.MinValue);
     private bool _noticePending;
 
-    // Two clocks behind one number. meta.db moves when the index changes; config.json moves when a policy
-    // that shapes the answer changes (indexing.rankExclude, indexing.secretGuardExtra). Carrying the patterns
-    // in the key answers "which pattern set produced this answer"; this answers "the config moved at all",
+    // Two clocks carried as a pair, never blended into one number. meta.db moves when the index changes;
+    // config.json moves when a policy that shapes the answer changes (indexing.rankExclude,
+    // indexing.secretGuardExtra). An entry stays alive only while both of its components still match, so a
+    // config whose mtime sits in the future (stepped clock, `cp -p` from a backup, a fixture pinning
+    // stamps) cannot swallow index passes the way a max() blend did — the blend froze on the config stamp
+    // and no eviction happened until the config itself was touched again. Carrying the patterns in the key
+    // answers "which pattern set produced this answer"; the policy half answers "the config moved at all",
     // which is what stops a mask narrowed back from reconstituting its older key and resurrecting the
     // envelope that was cached before the widening.
-    public long Generation
+    public (long Index, long Policy) Generation
     {
         get
         {
@@ -37,7 +41,7 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
             var index = File.Exists(metaDbPath) ? File.GetLastWriteTimeUtc(metaDbPath).Ticks : 0;
             var configPath = SqueezrPaths.ConfigPath(workspaceRoot);
             var policy = File.Exists(configPath) ? File.GetLastWriteTimeUtc(configPath).Ticks : 0;
-            return Math.Max(index, policy);
+            return (index, policy);
         }
     }
 
@@ -129,10 +133,11 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
             var described = generation;
             if (_readGenerations.Remove(key, out var readAt))
             {
-                if (readAt > generation)
+                if (readAt.Index > generation.Index || readAt.Policy > generation.Policy)
                 {
-                    // The clock went backwards (NTP step, or a test pinning mtime into the past), so which
-                    // index state this answer describes is unknowable. Refusing to cache beats a wrong tag.
+                    // Either clock went backwards (NTP step, a config restored from an older backup, or a
+                    // test pinning an mtime into the past), so which index state this answer describes is
+                    // unknowable. Refusing to cache beats a wrong tag.
                     return;
                 }
 
@@ -158,7 +163,7 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
         }
     }
 
-    private void Retire(long generation)
+    private void Retire((long Index, long Policy) generation)
     {
         if (generation == _observedGeneration)
         {
@@ -197,5 +202,5 @@ public sealed class ToolResponseCache(string workspaceRoot, int capacity = 100)
             _ => node?.ToJsonString()
         };
 
-    private sealed record CachedEntry(string Key, object Response, long Generation);
+    private sealed record CachedEntry(string Key, object Response, (long Index, long Policy) Generation);
 }
