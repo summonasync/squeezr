@@ -7,4 +7,5 @@ public sealed record WorkspaceListEntry(
     DateTimeOffset CreatedAt,
     DateTimeOffset LastUsedAt,
     bool Stale,
-    bool? Husk = null);
+    bool? Husk = null,
+    bool? NameCollision = null);

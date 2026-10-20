@@ -182,6 +182,7 @@ public sealed class WorkspaceRepairPruneCliTests
 
             run.ExitCode.ShouldBe(1);
             run.StdOut.ShouldContain("Not pruned: 1 stale row(s) left in the registry.");
+            run.StdOut.ShouldContain("Repair report: 0 adopted, 0 need --root, 0 stale row(s) pruned, 0 husk row(s) pruned.");
             run.StdOut.ShouldContain($"stale: prune-gone ({goneKey})");
             run.StdErr.ShouldContain("error: Refusing to prune 1 stale row(s) without confirmation");
             run.StdErr.ShouldContain("this is not an interactive terminal");
@@ -244,7 +245,8 @@ public sealed class WorkspaceRepairPruneCliTests
 
             run.ExitCode.ShouldBe(0);
             run.StdOut.ShouldContain($"adopted prune-orphan ({orphanKey})");
-            run.StdOut.ShouldNotContain("pruned");
+            run.StdOut.ShouldNotContain($"({orphanKey}) — performed:");
+            run.StdOut.ShouldContain("Repair report: 1 adopted, 0 need --root, 0 stale row(s) pruned, 0 husk row(s) pruned.");
             ReadRegistry(home).ShouldHaveSingleItem().StoreKey.ShouldBe(orphanKey);
             Directory.Exists(StoreDir(home, orphanKey)).ShouldBeTrue();
         }
@@ -255,10 +257,11 @@ public sealed class WorkspaceRepairPruneCliTests
     }
 
     [Fact]
-    public async Task Yes_LeavesHuskRowAlone()
+    public async Task Yes_PrunesStaleAndHuskRows_BehindSameYes_HomeDirectorySurvives()
     {
         var home = TestDirs.NewTempDir();
         var goneRoot = Canonical(TestDirs.NewTempDir());
+        File.WriteAllText(Path.Combine(home, "canary.txt"), "keep me");
         try
         {
             var goneKey = Key("prune-gone", goneRoot);
@@ -271,15 +274,144 @@ public sealed class WorkspaceRepairPruneCliTests
             var run = await RunAsync(home, "workspace", "repair", "--yes");
 
             run.ExitCode.ShouldBe(0);
-            run.StdErr.ShouldContain("workspace 'prune-husk' looks like a husk");
+            run.StdErr.ShouldNotContain("looks like a husk");
+            run.StdErr.ShouldNotContain("squeezr drop --store-key");
             ResultLine(run.StdOut, goneKey).ShouldStartWith("  - pruned row + store (");
-            run.StdOut.ShouldNotContain("prune-husk");
-            ReadRegistry(home).Select(row => row.StoreKey).ShouldBe([huskKey]);
-            Directory.Exists(StoreDir(home, huskKey)).ShouldBeTrue();
+            ResultLine(run.StdOut, huskKey).ShouldStartWith("  - pruned row + store (");
+            run.StdOut.ShouldContain("Pruned 2 row(s) (1 stale, 1 husk) · 2 store dir(s) removed (");
+            run.StdOut.ShouldContain("Repair report: 0 adopted, 0 need --root, 1 stale row(s) pruned, 1 husk row(s) pruned.");
+            ReadRegistry(home).ShouldBeEmpty();
+            Directory.Exists(StoreDir(home, goneKey)).ShouldBeFalse();
+            Directory.Exists(StoreDir(home, huskKey)).ShouldBeFalse();
+            Directory.Exists(home).ShouldBeTrue();
+            File.ReadAllText(Path.Combine(home, "canary.txt")).ShouldBe("keep me");
         }
         finally
         {
             Clean(home, goneRoot);
+        }
+    }
+
+    [Fact]
+    public async Task DryRun_ListsHuskRowsWithSizes_CountsWouldBePruned_ChangesNothing()
+    {
+        var home = TestDirs.NewTempDir();
+        var liveRoot = Canonical(TestDirs.NewTempDir());
+        try
+        {
+            var liveKey = Key("prune-live", liveRoot);
+            var huskKey = Key("prune-husk", Canonical(home));
+            WriteRegistry(home, Row("prune-live", liveRoot, liveKey), Row("prune-husk", Canonical(home), huskKey));
+            WriteStoreDir(home, huskKey, "prune-husk", home, ("meta.db", 10));
+
+            var run = await RunAsync(home, "workspace", "repair", "--dry-run");
+
+            run.ExitCode.ShouldBe(0);
+            run.StdOut.ShouldContain("Dry run: nothing adopted, nothing deleted.");
+            run.StdErr.ShouldContain("workspace 'prune-husk' looks like a husk");
+            run.StdErr.ShouldContain("squeezr drop --store-key");
+            run.StdOut.ShouldContain($"husk: prune-husk ({huskKey}) root {Canonical(home)} · ");
+            run.StdOut.ShouldContain("Dry run: 1 husk row(s), 1 store dir(s) totalling ");
+            run.StdOut.ShouldContain(
+                "Repair report: 0 adoptable, 0 need --root, 0 stale row(s) would be pruned, 1 husk row(s) would be pruned.");
+            File.ReadAllText(RegistryPath(home)).ShouldContain(huskKey);
+            Directory.Exists(StoreDir(home, huskKey)).ShouldBeTrue();
+            Directory.Exists(home).ShouldBeTrue();
+        }
+        finally
+        {
+            Clean(home, liveRoot);
+        }
+    }
+
+    [Fact]
+    public async Task Yes_AllFourCategories_ExactCounts_OnlyConfirmedDeleted_Json()
+    {
+        var home = TestDirs.NewTempDir();
+        var liveRoot = Canonical(TestDirs.NewTempDir());
+        var goneRoot = Canonical(TestDirs.NewTempDir());
+        var orphanRoot = Canonical(TestDirs.NewTempDir());
+        try
+        {
+            var liveKey = Key("prune-live", liveRoot);
+            var goneKey = Key("prune-gone", goneRoot);
+            var huskKey = Key("prune-husk", Canonical(home));
+            var orphanKey = Key("prune-orphan", orphanRoot);
+            WriteRegistry(home,
+                Row("prune-live", liveRoot, liveKey),
+                Row("prune-gone", goneRoot, goneKey),
+                Row("prune-husk", Canonical(home), huskKey));
+            WriteStoreDir(home, liveKey, "prune-live", liveRoot, ("meta.db", 10));
+            WriteStoreDir(home, goneKey, "prune-gone", goneRoot, ("meta.db", 20));
+            WriteStoreDir(home, huskKey, "prune-husk", home, ("meta.db", 30));
+            WriteStoreDir(home, orphanKey, "prune-orphan", orphanRoot, ("meta.db", 40));
+            Directory.Delete(goneRoot, recursive: true);
+
+            var run = await RunAsync(home, "workspace", "repair", "--yes", "--json");
+
+            run.ExitCode.ShouldBe(0);
+            using var document = JsonDocument.Parse(run.StdOut.Trim());
+            var body = document.RootElement;
+            body.GetProperty("adopted").EnumerateArray()
+                .Select(row => row.GetProperty("storeKey").GetString()).ShouldBe([orphanKey]);
+            body.GetProperty("needsRoot").GetArrayLength().ShouldBe(0);
+            body.GetProperty("husks").EnumerateArray()
+                .Select(row => row.GetProperty("storeKey").GetString()).ShouldBe([huskKey]);
+            body.GetProperty("stale").EnumerateArray()
+                .Select(row => row.GetProperty("storeKey").GetString()).ShouldBe([goneKey]);
+            var rows = body.GetProperty("prune").GetProperty("rows").EnumerateArray().ToList();
+            rows.Select(row => row.GetProperty("category").GetString()).ShouldBe(["stale", "husk"]);
+            rows.Select(row => row.GetProperty("action").GetString())
+                .ShouldBe(["pruned-row-and-store", "pruned-row-and-store"]);
+            var counts = body.GetProperty("counts");
+            counts.GetProperty("adopted").GetInt32().ShouldBe(1);
+            counts.GetProperty("needsRoot").GetInt32().ShouldBe(0);
+            counts.GetProperty("stalePruned").GetInt32().ShouldBe(1);
+            counts.GetProperty("husksPruned").GetInt32().ShouldBe(1);
+            ReadRegistry(home).Select(row => row.StoreKey).ShouldBe([liveKey, orphanKey]);
+            Directory.Exists(StoreDir(home, goneKey)).ShouldBeFalse();
+            Directory.Exists(StoreDir(home, huskKey)).ShouldBeFalse();
+            Directory.Exists(StoreDir(home, liveKey)).ShouldBeTrue();
+            Directory.Exists(StoreDir(home, orphanKey)).ShouldBeTrue();
+            Directory.Exists(home).ShouldBeTrue();
+        }
+        finally
+        {
+            Clean(home, liveRoot, goneRoot, orphanRoot);
+        }
+    }
+
+    [Fact]
+    public async Task Yes_DeadRootOrphanStore_AdoptedFirst_SweptAsStaleOnNextRun()
+    {
+        var home = TestDirs.NewTempDir();
+        var deadRoot = Canonical(TestDirs.NewTempDir());
+        try
+        {
+            File.WriteAllText(RegistryPath(home), "[]");
+            var deadKey = Key("prune-dead", deadRoot);
+            WriteStoreDir(home, deadKey, "prune-dead", deadRoot, ("meta.db", 10));
+            Directory.Delete(deadRoot, recursive: true);
+
+            var first = await RunAsync(home, "workspace", "repair", "--yes");
+
+            first.ExitCode.ShouldBe(0);
+            first.StdOut.ShouldContain($"adopted prune-dead ({deadKey})");
+            ReadRegistry(home).ShouldHaveSingleItem().StoreKey.ShouldBe(deadKey);
+            Directory.Exists(StoreDir(home, deadKey)).ShouldBeTrue();
+
+            var second = await RunAsync(home, "workspace", "repair", "--yes");
+
+            second.ExitCode.ShouldBe(0);
+            ResultLine(second.StdOut, deadKey).ShouldStartWith("  - pruned row + store (");
+            second.StdOut.ShouldContain(
+                "Repair report: 0 adopted, 0 need --root, 1 stale row(s) pruned, 0 husk row(s) pruned.");
+            ReadRegistry(home).ShouldBeEmpty();
+            Directory.Exists(StoreDir(home, deadKey)).ShouldBeFalse();
+        }
+        finally
+        {
+            Clean(home, deadRoot);
         }
     }
 
@@ -478,6 +610,8 @@ public sealed class WorkspaceRepairPruneCliTests
         run.StdOut.ShouldContain("x not removed: prune-zulu");
         run.StdOut.ShouldContain("Sweep stopped:");
         run.StdOut.ShouldContain("1 stale row(s) already removed, 1 store dir(s) gone");
+        run.StdOut.ShouldContain("Repair report: 0 adopted, 0 need --root, 1 stale row(s) pruned, 0 husk row(s) pruned.");
+        run.StdOut.ShouldNotContain("2 stale row(s) pruned");
         run.StdErr.ShouldContain("error:");
         run.StdOut.ShouldNotContain(fixture.BlockedDir);
         run.StdErr.ShouldNotContain(fixture.BlockedDir);

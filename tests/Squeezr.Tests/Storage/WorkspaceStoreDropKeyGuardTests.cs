@@ -82,6 +82,47 @@ public sealed class WorkspaceStoreDropKeyGuardTests : IDisposable
     }
 
     [Fact]
+    public void DropByStoreKey_KeyWithNulByte_RefusesBeforeAnyFileSystemOperation()
+    {
+        var storeKey = "a\0b";
+        WriteRegistry(Row("nul", storeKey), Row("victim", "victim-key"));
+        var victimDir = WriteStoreDir("victim-key");
+
+        WorkspaceStorePaths.IsSingleSegmentKey(storeKey).ShouldBeFalse();
+        var error = Should.Throw<WorkspaceException>(() => WorkspaceStore.DropByStoreKey(storeKey));
+
+        error.Message.ShouldContain("not a single path segment");
+        WorkspaceRegistry.FindByStoreKey(storeKey).ShouldNotBeNull();
+        Directory.Exists(victimDir).ShouldBeTrue();
+        Directory.Exists(_home).ShouldBeTrue();
+        File.ReadAllText(Path.Combine(_home, "canary.txt")).ShouldBe("keep me");
+    }
+
+    // The trailing-dot/space family is a Win32 second-parser claim, not testable from this host. On
+    // POSIX these keys are literal sibling names: containment holds by normalization, and the delete
+    // must stop at the named directory instead of reaching workspaces/ itself.
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void DropByStoreKey_TrailingDotOrSpaceKey_RemovesOnlyTheLiteralDirectory()
+    {
+        WriteRegistry(Row("tail-dot", ".. "), Row("tail-space", ".. ."), Row("sibling", "sibling-key"));
+        var dotDir = WriteStoreDir(".. ");
+        var spaceDir = WriteStoreDir(".. .");
+        var siblingDir = WriteStoreDir("sibling-key");
+
+        WorkspaceStore.DropByStoreKey(".. ").ShouldHaveSingleItem().ShouldBe(Path.Combine(_workspaces, ".. "));
+        WorkspaceStore.DropByStoreKey(".. .").ShouldHaveSingleItem().ShouldBe(Path.Combine(_workspaces, ".. ."));
+
+        Directory.Exists(dotDir).ShouldBeFalse();
+        Directory.Exists(spaceDir).ShouldBeFalse();
+        Directory.Exists(siblingDir).ShouldBeTrue();
+        Directory.Exists(_workspaces).ShouldBeTrue();
+        Directory.Exists(_home).ShouldBeTrue();
+        File.ReadAllText(Path.Combine(_home, "canary.txt")).ShouldBe("keep me");
+        WorkspaceRegistry.FindByStoreKey("sibling-key").ShouldNotBeNull();
+    }
+
+    [Fact]
     public void RequireStoreDir_SingleSegmentKey_CombinesUnderTheWorkspacesRoot()
     {
         WorkspaceStorePaths.RequireStoreDir("demo-1a2b3c4d")

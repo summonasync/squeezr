@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Serialization;
@@ -11,6 +12,10 @@ public sealed class RegistryRepairTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
     private const string HuskKey = "husk-home-aaaa1111";
+    private static readonly UnixFileMode HomeWritable =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+        UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
     private readonly string? _previousEnv;
     private readonly string _home;
     private readonly List<string> _createdDirs = [];
@@ -73,6 +78,35 @@ public sealed class RegistryRepairTests : IDisposable
         second.Adopted.ShouldBeEmpty();
         WorkspaceRegistry.Load().Count.ShouldBe(2);
         File.ReadAllBytes(adoptableManifestPath).ShouldBe(adoptableManifestBytes);
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void AdoptAll_UnwritableHome_ReportsEveryAdoptableOrphanAsFailedAndAdoptsNothing()
+    {
+        var root = NewTempDir();
+        var storeKey = WorkspaceStoreKeys.Create("blocked", WorkspaceCanonicalPath.Canonicalize(root));
+        var storeDir = CreateStoreDir(storeKey);
+        WriteManifest(Path.Combine(storeDir, SqueezrPaths.StoreManifestFileName), "blocked", root);
+        File.SetUnixFileMode(_home, HomeWritable & ~UnixFileMode.UserWrite);
+        try
+        {
+            var outcome = RegistryRepair.AdoptAll();
+
+            outcome.Adopted.ShouldBeEmpty();
+            outcome.NeedsRoot.ShouldBeEmpty();
+            var failure = outcome.Failed.ShouldHaveSingleItem();
+            failure.Orphan.StoreKey.ShouldBe(storeKey);
+            failure.Orphan.Name.ShouldBe("blocked");
+            failure.Cause.ShouldContain("UnauthorizedAccessException");
+            WorkspaceRegistry.Load().ShouldBeEmpty();
+        }
+        finally
+        {
+            File.SetUnixFileMode(_home, HomeWritable);
+        }
+
+        Directory.Exists(storeDir).ShouldBeTrue();
     }
 
     [Fact]

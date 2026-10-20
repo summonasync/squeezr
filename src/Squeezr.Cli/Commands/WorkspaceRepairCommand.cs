@@ -9,9 +9,6 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand.Settings>
 {
-    private const string HuskDropHint =
-        "run 'squeezr drop --store-key <key>' to remove this entry and its store";
-
     private const string DropEquivalent = "squeezr drop --store-key";
 
     public sealed class Settings : CommandSettings
@@ -27,8 +24,9 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         public bool DryRun { get; set; }
 
         [Description(
-            "Prune every stale row without prompting. Back up the registry first: the tool rotates workspaces.json.bak " +
-            "on each write, so it keeps only the state one removal back, not the state before the sweep")]
+            "Prune every stale or husk row without prompting. Back up the registry first: the tool rotates " +
+            "workspaces.json.bak on each write, so it keeps only the state one removal back, not the state " +
+            "before the sweep")]
         [CommandOption("--yes")]
         public bool Yes { get; set; }
 
@@ -87,18 +85,28 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             var needsRootRows = outcome.NeedsRoot
                 .Select(orphan => new WorkspaceRepairNeedsRootEntry(orphan.Name, orphan.StoreKey))
                 .ToList();
-            var huskRows = outcome.Husks
-                .Select(husk => new WorkspaceRepairHuskEntry(husk.Name, husk.StoreKey, husk.RootPath))
+            var failedRows = outcome.Failed
+                .Select(failure => new WorkspaceRepairFailedAdoptionEntry(
+                    failure.Orphan.Name,
+                    failure.Orphan.StoreKey,
+                    failure.Cause))
                 .ToList();
-            var candidates = WorkspaceRepairPruner.Candidates(
-                outcome.Stale,
-                huskRows.Select(husk => husk.StoreKey).ToHashSet(StringComparer.Ordinal));
 
-            WriteHuskHints(huskRows);
+            // Husk and stale sets are disjoint by construction (a husk root exists, a stale root does not);
+            // both candidate builders still exclude each other's keys so a registry that breaks the
+            // invariant can never route one row into both verdicts.
+            var staleKeys = outcome.Stale.Select(row => row.StoreKey).ToHashSet(StringComparer.Ordinal);
+            var huskRows = WorkspaceRepairPruner.HuskCandidates(outcome.Husks, staleKeys);
+            var candidates = WorkspaceRepairPruner
+                .Candidates(outcome.Stale, huskRows.Select(husk => husk.StoreKey).ToHashSet(StringComparer.Ordinal))
+                .Concat(huskRows)
+                .OrderBy(row => row.Name, StringComparer.Ordinal)
+                .ThenBy(row => row.StoreKey, StringComparer.Ordinal)
+                .ToList();
 
             if (!settings.Json)
             {
-                RenderReport(adoptedRows, needsRootRows, huskRows, candidates, settings.DryRun);
+                RenderReport(adoptedRows, needsRootRows, failedRows, candidates, settings.DryRun);
             }
 
             var gate = WorkspaceRepairPruner.Gate(
@@ -110,13 +118,30 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             var prune = await WorkspaceRepairPruner.RunAsync(
                 gate, candidates, AnsiConsole.Console, cancellationToken);
 
+            WriteHuskHints(huskRows, prune);
+
             if (settings.Json)
             {
-                JsonOutput.Write(new WorkspaceRepairReport(adoptedRows, needsRootRows, huskRows, candidates, prune));
+                JsonOutput.Write(new WorkspaceRepairReport(
+                    adoptedRows,
+                    needsRootRows,
+                    HuskSection(huskRows),
+                    [.. candidates.Where(row => row.Category == WorkspaceRepairPruner.CategoryStale)],
+                    prune,
+                    Counts(adoptedRows.Count, needsRootRows.Count, candidates, prune),
+                    failedRows.Count > 0 ? failedRows : null));
             }
             else
             {
                 RenderPrune(prune, candidates);
+                RenderSummary(adoptedRows.Count, needsRootRows.Count, candidates, prune);
+            }
+
+            // The adopt phase runs before the sweep, so its verdict is the first phase fact a broken
+            // home produces; the sweep rows stay in the report either way.
+            if (failedRows.Count > 0)
+            {
+                return CommandError.Report(new WorkspaceException(AdoptionFailure(failedRows)), settings.Json);
             }
 
             if (prune.Mode == WorkspaceRepairPruner.ModeAborted)
@@ -125,12 +150,20 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             }
 
             return gate == RepairPruneGate.Refuse
-                ? CommandError.Report(new McpUsageException(PruneRefusal(candidates.Count, settings.Json)), settings.Json)
+                ? CommandError.Report(
+                    new McpUsageException(PruneRefusal(WorkspaceRepairPruner.CandidateLabel(candidates), settings.Json)),
+                    settings.Json)
                 : 0;
         }
-        catch (Exception ex) when (ex is WorkspaceException or McpUsageException)
+        catch (Exception ex)
+            when (ex is WorkspaceException or McpUsageException or UnauthorizedAccessException)
         {
-            return CommandError.Report(ex, settings.Json);
+            // Same permission net as drop: a denial no phase classified would otherwise leave the CLI
+            // with exit 255 and no parseable output on any channel.
+            var reported = ex is UnauthorizedAccessException
+                ? new WorkspaceException(ex.Message, WorkspaceException.DefaultCode, ex)
+                : ex;
+            return CommandError.Report(reported, settings.Json);
         }
     }
 
@@ -141,17 +174,29 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             [.. scan.Orphans.Where(orphan => orphan.IsAdoptable)],
             [.. scan.Orphans.Where(orphan => !orphan.IsAdoptable)],
             scan.Husks,
-            scan.Stale);
+            scan.Stale,
+            []);
     }
+
+    // The per-row causes live in the report; the envelope carries the count, the rows it covers and the
+    // first cause, the way an aborted sweep does.
+    private static string AdoptionFailure(IReadOnlyList<WorkspaceRepairFailedAdoptionEntry> failed) =>
+        $"Could not adopt {failed.Count} orphaned workspace store(s) into the registry " +
+        $"({string.Join(", ", failed.Select(row => row.StoreKey))}). Cause: {failed[0].Cause}";
+
+    private static IReadOnlyList<WorkspaceRepairHuskEntry> HuskSection(
+        IReadOnlyList<WorkspaceRepairStaleEntry> huskRows) =>
+        [.. huskRows.Select(husk => new WorkspaceRepairHuskEntry(
+            husk.Name, husk.StoreKey, husk.RootPath, husk.StoreBytes, husk.StoreState))];
 
     private static void RenderReport(
         IReadOnlyList<WorkspaceRepairAdoptedEntry> adopted,
         IReadOnlyList<WorkspaceRepairNeedsRootEntry> needsRoot,
-        IReadOnlyList<WorkspaceRepairHuskEntry> husks,
-        IReadOnlyList<WorkspaceRepairStaleEntry> stale,
+        IReadOnlyList<WorkspaceRepairFailedAdoptionEntry> failedAdoptions,
+        IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
         bool preview)
     {
-        if (adopted.Count == 0 && needsRoot.Count == 0 && husks.Count == 0 && stale.Count == 0)
+        if (adopted.Count == 0 && needsRoot.Count == 0 && failedAdoptions.Count == 0 && candidates.Count == 0)
         {
             AnsiConsole.MarkupLine("Nothing to repair: no orphaned workspace stores found.");
             return;
@@ -161,12 +206,6 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         {
             AnsiConsole.MarkupLine("[grey]Dry run: nothing adopted, nothing deleted.[/]");
         }
-
-        AnsiConsole.MarkupLine(
-            $"Repair report: [green]{adopted.Count} {(preview ? "adoptable" : "adopted")}[/], " +
-            $"[yellow]{needsRoot.Count} need --root[/], " +
-            $"{husks.Count} husk(s) left untouched, " +
-            $"{stale.Count} stale row(s)");
 
         foreach (var entry in adopted)
         {
@@ -182,13 +221,79 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 $"re-run with --store-key {orphan.StoreKey.EscapeMarkup()} --root <path>");
         }
 
-        foreach (var row in stale)
+        foreach (var failure in failedAdoptions)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [red]x[/] not adopted: {failure.Name.EscapeMarkup()} ({failure.StoreKey.EscapeMarkup()}) — " +
+                $"{failure.Cause.EscapeMarkup()}");
+        }
+
+        foreach (var row in candidates.Where(row => row.Category == WorkspaceRepairPruner.CategoryStale))
         {
             AnsiConsole.MarkupLine(
                 $"  [yellow]-[/] stale: {row.Name.EscapeMarkup()} ({row.StoreKey.EscapeMarkup()}) " +
                 $"root {row.RootPath.EscapeMarkup()} · {StoreSizeLabel(row)}");
         }
+
+        foreach (var row in candidates.Where(row => row.Category == WorkspaceRepairPruner.CategoryHusk))
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]-[/] husk: {row.Name.EscapeMarkup()} ({row.StoreKey.EscapeMarkup()}) " +
+                $"root {row.RootPath.EscapeMarkup()} · {StoreSizeLabel(row)}");
+        }
     }
+
+    // The category line lands after the sweep so the numbers are facts about this run, not intentions:
+    // a dry run states what a confirmed run would prune, a decline states zeros because nothing was
+    // deleted, an abort counts only the tail it actually reached, and unsafe keys never count as pruned.
+    // A run with nothing to repair keeps its single line — zeros would dress up "nothing" as a report.
+    private static void RenderSummary(
+        int adopted,
+        int needsRoot,
+        IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
+        WorkspaceRepairPruneSummary prune)
+    {
+        if (prune.Mode == WorkspaceRepairPruner.ModeNone && adopted == 0 && needsRoot == 0)
+        {
+            return;
+        }
+
+        var would = prune.Mode == WorkspaceRepairPruner.ModeDryRun;
+        var (stale, husks) = CategoryNumbers(candidates, prune);
+        AnsiConsole.MarkupLine(
+            $"Repair report: [green]{adopted} {(would ? "adoptable" : "adopted")}[/], " +
+            $"[yellow]{needsRoot} need --root[/], " +
+            $"{stale} stale row(s) {(would ? "would be pruned" : "pruned")}, " +
+            $"{husks} husk row(s) {(would ? "would be pruned" : "pruned")}.");
+    }
+
+    private static WorkspaceRepairCategoryCounts Counts(
+        int adopted,
+        int needsRoot,
+        IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
+        WorkspaceRepairPruneSummary prune)
+    {
+        var (stalePruned, husksPruned) = CategoryNumbers(candidates, prune);
+        return new WorkspaceRepairCategoryCounts(adopted, needsRoot, stalePruned, husksPruned);
+    }
+
+    private static (int Stale, int Husks) CategoryNumbers(
+        IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
+        WorkspaceRepairPruneSummary prune)
+    {
+        var would = prune.Mode == WorkspaceRepairPruner.ModeDryRun;
+        return would
+            ? (CategoryCount(candidates, WorkspaceRepairPruner.CategoryStale),
+                CategoryCount(candidates, WorkspaceRepairPruner.CategoryHusk))
+            : (CountPruned(prune, WorkspaceRepairPruner.CategoryStale),
+                CountPruned(prune, WorkspaceRepairPruner.CategoryHusk));
+    }
+
+    private static int CategoryCount(IReadOnlyList<WorkspaceRepairStaleEntry> candidates, string category) =>
+        candidates.Count(row => row.Category == category);
+
+    private static int CountPruned(WorkspaceRepairPruneSummary prune, string category) =>
+        prune.Rows.Count(row => row.Category == category && WorkspaceRepairPruner.IsPruned(row));
 
     private static void RenderPrune(WorkspaceRepairPruneSummary prune, IReadOnlyList<WorkspaceRepairStaleEntry> candidates)
     {
@@ -198,16 +303,19 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 return;
             case WorkspaceRepairPruner.ModeDryRun:
                 AnsiConsole.MarkupLine(
-                    $"Dry run: {candidates.Count} stale row(s), " +
+                    $"Dry run: {WorkspaceRepairPruner.CandidateLabel(candidates)}, " +
                     $"{DryRunStoresText(candidates, prune.TotalStoreBytes)}. Nothing was deleted.");
                 AnsiConsole.MarkupLine($"[grey]{BackupAdvice().EscapeMarkup()}[/]");
                 return;
             case WorkspaceRepairPruner.ModeRefused:
-                AnsiConsole.MarkupLine($"[yellow]Not pruned:[/] {candidates.Count} stale row(s) left in the registry.");
+                AnsiConsole.MarkupLine(
+                    $"[yellow]Not pruned:[/] {WorkspaceRepairPruner.CandidateLabel(candidates)} left in the registry.");
                 AnsiConsole.MarkupLine($"[grey]{BackupAdvice().EscapeMarkup()}[/]");
                 return;
             case WorkspaceRepairPruner.ModeDeclined:
-                AnsiConsole.MarkupLine($"[yellow]Prune declined:[/] {candidates.Count} stale row(s) left in the registry.");
+                AnsiConsole.MarkupLine(
+                    $"[yellow]Prune declined:[/] {WorkspaceRepairPruner.CandidateLabel(candidates)} " +
+                    "kept in the registry, nothing was deleted.");
                 return;
         }
 
@@ -216,8 +324,6 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             AnsiConsole.MarkupLine(PruneLine(row));
         }
 
-        var pruned = prune.Rows.Count(row =>
-            row.Action is WorkspaceRepairPruner.ActionRowAndStore or WorkspaceRepairPruner.ActionRowOnly);
         var stores = prune.StoresRemoved;
         var held = prune.Rows.Count(row => row.Action == WorkspaceRepairPruner.ActionSkippedUnsafeKey);
 
@@ -225,18 +331,19 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         {
             var notAttempted = candidates.Count - prune.Rows.Count;
             AnsiConsole.MarkupLine(
-                $"[red]Sweep stopped:[/] {SweepFailure(prune).EscapeMarkup()} — {pruned} stale row(s) already removed, " +
+                $"[red]Sweep stopped:[/] {SweepFailure(prune).EscapeMarkup()} — " +
+                $"{WorkspaceRepairPruner.PrunedLabel(prune.Rows)} already removed, " +
                 $"{stores} store dir(s) gone" +
                 (notAttempted > 0 ? $", {notAttempted} row(s) not attempted" : string.Empty) + ".");
         }
         else
         {
             AnsiConsole.MarkupLine(
-                $"[green]Pruned {pruned} stale row(s)[/] · {RemovedStoresText(stores, prune.TotalStoreBytes)}" +
+                $"[green]Pruned {WorkspaceRepairPruner.PrunedLabel(prune.Rows)}[/] · {RemovedStoresText(stores, prune.TotalStoreBytes)}" +
                 (held > 0 ? $" · [yellow]{held} left alone[/]" : string.Empty) + ".");
         }
 
-        if (pruned > 0)
+        if (prune.Rows.Any(WorkspaceRepairPruner.IsPruned))
         {
             AnsiConsole.MarkupLine(
                 $"[grey]Registry {WorkspaceRegistry.FilePath.EscapeMarkup()}: workspaces.json.bak now holds the state " +
@@ -257,6 +364,8 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 $" — performed: {DropEquivalent} {row.StoreKey.EscapeMarkup()}",
             WorkspaceRepairPruner.ActionPruneFailed =>
                 $"  [red]x[/] not removed: {named} — {FailureText(row.Failure)}",
+            WorkspaceRepairPruner.ActionStoreRemovedRowKept =>
+                $"  [red]x[/] removed: unverified — store dir gone, row kept: {named} — {FailureText(row.Failure)}",
             WorkspaceRepairPruner.ActionSkippedUnsafeKey =>
                 $"  [red]![/] left alone, store key is not a single path segment: {named}",
             _ => $"  [red]![/] left alone ({row.Action.EscapeMarkup()}): {named}",
@@ -311,20 +420,28 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         $"before a real prune take a dated copy of the registry: cp {WorkspaceRegistry.FilePath} " +
         $"{WorkspaceRegistry.FilePath}.bak-{DateTimeOffset.UtcNow:yyyy-MM-dd}";
 
-    private static string PruneRefusal(int count, bool json) =>
-        $"Refusing to prune {count} stale row(s) without confirmation: " +
+    private static string PruneRefusal(string label, bool json) =>
+        $"Refusing to prune {label} without confirmation: " +
         (json
             ? "--json writes one machine-readable document to stdout, so a prompt has no channel here"
             : "this is not an interactive terminal") +
         $", and the absence of a prompt is not consent. Re-run with --dry-run to list them, or --yes to confirm; " +
         $"{BackupAdvice()}.";
 
-    private static void WriteHuskHints(IReadOnlyList<WorkspaceRepairHuskEntry> husks)
+    private static void WriteHuskHints(IReadOnlyList<WorkspaceRepairStaleEntry> husks, WorkspaceRepairPruneSummary prune)
     {
-        foreach (var husk in husks)
+        foreach (var husk in husks.Where(husk => StillRegistered(husk, prune)))
         {
             Console.Error.WriteLine(
-                $"warning: workspace '{husk.Name}' looks like a husk (root path '{husk.RootPath}'); {HuskDropHint}.");
+                $"warning: workspace '{husk.Name}' looks like a husk (storeKey '{husk.StoreKey}', " +
+                $"root path '{husk.RootPath}'); run 'squeezr drop --store-key {husk.StoreKey}' " +
+                "to remove this entry and its store.");
         }
     }
+
+    // The drop advice is only for husks this run did not prune away: a row that is already gone must not
+    // be told to run drop on itself. Failed, skipped and unattempted husks keep the advice.
+    private static bool StillRegistered(WorkspaceRepairStaleEntry husk, WorkspaceRepairPruneSummary prune) =>
+        prune.Rows.FirstOrDefault(row => row.StoreKey == husk.StoreKey) is not { } row
+        || !WorkspaceRepairPruner.IsPruned(row);
 }

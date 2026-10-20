@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -23,8 +24,19 @@ public sealed class AddCommand : Command<AddCommand.Settings>
     {
         try
         {
-            var manager = new WorkspaceManager(WorkspaceRootResolver.RequireWorkspaceRoot());
+            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var manager = new WorkspaceManager(workspaceRoot);
             var entry = manager.AddRepo(settings.RepoPath, settings.Name, StaleLockWarningSink.ToStderr);
+
+            var repoFullPath = Path.GetFullPath(
+                Path.IsPathRooted(settings.RepoPath)
+                    ? settings.RepoPath
+                    : Path.Combine(workspaceRoot, settings.RepoPath));
+            RegistrationAdvisoryOutput.Write(
+                RegistrationAdvisories.Collect(
+                    entry.Name,
+                    WorkspaceCanonicalPath.Canonicalize(repoFullPath)),
+                settings.Json);
 
             if (settings.Json)
             {

@@ -28,8 +28,8 @@ public static class SqueezrHome
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         return string.Equals(
-            WorkspaceCanonicalPath.Canonicalize(directory),
-            WorkspaceCanonicalPath.Canonicalize(Resolve()),
+            WorkspaceCanonicalPath.ResolveThroughLinks(directory),
+            WorkspaceCanonicalPath.ResolveThroughLinks(Resolve()),
             comparison);
     }
 

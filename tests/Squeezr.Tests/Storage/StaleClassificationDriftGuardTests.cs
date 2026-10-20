@@ -84,6 +84,62 @@ public sealed partial class StaleClassificationDriftGuardTests
         }
     }
 
+    // The usage surface lives in Core, where whole-directory sweeps would outlaw the registry, the
+    // scanner and the telemetry writers. Core is covered per file, only where the probe is genuinely
+    // gone — the ban keeps meaning "listing layers do not probe" without pretending Storage is clean.
+    private static readonly (string Project, string Relative)[] BannedProbeFiles =
+    [
+        ("Squeezr.Cli", Path.Combine("Output", "WorkspaceListing.cs")),
+        ("Squeezr.Cli", Path.Combine("Output", "FleetListing.cs")),
+        ("Squeezr.Core", Path.Combine("Storage", "UsageAnalytics.cs")),
+    ];
+
+    public static TheoryData<string, string> ProbeBanFiles()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (project, relative) in BannedProbeFiles)
+        {
+            data.Add(project, relative);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ProbeBanFiles))]
+    public void ProbeBannedSurface_ContainsNoFilesystemExistenceProbe(string project, string relative)
+    {
+        var path = Path.Combine(FindRepoRoot(), "src", project, relative);
+
+        File.Exists(path).ShouldBeTrue($"{project}/{relative} is on the probe ban list but missing");
+        OffendingLines(path).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void UsageSurface_ConsumesTheCoreScanVerdict()
+    {
+        var loader = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "src", "Squeezr.Core", "Storage", "UsageRollupLoader.cs"));
+
+        loader.ShouldContain("OrphanScanner.Scan");
+        loader.ShouldContain(".Stale");
+    }
+
+    [Fact]
+    public void UsageBanIsNotBlind_ToTheProbeShapeItReplaced()
+    {
+        AnyFileSystemProbe().IsMatch("Stale: !Directory.Exists(workspace.RootPath),").ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ProbeBan_StaysPerFile_TheScannerKeepsItsOwnProbe()
+    {
+        var scanner = Path.Combine(FindRepoRoot(), "src", "Squeezr.Core", "Storage", "OrphanScanner.cs");
+
+        BannedProbeFiles.ShouldNotContain(file => file.Relative.EndsWith("OrphanScanner.cs", StringComparison.Ordinal));
+        OffendingLines(scanner).ShouldNotBeEmpty();
+    }
+
     [GeneratedRegex(@"Directory\.Exists\([^)]*RootPath")]
     private static partial Regex LocalStalenessProbe();
 

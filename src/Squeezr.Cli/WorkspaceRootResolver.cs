@@ -40,20 +40,24 @@ public static class WorkspaceRootResolver
         if (!resolution.IsWorkspace)
         {
             throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr init' first.",
+                RemedyText.WorkspaceNotInitialized,
                 WorkspaceException.NotInitializedCode);
         }
 
         return resolution.RootPath;
     }
 
+    // Both removal verdicts are already classified by the primitive: one names the store phase, the
+    // other names the registry phase and carries the paths that are gone. Repainting either as "busy"
+    // would throw away the fact the caller has to report.
     public static T GuardRegistryIo<T>(Func<T> operation)
     {
         try
         {
             return operation();
         }
-        catch (IOException ex) when (ex is not WorkspaceStoreRemovalException)
+        catch (IOException ex)
+            when (ex is not WorkspaceStoreRemovalException and not WorkspaceStoreRemovalUnverifiedException)
         {
             throw new WorkspaceException(RegistryBusyMessage, WorkspaceException.RegistryBusyCode, ex);
         }

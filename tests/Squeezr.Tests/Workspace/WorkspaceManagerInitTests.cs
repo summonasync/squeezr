@@ -106,6 +106,8 @@ public class WorkspaceManagerInitTests
             "**/.vs/**",
             "**/.idea/**",
             "**/.claude/worktrees/**",
+            "**/.mindlash/worktrees/**",
+            "**/.qwen/worktrees/**",
             "**/*.min.js",
             "**/*.tsbuildinfo",
             "**/web/out/**",
@@ -118,7 +120,7 @@ public class WorkspaceManagerInitTests
         ];
         config.Indexing.Ignore.ShouldBe(pinnedDefaults);
         config.Indexing.Ignore.ShouldBe(SqueezrConfig.CreateDefault().Indexing.Ignore);
-        config.Indexing.Ignore.Count.ShouldBe(17);
+        config.Indexing.Ignore.Count.ShouldBe(19);
         config.Indexing.Ignore[0].ShouldBe("**/node_modules/**");
         config.Indexing.Ignore[^1].ShouldBe("**/TestResults/**");
         config.Indexing.Ignore.ShouldNotContain("**/out/**");

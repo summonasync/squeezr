@@ -4,4 +4,5 @@ public sealed record RepairOutcome(
     IReadOnlyList<OrphanInfo> Adopted,
     IReadOnlyList<OrphanInfo> NeedsRoot,
     IReadOnlyList<HuskInfo> Husks,
-    IReadOnlyList<StaleInfo> Stale);
+    IReadOnlyList<StaleInfo> Stale,
+    IReadOnlyList<OrphanAdoptionFailure> Failed);

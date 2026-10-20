@@ -28,13 +28,19 @@ public sealed class DropCommand : Command<DropCommand.Settings>
                 ? DropByStoreKey(storeKey, settings.Json, cancellationToken)
                 : DropCurrentWorkspace(settings.Json, cancellationToken);
         }
-        catch (WorkspaceException ex)
+        // Two removal verdicts and one unclassified permission failure: the permission arm exists because
+        // an unhandled exception lands on stdout with exit 255 and breaks the --json contract, and because
+        // a denial on the removal path is a workspace-store failure, not an internal one.
+        catch (Exception ex)
+            when (ex is WorkspaceException
+                or WorkspaceStoreRemovalException
+                or WorkspaceStoreRemovalUnverifiedException
+                or UnauthorizedAccessException)
         {
-            return CommandError.Report(ex, settings.Json);
-        }
-        catch (WorkspaceStoreRemovalException ex)
-        {
-            return CommandError.Report(ex, settings.Json);
+            var reported = ex is UnauthorizedAccessException
+                ? new WorkspaceException(ex.Message, WorkspaceException.DefaultCode, ex)
+                : ex;
+            return CommandError.Report(reported, settings.Json);
         }
     }
 

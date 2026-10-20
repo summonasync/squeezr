@@ -9,7 +9,9 @@ public static class WorkspaceListing
         var scan = OrphanScanner.Scan();
         var huskKeys = scan.Husks.Select(husk => husk.StoreKey).ToHashSet(StringComparer.Ordinal);
         var staleKeys = scan.Stale.Select(stale => stale.StoreKey).ToHashSet(StringComparer.Ordinal);
-        var workspaces = WorkspaceRegistry.Load()
+        var entries = WorkspaceRegistry.Load();
+        var collidingNames = CollidingNames.SharedByLiveEntries(entries);
+        var workspaces = entries
             .Select(entry => new WorkspaceListEntry(
                 entry.Name,
                 entry.RootPath,
@@ -17,7 +19,8 @@ public static class WorkspaceListing
                 entry.CreatedAt,
                 entry.LastUsedAt,
                 Stale: staleKeys.Contains(entry.StoreKey),
-                Husk: huskKeys.Contains(entry.StoreKey) ? true : null))
+                Husk: huskKeys.Contains(entry.StoreKey) ? true : null,
+                NameCollision: collidingNames.Contains(entry.Name) ? true : null))
             .ToList();
         var orphans = scan.Orphans
             .Select(orphan => new WorkspaceOrphanEntry(

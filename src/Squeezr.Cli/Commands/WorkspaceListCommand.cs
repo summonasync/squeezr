@@ -7,9 +7,6 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class WorkspaceListCommand : Command<WorkspaceListCommand.Settings>
 {
-    private const string StaleDropHint =
-        "run 'squeezr drop --store-key <key>' to remove this entry and its store";
-
     public sealed class Settings : CommandSettings
     {
         [CommandOption("--json")]
@@ -62,7 +59,7 @@ public sealed class WorkspaceListCommand : Command<WorkspaceListCommand.Settings
                 ? "[yellow]husk[/]"
                 : workspace.Stale ? "[yellow]stale[/]" : "[green]ok[/]";
             table.AddRow(
-                workspace.Name.EscapeMarkup(),
+                NameCell(workspace.Name, workspace.NameCollision == true),
                 workspace.RootPath.EscapeMarkup(),
                 workspace.StoreKey.EscapeMarkup(),
                 workspace.LastUsedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
@@ -84,12 +81,17 @@ public sealed class WorkspaceListCommand : Command<WorkspaceListCommand.Settings
         foreach (var stale in listing.Workspaces.Where(workspace => workspace.Stale))
         {
             Console.Error.WriteLine(
-                $"warning: workspace '{stale.Name}' is stale: root path '{stale.RootPath}' does not exist; {StaleDropHint}.");
+                $"warning: workspace '{stale.Name}' is stale (storeKey '{stale.StoreKey}'): " +
+                $"root path '{stale.RootPath}' does not exist; run 'squeezr drop --store-key {stale.StoreKey}' " +
+                "to remove this entry and its store.");
         }
 
         WriteHints(listing);
         return 0;
     }
+
+    private static string NameCell(string name, bool collision) =>
+        collision ? $"{name.EscapeMarkup()} [yellow](name shared)[/]" : name.EscapeMarkup();
 
     private static void WriteHints(WorkspaceListingResult listing)
     {
@@ -103,7 +105,9 @@ public sealed class WorkspaceListCommand : Command<WorkspaceListCommand.Settings
         foreach (var workspace in listing.Workspaces.Where(entry => entry.Husk == true))
         {
             Console.Error.WriteLine(
-                $"warning: workspace '{workspace.Name}' looks like a husk (root path '{workspace.RootPath}'); {StaleDropHint}.");
+                $"warning: workspace '{workspace.Name}' looks like a husk (storeKey '{workspace.StoreKey}', " +
+                $"root path '{workspace.RootPath}'); run 'squeezr drop --store-key {workspace.StoreKey}' " +
+                "to remove this entry and its store.");
         }
     }
 }

@@ -24,11 +24,13 @@ internal static class WorkspaceRepairPruner
     public const string ModeAborted = "aborted";
 
     public const string CategoryStale = "stale";
+    public const string CategoryHusk = "husk";
     public const string ActionWouldPrune = "would-prune";
     public const string ActionRowAndStore = "pruned-row-and-store";
     public const string ActionRowOnly = "pruned-row-only";
     public const string ActionSkippedUnsafeKey = "skipped-unsafe-store-key";
     public const string ActionPruneFailed = "prune-failed";
+    public const string ActionStoreRemovedRowKept = "store-removed-row-kept";
 
     public const string StoreMeasured = "measured";
     public const string StoreMissing = "missing";
@@ -62,8 +64,37 @@ internal static class WorkspaceRepairPruner
             .Where(row => !huskKeys.Contains(row.StoreKey))
             .OrderBy(row => row.Name, StringComparer.Ordinal)
             .ThenBy(row => row.StoreKey, StringComparer.Ordinal)
-            .Select(Measured)
+            .Select(row => Measured(row.Name, row.StoreKey, row.RootPath, CategoryStale))
             .ToList();
+
+    public static IReadOnlyList<WorkspaceRepairStaleEntry> HuskCandidates(
+        IReadOnlyList<HuskInfo> husks,
+        IReadOnlySet<string> staleKeys) =>
+        husks
+            .Where(husk => !staleKeys.Contains(husk.StoreKey))
+            .OrderBy(husk => husk.Name, StringComparer.Ordinal)
+            .ThenBy(husk => husk.StoreKey, StringComparer.Ordinal)
+            .Select(husk => Measured(husk.Name, husk.StoreKey, husk.RootPath, CategoryHusk))
+            .ToList();
+
+    public static string CandidateLabel(IReadOnlyList<WorkspaceRepairStaleEntry> candidates) =>
+        Label(
+            candidates.Count(row => row.Category == CategoryStale),
+            candidates.Count(row => row.Category == CategoryHusk));
+
+    public static string PrunedLabel(IReadOnlyList<WorkspaceRepairPrunedEntry> rows) =>
+        Label(
+            rows.Count(row => row.Category == CategoryStale && IsPruned(row)),
+            rows.Count(row => row.Category == CategoryHusk && IsPruned(row)));
+
+    private static string Label(int stale, int husks) =>
+        (stale, husks) switch
+        {
+            (0, 0) => "0 row(s)",
+            (_, 0) => $"{stale} stale row(s)",
+            (0, _) => $"{husks} husk row(s)",
+            _ => $"{stale + husks} row(s) ({stale} stale, {husks} husk)",
+        };
 
     public static async Task<WorkspaceRepairPruneSummary> RunAsync(
         RepairPruneGate gate,
@@ -90,7 +121,7 @@ internal static class WorkspaceRepairPruner
             return new WorkspaceRepairPruneSummary(ModeRefused, [], 0, 0);
         }
 
-        if (gate == RepairPruneGate.Prompt && !await ConfirmAsync(candidates.Count, console, cancellationToken))
+        if (gate == RepairPruneGate.Prompt && !await ConfirmAsync(candidates, console, cancellationToken))
         {
             return new WorkspaceRepairPruneSummary(ModeDeclined, [], 0, 0);
         }
@@ -99,7 +130,9 @@ internal static class WorkspaceRepairPruner
     }
 
     // The sweep dies on the first store it cannot remove. Rows removed before that point are already
-    // gone from the registry, so they are reported instead of being lost with the exception.
+    // gone from the registry, so they are reported instead of being lost with the exception. A registry
+    // write that dies after a store dir disappeared keeps those paths: the store fact and the row fact
+    // point in different directions, and the report has to say both.
     private static WorkspaceRepairPruneSummary Sweep(IReadOnlyList<WorkspaceRepairStaleEntry> candidates)
     {
         var rows = new List<WorkspaceRepairPrunedEntry>();
@@ -121,25 +154,25 @@ internal static class WorkspaceRepairPruner
     }
 
     private static async Task<bool> ConfirmAsync(
-        int candidateCount,
+        IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
         IAnsiConsole console,
         CancellationToken cancellationToken)
     {
-        var prompt = new ConfirmationPrompt($"Prune {candidateCount} stale row(s) and their store dirs?")
+        var prompt = new ConfirmationPrompt($"Prune {CandidateLabel(candidates)} and their store dirs?")
         {
             DefaultValue = false,
         };
         return await prompt.ShowAsync(console, cancellationToken);
     }
 
-    private static WorkspaceRepairStaleEntry Measured(StaleInfo row)
+    private static WorkspaceRepairStaleEntry Measured(string name, string storeKey, string rootPath, string category)
     {
-        var (state, bytes) = MeasureStore(row.StoreKey);
-        return new WorkspaceRepairStaleEntry(row.Name, row.StoreKey, row.RootPath, bytes, state);
+        var (state, bytes) = MeasureStore(storeKey);
+        return new WorkspaceRepairStaleEntry(name, storeKey, rootPath, bytes, state, category);
     }
 
     private static WorkspaceRepairPrunedEntry Planned(WorkspaceRepairStaleEntry candidate) =>
-        new(candidate.StoreKey, candidate.Name, candidate.RootPath, CategoryStale, ActionWouldPrune, candidate.StoreBytes, []);
+        new(candidate.StoreKey, candidate.Name, candidate.RootPath, candidate.Category, ActionWouldPrune, candidate.StoreBytes, []);
 
     private static WorkspaceRepairPrunedEntry Drop(WorkspaceRepairStaleEntry candidate)
     {
@@ -149,7 +182,7 @@ internal static class WorkspaceRepairPruner
                 candidate.StoreKey,
                 candidate.Name,
                 candidate.RootPath,
-                CategoryStale,
+                candidate.Category,
                 ActionSkippedUnsafeKey,
                 null,
                 []);
@@ -161,7 +194,7 @@ internal static class WorkspaceRepairPruner
             candidate.StoreKey,
             candidate.Name,
             candidate.RootPath,
-            CategoryStale,
+            candidate.Category,
             removed.Count > 0 ? ActionRowAndStore : ActionRowOnly,
             candidate.StoreBytes,
             removed);
@@ -172,29 +205,40 @@ internal static class WorkspaceRepairPruner
             candidate.StoreKey,
             candidate.Name,
             candidate.RootPath,
-            CategoryStale,
-            ActionPruneFailed,
+            candidate.Category,
+            ex is WorkspaceStoreRemovalUnverifiedException ? ActionStoreRemovedRowKept : ActionPruneFailed,
             candidate.StoreBytes,
-            [],
+            (ex as WorkspaceStoreRemovalUnverifiedException)?.RemovedStoreDirs ?? [],
             DescribeFailure(ex));
 
     // Exception messages here carry the store path, and the sweep must not name a path it did not delete.
-    // The removal primitive tags store-side failures, so anything untagged here came from the registry.
+    // The removal primitive tags both removal phases, so the wording follows the tag: a store-side tag
+    // means nothing disappeared, an unverified tag means a store dir did disappear and the row did not.
     private static string DescribeFailure(Exception ex) => ex switch
     {
         WorkspaceLockedException locked => locked.Message,
         WorkspaceStoreRemovalException removal => $"{InnerType(removal)}: a store dir could not be removed",
+        WorkspaceStoreRemovalUnverifiedException unverified =>
+            $"{InnerType(unverified)}: the store dir was removed, the registry row could not be pruned",
         _ => $"{ex.GetType().Name}: the registry row could not be pruned",
     };
 
-    private static string InnerType(WorkspaceStoreRemovalException removal) =>
-        (removal.InnerException ?? removal).GetType().Name;
+    private static string InnerType(Exception ex) =>
+        (ex.InnerException ?? ex).GetType().Name;
 
+    // Aggregates count paths that really disappeared, never an action label: a row that survived while
+    // its store dir did not is one store dir gone, and a refusal that deleted nothing is zero.
     private static long RemovedStoreBytes(IReadOnlyList<WorkspaceRepairPrunedEntry> rows) =>
-        rows.Where(row => row.Action == ActionRowAndStore).Sum(row => row.StoreBytes ?? 0);
+        rows.Where(RemovedAStore).Sum(row => row.StoreBytes ?? 0);
 
     private static int RemovedStores(IReadOnlyList<WorkspaceRepairPrunedEntry> rows) =>
-        rows.Count(row => row.Action == ActionRowAndStore);
+        rows.Count(RemovedAStore);
+
+    public static bool IsPruned(WorkspaceRepairPrunedEntry row) =>
+        row.Action is ActionRowAndStore or ActionRowOnly;
+
+    private static bool RemovedAStore(WorkspaceRepairPrunedEntry row) =>
+        row.Action is ActionRowAndStore or ActionStoreRemovedRowKept;
 
     private static (string State, long? Bytes) MeasureStore(string storeKey)
     {

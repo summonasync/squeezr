@@ -67,7 +67,7 @@ public sealed class WorkspaceRepairCommandTests
 
             var result = await RunCliAsync(home, "workspace", "repair", "--json");
 
-            result.ExitCode.ShouldBe(0);
+            result.ExitCode.ShouldBe(1);
             var lines = result.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
             lines.Length.ShouldBe(1);
             using var document = JsonDocument.Parse(lines[0]);
@@ -86,9 +86,19 @@ public sealed class WorkspaceRepairCommandTests
             husks.GetArrayLength().ShouldBe(1);
             husks[0].GetProperty("storeKey").GetString().ShouldBe("husk-home-aaaa1111");
 
-            result.StdErr.ShouldContain("husk");
+            body.GetProperty("prune").GetProperty("mode").GetString().ShouldBe("refused");
+            body.TryGetProperty("failedAdoptions", out _).ShouldBeFalse();
+            var counts = body.GetProperty("counts");
+            counts.GetProperty("adopted").GetInt32().ShouldBe(1);
+            counts.GetProperty("needsRoot").GetInt32().ShouldBe(1);
+            counts.GetProperty("stalePruned").GetInt32().ShouldBe(0);
+            counts.GetProperty("husksPruned").GetInt32().ShouldBe(0);
+
+            result.StdErr.ShouldContain("looks like a husk");
             result.StdErr.ShouldContain("squeezr drop --store-key");
+            result.StdErr.ShouldContain("Refusing to prune 1 husk row(s) without confirmation");
             result.StdOut.ShouldNotContain("warning");
+            ReadRegistry(home).Select(row => row.StoreKey).ShouldBe(["husk-home-aaaa1111", adoptable.StoreKey]);
         }
         finally
         {

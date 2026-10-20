@@ -11,6 +11,7 @@ public static class RegistryRepair
         var scan = OrphanScanner.Scan();
         var adopted = new List<OrphanInfo>();
         var needsRoot = new List<OrphanInfo>();
+        var failed = new List<OrphanAdoptionFailure>();
         var timestamp = DateTimeOffset.UtcNow;
 
         foreach (var orphan in scan.Orphans)
@@ -21,16 +22,25 @@ public static class RegistryRepair
                 continue;
             }
 
-            WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
-                orphan.Name,
-                rootPath,
-                orphan.StoreKey,
-                timestamp,
-                timestamp));
-            adopted.Add(orphan);
+            try
+            {
+                WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+                    orphan.Name,
+                    rootPath,
+                    orphan.StoreKey,
+                    timestamp,
+                    timestamp));
+                adopted.Add(orphan);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // One unwritable home fails every row; stopping at the first would report the rest as
+                // not attempted, which reads like they were fine.
+                failed.Add(new OrphanAdoptionFailure(orphan, $"{ex.GetType().Name}: {ex.Message}"));
+            }
         }
 
-        return new RepairOutcome(adopted, needsRoot, scan.Husks, scan.Stale);
+        return new RepairOutcome(adopted, needsRoot, scan.Husks, scan.Stale, failed);
     }
 
     public static WorkspaceRegistryEntry AdoptWithRoot(string storeKey, string rootPath)

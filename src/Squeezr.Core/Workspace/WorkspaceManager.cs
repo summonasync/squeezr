@@ -172,18 +172,35 @@ public sealed class WorkspaceManager
             throw new WorkspaceException("Nothing to drop: no workspace store is registered for this directory.");
         }
 
-        // Windows refuses to delete a directory that holds an open file,
-        // so the lock is released (which removes index.lock) before the delete.
-        using (IndexLock.Acquire(storeDir, onStaleTakeover))
+        // The store phase is classified here, before the caller's registry guard sees it: a plain
+        // IOException from the delete would be repainted as "registry is busy" upstream.
+        try
         {
+            // Windows refuses to delete a directory that holds an open file,
+            // so the lock is released (which removes index.lock) before the delete.
+            using (IndexLock.Acquire(storeDir, onStaleTakeover))
+            {
+            }
+
+            Directory.Delete(storeDir, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw WorkspaceStoreRemovalException.ForStoreDir(storeDir, ex);
         }
 
-        Directory.Delete(storeDir, recursive: true);
         var removed = new List<string> { storeDir };
 
         if (wasRegistered)
         {
-            WorkspaceRegistry.RemoveByRoot(_root);
+            try
+            {
+                WorkspaceRegistry.RemoveByRoot(_root);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new WorkspaceStoreRemovalUnverifiedException(removed, ex);
+            }
         }
         else
         {
@@ -284,7 +301,7 @@ public sealed class WorkspaceManager
         WorkspaceManifestFile.Exists(_root)
             ? WorkspaceManifestFile.Load(_root)
             : throw new WorkspaceException(
-                "Workspace is not initialized. Run 'squeezr init' first.",
+                RemedyText.WorkspaceNotInitialized,
                 WorkspaceException.NotInitializedCode);
 
     private string ToStoredPath(string fullPath)

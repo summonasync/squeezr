@@ -196,6 +196,56 @@ public sealed class WorkspaceRepairPrunerTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_Confirmed_HuskCandidate_PrunesRowAndStore_HomeDirectorySurvives()
+    {
+        var huskDir = WriteStoreDir(_huskKey, HuskName, Canonical(_home), ("meta.db", 256));
+        var scan = OrphanScanner.Scan();
+        var candidates = WorkspaceRepairPruner.HuskCandidates(
+            scan.Husks, scan.Stale.Select(row => row.StoreKey).ToHashSet(StringComparer.Ordinal));
+
+        var summary = await WorkspaceRepairPruner.RunAsync(
+            RepairPruneGate.Confirmed, candidates, new TestConsole(), CancellationToken.None);
+
+        summary.Mode.ShouldBe(WorkspaceRepairPruner.ModePruned);
+        var row = summary.Rows.ShouldHaveSingleItem();
+        row.Category.ShouldBe(WorkspaceRepairPruner.CategoryHusk);
+        row.Action.ShouldBe(WorkspaceRepairPruner.ActionRowAndStore);
+        row.RemovedPaths.ShouldHaveSingleItem().ShouldBe(huskDir);
+        summary.Rows.SelectMany(entry => entry.RemovedPaths).ShouldHaveSingleItem().ShouldBe(huskDir);
+        ReadRegistry().Select(entry => entry.StoreKey).ShouldNotContain(_huskKey);
+        ReadRegistry().Select(entry => entry.StoreKey).ShouldContain(_liveKey);
+        Directory.Exists(_home).ShouldBeTrue();
+        File.ReadAllText(Path.Combine(_home, "canary.txt")).ShouldBe("keep me");
+    }
+
+    [Fact]
+    public async Task RunAsync_Prompt_MixedCandidates_QuestionNamesBothCategories_AndDeclineKeepsEverything()
+    {
+        var huskDir = WriteStoreDir(_huskKey, HuskName, Canonical(_home), ("meta.db", 64));
+        var scan = OrphanScanner.Scan();
+        IReadOnlyList<WorkspaceRepairStaleEntry> candidates = WorkspaceRepairPruner
+            .Candidates(scan.Stale, new HashSet<string>(StringComparer.Ordinal))
+            .Concat(WorkspaceRepairPruner.HuskCandidates(
+                scan.Husks, scan.Stale.Select(row => row.StoreKey).ToHashSet(StringComparer.Ordinal)))
+            .OrderBy(row => row.Name, StringComparer.Ordinal)
+            .ThenBy(row => row.StoreKey, StringComparer.Ordinal)
+            .ToList();
+        var console = InteractiveConsole();
+        console.Input.PushTextWithEnter("n");
+        var before = ReadRegistry().Select(row => row.StoreKey).ToList();
+
+        var summary = await WorkspaceRepairPruner.RunAsync(
+            RepairPruneGate.Prompt, candidates, console, CancellationToken.None);
+
+        summary.Mode.ShouldBe(WorkspaceRepairPruner.ModeDeclined);
+        summary.Rows.ShouldBeEmpty();
+        console.Output.ShouldContain("Prune 4 row(s) (3 stale, 1 husk) and their store dirs?");
+        ReadRegistry().Select(row => row.StoreKey).ShouldBe(before);
+        Directory.Exists(_withStoreDir).ShouldBeTrue();
+        Directory.Exists(huskDir).ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task RunAsync_NonLatinStoreKey_PrunsRowAndStore()
     {
         var root = Canonical(NewTempDir());
@@ -325,6 +375,59 @@ public sealed class WorkspaceRepairPrunerTests : IDisposable
             stale, new HashSet<string>(StringComparer.Ordinal) { _withStoreKey });
 
         candidates.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void HuskCandidates_MeasuresStores_TagsHusk_AndExcludesStaleKeys()
+    {
+        var huskDir = WriteStoreDir(_huskKey, HuskName, Canonical(_home), ("meta.db", 320));
+        var scan = OrphanScanner.Scan();
+        var staleKeys = scan.Stale.Select(row => row.StoreKey).ToHashSet(StringComparer.Ordinal);
+
+        var husks = WorkspaceRepairPruner.HuskCandidates(scan.Husks, staleKeys);
+
+        var husk = husks.ShouldHaveSingleItem();
+        husk.Category.ShouldBe(WorkspaceRepairPruner.CategoryHusk);
+        husk.Name.ShouldBe(HuskName);
+        husk.StoreKey.ShouldBe(_huskKey);
+        husk.RootPath.ShouldBe(Canonical(_home));
+        husk.StoreState.ShouldBe(WorkspaceRepairPruner.StoreMeasured);
+        husk.StoreBytes.ShouldBe(TotalBytes(huskDir));
+
+        WorkspaceRepairPruner
+            .HuskCandidates(scan.Husks, new HashSet<string>(StringComparer.Ordinal) { _huskKey })
+            .ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void CandidateLabel_And_PrunedLabel_NameCategoriesForEveryShape()
+    {
+        var mixed = new[]
+        {
+            new WorkspaceRepairStaleEntry("a", "key-a", "/r", null, WorkspaceRepairPruner.StoreMissing),
+            new WorkspaceRepairStaleEntry("b", "key-b", "/r", null, WorkspaceRepairPruner.StoreMissing),
+            new WorkspaceRepairStaleEntry(
+                "c", "key-c", "/r", null, WorkspaceRepairPruner.StoreMissing, WorkspaceRepairPruner.CategoryHusk),
+        };
+
+        WorkspaceRepairPruner.CandidateLabel(mixed).ShouldBe("3 row(s) (2 stale, 1 husk)");
+        WorkspaceRepairPruner.CandidateLabel(mixed.Take(2).ToList()).ShouldBe("2 stale row(s)");
+        WorkspaceRepairPruner.CandidateLabel(mixed.Skip(2).ToList()).ShouldBe("1 husk row(s)");
+
+        var pruned = new[]
+        {
+            new WorkspaceRepairPrunedEntry(
+                "key-a", "a", "/r", WorkspaceRepairPruner.CategoryStale,
+                WorkspaceRepairPruner.ActionRowAndStore, null, []),
+            new WorkspaceRepairPrunedEntry(
+                "key-b", "b", "/r", WorkspaceRepairPruner.CategoryStale,
+                WorkspaceRepairPruner.ActionSkippedUnsafeKey, null, []),
+            new WorkspaceRepairPrunedEntry(
+                "key-c", "c", "/r", WorkspaceRepairPruner.CategoryHusk,
+                WorkspaceRepairPruner.ActionRowOnly, null, []),
+        };
+
+        WorkspaceRepairPruner.PrunedLabel(pruned).ShouldBe("2 row(s) (1 stale, 1 husk)");
     }
 
     [Fact]

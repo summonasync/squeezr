@@ -38,6 +38,10 @@ public sealed class InitCommand : Command<InitCommand.Settings>
                 Console.Error.WriteLine($"warning: {result.RepairHint}");
             }
 
+            RegistrationAdvisoryOutput.Write(
+                RegistrationAdvisories.Collect(result.WorkspaceName, result.RootPath),
+                settings.Json);
+
             if (settings.Json)
             {
                 JsonOutput.Write(result);

@@ -42,7 +42,17 @@ public static class WorkspaceStore
             removed.Add(storeDir);
         }
 
-        WorkspaceRegistry.RemoveByStoreKey(entry.StoreKey);
+        // Nothing was removed when the store dir was already gone, so the failure stays a plain registry
+        // failure; the unverified verdict only speaks when a path really did disappear.
+        try
+        {
+            WorkspaceRegistry.RemoveByStoreKey(entry.StoreKey);
+        }
+        catch (Exception ex) when (removed.Count > 0 && ex is IOException or UnauthorizedAccessException)
+        {
+            throw new WorkspaceStoreRemovalUnverifiedException(removed, ex);
+        }
+
         return removed;
     }
 
@@ -77,7 +87,7 @@ public static class WorkspaceStore
                 return new WorkspaceResolution(
                     entry.RootPath,
                     entry.StoreKey,
-                    keyIsOneSegment ? StoreDirFor(entry.StoreKey) : null,
+                    keyIsOneSegment ? WorkspaceStorePaths.RequireStoreDir(entry.StoreKey) : null,
                     IsWorkspace: true,
                     completedPartialMigration);
             }
@@ -88,7 +98,7 @@ public static class WorkspaceStore
                 return new WorkspaceResolution(
                     migrated.RootPath,
                     migrated.StoreKey,
-                    StoreDirFor(migrated.StoreKey),
+                    WorkspaceStorePaths.RequireStoreDir(migrated.StoreKey),
                     IsWorkspace: true,
                     MigratedFromLegacy: true);
             }
@@ -167,7 +177,7 @@ public static class WorkspaceStore
     {
         RefuseCentralStoreMigration(root);
 
-        var storeDir = StoreDirFor(storeKey);
+        var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
         Directory.CreateDirectory(storeDir);
 
         var legacyStoreDir = Path.Combine(root, SqueezrPaths.StoreDirName);
@@ -251,6 +261,4 @@ public static class WorkspaceStore
             MoveDirectoryContents(dir, Path.Combine(destDir, Path.GetFileName(dir)));
         }
     }
-
-    private static string StoreDirFor(string storeKey) => Path.Combine(SqueezrHome.WorkspacesDir, storeKey);
 }
