@@ -7,7 +7,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Cli;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class WorkspaceRepairPruneCliTests
 {
     private const string NonAsciiName = "проект-проект";

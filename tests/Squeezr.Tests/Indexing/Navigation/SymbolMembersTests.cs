@@ -10,7 +10,7 @@ using Xunit.Abstractions;
 
 namespace Squeezr.Tests.Indexing.Navigation;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public class SymbolMembersTests(ITestOutputHelper output)
 {
     private const int MembersFitBudget = 120;

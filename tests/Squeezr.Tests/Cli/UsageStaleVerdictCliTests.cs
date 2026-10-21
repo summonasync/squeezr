@@ -11,7 +11,7 @@ namespace Squeezr.Tests.Cli;
 // The fixture's queries.jsonl lives in the central store dir, so the telemetry outlives the deleted
 // root exactly the way a real dead workspace's does. The log line must be single-line JSON — the
 // reader splits on newlines and silently drops fragments of a pretty-printed entry.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class UsageStaleVerdictCliTests
 {
     [Fact]

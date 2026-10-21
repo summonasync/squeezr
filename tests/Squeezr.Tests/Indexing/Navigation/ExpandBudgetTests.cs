@@ -6,7 +6,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing.Navigation;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public class ExpandBudgetTests
 {
     [Fact]

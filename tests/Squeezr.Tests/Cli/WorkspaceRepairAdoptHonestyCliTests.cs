@@ -10,7 +10,7 @@ namespace Squeezr.Tests.Cli;
 // Before the per-orphan verdicts, a repair --yes with an unwritable home and one adoptable orphan died
 // in RegistryRepair.AdoptAll with a raw UnauthorizedAccessException: exit 255, no JSON on any channel,
 // and no trace of which orphans were adopted and which were not.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class WorkspaceRepairAdoptHonestyCliTests
 {
     private static readonly UnixFileMode HomeWritable =

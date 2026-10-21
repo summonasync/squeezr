@@ -9,7 +9,7 @@ namespace Squeezr.Tests.Indexing;
 // Next to an empty mask list the regression is invisible — with no masks the compiled half is short-circuited
 // away — so the ingestion scope is measured against the per-call facade over the same three masks. A scope
 // that compiles per path costs what the facade costs, and that is the shape this kills.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public class SecretGuardIngestionCostTests(ITestOutputHelper output)
 {
     private const int Decisions = 20_000;

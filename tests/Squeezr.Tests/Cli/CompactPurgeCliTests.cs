@@ -9,7 +9,7 @@ namespace Squeezr.Tests.Cli;
 // What the operator actually runs and actually reads: `squeezr compact` is the forced purge pass over a store
 // that was built before the guard. The counters have to be there, and the protected names must not be — the
 // one line of this contract that an agent sees is the line that must not become an existence oracle.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class CompactPurgeCliTests
 {
     private const string PemPath = "deploy/keys/monkey.pem";

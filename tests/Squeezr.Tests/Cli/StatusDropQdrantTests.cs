@@ -4,7 +4,7 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Cli;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class StatusDropQdrantTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");

@@ -6,7 +6,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Storage;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class WorkspaceStoreResolveTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
@@ -35,6 +35,58 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
         result.StoreKey.ShouldBeNull();
         result.StoreDir.ShouldBeNull();
         result.RootPath.ShouldBe(Path.GetFullPath(start));
+    }
+
+    [Fact]
+    public void Resolve_StartAtFilesystemRoot_ReturnsNotFoundInsteadOfThrowing()
+    {
+        // The upward walk canonicalizes every level, so it always reaches the
+        // filesystem root; on Windows that used to throw before the loop could exit.
+        var root = Path.GetPathRoot(Path.GetTempPath());
+        root.ShouldNotBeNullOrEmpty();
+
+        var result = WorkspaceStore.Resolve(root);
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.RootPath.ShouldBe(root);
+    }
+
+    [Fact]
+    public void Resolve_StartUnderTheStoreHome_DoesNotMigrateTheCentralStoreAsLegacy()
+    {
+        // The central store lives at <home>/.squeezr, which is shaped exactly like a
+        // legacy in-project store dir. Walking up from any directory beneath the home
+        // used to "migrate" it: contents moved away, directory deleted.
+        var profile = NewDir();
+        var store = Path.Combine(profile, SqueezrPaths.StoreDirName);
+        Directory.CreateDirectory(Path.Combine(store, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(store, SqueezrPaths.RegistryFileName), "[]");
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, store);
+        SqueezrHome.Reset();
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "projects", "fresh")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(store).ShouldBeTrue();
+        File.Exists(Path.Combine(store, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Resolve_StartUnderAForeignCentralStore_DoesNotMigrateItEither()
+    {
+        // Same shape, but not the store this process resolves - an old store left behind
+        // after SQUEEZR_HOME was repointed. Still a central store, still not legacy.
+        var profile = NewDir();
+        var foreignStore = Path.Combine(profile, SqueezrPaths.StoreDirName);
+        Directory.CreateDirectory(Path.Combine(foreignStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName), "[]");
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "work")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        File.Exists(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
     }
 
     [Fact]

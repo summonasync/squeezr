@@ -9,7 +9,7 @@ namespace Squeezr.Tests.Storage;
 // spellings lexically: with SQUEEZR_HOME named through a linked ancestor (<d>/link/.squeezr naming
 // <d>/real/.squeezr) the compare missed and Directory.Delete took the whole home. Measured on three
 // binaries in audits/registry-store-parent-drop-guard-2026-10-06/residual-symlink-home.txt.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class SymlinkedHomeStoreGuardTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

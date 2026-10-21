@@ -8,7 +8,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public class PendingQueueRefillTests
 {
     private const string ModelKey = "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5";

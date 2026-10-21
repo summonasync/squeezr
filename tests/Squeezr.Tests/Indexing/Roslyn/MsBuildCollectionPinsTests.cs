@@ -10,16 +10,16 @@ public class MsBuildCollectionPinsTests
     [InlineData(typeof(SemanticSessionPoolTests))]
     public void TestClass_CreatingSessionsThroughMsBuildLocator_SitsInTheSerializedCollection(Type testClass)
     {
-        CollectionNameOf(testClass).ShouldBe("MsBuildLocator");
+        CollectionNameOf(testClass).ShouldBe("ProcessGlobals");
     }
 
     [Fact]
-    public void MsBuildLocatorCollection_DisablesParallelization()
+    public void ProcessGlobalsCollection_DisablesParallelization()
     {
-        var definition = typeof(CliProcessGlobalsCollection).Assembly
-            .GetType("Squeezr.Tests.MsBuildLocatorCollection", throwOnError: false);
+        var definition = typeof(ProcessGlobalsCollection).Assembly
+            .GetType("Squeezr.Tests.ProcessGlobalsCollection", throwOnError: false);
         definition.ShouldNotBeNull();
-        CollectionNameOf(definition!).ShouldBe("MsBuildLocator");
+        CollectionNameOf(definition!).ShouldBe("ProcessGlobals");
         definition!.GetCustomAttribute<CollectionDefinitionAttribute>()
             .ShouldNotBeNull().DisableParallelization.ShouldBeTrue();
     }

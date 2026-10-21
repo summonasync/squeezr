@@ -8,7 +8,7 @@ using Squeezr.Tests.Mcp;
 
 namespace Squeezr.Tests.Cli;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class QueryTelemetryInstrumentationTests
 {
     [Fact]

@@ -10,7 +10,7 @@ using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Cli;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class UsageCommandTests
 {
     [Fact]

@@ -10,7 +10,7 @@ namespace Squeezr.Tests.Storage;
 // One removal has two phases: the store dir and the registry row. When they disagree the report has to
 // say which one moved — a store that disappeared while its row stayed is not "nothing happened", and a
 // refusal that deleted nothing is not "removed" either.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class WorkspaceStoreRemovalPhaseTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

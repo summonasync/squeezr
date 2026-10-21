@@ -6,7 +6,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Storage;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class RegistryStaleClassificationTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

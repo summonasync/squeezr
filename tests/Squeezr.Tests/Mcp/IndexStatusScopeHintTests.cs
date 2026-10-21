@@ -7,7 +7,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class IndexStatusScopeHintTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

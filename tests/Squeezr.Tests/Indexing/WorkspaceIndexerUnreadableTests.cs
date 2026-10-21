@@ -8,7 +8,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class WorkspaceIndexerUnreadableTests
 {
     private const string First = "class Alpha\n{\n    int Sum(int a, int b) => a + b;\n}\n";

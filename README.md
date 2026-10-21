@@ -41,9 +41,13 @@ scripts/install.sh
 ```
 
 ```powershell
-# Windows
-pwsh -File scripts\install.ps1
+# Windows: из исходников (нужен .NET 10 SDK)
+powershell -File scripts\install.ps1
 ```
+
+На Windows есть и второй путь — готовый установщик `SqueezrSetup-<version>-win-x64.exe`: двойной клик, без админа, с записью в «Программы и компоненты». Его собирают локально одной командой, см. [Windows: установщик `.exe`](#windows-установщик-exe).
+
+Скрипты объявляют `#Requires -Version 5.1`, так что работают и в штатном Windows PowerShell (`powershell -File ...`), и в pwsh 7 — отдельно ставить pwsh не нужно.
 
 Или просто собрать для разработки (нужен .NET 10 SDK): `dotnet build Squeezr.slnx`.
 
@@ -86,7 +90,7 @@ squeezr workspace list                        # реестр воркспейс�
 | `ollama` | Заметно быстрее на больших репо; на AMD-GPU считает через ROCm (см. раздел про services) | `embeddings.provider: "ollama"` + секция `embeddings.ollama`: endpoint `http://localhost:11434`, модель `nomic-embed-text` (768d, профиль `nomic-embed-text-v1.5` — префикс-симметрия с onnx по семантике (одинаковые `search_document: `/`search_query: ` на стороне squeezr; сами вектора onnx≠ollama, поэтому смена провайдера переэмбеддит чанки). Нативный `/api/embed`, API-ключа нет. Модель подтянется сама при первой индексации (auto-pull); ollama не запущен — явная ошибка с подсказкой `squeezr services up` |
 | `openai` | OpenAI-совместимый endpoint (OpenAI, Azure, vLLM) | Секция `embeddings.openAiCompatible` + ключ только через env `SQUEEZR_API_KEY` |
 
-Скачать ONNX-модель: `scripts/fetch-model.sh` на Linux, `pwsh -File scripts\fetch-model.ps1` на Windows. Порядок резолва модели: явный путь в конфиге → `~/.squeezr/models/` → bundled-копия рядом с бинарём. Обратно на bge-code-v1 (1536d, кодовая специализация): `scripts/fetch-model.sh --model bge-code-v1` (в pwsh: `-Model bge-code-v1`) + `"model": "bge-code-v1"` в секции `embeddings.onnx`; на существующем workspace смена модели честно ругнётся «collection vector size 768 ≠ 1536» — лечится `squeezr index --reembed`, молча перетереть коллекцию не выйдет. Смена провайдера/модели меняет ключ чанков — затронутые чанки переэмбеддятся автоматически. Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
+Скачать ONNX-модель: `scripts/fetch-model.sh` на Linux, `powershell -File scripts\fetch-model.ps1` на Windows. Порядок резолва модели: явный путь в конфиге → `~/.squeezr/models/` → bundled-копия рядом с бинарём. Обратно на bge-code-v1 (1536d, кодовая специализация): `scripts/fetch-model.sh --model bge-code-v1` (в pwsh: `-Model bge-code-v1`) + `"model": "bge-code-v1"` в секции `embeddings.onnx`; на существующем workspace смена модели честно ругнётся «collection vector size 768 ≠ 1536» — лечится `squeezr index --reembed`, молча перетереть коллекцию не выйдет. Смена провайдера/модели меняет ключ чанков — затронутые чанки переэмбеддятся автоматически. Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
 
 ## For AI agents
 
@@ -99,7 +103,7 @@ squeezr init && squeezr add . && squeezr index --events
 squeezr mcp install --all --scope user --yes
 ```
 
-1. The installer resolves the latest published Gitea release, unpacks it into `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if that dir is not on PATH, the script says so — fix the shell profile and open a new terminal). Pin or roll back with `--version <tag>`.
+1. The installer resolves the latest published Gitea release, unpacks it into `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if that dir is not on PATH, the script says so — fix the shell profile and open a new terminal). Pin or roll back with `--version <tag>`. **Linux only** — releases are published for `linux-x64` alone. On Windows, build the setup executable locally (`powershell -File scripts\build-installer.ps1`) or install from source with `powershell -File scripts\install.ps1`.
 2. Starts the managed Qdrant + Ollama stack; the first run pulls ~3.6 GB of images. If docker is missing, stop and ask the human — do not improvise.
 3. Creates a workspace in the current directory and indexes everything (zero files land in the project).
 4. Registers the MCP server in every detected client at user scope, non-interactive. Restart the agent session afterwards — MCP clients read configs at startup.
@@ -145,6 +149,7 @@ warning: workspace store 'squeezr-d23cb388' has no recorded root path; run 'sque
 $ squeezr workspace repair --store-key squeezr-d23cb388 --root REDACTED-PATH/Projects/AI-Tools/Squeezr
 Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI-Tools/Squeezr
 ```
+- **Переменные окружения:** `SQUEEZR_HOME` переносит весь стор, `SQUEEZR_CLIENT_HOME` переносит каталог, в котором `squeezr mcp install/remove/doctor` ищет конфиги агентских клиентов (по умолчанию — профиль пользователя). Вторая нужна в первую очередь тестам и песочницам: под Windows `GetFolderPath(UserProfile)` ходит в shell-API известных папок и `USERPROFILE` игнорирует, так что иначе профиль не перенаправить. Не задана — поведение ровно как раньше.
 - **Легаси-миграция автоматическая:** проекты со старым layout (`.squeezr/` + `squeezr.workspace.json` в корне) переезжают в стор при первом же обращении — переносится содержимое `.squeezr/` и манифест, squeezr-сгенерированный `docker-compose.yml` и мёртвый `state.json` удаляются. Детали — [docs/migration-central-store.md](docs/migration-central-store.md). Qdrant-коллекции (имя зависит от пути воркспейса, а не стора) переживают миграцию, вектора не теряются.
 
 ## Cross-repo workspaces
@@ -260,7 +265,31 @@ squeezr services up                                                     # пов
 
 Повторные `up` ходят в registry только за отсутствующими образами (`pull --policy missing`, compose v2.24+; на v2.21–2.23 — полный pull) — офлайн-перезапуск с уже скачанными образами работает. Требования: Docker Engine + compose plugin v2.21+ (`status` использует `ps --format json`); поддерживается и standalone `docker-compose`. `down` останавливает контейнеры, но **никогда** не трогает volume'ы — данные qdrant/ollama переживают циклы down/up.
 
-Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `pwsh -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится для `squeezr services up` (Qdrant и, опционально, Ollama). Важно: ни установка, ни удаление не трогают стор `~/.squeezr` — воркспейсы и модели переживают переустановку бинаря.
+Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `powershell -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится для `squeezr services up` (Qdrant и, опционально, Ollama). Важно: ни установка, ни удаление не трогают стор `~/.squeezr` — воркспейсы и модели переживают переустановку бинаря.
+
+### Windows: установщик `.exe`
+
+Кроме скриптовой установки Windows умеет нормальный установщик — `SqueezrSetup-<version>-win-x64.exe`. Он ставится **без прав администратора** в `%LOCALAPPDATA%\Programs\Squeezr` (тот же каталог, куда кладёт `install.ps1`, так что одно аккуратно перекрывает другое), сам добавляет каталог в user PATH и регистрируется в «Программах и компонентах» — удаление идёт оттуда, а не поиском скрипта в забытом чекауте. Если запустить с повышением прав, предложит поставить на всю машину в `%ProgramFiles%\Squeezr`.
+
+Готовых сборок под Windows нигде не лежит и не будет: Gitea-релизы собираются только под `linux-x64`, Windows-раннера нет. Пакет собирается локально, на любой виндовой машине:
+
+```powershell
+# пререквизит: Inno Setup 6 (плюс .NET 10 SDK)
+winget install -e --id JRSoftware.InnoSetup
+
+powershell -File scripts\build-installer.ps1
+# → artifacts\installer\SqueezrSetup-1.0.2-win-x64.exe
+```
+
+Флаги: `-Rid win-x64|win-arm64` (дефолт `win-x64`), `-Version <строка>` (по умолчанию берётся `<Version>` из `src\Squeezr.Cli\Squeezr.Cli.csproj`), `-SkipBuild` (упаковать уже опубликованное дерево `artifacts\publish`), `-IsccPath <путь>` (явный компилятор), `-OutputDir <путь>`, `-InstallInno` (доставить Inno Setup через winget, если его нет). Inno ищется по PATH, в ключах удаления HKCU и HKLM и в стандартных каталогах — per-user установка в `%LOCALAPPDATA%\Programs\Inno Setup 6` находится так же, как машинная.
+
+Что стоит знать:
+
+- **Пакет не подписан** — сертификата нет. При первом запуске SmartScreen покажет «Windows protected your PC»: *More info* → *Run anyway*.
+- **PATH подхватится только в новом терминале** — установщик рассылает `WM_SETTINGCHANGE`, но уже открытые консоли его не перечитывают.
+- **Перед переустановкой поверх живых демонов** останови их: `squeezr fleet stop <storeKey>`. Иначе бинарь залочен, и закрывать его будет Restart Manager.
+- **Удаление не трогает стор `~/.squeezr`** — воркспейсы, модели и compose-файл переживают деинсталл; снести их можно только руками, после `squeezr drop` и `squeezr services down`.
+- **Модель эмбеддингов в пакет не входит** (+131 МБ ради опциональной семантики) — тянется отдельно через `scripts\fetch-model.ps1`.
 
 Переехали со старой Windows-машины? Миграционный чек-лист — [docs/migration-windows-to-linux.md](docs/migration-windows-to-linux.md). Проект ещё на старом layout с `.squeezr/` в корне? Миграция в центральный стор происходит сама — [docs/migration-central-store.md](docs/migration-central-store.md).
 
@@ -649,6 +678,8 @@ squeezr index && squeezr search "WorkspaceManager"
 
 Linux install (self-contained binary + `~/.local/bin` symlink, no .NET required): `scripts/install.sh`. Uninstall: `scripts/uninstall.sh` (the `~/.squeezr` store with workspaces and models is left intact — remove it manually if you really want it gone).
 
-Windows install (self-contained exe + PATH, no .NET required): `pwsh -File scripts\install.ps1`. Uninstall: `pwsh -File scripts\uninstall.ps1`.
+Windows install (self-contained exe + PATH, no .NET required): `powershell -File scripts\install.ps1`. Uninstall: `powershell -File scripts\uninstall.ps1`. The scripts declare `#Requires -Version 5.1`, so stock Windows PowerShell is enough — pwsh 7 is optional.
+
+Windows setup executable: `powershell -File scripts\build-installer.ps1` packages the published tree with Inno Setup 6 (a build prerequisite — `winget install -e --id JRSoftware.InnoSetup`, or pass `-InstallInno`) into `artifacts\installer\SqueezrSetup-<version>-<rid>.exe`. It installs per-user without admin, registers in Add/Remove Programs, puts the install dir on PATH and leaves the `~/.squeezr` store alone on uninstall. Flags: `-Rid win-x64|win-arm64`, `-Version`, `-SkipBuild`, `-IsccPath`, `-OutputDir`, `-InstallInno`. There is no published Windows release artifact and there will not be one — the Gitea instance has no Windows runner, so the package is always built locally. The package is unsigned: SmartScreen warns on first run (*More info* → *Run anyway*).
 
 Status: M1–M6 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs, MCP server with all six tools, tree-sitter JS/TS + fallback chunker). See the roadmap above.

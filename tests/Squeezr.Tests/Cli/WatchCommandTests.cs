@@ -10,7 +10,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Cli;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class WatchCommandTests
 {
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");

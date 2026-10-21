@@ -7,7 +7,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Cli;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class StatusWorkspacesTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

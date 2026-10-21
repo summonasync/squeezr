@@ -10,7 +10,7 @@ namespace Squeezr.Tests.Cli;
 // review-067-08 W-1/W-2: the store dir can disappear while its registry row stays. Before the fix that
 // half-applied removal printed "Error: Access to the path '…/workspaces.lock' is denied." on stdout with
 // exit 255 — no JSON, and no trace of the path that was already deleted.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class DropRemovalHonestyCliTests
 {
     private static readonly UnixFileMode HomeWritable =

@@ -5,7 +5,7 @@ namespace Squeezr.Tests.Cli;
 
 // The same counters through the real process: what an agent reading `index --json` / `--events` and a human
 // reading `squeezr status` actually see when a pass refused secrets.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class IndexGuardCliTests
 {
     private const string PemPath = "deploy/keys/monkey.pem";

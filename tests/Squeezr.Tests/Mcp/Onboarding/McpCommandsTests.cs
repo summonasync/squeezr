@@ -9,7 +9,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp.Onboarding;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class McpCommandsTests
 {
     [Fact]
@@ -533,12 +533,13 @@ public sealed class McpCommandsTests
         var previousOutput = Console.Out;
         var previousError = Console.Error;
         var previousPath = Environment.GetEnvironmentVariable("PATH");
-        var previousHome = Environment.GetEnvironmentVariable("HOME");
+        // Redirecting HOME alone leaves the real profile in play on Windows, where
+        // GetFolderPath(UserProfile) ignores the environment entirely.
+        using var environment = new TestEnvironmentScope();
         AnsiConsole.Console = console;
         Environment.CurrentDirectory = workspace;
         Environment.SetEnvironmentVariable("PATH", string.Empty);
-        Environment.SetEnvironmentVariable("HOME", TestDirs.NewTempDir());
-        configureHome?.Invoke(Environment.GetEnvironmentVariable("HOME")!);
+        configureHome?.Invoke(environment.HomeDir);
         Console.SetOut(outputWriter);
         Console.SetError(errorWriter);
         try
@@ -557,7 +558,6 @@ public sealed class McpCommandsTests
             AnsiConsole.Console = previousConsole;
             Environment.CurrentDirectory = previousDirectory;
             Environment.SetEnvironmentVariable("PATH", previousPath);
-            Environment.SetEnvironmentVariable("HOME", previousHome);
             Console.SetOut(previousOutput);
             Console.SetError(previousError);
         }

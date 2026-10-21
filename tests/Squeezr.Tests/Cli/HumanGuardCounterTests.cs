@@ -6,7 +6,7 @@ namespace Squeezr.Tests.Cli;
 
 // The human half of the read guard: --json has carried the withheld tally since T3, and the terminal
 // renderings had to stop answering a truncated question as if it were a complete one.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class HumanGuardCounterTests
 {
     private static readonly Regex CounterLine = new(

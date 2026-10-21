@@ -8,7 +8,7 @@ namespace Squeezr.Tests.Storage;
 
 // Registry rows are disk input. Until a row's store key is proven to name one directory under
 // workspaces/, nothing may be resolved, migrated or deleted through it.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class StoreRowContainmentTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";

@@ -9,7 +9,7 @@ using Squeezr.Cli.Mcp.Onboarding;
 
 namespace Squeezr.Tests.Mcp.Onboarding;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class McpProjectBlockCommandsTests
 {
     [Fact]

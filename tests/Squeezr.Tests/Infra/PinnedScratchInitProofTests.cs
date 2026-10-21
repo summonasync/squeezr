@@ -8,7 +8,7 @@ namespace Squeezr.Tests.Infra;
 
 // Proof-by-example for the documented pinned pattern: a scratch init under a pinned home must leave
 // every other home's registry byte-identical and land exactly one row in the pinned one.
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public sealed class PinnedScratchInitProofTests
 {
     [Fact]

@@ -3,7 +3,7 @@ using Squeezr.Core.Indexing.Roslyn;
 
 namespace Squeezr.Tests.Indexing.Roslyn;
 
-[Collection("MsBuildLocator")]
+[Collection("ProcessGlobals")]
 public class SemanticSessionPoolTests : IDisposable
 {
     private static readonly DateTime Start = new(2026, 10, 4, 12, 0, 0, DateTimeKind.Utc);

@@ -7,7 +7,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing.Roslyn;
 
-[Collection("MsBuildLocator")]
+[Collection("ProcessGlobals")]
 public class PacedMsBuildSessionTests : IDisposable
 {
     private readonly List<string> _tempDirs = [];

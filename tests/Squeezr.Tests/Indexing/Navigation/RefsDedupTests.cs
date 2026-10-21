@@ -5,7 +5,7 @@ using Squeezr.Tests.Indexing;
 
 namespace Squeezr.Tests.Indexing.Navigation;
 
-[Collection("CliProcessGlobals")]
+[Collection("ProcessGlobals")]
 public class RefsDedupTests
 {
     [Fact]
