@@ -7,7 +7,8 @@ public sealed record SemanticPhaseResult(
     int Symbols,
     int Chunks,
     int Skipped,
-    IReadOnlyList<string>? Deferred = null);
+    IReadOnlyList<string>? Deferred = null,
+    int Throttled = 0);
 
 public static class SemanticIndexPhase
 {
@@ -72,12 +73,16 @@ public static class SemanticIndexPhase
             return new SemanticPhaseResult(0, 0, 0);
         }
 
-        var session = sessions.Acquire(
-            repoRoot, !noSemantic, out var pooled, ex => warning($"semantic index skipped for repo '{repoDoc.Name}': {ex.Message}"));
+        var outcome = sessions.Acquire(
+            repoRoot, !noSemantic, out var session,
+            message => warning($"semantic index skipped for repo '{repoDoc.Name}': {message}"));
         if (session is null)
         {
             // the walk already committed these shas, so nothing would bring them back into scope on its own
-            return new SemanticPhaseResult(0, 0, csFiles.Count, csFiles.Select(f => f.RelativePath).ToList());
+            var deferred = csFiles.Select(f => f.RelativePath).ToList();
+            return outcome == AcquireOutcome.Throttled
+                ? new SemanticPhaseResult(0, 0, 0, deferred, csFiles.Count)
+                : new SemanticPhaseResult(0, 0, csFiles.Count, deferred);
         }
 
         try
@@ -94,7 +99,7 @@ public static class SemanticIndexPhase
                 session, repoRoot, repoDoc, store, csFiles, changedByPath, dbFilesByPath, config,
                 noSemantic, guard, warning, progress);
 
-            if (pooled && session.RequiresReopen && sessions.ShouldReopen(repoRoot, session.RejectedPaths))
+            if (outcome == AcquireOutcome.Pooled && session.RequiresReopen && sessions.ShouldReopen(repoRoot, session.RejectedPaths))
             {
                 sessions.Discard(repoRoot);
             }
@@ -103,9 +108,7 @@ public static class SemanticIndexPhase
         }
         finally
         {
-            // pooled is ownership: a session the pool keeps must survive this pass, only the one-shot
-            // fallback the pool refused to cache belongs to us
-            if (!pooled)
+            if (outcome == AcquireOutcome.OneShot)
             {
                 session.Dispose();
             }

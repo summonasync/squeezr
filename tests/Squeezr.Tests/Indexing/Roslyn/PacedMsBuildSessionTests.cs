@@ -7,6 +7,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing.Roslyn;
 
+[Collection("MsBuildLocator")]
 public class PacedMsBuildSessionTests : IDisposable
 {
     private readonly List<string> _tempDirs = [];
@@ -79,9 +80,9 @@ public class PacedMsBuildSessionTests : IDisposable
         pool.CreatedSessions.ShouldBe(1, "a warm pass must not buy another solution open");
         pool.IsWarm(repoRoot, semantic: true).ShouldBeTrue();
 
-        var held = pool.Acquire(repoRoot, semantic: true, out var owned, _ => { });
-        owned.ShouldBeTrue("the pool owns a cached session, so the caller must not dispose it");
-        held.ShouldNotBeNull().Disposed.ShouldBeFalse(
+        var held = pool.Acquire(repoRoot, semantic: true, out var session, _ => { });
+        held.ShouldBe(AcquireOutcome.Pooled, "the pool owns a cached session, so the caller must not dispose it");
+        session.ShouldNotBeNull().DisposeAttempted.ShouldBeFalse(
             "the reused session has to be alive: a disposed workspace is not reuse");
 
         Symbols(workspace, "Reused.cs").Select(s => s.Name).ShouldContain("Reheat");
@@ -140,13 +141,13 @@ public class PacedMsBuildSessionTests : IDisposable
         var pool = new SemanticSessionPool();
         Index(workspace, pool, []);
 
-        var session = pool.Acquire(repoRoot, semantic: true, out var pooled, _ => { });
+        var outcome = pool.Acquire(repoRoot, semantic: true, out var session, _ => { });
         session.ShouldNotBeNull();
-        pooled.ShouldBeTrue();
+        outcome.ShouldBe(AcquireOutcome.Pooled);
 
         Should.NotThrow(() => session!.Dispose());
         Should.NotThrow(() => session.Dispose());
-        session.Disposed.ShouldBeTrue();
+        session.DisposeAttempted.ShouldBeTrue();
 
         Should.NotThrow(() => pool.Discard(repoRoot));
         Should.NotThrow(pool.Dispose);

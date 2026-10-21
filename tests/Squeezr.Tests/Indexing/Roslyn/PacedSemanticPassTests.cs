@@ -285,8 +285,13 @@ public class PacedSemanticPassTests
             }
             """);
         var throttled = new PhaseProgress();
-        Index(workspace, pool, [RepoFile(workspace, "src/Notes.cs")], throttled);
+        var throttledResult = new WorkspaceIndexer().Index(
+            workspace, progress: throttled, changedPaths: [RepoFile(workspace, "src/Notes.cs")], sessions: pool);
 
+        throttledResult.Repos.Single().Skipped.ShouldBe(0,
+            "a throttled pass is reported as throttled, not as a repo that skipped every file");
+        throttledResult.Repos.Single().Throttled.ShouldBe(3,
+            "the files the window held out of the parse are counted as throttled work");
         throttled.Items(IndexPhase.Semantic).ShouldBeEmpty(
             "inside the retry window the pass buys no session at all instead of a second solution open");
         pool.DeferredSemantic(RepoRoot(workspace)).Order().ToList().ShouldBe(

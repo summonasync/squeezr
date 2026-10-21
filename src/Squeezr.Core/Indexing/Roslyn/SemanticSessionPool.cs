@@ -17,7 +17,7 @@ public sealed class SemanticSessionPool : IDisposable
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ReopenMemory> _reopens = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HashSet<string>> _deferred = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, DateTime> _retryNotBefore = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RetryWindow> _retryWindows = new(StringComparer.Ordinal);
     private readonly Func<DateTime> _utcNow;
 
     public SemanticSessionPool(Func<DateTime>? utcNow = null) =>
@@ -29,88 +29,109 @@ public sealed class SemanticSessionPool : IDisposable
     {
         lock (_gate)
         {
-            return _entries.TryGetValue(repoRoot, out var entry) && entry.Semantic == semantic;
+            return _entries.TryGetValue(repoRoot, out var entry)
+                   && entry.Semantic == semantic
+                   && !entry.Session.DisposeAttempted;
         }
     }
 
     /// <summary>
-    /// Hands out the session this root is holding, creating one when the pool is cold.
-    /// <paramref name="pooled"/> is ownership, not "was found in the cache": true means the pool keeps the
-    /// session and the caller must not dispose it, false means the caller got a one-shot fallback session
-    /// it owns. Null means there is no session for this pass, and the caller must put the files it wanted
-    /// to parse back into scope instead of trusting the committed sha.
+    /// Hands out the session this root is holding, creating one when the pool is cold. The outcome is
+    /// the ownership contract: Pooled means the pool keeps the session and the caller must not dispose
+    /// it, OneShot means the caller got a fallback session it owns. Throttled and CreateFailed hand out
+    /// no session, and the caller must put the files it wanted to parse back into scope instead of
+    /// trusting the committed sha. An entry whose session was disposed counts as cold: a misread of
+    /// ownership anywhere upstream degrades to a recreate, never to serving a corpse.
     /// </summary>
-    public RoslynSession? Acquire(string repoRoot, bool semantic, out bool pooled, Action<Exception> createFailed)
+    public AcquireOutcome Acquire(string repoRoot, bool semantic, out RoslynSession? session, Action<string> notice)
     {
-        pooled = false;
         RoslynSession? candidate;
         lock (_gate)
         {
-            candidate = _entries.TryGetValue(repoRoot, out var entry) && entry.Semantic == semantic ? entry.Session : null;
+            candidate = null;
+            if (_entries.TryGetValue(repoRoot, out var entry) && entry.Semantic == semantic)
+            {
+                if (entry.Session.DisposeAttempted)
+                {
+                    _entries.Remove(repoRoot);
+                }
+                else
+                {
+                    candidate = entry.Session;
+                }
+            }
         }
 
         if (candidate is not null)
         {
-            pooled = true;
-            return candidate;
+            session = candidate;
+            return AcquireOutcome.Pooled;
         }
 
         // a root that cannot produce a cached session would otherwise pay a full solution open on every
         // debounce — the very storm shape this serve exists to remove, so the failed attempt is remembered
         var now = _utcNow();
-        if (IsRetryThrottled(repoRoot, now))
+        if (IsRetryThrottled(repoRoot, now, out var announce))
         {
-            createFailed(new InvalidOperationException(
-                $"no reusable session for '{repoRoot}'; the next create attempt is throttled for one minute"));
-            return null;
+            if (announce)
+            {
+                notice($"no reusable session for '{repoRoot}'; the next create attempt is throttled for one minute");
+            }
+
+            session = null;
+            return AcquireOutcome.Throttled;
         }
 
         Discard(repoRoot);
 
-        RoslynSession session;
+        RoslynSession created;
         try
         {
-            session = RoslynSession.Create(repoRoot, semantic);
+            created = RoslynSession.Create(repoRoot, semantic);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
         {
-            ThrottleRetry(repoRoot, now);
-            createFailed(ex);
-            return null;
+            ThrottleRetry(repoRoot);
+            notice(ex.Message);
+            session = null;
+            return AcquireOutcome.CreateFailed;
         }
 
         CreatedSessions++;
 
         // an entry answers only for the mode it actually achieved, and a fallback session is never
         // cached at all: pooling one would hold the serve at fallback quality until the process dies
-        if (session.Degraded || session.Semantic != semantic)
+        if (created.Degraded || created.Semantic != semantic)
         {
-            ThrottleRetry(repoRoot, now);
-            return session;
+            ThrottleRetry(repoRoot);
+            session = created;
+            return AcquireOutcome.OneShot;
         }
 
         RoslynSession kept;
         RoslynSession? loser;
         lock (_gate)
         {
-            if (_entries.TryGetValue(repoRoot, out var existing) && existing.Semantic == session.Semantic)
+            if (_entries.TryGetValue(repoRoot, out var existing)
+                && existing.Semantic == created.Semantic
+                && !existing.Session.DisposeAttempted)
             {
                 kept = existing.Session;
-                loser = session;
+                loser = created;
             }
             else
             {
-                kept = session;
+                kept = created;
                 loser = existing?.Session;
-                _entries[repoRoot] = new Entry(session, session.Semantic);
+                _entries[repoRoot] = new Entry(created, created.Semantic);
             }
 
-            _retryNotBefore.Remove(repoRoot);
+            _retryWindows.Remove(repoRoot);
         }
 
         loser?.Dispose();
-        pooled = true;
-        return kept;
+        session = kept;
+        return AcquireOutcome.Pooled;
     }
 
     /// <summary>
@@ -178,7 +199,9 @@ public sealed class SemanticSessionPool : IDisposable
         RoslynSession? session;
         lock (_gate)
         {
-            session = _entries.TryGetValue(repoRoot, out var entry) ? entry.Session : null;
+            session = _entries.TryGetValue(repoRoot, out var entry) && !entry.Session.DisposeAttempted
+                ? entry.Session
+                : null;
             if (_deferred.TryGetValue(repoRoot, out var deferred))
             {
                 foreach (var path in relativePaths)
@@ -226,9 +249,9 @@ public sealed class SemanticSessionPool : IDisposable
                 _deferred.Remove(root);
             }
 
-            foreach (var root in _retryNotBefore.Keys.Where(root => !keep.Contains(root)).ToList())
+            foreach (var root in _retryWindows.Keys.Where(root => !keep.Contains(root)).ToList())
             {
-                _retryNotBefore.Remove(root);
+                _retryWindows.Remove(root);
             }
         }
 
@@ -263,7 +286,7 @@ public sealed class SemanticSessionPool : IDisposable
             _entries.Clear();
             _reopens.Clear();
             _deferred.Clear();
-            _retryNotBefore.Clear();
+            _retryWindows.Clear();
         }
 
         foreach (var entry in entries)
@@ -272,23 +295,48 @@ public sealed class SemanticSessionPool : IDisposable
         }
     }
 
-    private bool IsRetryThrottled(string repoRoot, DateTime now)
+    private bool IsRetryThrottled(string repoRoot, DateTime now, out bool announce)
     {
+        announce = false;
         lock (_gate)
         {
-            return _retryNotBefore.TryGetValue(repoRoot, out var notBefore) && now < notBefore;
+            if (!_retryWindows.TryGetValue(repoRoot, out var window))
+            {
+                return false;
+            }
+
+            if (now >= window.NotBefore)
+            {
+                _retryWindows.Remove(repoRoot);
+                return false;
+            }
+
+            // the window announces itself once: every later pass inside it is the same fact and rides
+            // the throttled counter instead of repeating the warning
+            announce = !window.Announced;
+            window.Announced = true;
+            return true;
         }
     }
 
-    private void ThrottleRetry(string repoRoot, DateTime now)
+    private void ThrottleRetry(string repoRoot)
     {
         lock (_gate)
         {
-            _retryNotBefore[repoRoot] = now + RetryCooldown;
+            // armed from the moment the attempt finished, so a create that burned minutes keeps its
+            // full cooldown instead of handing back the time it spent
+            _retryWindows[repoRoot] = new RetryWindow(_utcNow() + RetryCooldown);
         }
     }
 
     private sealed record Entry(RoslynSession Session, bool Semantic);
+
+    private sealed class RetryWindow(DateTime notBefore)
+    {
+        public DateTime NotBefore { get; } = notBefore;
+
+        public bool Announced { get; set; }
+    }
 
     private sealed class ReopenMemory(DateTime reopenedAt, HashSet<string> rejected)
     {

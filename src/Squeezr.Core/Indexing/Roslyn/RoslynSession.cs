@@ -59,7 +59,7 @@ public sealed class RoslynSession : IDisposable
 
     public bool RequiresReopen { get; private set; }
 
-    public bool Disposed { get; private set; }
+    public bool DisposeAttempted { get; private set; }
 
     public static RoslynSession Create(string rootPath, bool semantic)
     {
@@ -137,14 +137,16 @@ public sealed class RoslynSession : IDisposable
 
     public void Dispose()
     {
-        // a second MSBuildWorkspace.Dispose is tolerated today (probed, see audits/dotnet-coder-055-t2-r3),
-        // so this is not crash insurance: it keeps Disposed a one-shot liveness signal for callers
-        if (Disposed)
+        // DisposeAttempted means the session is buried, not that the release completed: the flag is
+        // set before the workspace dispose so a throwing dispose cannot reopen the signal. A second
+        // MSBuildWorkspace.Dispose is tolerated today (probed, see audits/dotnet-coder-055-t2-r3),
+        // so this is one-shot liveness bookkeeping, not crash insurance.
+        if (DisposeAttempted)
         {
             return;
         }
 
-        Disposed = true;
+        DisposeAttempted = true;
         _workspace.Dispose();
     }
 

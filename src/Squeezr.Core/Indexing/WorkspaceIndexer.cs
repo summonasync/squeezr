@@ -171,7 +171,8 @@ public sealed class WorkspaceIndexer
                 works.Sum(w => w.Result.GuardWithheldBuiltIns),
                 works.Sum(w => w.Result.GuardDropped),
                 works.Sum(w => w.Result.Embedded),
-                works.All(w => w.Result.EmbeddingsCompleted));
+                works.All(w => w.Result.EmbeddingsCompleted),
+                works.Sum(w => w.Result.Throttled));
         }
     }
 
@@ -692,7 +693,8 @@ public sealed class WorkspaceIndexer
         return new RepoWork(
             new RepoIndexResult(
                 repo.Name, added, modified, reaps.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot,
-                guard.Withheld, guard.WithheldByBuiltIns, deletedProtected, embedded, embeddingsCompleted),
+                guard.Withheld, guard.WithheldByBuiltIns, deletedProtected, embedded, embeddingsCompleted,
+                semantic.Throttled),
             changed,
             reaps,
             deferredReaps);
