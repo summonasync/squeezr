@@ -241,6 +241,40 @@ public sealed class WorkspaceRepairCommandTests
         }
     }
 
+    [Fact]
+    public async Task WithRoot_KeyMatchedDeadRoot_ReportsLiveRootRefusal_AndKeepsRegistryAndManifest()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = TestDirs.NewTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(home, SqueezrPaths.RegistryFileName), "[]");
+            var orphan = CreateOrphan(home, "fix-gone", root, null);
+            var manifestPath = Path.Combine(orphan.StoreDir, SqueezrPaths.StoreManifestFileName);
+            var manifestBytes = File.ReadAllBytes(manifestPath);
+            Directory.Delete(root, recursive: true);
+
+            var result = await RunCliAsync(
+                home, "workspace", "repair", "--store-key", orphan.StoreKey, "--root", root, "--json");
+
+            result.ExitCode.ShouldBe(1);
+            result.StdOut.ShouldBe(string.Empty);
+            using var document = JsonDocument.Parse(result.StdErr.Trim());
+            var error = document.RootElement.GetProperty("error");
+            error.GetProperty("code").GetString().ShouldBe("workspace_error");
+            error.GetProperty("message").GetString()!
+                .ShouldContain("does not exist; adoption requires a live root");
+
+            ReadRegistry(home).ShouldBeEmpty();
+            File.ReadAllBytes(manifestPath).ShouldBe(manifestBytes);
+            Directory.Exists(orphan.StoreDir).ShouldBeTrue();
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
     private static (string StoreKey, string StoreDir) CreateOrphan(
         string home, string name, string rootDir, string? rootPath)
     {

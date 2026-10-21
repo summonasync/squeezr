@@ -173,6 +173,25 @@ public sealed class RegistryRepairTests : IDisposable
     }
 
     [Fact]
+    public void AdoptWithRoot_KeyMatchedDeadRoot_Throws_AndKeepsRegistryAndManifest()
+    {
+        var root = NewTempDir();
+        var storeKey = WorkspaceStoreKeys.Create("gone", WorkspaceCanonicalPath.Canonicalize(root));
+        var storeDir = CreateStoreDir(storeKey);
+        var manifestPath = Path.Combine(storeDir, SqueezrPaths.StoreManifestFileName);
+        WriteManifest(manifestPath, "gone", null);
+        var manifestBytes = File.ReadAllBytes(manifestPath);
+        Directory.Delete(root, recursive: true);
+
+        var ex = Should.Throw<WorkspaceException>(() => RegistryRepair.AdoptWithRoot(storeKey, root));
+
+        ex.Message.ShouldContain("does not exist; adoption requires a live root");
+        WorkspaceRegistry.FindByStoreKey(storeKey).ShouldBeNull();
+        File.ReadAllBytes(manifestPath).ShouldBe(manifestBytes);
+        Directory.Exists(storeDir).ShouldBeTrue();
+    }
+
+    [Fact]
     public void AdoptWithRoot_AlreadyHasRoot_Throws()
     {
         var root = NewTempDir();
