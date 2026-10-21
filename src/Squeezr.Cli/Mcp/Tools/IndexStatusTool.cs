@@ -7,6 +7,7 @@ using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Ignore;
+using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -52,9 +53,11 @@ public sealed class IndexStatusTool
             var manager = new WorkspaceManager(root);
             var status = manager.GetStatus();
             QdrantStatus qdrant;
+            GhostRefLag refsLag;
             using (var metaStore = new MetaStore(SqueezrPaths.MetaDbPath(root)))
             {
                 qdrant = await QdrantStatusProbe.ProbeAsync(_vectorStore, metaStore, cancellationToken);
+                refsLag = RefLookup.MeasureLag(metaStore);
             }
 
             if (qdrant.ExcessPoints is { } excess)
@@ -62,6 +65,14 @@ public sealed class IndexStatusTool
                 warnings.Add(
                     $"the collection carries {excess} more point(s) than the index has chunks — orphan vectors " +
                     "no live chunk hash maps to; 'squeezr vectors reconcile' lists them, '--apply' drops them.");
+            }
+
+            if (refsLag.HasLag)
+            {
+                warnings.Add(
+                    $"{refsLag.OverdueDeclarations} declaring file(s) carry {refsLag.LaggingRows} ref row(s) older than " +
+                    $"a caller's newest index pass, {refsLag.ScannedRows} rows scanned — find_references marks those " +
+                    $"answers stale and a booked pass re-parses them; '{RemedyText.IndexCommand}' reconciles all now.");
             }
 
             var rankExclusion = RankExclusion.Load(root);

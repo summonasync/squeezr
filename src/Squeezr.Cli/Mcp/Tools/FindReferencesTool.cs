@@ -15,6 +15,7 @@ namespace Squeezr.Cli.Mcp.Tools;
 public sealed class FindReferencesTool
 {
     private const int GuardCandidateLimit = 50;
+    private const int LaggingNamesInWarning = 3;
 
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
@@ -29,7 +30,7 @@ public sealed class FindReferencesTool
         _identity = identity;
     }
 
-    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
+    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. A row set belongs to the declaring file's last parse, so a caller indexed after it can leave a removed callsite listed here and hide one it added: the row-visible part of that lag is reported, not silently served (a brand-new callsite into a declaring the caller never had a row in leaves nothing to mark — only a full index catches it) — the declaring files appear in staleFiles with a warning naming them, a watch pass re-parses them under a per-pass budget, and 'squeezr index' reconciles every caller now. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
     [McpServerTool(Name = "find_references", Title = "Find references")]
     public object Find(string symbol, string? repo = null) =>
         _gate.Run(() => FindCore(symbol, repo));
@@ -73,7 +74,13 @@ public sealed class FindReferencesTool
                 warnings.AddRange(withheld);
             }
 
-            var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, freshness.Stale,
+            var lagging = result.LaggingDeclarations ?? [];
+            if (lagging.Count > 0)
+            {
+                warnings.Add(LaggingWarning(lagging));
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, MergeStale(freshness.Stale, lagging),
                 definitions: definitions);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
@@ -174,6 +181,40 @@ public sealed class FindReferencesTool
 
     private static object Params(string symbol, string? repo, IReadOnlyList<string> secretGuardExtra) =>
         new { symbol, repo, secretGuardExtra };
+
+    // one line, the files it names and the way out: the rows cannot be repaired from the read side
+    // without re-parsing the declaring file, and that is what the next paced pass is booked for
+    private static string LaggingWarning(IReadOnlyList<GhostRefDeclaration> lagging)
+    {
+        var names = lagging.Take(LaggingNamesInWarning).Select(d => $"{d.Repo}/{d.File}");
+        var rest = lagging.Count > LaggingNamesInWarning ? $", +{lagging.Count - LaggingNamesInWarning} more" : string.Empty;
+        var rows = lagging.Sum(d => d.LaggingRows);
+        return $"refs lag for {lagging.Count} declaring file(s) ({string.Join(", ", names)}{rest}), {rows} row(s) " +
+               "written before a caller's newest index pass — a callsite removed in that caller can still show here " +
+               $"and one added can be missing; a watch pass re-parses them, '{RemedyText.IndexCommand}' verifies all now";
+    }
+
+    private static IReadOnlyList<string> MergeStale(
+        IReadOnlyList<string> guardStale,
+        IReadOnlyList<GhostRefDeclaration> lagging)
+    {
+        if (lagging.Count == 0)
+        {
+            return guardStale;
+        }
+
+        var merged = new List<string>(guardStale);
+        foreach (var declaration in lagging)
+        {
+            var key = $"{declaration.Repo}/{declaration.File}";
+            if (!merged.Contains(key, StringComparer.Ordinal))
+            {
+                merged.Add(key);
+            }
+        }
+
+        return merged;
+    }
 
     private sealed record RefData(
         [property: JsonPropertyName("repo")] string Repo,

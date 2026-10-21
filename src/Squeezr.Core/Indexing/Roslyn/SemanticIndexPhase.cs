@@ -11,6 +11,10 @@ public sealed record SemanticPhaseResult(
 
 public static class SemanticIndexPhase
 {
+    // one paced pass may inherit at most this many booked declarations: the batch budget decides how
+    // fast a ghost drains, and an edited hub file with a hundred callees must not buy a hundred parses
+    private const int StaleDeclarationBudget = 16;
+
     public static SemanticPhaseResult Run(
         string repoRoot,
         RepoDocument repoDoc,
@@ -124,6 +128,9 @@ public static class SemanticIndexPhase
     {
         var skipped = 0;
         var symbolsInserted = 0;
+        var rebuiltStamp = DateTime.UtcNow;
+        var parsedPaths = csFiles.Select(f => f.RelativePath).ToHashSet(StringComparer.Ordinal);
+        var booked = new HashSet<string>(StringComparer.Ordinal);
         List<string>? deferred = null;
 
         progress?.PhaseStarted(repoDoc.Name, IndexPhase.Semantic, csFiles.Count);
@@ -236,6 +243,14 @@ public static class SemanticIndexPhase
                 }
 
                 InsertRefs(result, symbolsForRefs, repoRoot, dbFilesByPath, store);
+                if (!changedByPath.ContainsKey(file.RelativePath)
+                    && dbFilesByPath.TryGetValue(file.RelativePath, out var rebuilt))
+                {
+                    // rows just rebuilt from the current text of every caller, and the lag marker reads
+                    // this stamp: without it a declaration healed by a booked pass would stay overdue
+                    rebuilt.IndexedAt = rebuiltStamp;
+                    store.UpsertFile(rebuilt);
+                }
             }
             finally
             {
@@ -251,8 +266,95 @@ public static class SemanticIndexPhase
             }
         }
 
+        if (session.Semantic && !noSemantic)
+        {
+            BookStaleDeclarations(
+                store,
+                changedByPath,
+                dbFilesByPath.Values,
+                symbolsByFile,
+                parsedPaths,
+                dbFilesByPath.Values.Count(f => f.Language == "csharp"),
+                booked);
+        }
+
+        if (booked.Count > 0)
+        {
+            deferred ??= [];
+            foreach (var path in booked.Where(path => !deferred.Contains(path)))
+            {
+                deferred.Add(path);
+            }
+        }
+
         return new SemanticPhaseResult(store.CountSymbols(repoDoc.Id), store.CountChunks(repoDoc.Id), skipped, deferred);
     }
+
+    // a restamped caller leaves the rows it hosts exactly where they were: they name callsites inside
+    // it, but they are written by the declaring side's parse, and CascadeFile only clears the rows the
+    // parsed file declares itself. those declaring files are booked here — into the same set the
+    // semantic skips ride, so the next paced pass re-resolves them inside the batch budget and a ghost
+    // lives one pass instead of until somebody edits the declaration or indexes the whole repo
+    private static void BookStaleDeclarations(
+        MetaStore store,
+        IReadOnlyDictionary<string, FileDocument> changedByPath,
+        IEnumerable<FileDocument> dbFiles,
+        Dictionary<uint, List<SymbolDocument>> symbolsByFile,
+        HashSet<string> parsedPaths,
+        int csharpFilesInDb,
+        HashSet<string> booked)
+    {
+        // a pass that already parsed every csharp file of the repo rebuilt every row set itself: nothing
+        // is left to book, and the scans below would be pure overhead on the cold path
+        if (parsedPaths.Count >= csharpFilesInDb)
+        {
+            return;
+        }
+
+        var declaringBySymbol = new Dictionary<long, uint>();
+        foreach (var (fileId, symbols) in symbolsByFile)
+        {
+            foreach (var symbol in symbols)
+            {
+                declaringBySymbol[symbol.Id] = fileId;
+            }
+        }
+
+        var declaringById = dbFiles.ToDictionary(f => f.Id);
+        foreach (var caller in changedByPath.Values)
+        {
+            if (caller.Language != "csharp")
+            {
+                continue;
+            }
+
+            foreach (var symbolId in store.ListRefsByFile(caller.Id).Select(r => r.FromSymbolId).Distinct())
+            {
+                if (!declaringBySymbol.TryGetValue(symbolId, out var declaringId) || declaringId == caller.Id)
+                {
+                    continue;
+                }
+
+                if (!declaringById.TryGetValue(declaringId, out var declaring)
+                    || declaring.Language != "csharp"
+                    || AsUtc(declaring.IndexedAt) >= AsUtc(caller.IndexedAt)
+                    || parsedPaths.Contains(declaring.Path))
+                {
+                    continue;
+                }
+
+                if (booked.Add(declaring.Path) && booked.Count >= StaleDeclarationBudget)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    // the store hands a persisted stamp back as local ticks while the walk holds DateTime.UtcNow ticks:
+    // unnormalised, an unchanged declaration reads as younger than the caller that just moved past it
+    private static DateTime AsUtc(DateTime value) =>
+        value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
 
     private static bool IsDegradationWarning(string sessionWarning) =>
         sessionWarning.StartsWith("MSBuild workspace unavailable", StringComparison.OrdinalIgnoreCase)

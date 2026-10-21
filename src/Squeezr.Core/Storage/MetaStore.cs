@@ -143,6 +143,14 @@ public sealed class MetaStore : IDisposable
     public IReadOnlyList<RefDocument> ListRefsByFromSymbol(long symbolId) =>
         _db.GetCollection<RefDocument>(RefsCollection).Find(r => r.FromSymbolId == symbolId).ToList();
 
+    // the ghost-refs lag scan joins every row against two file stamps and reads nothing else, so the
+    // row bodies (ToName, EnclosingSymbol) are dropped while streaming instead of being kept per row
+    public IReadOnlyList<(long FromSymbolId, uint FileId)> ListRefEndpoints() =>
+        _db.GetCollection<RefDocument>(RefsCollection)
+            .FindAll()
+            .Select(r => (r.FromSymbolId, r.FileId))
+            .ToList();
+
     public IReadOnlyList<RefDocument> ListRefsByFile(uint fileId) =>
         _db.GetCollection<RefDocument>(RefsCollection).Find(r => r.FileId == fileId).ToList();
 
