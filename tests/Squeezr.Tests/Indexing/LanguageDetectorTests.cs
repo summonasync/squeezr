@@ -23,6 +23,14 @@ public class LanguageDetectorTests
     }
 
     [Fact]
+    public void ProjectLayoutExtensions_CompositionIsPinnedAbsolutely()
+    {
+        // shrinking the list is the exact drift the watch seam lost to; queue-pins derive from the same array
+        WorkspaceIndexer.ProjectLayoutExtensions
+            .ShouldBe([".csproj", ".sln", ".slnx", ".props", ".targets"], ignoreOrder: true);
+    }
+
+    [Fact]
     public void Detect_ProjectLayoutDialects_AreNeverSourceLanguages()
     {
         foreach (var extension in WorkspaceIndexer.ProjectLayoutExtensions)
