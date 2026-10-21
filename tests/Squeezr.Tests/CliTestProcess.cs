@@ -9,7 +9,7 @@ internal static partial class CliTestProcess
     private static readonly string CliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
 
     // Captured once on first use so that every child CLI in a test run is pinned
-    // to the same central store, even if a SqueezrHomeScope test (running earlier
+    // to the same central store, even if a ProcessGlobals test (running earlier
     // in the same serialized collection) left SQUEEZR_HOME pointing at its own
     // temp dir and SqueezrHome.Reset() cleared the cache. Without this snapshot,
     // SqueezrHome.Resolve() at Process.Start time could re-read a stale env var
