@@ -115,6 +115,45 @@ public sealed class WorkspaceListOrphanTests
         }
     }
 
+    [Fact]
+    public async Task Json_DeadRootOrphan_IsClassedRootGone_AndHintAsksForARestoreNotAnAdopt()
+    {
+        var home = TestDirs.NewTempDir();
+        var deadRoot = TestDirs.NewTempDir();
+        try
+        {
+            var canonical = WorkspaceCanonicalPath.Canonicalize(deadRoot);
+            var storeKey = WorkspaceStoreKeys.Create("o-gone", canonical);
+            WriteRegistry(home, []);
+            CreateOrphan(home, "o-gone", deadRoot, canonical);
+            Directory.Delete(deadRoot, recursive: true);
+
+            var result = await RunCliAsync(home, "workspace", "list", "--json");
+
+            result.ExitCode.ShouldBe(0);
+            var row = result.StdOut.Trim()
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => JsonDocument.Parse(line).RootElement)
+                .Single(r => r.GetProperty("storeKey").GetString() == storeKey);
+            row.GetProperty("type").GetString().ShouldBe("orphan");
+            row.GetProperty("class").GetString().ShouldBe("root-gone");
+            row.GetProperty("rootPath").GetString().ShouldBe(canonical);
+            result.StdErr.ShouldContain($"'{canonical}' does not exist");
+            result.StdErr.ShouldNotContain("is an orphan; run 'squeezr workspace repair' to adopt it");
+
+            var human = await RunCliAsync(home, "workspace", "list");
+            var flattened = Regex.Replace(
+                Regex.Replace(human.StdOut, @"[╭╮╰╯│├┤┬┴┼─]+", " "),
+                @"\s+",
+                " ");
+            flattened.ShouldContain("orphan — root gone");
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
     private static (string StoreKey, string StoreDir) CreateOrphan(
         string home, string name, string rootDir, string? rootPath)
     {

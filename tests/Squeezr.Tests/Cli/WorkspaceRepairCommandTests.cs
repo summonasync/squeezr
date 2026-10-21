@@ -81,6 +81,8 @@ public sealed class WorkspaceRepairCommandTests
             needsRoot.GetArrayLength().ShouldBe(1);
             needsRoot[0].GetProperty("storeKey").GetString().ShouldBe(legacy.StoreKey);
             needsRoot[0].GetProperty("name").GetString().ShouldBe("fix-legacy");
+            needsRoot[0].GetProperty("reason").GetString().ShouldBe("missing-root");
+            needsRoot[0].TryGetProperty("rootPath", out _).ShouldBeFalse();
 
             var husks = body.GetProperty("husks");
             husks.GetArrayLength().ShouldBe(1);
@@ -105,6 +107,40 @@ public sealed class WorkspaceRepairCommandTests
             Directory.Delete(home, recursive: true);
             Directory.Delete(adoptableRoot, recursive: true);
             Directory.Delete(legacyRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Json_DeadRootOrphan_ReportsRootGone_ParksTheStore_AndAdoptsNothing()
+    {
+        var home = TestDirs.NewTempDir();
+        var deadRoot = TestDirs.NewTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(home, SqueezrPaths.RegistryFileName), "[]");
+            var canonical = WorkspaceCanonicalPath.Canonicalize(deadRoot);
+            var orphan = CreateOrphan(home, "fix-gone", deadRoot, canonical);
+            Directory.Delete(deadRoot, recursive: true);
+
+            var result = await RunCliAsync(home, "workspace", "repair", "--json");
+
+            result.ExitCode.ShouldBe(0);
+            using var document = JsonDocument.Parse(result.StdOut.Trim());
+            var body = document.RootElement;
+            body.GetProperty("adopted").GetArrayLength().ShouldBe(0);
+            var row = body.GetProperty("needsRoot").EnumerateArray().Single();
+            row.GetProperty("storeKey").GetString().ShouldBe(orphan.StoreKey);
+            row.GetProperty("name").GetString().ShouldBe("fix-gone");
+            row.GetProperty("reason").GetString().ShouldBe("root-gone");
+            row.GetProperty("rootPath").GetString().ShouldBe(canonical);
+            body.GetProperty("counts").GetProperty("needsRoot").GetInt32().ShouldBe(1);
+            result.StdErr.ShouldNotContain("Refusing to prune");
+            ReadRegistry(home).ShouldBeEmpty();
+            Directory.Exists(orphan.StoreDir).ShouldBeTrue();
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
         }
     }
 

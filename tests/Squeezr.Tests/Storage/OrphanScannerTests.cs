@@ -71,6 +71,24 @@ public sealed class OrphanScannerTests : IDisposable
     }
 
     [Fact]
+    public void Scan_DeadRootOrphan_ReportsTheRecordedRoot_AsNotAdoptable()
+    {
+        var deadRoot = NewTempDir();
+        var canonical = WorkspaceCanonicalPath.Canonicalize(deadRoot);
+        var storeKey = WorkspaceStoreKeys.Create("gone-root", canonical);
+        WriteManifest(CreateStoreDir(storeKey), "gone-root", deadRoot);
+        Directory.Delete(deadRoot, recursive: true);
+
+        var orphan = OrphanScanner.Scan().Orphans.ShouldHaveSingleItem();
+
+        orphan.StoreKey.ShouldBe(storeKey);
+        orphan.Name.ShouldBe("gone-root");
+        orphan.RootPath.ShouldBe(canonical);
+        orphan.RootExists.ShouldBeFalse();
+        orphan.IsAdoptable.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Scan_DetectsHuskEntriesByHomeAndStoreParentRoots()
     {
         var normalRoot = NewTempDir();

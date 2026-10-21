@@ -83,7 +83,11 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 .Select(orphan => new WorkspaceRepairAdoptedEntry(orphan.Name, orphan.StoreKey, orphan.RootPath!))
                 .ToList();
             var needsRootRows = outcome.NeedsRoot
-                .Select(orphan => new WorkspaceRepairNeedsRootEntry(orphan.Name, orphan.StoreKey))
+                .Select(orphan => new WorkspaceRepairNeedsRootEntry(
+                    orphan.Name,
+                    orphan.StoreKey,
+                    orphan.RootPath,
+                    orphan.RootPath is null ? "missing-root" : "root-gone"))
                 .ToList();
             var failedRows = outcome.Failed
                 .Select(failure => new WorkspaceRepairFailedAdoptionEntry(
@@ -128,13 +132,13 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                     HuskSection(huskRows),
                     [.. candidates.Where(row => row.Category == WorkspaceRepairPruner.CategoryStale)],
                     prune,
-                    Counts(adoptedRows.Count, needsRootRows.Count, candidates, prune),
+                    Counts(adoptedRows.Count, needsRootRows.Count, candidates, prune, settings.DryRun),
                     failedRows.Count > 0 ? failedRows : null));
             }
             else
             {
                 RenderPrune(prune, candidates);
-                RenderSummary(adoptedRows.Count, needsRootRows.Count, candidates, prune);
+                RenderSummary(adoptedRows.Count, needsRootRows.Count, candidates, prune, settings.DryRun);
             }
 
             // The adopt phase runs before the sweep, so its verdict is the first phase fact a broken
@@ -216,9 +220,16 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
 
         foreach (var orphan in needsRoot)
         {
-            AnsiConsole.MarkupLine(
-                $"  [yellow]![/] needs root: {orphan.Name.EscapeMarkup()} ({orphan.StoreKey.EscapeMarkup()}) — " +
-                $"re-run with --store-key {orphan.StoreKey.EscapeMarkup()} --root <path>");
+            var named = $"{orphan.Name.EscapeMarkup()} ({orphan.StoreKey.EscapeMarkup()})";
+            AnsiConsole.MarkupLine(orphan.Reason switch
+            {
+                "root-gone" =>
+                    $"  [yellow]![/] root gone: {named} — recorded root {orphan.RootPath!.EscapeMarkup()} " +
+                    "does not exist; repair adopts only a live root, restore the directory and re-run",
+                _ =>
+                    $"  [yellow]![/] needs root: {named} — " +
+                    $"re-run with --store-key {orphan.StoreKey.EscapeMarkup()} --root <path>",
+            });
         }
 
         foreach (var failure in failedAdoptions)
@@ -247,42 +258,45 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
     // a dry run states what a confirmed run would prune, a decline states zeros because nothing was
     // deleted, an abort counts only the tail it actually reached, and unsafe keys never count as pruned.
     // A run with nothing to repair keeps its single line — zeros would dress up "nothing" as a report.
+    // The tense follows the mode of the call, not of the sweep: a dry run that found nothing to prune
+    // still previews an adoption it did not perform.
     private static void RenderSummary(
         int adopted,
         int needsRoot,
         IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
-        WorkspaceRepairPruneSummary prune)
+        WorkspaceRepairPruneSummary prune,
+        bool preview)
     {
         if (prune.Mode == WorkspaceRepairPruner.ModeNone && adopted == 0 && needsRoot == 0)
         {
             return;
         }
 
-        var would = prune.Mode == WorkspaceRepairPruner.ModeDryRun;
-        var (stale, husks) = CategoryNumbers(candidates, prune);
+        var (stale, husks) = CategoryNumbers(candidates, prune, preview);
         AnsiConsole.MarkupLine(
-            $"Repair report: [green]{adopted} {(would ? "adoptable" : "adopted")}[/], " +
-            $"[yellow]{needsRoot} need --root[/], " +
-            $"{stale} stale row(s) {(would ? "would be pruned" : "pruned")}, " +
-            $"{husks} husk row(s) {(would ? "would be pruned" : "pruned")}.");
+            $"Repair report: [green]{adopted} {(preview ? "adoptable" : "adopted")}[/], " +
+            $"[yellow]{needsRoot} {(preview ? "not adoptable" : "not adopted")}[/], " +
+            $"{stale} stale row(s) {(preview ? "would be pruned" : "pruned")}, " +
+            $"{husks} husk row(s) {(preview ? "would be pruned" : "pruned")}.");
     }
 
     private static WorkspaceRepairCategoryCounts Counts(
         int adopted,
         int needsRoot,
         IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
-        WorkspaceRepairPruneSummary prune)
+        WorkspaceRepairPruneSummary prune,
+        bool preview)
     {
-        var (stalePruned, husksPruned) = CategoryNumbers(candidates, prune);
+        var (stalePruned, husksPruned) = CategoryNumbers(candidates, prune, preview);
         return new WorkspaceRepairCategoryCounts(adopted, needsRoot, stalePruned, husksPruned);
     }
 
     private static (int Stale, int Husks) CategoryNumbers(
         IReadOnlyList<WorkspaceRepairStaleEntry> candidates,
-        WorkspaceRepairPruneSummary prune)
+        WorkspaceRepairPruneSummary prune,
+        bool preview)
     {
-        var would = prune.Mode == WorkspaceRepairPruner.ModeDryRun;
-        return would
+        return preview
             ? (CategoryCount(candidates, WorkspaceRepairPruner.CategoryStale),
                 CategoryCount(candidates, WorkspaceRepairPruner.CategoryHusk))
             : (CountPruned(prune, WorkspaceRepairPruner.CategoryStale),

@@ -182,7 +182,7 @@ public sealed class WorkspaceRepairPruneCliTests
 
             run.ExitCode.ShouldBe(1);
             run.StdOut.ShouldContain("Not pruned: 1 stale row(s) left in the registry.");
-            run.StdOut.ShouldContain("Repair report: 0 adopted, 0 need --root, 0 stale row(s) pruned, 0 husk row(s) pruned.");
+            run.StdOut.ShouldContain("Repair report: 0 adopted, 0 not adopted, 0 stale row(s) pruned, 0 husk row(s) pruned.");
             run.StdOut.ShouldContain($"stale: prune-gone ({goneKey})");
             run.StdErr.ShouldContain("error: Refusing to prune 1 stale row(s) without confirmation");
             run.StdErr.ShouldContain("this is not an interactive terminal");
@@ -239,14 +239,13 @@ public sealed class WorkspaceRepairPruneCliTests
             File.WriteAllText(RegistryPath(home), "[]");
             var orphanKey = Key("prune-orphan", orphanRoot);
             WriteStoreDir(home, orphanKey, "prune-orphan", orphanRoot, ("meta.db", 10));
-            Directory.Delete(orphanRoot, recursive: true);
 
             var run = await RunAsync(home, "workspace", "repair", "--yes");
 
             run.ExitCode.ShouldBe(0);
             run.StdOut.ShouldContain($"adopted prune-orphan ({orphanKey})");
             run.StdOut.ShouldNotContain($"({orphanKey}) — performed:");
-            run.StdOut.ShouldContain("Repair report: 1 adopted, 0 need --root, 0 stale row(s) pruned, 0 husk row(s) pruned.");
+            run.StdOut.ShouldContain("Repair report: 1 adopted, 0 not adopted, 0 stale row(s) pruned, 0 husk row(s) pruned.");
             ReadRegistry(home).ShouldHaveSingleItem().StoreKey.ShouldBe(orphanKey);
             Directory.Exists(StoreDir(home, orphanKey)).ShouldBeTrue();
         }
@@ -279,7 +278,7 @@ public sealed class WorkspaceRepairPruneCliTests
             ResultLine(run.StdOut, goneKey).ShouldStartWith("  - pruned row + store (");
             ResultLine(run.StdOut, huskKey).ShouldStartWith("  - pruned row + store (");
             run.StdOut.ShouldContain("Pruned 2 row(s) (1 stale, 1 husk) · 2 store dir(s) removed (");
-            run.StdOut.ShouldContain("Repair report: 0 adopted, 0 need --root, 1 stale row(s) pruned, 1 husk row(s) pruned.");
+            run.StdOut.ShouldContain("Repair report: 0 adopted, 0 not adopted, 1 stale row(s) pruned, 1 husk row(s) pruned.");
             ReadRegistry(home).ShouldBeEmpty();
             Directory.Exists(StoreDir(home, goneKey)).ShouldBeFalse();
             Directory.Exists(StoreDir(home, huskKey)).ShouldBeFalse();
@@ -313,7 +312,7 @@ public sealed class WorkspaceRepairPruneCliTests
             run.StdOut.ShouldContain($"husk: prune-husk ({huskKey}) root {Canonical(home)} · ");
             run.StdOut.ShouldContain("Dry run: 1 husk row(s), 1 store dir(s) totalling ");
             run.StdOut.ShouldContain(
-                "Repair report: 0 adoptable, 0 need --root, 0 stale row(s) would be pruned, 1 husk row(s) would be pruned.");
+                "Repair report: 0 adoptable, 0 not adoptable, 0 stale row(s) would be pruned, 1 husk row(s) would be pruned.");
             File.ReadAllText(RegistryPath(home)).ShouldContain(huskKey);
             Directory.Exists(StoreDir(home, huskKey)).ShouldBeTrue();
             Directory.Exists(home).ShouldBeTrue();
@@ -382,7 +381,7 @@ public sealed class WorkspaceRepairPruneCliTests
     }
 
     [Fact]
-    public async Task Yes_DeadRootOrphanStore_AdoptedFirst_SweptAsStaleOnNextRun()
+    public async Task Yes_DeadRootOrphanStore_RefusedAndParked_RestoredRootAdoptsIt()
     {
         var home = TestDirs.NewTempDir();
         var deadRoot = Canonical(TestDirs.NewTempDir());
@@ -393,21 +392,33 @@ public sealed class WorkspaceRepairPruneCliTests
             WriteStoreDir(home, deadKey, "prune-dead", deadRoot, ("meta.db", 10));
             Directory.Delete(deadRoot, recursive: true);
 
-            var first = await RunAsync(home, "workspace", "repair", "--yes");
+            var refused = await RunAsync(home, "workspace", "repair", "--yes");
 
-            first.ExitCode.ShouldBe(0);
-            first.StdOut.ShouldContain($"adopted prune-dead ({deadKey})");
-            ReadRegistry(home).ShouldHaveSingleItem().StoreKey.ShouldBe(deadKey);
+            refused.ExitCode.ShouldBe(0);
+            refused.StdOut.ShouldContain($"root gone: prune-dead ({deadKey}) — recorded root {deadRoot}");
+            refused.StdOut.ShouldNotContain($"adopted prune-dead ({deadKey})");
+            refused.StdOut.ShouldNotContain($"({deadKey}) — performed:");
+            refused.StdOut.ShouldContain(
+                "Repair report: 0 adopted, 1 not adopted, 0 stale row(s) pruned, 0 husk row(s) pruned.");
+            ReadRegistry(home).ShouldBeEmpty();
             Directory.Exists(StoreDir(home, deadKey)).ShouldBeTrue();
 
-            var second = await RunAsync(home, "workspace", "repair", "--yes");
+            var dry = await RunAsync(home, "workspace", "repair", "--dry-run");
 
-            second.ExitCode.ShouldBe(0);
-            ResultLine(second.StdOut, deadKey).ShouldStartWith("  - pruned row + store (");
-            second.StdOut.ShouldContain(
-                "Repair report: 0 adopted, 0 need --root, 1 stale row(s) pruned, 0 husk row(s) pruned.");
-            ReadRegistry(home).ShouldBeEmpty();
-            Directory.Exists(StoreDir(home, deadKey)).ShouldBeFalse();
+            dry.ExitCode.ShouldBe(0);
+            dry.StdOut.ShouldContain("root gone: prune-dead");
+            dry.StdOut.ShouldNotContain("would adopt");
+            dry.StdOut.ShouldContain(
+                "Repair report: 0 adoptable, 1 not adoptable, 0 stale row(s) would be pruned, " +
+                "0 husk row(s) would be pruned.");
+
+            Directory.CreateDirectory(deadRoot);
+            var restored = await RunAsync(home, "workspace", "repair", "--yes");
+
+            restored.ExitCode.ShouldBe(0);
+            restored.StdOut.ShouldContain($"adopted prune-dead ({deadKey})");
+            ReadRegistry(home).ShouldHaveSingleItem().StoreKey.ShouldBe(deadKey);
+            Directory.Exists(StoreDir(home, deadKey)).ShouldBeTrue();
         }
         finally
         {
@@ -610,7 +621,7 @@ public sealed class WorkspaceRepairPruneCliTests
         run.StdOut.ShouldContain("x not removed: prune-zulu");
         run.StdOut.ShouldContain("Sweep stopped:");
         run.StdOut.ShouldContain("1 stale row(s) already removed, 1 store dir(s) gone");
-        run.StdOut.ShouldContain("Repair report: 0 adopted, 0 need --root, 1 stale row(s) pruned, 0 husk row(s) pruned.");
+        run.StdOut.ShouldContain("Repair report: 0 adopted, 0 not adopted, 1 stale row(s) pruned, 0 husk row(s) pruned.");
         run.StdOut.ShouldNotContain("2 stale row(s) pruned");
         run.StdErr.ShouldContain("error:");
         run.StdOut.ShouldNotContain(fixture.BlockedDir);

@@ -73,7 +73,9 @@ public sealed class WorkspaceListCommand : Command<WorkspaceListCommand.Settings
                 orphan.RootPath?.EscapeMarkup() ?? "[yellow]unknown — needs --root[/]",
                 orphan.StoreKey.EscapeMarkup(),
                 "-",
-                orphan.Class == "legacy" ? "[yellow]orphan — needs root[/]" : "[yellow]orphan — adoptable[/]");
+                orphan.Class == "legacy" ? "[yellow]orphan — needs root[/]"
+                    : orphan.Class == "root-gone" ? "[yellow]orphan — root gone[/]"
+                    : "[yellow]orphan — adoptable[/]");
         }
 
         AnsiConsole.Write(table);
@@ -97,9 +99,15 @@ public sealed class WorkspaceListCommand : Command<WorkspaceListCommand.Settings
     {
         foreach (var orphan in listing.Orphans)
         {
-            Console.Error.WriteLine(orphan.Class == "legacy"
-                ? $"warning: workspace store '{orphan.StoreKey}' has no recorded root path; run 'squeezr workspace repair --store-key {orphan.StoreKey} --root <path>'."
-                : $"warning: workspace store '{orphan.StoreKey}' is an orphan; run 'squeezr workspace repair' to adopt it.");
+            Console.Error.WriteLine(orphan.Class switch
+            {
+                "legacy" =>
+                    $"warning: workspace store '{orphan.StoreKey}' has no recorded root path; run 'squeezr workspace repair --store-key {orphan.StoreKey} --root <path>'.",
+                "root-gone" =>
+                    $"warning: workspace store '{orphan.StoreKey}' is an orphan whose recorded root path '{orphan.RootPath}' does not exist; repair will not adopt it until that directory is back.",
+                _ =>
+                    $"warning: workspace store '{orphan.StoreKey}' is an orphan; run 'squeezr workspace repair' to adopt it.",
+            });
         }
 
         foreach (var workspace in listing.Workspaces.Where(entry => entry.Husk == true))

@@ -80,6 +80,31 @@ public sealed class RegistryRepairTests : IDisposable
         File.ReadAllBytes(adoptableManifestPath).ShouldBe(adoptableManifestBytes);
     }
 
+    [Fact]
+    public void AdoptAll_DeadRootOrphan_RefusedByTheGate_StaysRowless_AndKeepsItsStore()
+    {
+        var deadRoot = NewTempDir();
+        var canonical = WorkspaceCanonicalPath.Canonicalize(deadRoot);
+        var storeKey = WorkspaceStoreKeys.Create("dead-root", canonical);
+        var manifestPath = Path.Combine(CreateStoreDir(storeKey), SqueezrPaths.StoreManifestFileName);
+        WriteManifest(manifestPath, "dead-root", deadRoot);
+        var manifestBytes = File.ReadAllBytes(manifestPath);
+        Directory.Delete(deadRoot, recursive: true);
+
+        var outcome = RegistryRepair.AdoptAll();
+
+        outcome.Adopted.ShouldBeEmpty();
+        outcome.Failed.ShouldBeEmpty();
+        outcome.NeedsRoot.ShouldHaveSingleItem().StoreKey.ShouldBe(storeKey);
+        WorkspaceRegistry.FindByStoreKey(storeKey).ShouldBeNull();
+        File.ReadAllBytes(manifestPath).ShouldBe(manifestBytes);
+
+        var second = RegistryRepair.AdoptAll();
+
+        second.Adopted.ShouldBeEmpty();
+        second.NeedsRoot.ShouldHaveSingleItem().StoreKey.ShouldBe(storeKey);
+    }
+
     [LinuxFact]
     [SupportedOSPlatform("linux")]
     public void AdoptAll_UnwritableHome_ReportsEveryAdoptableOrphanAsFailedAndAdoptsNothing()

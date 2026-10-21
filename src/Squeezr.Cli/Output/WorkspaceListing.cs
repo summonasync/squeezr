@@ -26,7 +26,7 @@ public static class WorkspaceListing
             .Select(orphan => new WorkspaceOrphanEntry(
                 orphan.Name,
                 orphan.StoreKey,
-                orphan.IsAdoptable ? "adoptable" : "legacy",
+                orphan.IsAdoptable ? "adoptable" : orphan.RootPath is null ? "legacy" : "root-gone",
                 orphan.RootPath))
             .ToList();
 

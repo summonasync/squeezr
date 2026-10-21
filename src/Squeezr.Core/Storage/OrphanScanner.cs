@@ -34,7 +34,10 @@ public static class OrphanScanner
                     continue;
                 }
 
-                orphans.Add(new OrphanInfo(storeKey, manifest.Name, canonicalRoot));
+                orphans.Add(new OrphanInfo(storeKey, manifest.Name, canonicalRoot)
+                {
+                    RootExists = Directory.Exists(canonicalRoot),
+                });
             }
             else
             {

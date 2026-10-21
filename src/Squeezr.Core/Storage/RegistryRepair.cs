@@ -16,7 +16,7 @@ public static class RegistryRepair
 
         foreach (var orphan in scan.Orphans)
         {
-            if (orphan.RootPath is not { } rootPath)
+            if (orphan is not { IsAdoptable: true, RootPath: { } rootPath })
             {
                 needsRoot.Add(orphan);
                 continue;
@@ -59,6 +59,14 @@ public static class RegistryRepair
         if (!string.Equals(WorkspaceStoreKeys.Create(manifest.Name, canonicalRoot), storeKey, StringComparison.Ordinal))
         {
             throw new WorkspaceException($"Root path '{rootPath}' does not match store key '{storeKey}'.");
+        }
+
+        // The explicit act has no scan snapshot behind it, so liveness is probed here, at the moment the
+        // row is written: a row naming a directory that is already gone would be stale on the next scan.
+        if (!Directory.Exists(canonicalRoot))
+        {
+            throw new WorkspaceException(
+                $"Root path '{canonicalRoot}' does not exist; adoption requires a live root.");
         }
 
         var filled = manifest with { RootPath = canonicalRoot };
