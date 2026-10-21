@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
@@ -135,6 +137,49 @@ public class FreshnessGuardTests
         result.Stale.ShouldBeEmpty();
         new SearchEngine(workspace).Search(Query("newneedle")).Matches.ShouldHaveSingleItem().Path.ShouldBe("new.cs");
     }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public async Task IndexedEmptyFile_PathSubstitutedWithAWriterlessFifo_DoesNotBlockTheFreshnessProbe()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/empty.cs", string.Empty);
+        new WorkspaceIndexer().Index(workspace);
+
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            var repoDoc = store.FindRepo("demo")!;
+            store.ListFiles(repoDoc.Id)
+                .Single(f => f.Path == "empty.cs")
+                .SizeBytes.ShouldBe(0, "a channel imitates an empty row only because the row really is empty");
+        }
+
+        var fifo = Path.Combine(workspace, "repo", "empty.cs");
+        File.Delete(fifo);
+        Assert.Equal(0, mkfifo(fifo, 0b100_100_100));
+
+        // asserted before the call so a regressed stat probe fails fast instead of hanging here
+        UnixFileType.IsRegularFile(fifo).ShouldBeFalse();
+
+        var call = Task.Run(() => FreshnessGuard.CheckAndRefresh(workspace, [("demo", "empty.cs")]));
+        (await Task.WhenAny(call, Task.Delay(WedgeBudget))).ShouldBe(call, $"the freshness probe opened {fifo}");
+
+        var result = await call;
+        result.Refreshed.ShouldBe(["demo/empty.cs"]);
+        result.Stale.ShouldBeEmpty();
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            var repoDoc = store.FindRepo("demo")!;
+            store.ListFiles(repoDoc.Id).ShouldNotContain(f => f.Path == "empty.cs",
+                "a channel carries no indexable content, so the row has to leave with the open that never happened");
+        }
+    }
+
+    private static readonly TimeSpan WedgeBudget = TimeSpan.FromSeconds(30);
+
+    [SupportedOSPlatform("linux")]
+    [DllImport("libc", SetLastError = true)]
+    private static extern int mkfifo(string pathname, uint mode);
 
     private static DateTime IndexedAt(string workspace, string path)
     {

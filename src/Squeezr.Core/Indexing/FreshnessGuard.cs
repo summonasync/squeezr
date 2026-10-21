@@ -86,7 +86,10 @@ public static class FreshnessGuard
         var fullPath = Path.Combine(
             NavigationContext.ResolveRepoRoot(workspaceRoot, entry),
             candidate.Path.Replace('/', Path.DirectorySeparatorChar));
-        if (!File.Exists(fullPath))
+
+        // the size comparison below is no filter: a channel reports st_size 0, so it matches an indexed
+        // empty row and the hash read would open a writerless FIFO on the caller's thread, outside any lock
+        if (!File.Exists(fullPath) || !UnixFileType.IsRegularFile(fullPath))
         {
             return false;
         }
