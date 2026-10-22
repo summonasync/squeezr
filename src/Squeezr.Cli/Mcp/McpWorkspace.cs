@@ -23,6 +23,17 @@ public sealed class McpWorkspace
 
     public bool SessionOutsideRoot { get; }
 
+    // The host writes this when the watch claim sends the session to observer duty; the tool gate reads it once,
+    // so the agent learns the standing on its first answer without paying the same line on every call.
+    public string? WatchNotice { get; internal set; }
+
+    internal string? TakeWatchNotice()
+    {
+        var notice = WatchNotice;
+        WatchNotice = null;
+        return notice;
+    }
+
     public bool IsWorkspace => File.Exists(SqueezrPaths.ManifestPath(Root));
 
     public void RequireWorkspace()

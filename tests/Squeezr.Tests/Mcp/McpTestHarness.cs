@@ -23,7 +23,7 @@ internal sealed class McpTestHarness : IAsyncDisposable
 
     public static async Task<McpTestHarness> StartAsync(
         string workspaceRoot, bool watch = false, string? sessionDirectory = null, WatchOwnerClaim? claimOverride = null,
-        bool embedWatch = true, WatchEmbeddingRuntime? embeddingRuntime = null)
+        bool embedWatch = true, WatchEmbeddingRuntime? embeddingRuntime = null, TextWriter? stderr = null)
     {
         var toServer = new Pipe();
         var fromServer = new Pipe();
@@ -39,7 +39,8 @@ internal sealed class McpTestHarness : IAsyncDisposable
             events: false,
             claimOverride,
             embedWatch,
-            embeddingRuntime is null ? null : Task.FromResult<WatchEmbeddingRuntime?>(embeddingRuntime));
+            embeddingRuntime is null ? null : Task.FromResult<WatchEmbeddingRuntime?>(embeddingRuntime),
+            stderr);
 
         var transport = new StreamClientTransport(
             toServer.Writer.AsStream(),

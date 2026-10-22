@@ -93,17 +93,19 @@ public static class McpServerHost
         bool events,
         WatchOwnerClaim? claimOverride,
         bool embedWatch = true,
-        Task<WatchEmbeddingRuntime?>? embeddingRuntime = null)
+        Task<WatchEmbeddingRuntime?>? embeddingRuntime = null,
+        TextWriter? stderr = null)
     {
+        var diagnostics = stderr ?? Console.Error;
         var startupConfig = StartupConfig.TryRead(workspaceRoot);
         var workspace = new McpWorkspace(workspaceRoot, sessionDirectory, startupConfig?.Embeddings.Provider);
         if (!workspace.IsWorkspace)
         {
-            Console.Error.WriteLine(
+            diagnostics.WriteLine(
                 $"warning: '{workspace.Root}' is not an initialized workspace; tool calls will return an error");
         }
 
-        var gate = new McpToolGate();
+        var gate = new McpToolGate(workspace.TakeWatchNotice);
         var cache = new ToolResponseCache(workspaceRoot);
         var identity = new ClientIdentity();
         var services = new ServiceCollection();
@@ -136,7 +138,7 @@ public static class McpServerHost
         var embedDrainReason = ResolveEmbedDrainReason(embedWatch, startupConfig?.Watch.EmbedPending);
         var watcher = await TryStartWatchEngineAsync(
             workspace, watch, startupConfig?.Watch.Enabled ?? false, ct, events, claimOverride,
-            embedDrainReason, embeddingRuntime);
+            embedDrainReason, embeddingRuntime, diagnostics);
         lifetime.MarkStarted();
         try
         {
@@ -156,13 +158,14 @@ public static class McpServerHost
 
     private static async Task<WorkspaceWatcher?> TryStartWatchEngineAsync(
         McpWorkspace workspace, bool watchRequested, bool watchEnabledInConfig, CancellationToken ct, bool events,
-        WatchOwnerClaim? claimOverride, string? embedDrainReason, Task<WatchEmbeddingRuntime?>? embeddingRuntime)
+        WatchOwnerClaim? claimOverride, string? embedDrainReason,
+        Task<WatchEmbeddingRuntime?>? embeddingRuntime, TextWriter stderr)
     {
         if (!watchRequested && !watchEnabledInConfig)
         {
             if (events)
             {
-                Console.Error.WriteLine("warning: --events has no effect: watch engine is off (pass --watch or set watch.enabled)");
+                stderr.WriteLine("warning: --events has no effect: watch engine is off (pass --watch or set watch.enabled)");
             }
 
             return null;
@@ -170,39 +173,46 @@ public static class McpServerHost
 
         if (!workspace.IsWorkspace)
         {
-            Console.Error.WriteLine("warning: watch requested but workspace is not initialized; engine is off");
+            stderr.WriteLine("warning: watch requested but workspace is not initialized; engine is off");
             return null;
         }
 
         try
         {
+            var announcer = new ServeWatchAnnouncer(stderr);
+            // The claim owns the only honest test of whether its own shutdown cleanup failed: Release answers false
+            // both when the marker stayed undeletable (a wedged store for the next contender) and when the marker
+            // simply is not ours anymore, so the bool at the call sites cannot carry the signal and the sink can.
             var claim = claimOverride
-                ?? new WatchOwnerClaim(SqueezrPaths.StoreDir(workspace.Root), DaemonHeartbeat.ServeWatchKind);
+                ?? new WatchOwnerClaim(
+                    SqueezrPaths.StoreDir(workspace.Root), DaemonHeartbeat.ServeWatchKind, announcer.Fault);
             var outcome = claim.TryAcquire();
             if (outcome.Status == WatchOwnerStatus.RaceLost)
             {
                 outcome = claim.TryAcquire();
             }
 
-            if (!outcome.IsOwner)
+            var role = ServeWatchRole.FromOutcome(outcome);
+            if (!role.IsOwner)
             {
-                Console.Error.WriteLine("warning: watch engine is off: another process owns the watch for this workspace");
+                workspace.WatchNotice = role.AgentNotice;
+                announcer.Announce(role);
                 return null;
             }
 
             var runtimeTask = embedDrainReason is null
                 ? embeddingRuntime ?? Task.Run(
-                    () => CreateWatchEmbeddingRuntime(workspace.Root), CancellationToken.None)
+                    () => CreateWatchEmbeddingRuntime(workspace.Root, stderr), CancellationToken.None)
                 : null;
             if (embedDrainReason is not null)
             {
-                Console.Error.WriteLine($"squeezr serve: watch embed drain off ({embedDrainReason})");
+                stderr.WriteLine($"squeezr serve: watch embed drain off ({embedDrainReason})");
             }
 
             WorkspaceWatcher watcher;
             if (events)
             {
-                var writer = new IndexEventWriter(Console.Error);
+                var writer = new IndexEventWriter(stderr);
                 var renderer = new IndexEventsRenderer(writer);
                 watcher = new WorkspaceWatcher(
                     new WatchEventsStatus(writer, workspace.Root, renderer), renderer,
@@ -211,7 +221,7 @@ public static class McpServerHost
             else
             {
                 watcher = new WorkspaceWatcher(
-                    new ServeWatchStatus(Console.Error), onStaleTakeover: StaleLockWarningSink.ToStderr, claim: claim,
+                    new ServeWatchStatus(stderr), onStaleTakeover: StaleLockWarningSink.ToStderr, claim: claim,
                     embeddings: runtimeTask);
             }
 
@@ -225,12 +235,13 @@ public static class McpServerHost
                 throw;
             }
 
-            Console.Error.WriteLine("squeezr serve: watch engine running");
+            stderr.WriteLine("squeezr serve: watch engine running");
+            announcer.Announce(role);
             return watcher;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException or ArgumentException)
         {
-            Console.Error.WriteLine($"warning: watch engine failed to start: {ex.Message}");
+            stderr.WriteLine($"warning: watch engine failed to start: {ex.Message}");
             return null;
         }
     }
@@ -245,7 +256,7 @@ public static class McpServerHost
 
     // Runs on a worker thread off the JSON-RPC startup path: provider resolution may probe an HTTP
     // endpoint and an onnx provider loads its model. Whatever happens here, serve must keep answering.
-    private static WatchEmbeddingRuntime? CreateWatchEmbeddingRuntime(string workspaceRoot)
+    private static WatchEmbeddingRuntime? CreateWatchEmbeddingRuntime(string workspaceRoot, TextWriter stderr)
     {
         try
         {
@@ -253,19 +264,19 @@ public static class McpServerHost
                 workspaceRoot, withProvider: true, out var provider, out var store, out var resolution);
             if (provider is null || store is null)
             {
-                Console.Error.WriteLine(
+                stderr.WriteLine(
                     "warning: watch embed drain off: " +
                     (warnings.Count > 0 ? warnings[0] : "embedding runtime unavailable"));
                 return null;
             }
 
             var providerName = resolution?.Provider ?? "unknown";
-            Console.Error.WriteLine($"squeezr serve: watch embed drain ready (provider={providerName})");
+            stderr.WriteLine($"squeezr serve: watch embed drain ready (provider={providerName})");
             return new WatchEmbeddingRuntime(provider, store, resolution);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            Console.Error.WriteLine($"warning: watch embed drain off: {ex.Message}");
+            stderr.WriteLine($"warning: watch embed drain off: {ex.Message}");
             return null;
         }
     }
