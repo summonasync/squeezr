@@ -1,5 +1,6 @@
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Core.Indexing.Query;
@@ -42,10 +43,25 @@ public sealed class SearchEngine
     {
         var guard = SecretGuardReader.Load(_workspaceRoot);
         var fileScope = ResolveFileScope(query, guard);
-        var exact = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: true, fileScope, guard);
-        var identifierHits = query.Regex
-            ? []
-            : IdentifierTokenLeg.Execute(_workspaceRoot, query, fileScope, guard);
+        var indexPath = SqueezrPaths.TrigramIndexPath(_workspaceRoot);
+        List<(SearchMatch Match, string? Key)> exact;
+        List<(SearchMatch Match, string? Key)> identifierHits;
+        if (query.Regex || !File.Exists(indexPath))
+        {
+            // regex rows never reach the leg and a missing index stays ExactSearchPlan's throw —
+            // both keep the standalone pipeline; the branch below owns every row the leg can run on
+            exact = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: true, fileScope, guard);
+            identifierHits = [];
+        }
+        else
+        {
+            // one store + one parsed trigram index per hybrid query, shared by both exact arms —
+            // the leg used to open the store and re-parse the whole index file a second time
+            using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
+            var reader = new TrigramIndexReader(indexPath);
+            exact = ExactSearchPlan.Execute(_workspaceRoot, store, reader, query, trackChunkKeys: true, fileScope, guard);
+            identifierHits = IdentifierTokenLeg.Execute(_workspaceRoot, store, reader, query, fileScope, guard);
+        }
         var semantic = new List<(string Key, SearchMatch Match)>();
         var warnings = new List<string>();
 

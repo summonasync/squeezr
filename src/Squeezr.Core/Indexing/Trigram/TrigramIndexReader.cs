@@ -72,6 +72,23 @@ public sealed class TrigramIndexReader
         return _inverted.GetValueOrDefault(hash);
     }
 
+    // same ascending DocIds Find serves after the inverted build, at O(docs) dictionary probes —
+    // worth it when only a handful of hashes is asked, where building the inverted index costs
+    // a full pass over every posting of every doc
+    public uint[] ScanDocIds(uint hash)
+    {
+        var hits = new List<uint>();
+        for (var docId = 0; docId < _docPostings.Count; docId++)
+        {
+            if (_docPostings[docId].ContainsKey(hash))
+            {
+                hits.Add((uint)docId);
+            }
+        }
+
+        return [.. hits];
+    }
+
     public uint[] IntersectTrigrams(IReadOnlyList<uint> hashes)
     {
         if (hashes.Count == 0)

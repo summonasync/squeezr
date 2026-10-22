@@ -59,10 +59,42 @@ public static class IdentifierTokenLeg
         }
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
+        var reader = new TrigramIndexReader(indexPath);
+        return Execute(store, reader, workspaceRoot, tokens, query, fileScope, counter, guard);
+    }
+
+    // hybrid path: the phrase arm already opened the store and parsed the trigram file for this
+    // very query — the leg rides on the same pair instead of rebuilding both per call
+    internal static List<(SearchMatch Match, string? Key)> Execute(
+        string workspaceRoot,
+        MetaStore store,
+        TrigramIndexReader reader,
+        SearchQuery query,
+        IReadOnlySet<uint>? fileScope,
+        SecretGuardReader guard)
+    {
+        var tokens = Tokenize(query.Query);
+        if (tokens.Count < 2)
+        {
+            return [];
+        }
+
+        return Execute(store, reader, workspaceRoot, tokens, query, fileScope, null, guard);
+    }
+
+    private static List<(SearchMatch Match, string? Key)> Execute(
+        MetaStore store,
+        TrigramIndexReader reader,
+        string workspaceRoot,
+        List<string> tokens,
+        SearchQuery query,
+        IReadOnlySet<uint>? fileScope,
+        ReadCounter? counter,
+        SecretGuardReader guard)
+    {
         // fileScope carries prefix/rankExclude only; repo/language/pathGlob ride the query, so the
         // leg folds them through the phrase arm's filter instead of inventing its own semantics
         var filter = ExactSearchPlan.BuildFilter(store, query, fileScope);
-        var reader = new TrigramIndexReader(indexPath);
 
         var manifest = WorkspaceManifestFile.Load(workspaceRoot);
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
@@ -275,7 +307,7 @@ public static class IdentifierTokenLeg
         // the cap that bounds case expansion on a long literal degrades this to case-sensitive
         // candidates; folded trigrams in the index itself are an index-format change (no owner yet)
         var groups = ExactSearchPlan.LiteralGroups(token, IsCaseSensitive(token), out _);
-        return ExactSearchPlan.ResolveCandidates(reader, groups, filter);
+        return ExactSearchPlan.ResolveCandidatesByScan(reader, groups, filter);
     }
 
     private static bool IsCaseSensitive(string token) => token != token.ToLowerInvariant();

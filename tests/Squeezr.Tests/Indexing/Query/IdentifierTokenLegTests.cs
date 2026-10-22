@@ -4,6 +4,7 @@ using Shouldly;
 using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -165,6 +166,29 @@ public class IdentifierTokenLegTests
         counter.CandidateReads.ShouldBe(160);
         counter.FileReads.ShouldBe(80);
         counter.MaxReadsPerFile.ShouldBeLessThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public void ScanCandidates_AreIdenticalToFindCandidates_WithAndWithoutFilter()
+    {
+        var workspace = NewIndexedWorkspaceWithManyFiles();
+        var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var filter = store.ListAllFiles()
+            .Where(f => f.Path.StartsWith("File1", StringComparison.Ordinal))
+            .Select(f => f.Id)
+            .ToHashSet();
+
+        foreach (var token in new[] { "WorkspaceManager", "Method", "namespace", "zzzz" })
+        {
+            var groups = ExactSearchPlan.LiteralGroups(token, caseSensitive: true, out _);
+
+            ExactSearchPlan.ResolveCandidatesByScan(reader, groups, null)
+                .ShouldBe(ExactSearchPlan.ResolveCandidates(reader, groups, null), token);
+            ExactSearchPlan.ResolveCandidatesByScan(reader, groups, filter)
+                .ShouldBe(ExactSearchPlan.ResolveCandidates(reader, groups, filter), token + " filtered");
+        }
     }
 
     [Fact]

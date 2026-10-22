@@ -41,7 +41,20 @@ public static class ExactSearchPlan
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
         var reader = new TrigramIndexReader(indexPath);
+        return Execute(workspaceRoot, store, reader, query, trackChunkKeys, fileScope, guard);
+    }
 
+    // the hybrid path hands the phrase arm and the identifier leg one per-query store+reader,
+    // so the index file is parsed once per query instead of once per arm
+    internal static List<(SearchMatch Match, string? Key)> Execute(
+        string workspaceRoot,
+        MetaStore store,
+        TrigramIndexReader reader,
+        SearchQuery query,
+        bool trackChunkKeys,
+        IReadOnlySet<uint>? fileScope,
+        SecretGuardReader guard)
+    {
         var manifest = WorkspaceManifestFile.Load(workspaceRoot);
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
         var entriesByName = manifest.Repos.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
@@ -163,6 +176,32 @@ public static class ExactSearchPlan
                     {
                         union.UnionWith(postings.DocIds);
                     }
+                }
+
+                return filter is null
+                    ? union.ToArray()
+                    : union.Where(docId => filter.Contains(reader.GetDoc(docId).FileId)).ToArray();
+            })
+            .ToList();
+
+        return PostingListIntersect.Intersect(lists);
+    }
+
+    // the same set in the same order as ResolveCandidates, but every hash is answered by a
+    // per-doc scan of the postings it needs anyway — on a cold reader the Find path first pays
+    // a full inverted-index build, which a handful of identifier tokens never justifies
+    internal static uint[] ResolveCandidatesByScan(
+        TrigramIndexReader reader,
+        IReadOnlyList<string[]> groups,
+        IReadOnlySet<uint>? filter)
+    {
+        var lists = groups
+            .Select(group =>
+            {
+                var union = new HashSet<uint>();
+                foreach (var trigram in group)
+                {
+                    union.UnionWith(reader.ScanDocIds(TrigramHasher.ComputeHash(trigram[0], trigram[1], trigram[2])));
                 }
 
                 return filter is null
