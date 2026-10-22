@@ -123,6 +123,154 @@ public sealed class WorkspaceIndexerUnreadableTests
         reader.GetDocumentPostings(carried[0].DocId).ShouldNotBeEmpty();
     }
 
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void FullIndex_UnreadableDirectoryKeepsSubtreeRowsAndBothKeepsAgree()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/open.cs", First);
+        WriteFile(workspace, "repo/vault/deep.cs", Second);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var deepId = FileIdOf(workspace, "vault/deep.cs");
+        var deepHashes = ChunkHashes(workspace, deepId);
+        deepHashes.ShouldNotBeEmpty();
+        var vaultPath = Path.Combine(workspace, "repo", "vault");
+        var originalMode = File.GetUnixFileMode(vaultPath);
+        File.SetUnixFileMode(vaultPath, UnixFileMode.None);
+        try
+        {
+            // the premise is asserted, not assumed: stat into the subtree must be denied, and File.Exists
+            // must answer false for a file that is still on disk — that collapse is the bug's whole shape
+            Should.Throw<UnauthorizedAccessException>(() => Directory.EnumerateFileSystemEntries(vaultPath).ToList());
+            Should.Throw<UnauthorizedAccessException>(() => File.GetAttributes(Path.Combine(vaultPath, "deep.cs")));
+            File.Exists(Path.Combine(vaultPath, "deep.cs")).ShouldBeFalse();
+
+            var pass = indexer.Index(
+                workspace, full: true, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+            using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+            {
+                store.FindFileById(deepId).ShouldNotBeNull(
+                    "a directory the walk declared kept must not be reaped by the rebuild in the same pass");
+            }
+
+            pass.Warnings.ShouldContain(w =>
+                w.Contains("unreadable directory 'vault'", StringComparison.Ordinal)
+                && w.Contains("index rows under it kept", StringComparison.Ordinal));
+            pass.Warnings.ShouldContain(w =>
+                w.Contains("keeping 'vault/deep.cs' in the index store: unreadable", StringComparison.Ordinal)
+                && w.Contains("rows kept", StringComparison.Ordinal));
+            pass.Warnings.ShouldNotContain(w =>
+                w.Contains("vault/deep.cs", StringComparison.Ordinal)
+                && w.Contains("missing on disk", StringComparison.Ordinal));
+
+            PendingReapIds(workspace).ShouldBeEmpty();
+            ChunkHashes(workspace, deepId).ShouldBe(deepHashes);
+            ListChunks(workspace, deepId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+            deepHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
+
+            var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
+            var carried = Enumerable.Range(0, (int)reader.DocCount)
+                .Select(docId => (DocId: (uint)docId, Doc: reader.GetDoc((uint)docId)))
+                .Where(entry => entry.Doc.FileId == deepId)
+                .ToList();
+            carried.Count.ShouldBe(1);
+            reader.GetDocumentPostings(carried[0].DocId).ShouldNotBeEmpty();
+        }
+        finally
+        {
+            File.SetUnixFileMode(vaultPath, originalMode);
+        }
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Index_UnreadableDirectory_KeepsSubtreeRowsOnTheIncrementalPath()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/open.cs", First);
+        WriteFile(workspace, "repo/vault/deep.cs", Second);
+        var vectorStore = new FakeVectorStore();
+        var indexer = new WorkspaceIndexer();
+        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        var deepId = FileIdOf(workspace, "vault/deep.cs");
+        var deepHashes = ChunkHashes(workspace, deepId);
+        var vaultPath = Path.Combine(workspace, "repo", "vault");
+        var originalMode = File.GetUnixFileMode(vaultPath);
+        File.SetUnixFileMode(vaultPath, UnixFileMode.None);
+        try
+        {
+            Should.Throw<UnauthorizedAccessException>(() => Directory.EnumerateFileSystemEntries(vaultPath).ToList());
+
+            var pass = indexer.Index(
+                workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+            using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+            {
+                store.FindFileById(deepId).ShouldNotBeNull();
+            }
+
+            pass.Warnings.ShouldContain(w =>
+                w.Contains("unreadable directory 'vault'", StringComparison.Ordinal)
+                && w.Contains("index rows under it kept", StringComparison.Ordinal));
+            pass.Warnings.ShouldNotContain(w =>
+                w.Contains("vault/deep.cs", StringComparison.Ordinal)
+                && (w.Contains("missing on disk", StringComparison.Ordinal)
+                    || w.Contains("dropping", StringComparison.Ordinal)));
+            PendingReapIds(workspace).ShouldBeEmpty();
+            ChunkHashes(workspace, deepId).ShouldBe(deepHashes);
+            deepHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
+        }
+        finally
+        {
+            File.SetUnixFileMode(vaultPath, originalMode);
+        }
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void RebuildTrigramIndex_RowUnderUnreadableDirectory_KeepsWhileDeletedSiblingStillReaps()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/vault/deep.cs", Second);
+        WriteFile(workspace, "repo/gone.cs", First);
+        new WorkspaceIndexer().Index(workspace);
+
+        var deepId = FileIdOf(workspace, "vault/deep.cs");
+        var goneId = FileIdOf(workspace, "gone.cs");
+        File.Delete(Path.Combine(workspace, "repo", "gone.cs"));
+        var vaultPath = Path.Combine(workspace, "repo", "vault");
+        var originalMode = File.GetUnixFileMode(vaultPath);
+        File.SetUnixFileMode(vaultPath, UnixFileMode.None);
+        try
+        {
+            Should.Throw<UnauthorizedAccessException>(() => File.GetAttributes(Path.Combine(vaultPath, "deep.cs")));
+
+            var warnings = new List<string>();
+            using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+            WorkspaceIndexer.RebuildTrigramIndex(
+                workspace, store, WorkspaceManifestFile.Load(workspace), warnings,
+                new Dictionary<uint, string>(), SqueezrPaths.TrigramIndexPath(workspace));
+
+            store.FindFileById(deepId).ShouldNotBeNull();
+            store.FindFileById(goneId).ShouldBeNull(
+                "a readable directory with no file under it is still a deletion: the keep must not swallow it");
+            warnings.ShouldContain(w =>
+                w.Contains("keeping 'vault/deep.cs' in the index store: unreadable", StringComparison.Ordinal)
+                && w.Contains("rows kept", StringComparison.Ordinal));
+            warnings.ShouldContain(w =>
+                w.Contains("dropping 'gone.cs' from index store: file is missing on disk", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.SetUnixFileMode(vaultPath, originalMode);
+        }
+    }
+
     private static string NewWorkspace()
     {
         var workspace = TestDirs.NewTempDir();

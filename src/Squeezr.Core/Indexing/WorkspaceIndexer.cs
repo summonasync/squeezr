@@ -1172,9 +1172,22 @@ public sealed class WorkspaceIndexer
                     var fullPath = Path.Combine(ResolveRepoRoot(workspaceRoot, entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
                     if (!File.Exists(fullPath))
                     {
-                        NoteStoreDrop(guard, protectedDrops, warnings, file.Path, StoreDrop.MissingOnDisk);
-                        deferredReaps += DropFile(file, store, vectorStore, warnings, guard).ReapsQueued;
-                        continue;
+                        // File.Exists answers the same false for a deletion and for a path a non-executable
+                        // parent hides from stat; the exception shape is what tells them apart, and a denied
+                        // stat is the walk's unreadable keep, not a reap
+                        var denial = ProbeMissingStat(fullPath, out var present);
+                        if (denial is not null)
+                        {
+                            KeepUnreadableRow(file, denial.Message);
+                            continue;
+                        }
+
+                        if (!present)
+                        {
+                            NoteStoreDrop(guard, protectedDrops, warnings, file.Path, StoreDrop.MissingOnDisk);
+                            deferredReaps += DropFile(file, store, vectorStore, warnings, guard).ReapsQueued;
+                            continue;
+                        }
                     }
 
                     // a path that stopped being a regular file after the walk is a rebuild-time race, not
@@ -1215,6 +1228,28 @@ public sealed class WorkspaceIndexer
 
     private static string ResolveRepoRoot(string workspaceRoot, RepoEntry repo) =>
         Path.GetFullPath(Path.IsPathRooted(repo.Path) ? repo.Path : Path.Combine(workspaceRoot, repo.Path));
+
+    // the exists-check has no shape for a parent directory that denies the stat, while GetAttributes keeps
+    // the exception: UnauthorizedAccessException is the unreadable subtree, a plain IOException is the deletion
+    private static Exception? ProbeMissingStat(string fullPath, out bool present)
+    {
+        try
+        {
+            _ = File.GetAttributes(fullPath);
+            present = true;
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            present = false;
+            return ex;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            present = false;
+            return null;
+        }
+    }
 
     private static TrigramIndexReader? TryOpenTrigramIndex(string path)
     {
