@@ -12,11 +12,11 @@ public static class TuiSearchFlow
     private const int SearchMaxTokens = 2000;
     private const int HitListSize = 20;
 
-    private static bool _vectorStoreUnavailableShown;
-
-    internal static void ResetWarningDedup() => _vectorStoreUnavailableShown = false;
-
-    public static async Task RunAsync(IAnsiConsole console, string workspaceRoot, CancellationToken cancellationToken)
+    public static async Task RunAsync(
+        IAnsiConsole console,
+        string workspaceRoot,
+        TuiSession session,
+        CancellationToken cancellationToken)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -81,12 +81,11 @@ public static class TuiSearchFlow
             {
                 if (warning == SearchEngine.VectorStoreUnavailableWarning)
                 {
-                    if (_vectorStoreUnavailableShown)
+                    if (!session.TryMarkVectorStoreUnavailableShown())
                     {
                         continue;
                     }
 
-                    _vectorStoreUnavailableShown = true;
                     console.MarkupLine($"[grey]{warning.EscapeMarkup()}[/]");
                     continue;
                 }

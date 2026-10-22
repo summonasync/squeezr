@@ -129,7 +129,7 @@ public class TuiContextMenuTests
     {
         var console = TuiTestHarness.InteractiveConsole();
 
-        await TuiSearchFlow.RunAsync(console, TestDirs.NewTempDir(), CancellationToken.None);
+        await TuiSearchFlow.RunAsync(console, TestDirs.NewTempDir(), new TuiSession(), CancellationToken.None);
 
         console.Output.ShouldContain("Workspace not initialized.");
         console.Output.ShouldContain("add it via \"Add repository\" in the main menu");

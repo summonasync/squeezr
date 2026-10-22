@@ -41,6 +41,7 @@ public static class TuiApp
 
     public static async Task<int> RunAsync(IAnsiConsole console, string workspaceRoot, CancellationToken cancellationToken = default)
     {
+        var session = new TuiSession();
         try
         {
             await OfferInitializationOnEntryAsync(console, workspaceRoot, cancellationToken);
@@ -70,7 +71,7 @@ public static class TuiApp
 
             try
             {
-                await ExecuteAsync(console, workspaceRoot, choice, cancellationToken);
+                await ExecuteAsync(console, workspaceRoot, choice, session, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -119,6 +120,7 @@ public static class TuiApp
         IAnsiConsole console,
         string workspaceRoot,
         string choice,
+        TuiSession session,
         CancellationToken cancellationToken)
     {
         switch (choice)
@@ -132,7 +134,7 @@ public static class TuiApp
 
                 break;
             case "Search":
-                await TuiSearchFlow.RunAsync(console, workspaceRoot, cancellationToken);
+                await TuiSearchFlow.RunAsync(console, workspaceRoot, session, cancellationToken);
                 break;
             case "Map":
                 await TuiMapBrowser.RunAsync(console, workspaceRoot, cancellationToken);

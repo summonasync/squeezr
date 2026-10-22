@@ -84,33 +84,14 @@ public class TuiSearchFlowTests
     [Fact]
     public async Task Search_QdrantDown_ShowsUnavailableHintOncePerSession()
     {
-        TuiSearchFlow.ResetWarningDedup();
         var workspace = NewIndexedWorkspace();
-        const string apiKeyEnv = "SQUEEZR_API_KEY_TUI_SEARCH_FLOW_TEST";
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
-        {
-            Embeddings = config.Embeddings with
-            {
-                Provider = "openai",
-                OpenAiCompatible = config.Embeddings.OpenAiCompatible with { ApiKeyEnv = apiKeyEnv }
-            },
-            Qdrant = config.Qdrant with { Endpoint = "http://localhost:9" }
-        });
-        var previousKey = Environment.GetEnvironmentVariable(apiKeyEnv);
-        Environment.SetEnvironmentVariable(apiKeyEnv, "test-key");
+        ConfigureUnavailableVectorStore(workspace);
+        var previousKey = Environment.GetEnvironmentVariable(UnavailableStoreApiKeyEnv);
+        Environment.SetEnvironmentVariable(UnavailableStoreApiKeyEnv, "test-key");
         try
         {
-            var console = TuiTestHarness.InteractiveConsole();
-            TuiTestHarness.PushMenuChoice(console, 1);
-            console.Input.PushTextWithEnter("zanzibar");
-            TuiTestHarness.PushMenuChoice(console, 0);
-            TuiTestHarness.PushMenuChoice(console, 3);
-            TuiTestHarness.PushMenuChoice(console, 9);
+            var console = await RunUnavailableStoreSessionAsync(workspace);
 
-            var code = await TuiApp.RunAsync(console, workspace);
-
-            code.ShouldBe(0);
             CountOccurrences(console.Output, "vector store is unavailable").ShouldBe(1);
             console.Output.ShouldNotContain("warning:");
             console.Output.ShouldContain("demo/src/Calc.cs");
@@ -118,8 +99,92 @@ public class TuiSearchFlowTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable(apiKeyEnv, previousKey);
+            Environment.SetEnvironmentVariable(UnavailableStoreApiKeyEnv, previousKey);
         }
+    }
+
+    [Fact]
+    public async Task Search_QdrantDown_TwoSessionsInOneProcess_ShowsHintOncePerSession()
+    {
+        var workspace = NewIndexedWorkspace();
+        ConfigureUnavailableVectorStore(workspace);
+        var previousKey = Environment.GetEnvironmentVariable(UnavailableStoreApiKeyEnv);
+        Environment.SetEnvironmentVariable(UnavailableStoreApiKeyEnv, "test-key");
+        try
+        {
+            var first = await RunUnavailableStoreSessionAsync(workspace);
+            var second = await RunUnavailableStoreSessionAsync(workspace);
+
+            CountOccurrences(first.Output, "vector store is unavailable").ShouldBe(1);
+            CountOccurrences(second.Output, "vector store is unavailable").ShouldBe(1);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(UnavailableStoreApiKeyEnv, previousKey);
+        }
+    }
+
+    [Fact]
+    public async Task Search_QdrantDown_TwoQueriesInOneSession_ShowsHintOnce()
+    {
+        var workspace = NewIndexedWorkspace();
+        ConfigureUnavailableVectorStore(workspace);
+        var previousKey = Environment.GetEnvironmentVariable(UnavailableStoreApiKeyEnv);
+        Environment.SetEnvironmentVariable(UnavailableStoreApiKeyEnv, "test-key");
+        try
+        {
+            var console = TuiTestHarness.InteractiveConsole();
+            TuiTestHarness.PushMenuChoice(console, 1);
+            console.Input.PushTextWithEnter("zanzibar");
+            TuiTestHarness.PushMenuChoice(console, 0);
+            TuiTestHarness.PushMenuChoice(console, 2);
+            console.Input.PushTextWithEnter("return");
+            TuiTestHarness.PushMenuChoice(console, 0);
+            TuiTestHarness.PushMenuChoice(console, 3);
+            TuiTestHarness.PushMenuChoice(console, 9);
+
+            var code = await TuiApp.RunAsync(console, workspace);
+
+            code.ShouldBe(0);
+            console.Output.ShouldContain("var zanzibar = a + b;");
+            console.Output.ShouldContain("return a + b;");
+            CountOccurrences(console.Output, "vector store is unavailable").ShouldBe(1);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(UnavailableStoreApiKeyEnv, previousKey);
+        }
+    }
+
+    private const string UnavailableStoreApiKeyEnv = "SQUEEZR_API_KEY_TUI_SEARCH_FLOW_TEST";
+
+    private static void ConfigureUnavailableVectorStore(string workspace)
+    {
+        var config = ConfigFile.Load(workspace);
+        ConfigFile.Save(workspace, config with
+        {
+            Embeddings = config.Embeddings with
+            {
+                Provider = "openai",
+                OpenAiCompatible = config.Embeddings.OpenAiCompatible with { ApiKeyEnv = UnavailableStoreApiKeyEnv }
+            },
+            Qdrant = config.Qdrant with { Endpoint = "http://localhost:9" }
+        });
+    }
+
+    private static async Task<TestConsole> RunUnavailableStoreSessionAsync(string workspace)
+    {
+        var console = TuiTestHarness.InteractiveConsole();
+        TuiTestHarness.PushMenuChoice(console, 1);
+        console.Input.PushTextWithEnter("zanzibar");
+        TuiTestHarness.PushMenuChoice(console, 0);
+        TuiTestHarness.PushMenuChoice(console, 3);
+        TuiTestHarness.PushMenuChoice(console, 9);
+
+        var code = await TuiApp.RunAsync(console, workspace);
+
+        code.ShouldBe(0);
+        return console;
     }
 
     private static int CountOccurrences(string text, string substring) =>
