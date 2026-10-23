@@ -862,15 +862,24 @@ JSON clients (Claude, Kimi, Qwen) — the `mcpServers` block:
   "mcpServers": {
     "squeezr": {
       "command": "squeezr",
-      "args": ["serve", "--watch"]
+      "args": ["serve"]
     }
   }
 }
 ```
 
+`["serve"]` is what `squeezr mcp install` registers by default: the session
+runs no watch loop, it only queries the index. Add `--watch` when this
+session should own the indexer — it then becomes the process the watch claim
+names, and `squeezr fleet stop` is aimed at it. Whether a store has an owner
+at all, `squeezr mcp doctor` answers in its `watch` row: the owner (pid,
+kind, host) or the exact `squeezr fleet restart <storeKey>` command to give
+the store one.
+
 Codex — a `[mcp_servers.squeezr]` TOML section with the same
-`command`/`args` (plus `startup_timeout_sec = 30`, so the indexer has time to
-start). No `cwd` key is needed in the entry — the workspace root is resolved
+`command`/`args` (plus `startup_timeout_sec = 30`, sized for the freshness
+pass the first cold query runs, not for an indexer boot). No `cwd` key is
+needed in the entry — the workspace root is resolved
 by `serve` itself from the process cwd (and `CLAUDE_PROJECT_DIR`, see above).
 
 ### Advisory hook: `squeezr hook pre-read`
@@ -1211,7 +1220,10 @@ squeezr fleet restart <storeKey>  # restart the watch daemon
   owner too; stopping the named process is the documented recovery for a
   store whose lock never came back), a claim held on another host is refused
   with a hint, a gone owner leaves nothing to stop, and live observers are
-  never killed by surprise — they are MCP clients' live servers; the result
+  never a target — the distinction is owner/observer, not client/daemon: the
+  kill surface reads the claim holder whoever runs it (a client's live
+  `serve --watch` is stoppable exactly because it holds the claim), while
+  observers beat on the store unclaimed and stay untouched; the result
   counts them (additive `observers` in `--json`). With no claim marker at all
   the store is in pre-070 shape and the per-kind heartbeats decide, as they
   always did. The pid is verified before the signal either way: the process

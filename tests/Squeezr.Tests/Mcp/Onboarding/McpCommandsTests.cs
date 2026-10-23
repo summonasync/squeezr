@@ -102,6 +102,23 @@ public sealed class McpCommandsTests
     }
 
     [Fact]
+    public async Task Install_BareNoWatchFlag_IsAcceptedAndRegistersPlainServe()
+    {
+        var workspace = TestDirs.NewTempDir();
+        string? homeDir = null;
+
+        var (exitCode, _, _, error) = await RunAsync(
+            workspace,
+            ["mcp", "install", "--client", "kimi", "--yes", "--no-watch"],
+            configureHome: home => homeDir = home);
+
+        exitCode.ShouldBe(0);
+        error.ShouldBeEmpty();
+        var entry = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".kimi-code", "mcp.json")))!["mcpServers"]!["squeezr"]!;
+        entry["args"]!.ToJsonString().ShouldBe("""["serve"]""");
+    }
+
+    [Fact]
     public async Task Install_NonInteractiveWithoutYesOrScope_ExitsWithHint()
     {
         var workspace = TestDirs.NewTempDir();

@@ -80,11 +80,11 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
     }
 
     // The kill surface follows the claim (070/T5): watch.owner names the process that runs the watch loop, the
-    // roster only proves it still lives here, and everything else beating on the store is an observer — some
-    // MCP client's live server — which nothing here stops by accident. A wedged owner (stale beat, live pid)
-    // stays a target: stopping the named process is the supported recovery for a store whose lock never came
-    // back. With no marker the store is in pre-070 shape, where the per-kind heartbeat was the only name an
-    // indexer ever had.
+    // roster only proves it still lives here, and everything else beating on the store is an observer, never a
+    // target — the owner is whoever holds the claim, a client's live `serve --watch` included. A wedged owner
+    // (stale beat, live pid) stays a target: stopping the named process is the supported recovery for a store
+    // whose lock never came back. With no marker the store is in pre-070 shape, where the per-kind heartbeat
+    // was the only name an indexer ever had.
     internal static (List<(string Kind, DaemonHeartbeat Heartbeat)> Targets,
         List<DaemonHeartbeat> Observers,
         string? NoOwnerReason) ResolveKillTargets(string storeDir, DateTime now)
