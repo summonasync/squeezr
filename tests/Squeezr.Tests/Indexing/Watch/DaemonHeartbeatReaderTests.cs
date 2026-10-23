@@ -96,6 +96,75 @@ public sealed class DaemonHeartbeatReaderTests : IDisposable
             HeartbeatPath(heartbeat.Kind),
             JsonSerializer.Serialize(heartbeat, SqueezrJson.FileOptions));
 
+    [Fact]
+    public void TryReadAll_NothingWritten_ReturnsEmpty()
+    {
+        DaemonHeartbeatReader.TryReadAll(_storeDir).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void TryReadAll_OldSingleFileBeat_IsReadAsOneProcess()
+    {
+        WriteHeartbeat(new DaemonHeartbeat(4242, DaemonHeartbeat.DefaultKind, Now, Now));
+
+        var roster = DaemonHeartbeatReader.TryReadAll(_storeDir);
+
+        roster.ShouldHaveSingleItem().Pid.ShouldBe(4242);
+        roster[0].Kind.ShouldBe(DaemonHeartbeat.DefaultKind);
+        roster[0].Host.ShouldBeNull();
+    }
+
+    [Fact]
+    public void TryReadAll_PerPidBeatsAndKindHeartbeat_OwnerAnswersOnce()
+    {
+        Directory.CreateDirectory(DaemonHeartbeat.BeatsDirFor(_storeDir));
+        WriteBeatFile(new DaemonHeartbeat(4242, DaemonHeartbeat.DefaultKind, Now, Now, "box"));
+        WriteBeatFile(new DaemonHeartbeat(4343, DaemonHeartbeat.DefaultKind, Now, Now, "box"));
+        WriteHeartbeat(new DaemonHeartbeat(4242, DaemonHeartbeat.DefaultKind, Now, Now, "box"));
+
+        var roster = DaemonHeartbeatReader.TryReadAll(_storeDir);
+
+        roster.Select(beat => beat.Pid).ShouldBe([4242, 4343]);
+    }
+
+    [Fact]
+    public void TryReadAll_BothKinds_KeepTheirOwnProcesses()
+    {
+        Directory.CreateDirectory(DaemonHeartbeat.BeatsDirFor(_storeDir));
+        WriteBeatFile(new DaemonHeartbeat(4242, DaemonHeartbeat.DefaultKind, Now, Now, "box"));
+        WriteBeatFile(new DaemonHeartbeat(4343, DaemonHeartbeat.ServeWatchKind, Now, Now, "box"));
+
+        DaemonHeartbeatReader.TryReadAll(_storeDir)
+            .Select(beat => (beat.Kind, beat.Pid))
+            .ShouldBe([
+                (DaemonHeartbeat.ServeWatchKind, 4343),
+                (DaemonHeartbeat.DefaultKind, 4242),
+            ]);
+    }
+
+    [Fact]
+    public void TryReadAll_BeatContradictingItsNameOrCorrupt_IsSkippedWithoutThrowing()
+    {
+        Directory.CreateDirectory(DaemonHeartbeat.BeatsDirFor(_storeDir));
+        WriteBeatFile(new DaemonHeartbeat(9999, DaemonHeartbeat.DefaultKind, Now, Now, "box"), pidInName: 4242);
+        File.WriteAllText(
+            DaemonHeartbeat.BeatPathFor(_storeDir, DaemonHeartbeat.DefaultKind, 5454), "not json {{{");
+        File.WriteAllText(Path.Combine(DaemonHeartbeat.BeatsDirFor(_storeDir), "notes.txt"), "stranger");
+        WriteBeatFile(new DaemonHeartbeat(4343, DaemonHeartbeat.DefaultKind, Now, Now, "box"));
+
+        var roster = DaemonHeartbeatReader.TryReadAll(_storeDir);
+
+        roster.ShouldHaveSingleItem().Pid.ShouldBe(4343);
+    }
+
+    private string WriteBeatFile(DaemonHeartbeat beat, int? pidInName = null)
+    {
+        Directory.CreateDirectory(DaemonHeartbeat.BeatsDirFor(_storeDir));
+        var path = DaemonHeartbeat.BeatPathFor(_storeDir, beat.Kind, pidInName ?? beat.Pid);
+        File.WriteAllText(path, JsonSerializer.Serialize(beat, SqueezrJson.FileOptions));
+        return path;
+    }
+
     public void Dispose()
     {
         Directory.Delete(_storeDir, recursive: true);

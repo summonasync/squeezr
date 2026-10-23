@@ -250,8 +250,8 @@ the central store:
 │   ├── index.lock
 │   ├── watch.owner                  # watch-loop claim: pid+host+kind, exclusive creation; a foreign host
 │   │                                # is outlived only by time (×4 stale windows), not by pid
-│   ├── watch.heartbeat              # per-kind heartbeat: written only by the process the claim names, i.e. the
-│   │                                # one running the watch loop (kind `watch` — the terminal daemon)
+│   ├── watch.heartbeat              # per-kind heartbeat: written by the process running the watch loop (never
+│   │                                # by an observer) — kind `watch`, the terminal daemon
 │   ├── serve-watch.heartbeat        # ...or `serve --watch` from an MCP client, when it is the owner
 │   ├── beats/                       # per-pid beats of every live watch-role process: {kind}.{pid}.beat, same
 │   │                                # JSON {pid, kind, startedAt, lastBeatAt, host}; the roster fleet enumerates
@@ -1149,10 +1149,11 @@ ordering (a store with a live daemon on top) is unchanged: a store counts as
 live when at least one of its bits is alive.
 
 The same roster reaches `fleet --json` as a per-store `daemons[]` array (`kind`, `pid`, `status`,
-`uptimeSeconds`, `owner`, `host`): every process the store's beats name, empty when the store names
-nobody, with exactly the claim holder flagged `owner: true`. Additive per 035 — `watch`, `serveWatch`,
-`stale`, `pendingChunks` and `lastIndexedAt` keep their names, their meanings and their order among
-themselves; the array simply sits between `serveWatch` and `stale`.
+`uptimeSeconds`, `owner`, `host`, plus `isAlive` — the same derived member the sibling `watch`/`serveWatch`
+objects already carry): every process the store's beats name, empty when the store names nobody, with exactly
+the claim holder flagged `owner: true`. Additive per 035 — `watch`, `serveWatch`, `stale`, `pendingChunks` and
+`lastIndexedAt` keep their names, their meanings and their order among themselves; the array simply sits
+between `serveWatch` and `stale`.
 
 How a daemon declares itself: every live watch-role process writes a per-pid
 beat into the store dir — `~/.squeezr/workspaces/<storeKey>/beats/<kind>.<pid>.beat`,
@@ -1167,10 +1168,13 @@ heartbeat. The role in the fleet roster is decided not by the beat and not by
 a second marker but by `watch.owner`: the owner is exactly one per store,
 regardless of kind. Besides the per-pid beats, the indexing process keeps the
 former per-kind `<kind>.heartbeat` file — the shape binaries before 070 read
-(both the `index.lock` lock-owner report and `fleet stop|restart`): only the
-claim holder writes it, so an observer that does not index the store never
-appears in it, and an old reader sees the indexer, not whichever racer came
-last. Garbage is collected by the writer: a beat of a foreign process whose
+(both the `index.lock` lock-owner report and `fleet stop|restart`): the process
+running the watch loop writes it and an observer never does, so an old reader
+sees the indexer, not whichever racer came last. One boundary stated plainly:
+the mirror writer is chosen when the loop starts, and a watcher that loses the
+claim mid-run stops indexing but keeps beating until it is stopped — which is
+why the roster's `(owner)` mark comes from `watch.owner` and never from the
+mirror. Garbage is collected by the writer: a beat of a foreign process whose
 pid is gone and whose beat went stale past the stale window is removed on the
 next beat (at most once a minute) — otherwise fleet would name a daemon that
 does not exist until the end of time; a stale beat of a live pid (a wedged

@@ -136,7 +136,7 @@ public static class McpServerHost
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();
         await server.StartAsync(ct);
         var embedDrainReason = ResolveEmbedDrainReason(embedWatch, startupConfig?.Watch.EmbedPending);
-        var watcher = await TryStartWatchEngineAsync(
+        var presence = await TryStartWatchEngineAsync(
             workspace, watch, startupConfig?.Watch.Enabled ?? false, ct, events, claimOverride,
             embedDrainReason, embeddingRuntime, diagnostics);
         lifetime.MarkStarted();
@@ -149,14 +149,14 @@ public static class McpServerHost
         }
         finally
         {
-            if (watcher is not null)
+            if (presence is not null)
             {
-                await watcher.StopAsync();
+                await presence.DisposeAsync();
             }
         }
     }
 
-    private static async Task<WorkspaceWatcher?> TryStartWatchEngineAsync(
+    private static async Task<ServeWatchPresence?> TryStartWatchEngineAsync(
         McpWorkspace workspace, bool watchRequested, bool watchEnabledInConfig, CancellationToken ct, bool events,
         WatchOwnerClaim? claimOverride, string? embedDrainReason,
         Task<WatchEmbeddingRuntime?>? embeddingRuntime, TextWriter stderr)
@@ -197,7 +197,16 @@ public static class McpServerHost
             {
                 workspace.WatchNotice = role.AgentNotice;
                 announcer.Announce(role);
-                return null;
+                // An observer indexes nothing, but it is a live process on this store holding memory and answers:
+                // publishing its own beat is what lets the fleet count it. It touches no per-kind heartbeat — that
+                // file stays the claim owner's, so a pre-070 reader is never handed an observer as the indexer.
+                var observerBeat = new DaemonHeartbeatWriter(
+                    SqueezrPaths.StoreDir(workspace.Root),
+                    DaemonHeartbeat.ServeWatchKind,
+                    onWarning: announcer.Fault,
+                    publishKindHeartbeat: false);
+                observerBeat.Start();
+                return ServeWatchPresence.Observing(observerBeat);
             }
 
             var runtimeTask = embedDrainReason is null
@@ -237,7 +246,7 @@ public static class McpServerHost
 
             stderr.WriteLine("squeezr serve: watch engine running");
             announcer.Announce(role);
-            return watcher;
+            return ServeWatchPresence.Indexing(watcher);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException or ArgumentException)
         {

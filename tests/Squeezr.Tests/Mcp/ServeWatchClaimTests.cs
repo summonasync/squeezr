@@ -91,6 +91,28 @@ public sealed class ServeWatchClaimTests
     }
 
     [Fact]
+    public async Task ClaimHeldElsewhere_ObserverPublishesItsBeat_TheFleetCanCountIt()
+    {
+        var workspace = NewIndexedWorkspace(watchEnabled: false);
+        var storeDir = SqueezrPaths.StoreDir(workspace);
+        HoldClaim(storeDir);
+
+        var harness = await McpTestHarness.StartAsync(
+            workspace, watch: true, claimOverride: ClaimAs(storeDir, ForeignPid()));
+        await ServerAnswersAsync(harness);
+
+        var ownBeat = DaemonHeartbeat.BeatPathFor(storeDir, DaemonHeartbeat.ServeWatchKind, Environment.ProcessId);
+        File.Exists(ownBeat).ShouldBeTrue(
+            "an observer that publishes nothing is the invisible duplicate this carrier exists to end");
+        DaemonHeartbeatReader.TryRead(storeDir, DaemonHeartbeat.ServeWatchKind).ShouldBeNull(
+            "an observer wrote the per-kind heartbeat: that file belongs to the process running the watch loop");
+
+        await harness.DisposeAsync();
+
+        File.Exists(ownBeat).ShouldBeFalse("a departing observer left its beat behind");
+    }
+
+    [Fact]
     public async Task OwnerServe_GracefulStop_ReleasesClaim()
     {
         var workspace = NewIndexedWorkspace(watchEnabled: false);

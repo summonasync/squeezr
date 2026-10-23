@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Serialization;
 
 namespace Squeezr.Tests.Indexing.Watch;
 
@@ -109,6 +111,98 @@ public sealed class DaemonHeartbeatWriterTests : IDisposable
         serveWriter.Dispose();
         File.Exists(servePath).ShouldBeFalse();
     }
+
+    [Fact]
+    public void Start_PublishesItsOwnBeat_BesideTheKindHeartbeat()
+    {
+        var now = new DateTime(2026, 10, 23, 12, 0, 0, DateTimeKind.Utc);
+        using var writer = CreateWriter(utcNow: () => now);
+        writer.Start();
+
+        var beatPath = DaemonHeartbeat.BeatPathFor(_storeDir, DaemonHeartbeat.DefaultKind, Environment.ProcessId);
+        writer.BeatPath.ShouldBe(beatPath);
+        File.Exists(beatPath).ShouldBeTrue();
+
+        var beat = ReadBeat(beatPath);
+        beat.ShouldNotBeNull();
+        beat.Pid.ShouldBe(Environment.ProcessId);
+        beat.Kind.ShouldBe(DaemonHeartbeat.DefaultKind);
+        beat.Host.ShouldBe(Environment.MachineName);
+        beat.StartedAt.ShouldBe(now);
+        File.Exists(DaemonHeartbeat.PathFor(_storeDir, DaemonHeartbeat.DefaultKind)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ObserverPublishesOnlyItsOwnBeat_LeavesTheKindHeartbeatToTheOwner()
+    {
+        var kindPath = DaemonHeartbeat.PathFor(_storeDir, DaemonHeartbeat.DefaultKind);
+        var ownerWrote = new DaemonHeartbeat(4242, DaemonHeartbeat.DefaultKind, DateTime.UtcNow, DateTime.UtcNow);
+        File.WriteAllText(kindPath, JsonSerializer.Serialize(ownerWrote, SqueezrJson.FileOptions));
+
+        var writer = new DaemonHeartbeatWriter(_storeDir, DaemonHeartbeat.DefaultKind, publishKindHeartbeat: false);
+        writer.Start();
+
+        File.Exists(writer.BeatPath).ShouldBeTrue();
+        ReadBeat(kindPath)!.Pid.ShouldBe(4242, "an observer overwrote the owner's kind heartbeat");
+
+        writer.Dispose();
+
+        File.Exists(writer.BeatPath).ShouldBeFalse();
+        File.Exists(kindPath).ShouldBeTrue("an observer deleted the kind heartbeat it never owned");
+    }
+
+    [Fact]
+    public void Beat_CollectsBeatsOfGoneProcesses_KeepsTheOnesStillProvable()
+    {
+        var now = new DateTime(2026, 10, 23, 12, 0, 0, DateTimeKind.Utc);
+        var gone = PlantBeat(4242, now.AddMinutes(-10), now.AddMinutes(-10));
+        var wedged = PlantBeat(4343, now.AddHours(-1), now);
+        var foreignHost = PlantBeat(4444, now.AddMinutes(-10), now.AddMinutes(-10), host: "elsewhere");
+
+        using var writer = new DaemonHeartbeatWriter(
+            _storeDir,
+            DaemonHeartbeat.DefaultKind,
+            utcNow: () => now,
+            isProcessAlive: pid => pid == 4343);
+        writer.Start();
+
+        File.Exists(gone).ShouldBeFalse("a beat of a gone process kept the fleet naming a daemon nobody runs");
+        File.Exists(wedged).ShouldBeTrue("a stale beat under a live pid is wedge evidence, not garbage");
+        File.Exists(foreignHost).ShouldBeTrue("a beat from another host has no pid this process may judge");
+    }
+
+    [Fact]
+    public void Observer_BeatOfAFailedStoreDir_ReportsThroughTheWarningSinkOnly()
+    {
+        var missingDir = Path.Combine(TestDirs.NewTempDir(), "does-not-exist");
+        var warnings = new List<string>();
+        using var writer = new DaemonHeartbeatWriter(
+            missingDir,
+            DaemonHeartbeat.DefaultKind,
+            onWarning: warnings.Add,
+            publishKindHeartbeat: false);
+
+        writer.Start();
+
+        warnings.ShouldHaveSingleItem().ShouldContain("heartbeat write failed");
+        Directory.Exists(missingDir).ShouldBeFalse("a beat publisher minted a store directory nothing owns");
+    }
+
+    private string PlantBeat(
+        int pid, DateTime startedAt, DateTime lastBeatAt, string? host = null)
+    {
+        Directory.CreateDirectory(DaemonHeartbeat.BeatsDirFor(_storeDir));
+        var path = DaemonHeartbeat.BeatPathFor(_storeDir, DaemonHeartbeat.DefaultKind, pid);
+        File.WriteAllText(
+            path,
+            JsonSerializer.Serialize(
+                new DaemonHeartbeat(pid, DaemonHeartbeat.DefaultKind, startedAt, lastBeatAt, host),
+                SqueezrJson.FileOptions));
+        return path;
+    }
+
+    private static DaemonHeartbeat? ReadBeat(string path) =>
+        JsonSerializer.Deserialize<DaemonHeartbeat>(File.ReadAllText(path), SqueezrJson.FileOptions);
 
     private static async Task UntilAsync(Func<bool> condition)
     {

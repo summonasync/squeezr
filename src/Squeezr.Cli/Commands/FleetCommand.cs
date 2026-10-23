@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -58,8 +59,8 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
                     : entry.Name.EscapeMarkup(),
                 entry.RootPath.EscapeMarkup(),
                 entry.StoreKey.EscapeMarkup(),
-                FormatDaemon(entry.Watch),
-                FormatDaemon(entry.ServeWatch),
+                FormatDaemons(entry.Daemons, DaemonHeartbeat.DefaultKind),
+                FormatDaemons(entry.Daemons, DaemonHeartbeat.ServeWatchKind),
                 entry.PendingChunks?.ToString() ?? "n/a",
                 entry.LastIndexedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "n/a",
                 entry.Stale ? "[yellow]stale[/]" : "[green]ok[/]");
@@ -78,12 +79,34 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
         return 0;
     }
 
-    private static string FormatDaemon(FleetDaemonState daemon) => daemon.Status switch
+    // Every process of the kind this store names, one line per pid. The role mark is carried only where the claim
+    // names an owner at all: a store whose beats predate the claim, or whose marker is gone, shows plain pids
+    // rather than inventing an observer out of the absence of evidence.
+    private static string FormatDaemons(IReadOnlyList<FleetDaemonProcess> daemons, string kind)
     {
-        FleetDaemonState.AliveStatus => $"pid {daemon.Pid}, up {FormatUptime(daemon.UptimeSeconds!.Value)}",
-        FleetDaemonState.DeadStatus => $"dead (pid {daemon.Pid})",
-        _ => "—",
-    };
+        var rows = daemons.Where(daemon => daemon.Kind == kind).ToList();
+        if (rows.Count == 0)
+        {
+            return "—";
+        }
+
+        var claimsOwner = daemons.Any(daemon => daemon.Owner);
+        return string.Join(Environment.NewLine, rows.Select(row => FormatDaemonRow(row, claimsOwner)));
+    }
+
+    private static string FormatDaemonRow(FleetDaemonProcess daemon, bool claimsOwner)
+    {
+        var role = !claimsOwner
+            ? string.Empty
+            : daemon.Owner ? " [green](owner)[/]" : " [dim](observer)[/]";
+        return daemon.Status switch
+        {
+            FleetDaemonState.AliveStatus =>
+                $"pid {daemon.Pid}, up {FormatUptime(daemon.UptimeSeconds!.Value)}{role}",
+            FleetDaemonState.DeadStatus => $"dead (pid {daemon.Pid})",
+            _ => "—"
+        };
+    }
 
     private static string FormatUptime(long totalSeconds)
     {
