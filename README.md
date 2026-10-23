@@ -1,39 +1,83 @@
-# Squeezr 🍋
+```
+            ▄████████▄▄▄                         [{((<                    ·                   >))}]
+      ▄▄  ▄██████████████▄▄                           [{((               ·              ))}]
+     ███████████████████████▄                              [{(          ·         )}]
+    ██████████████████████████▄                                 [{     ·    }]
+    ▀██████▒▒▒▒▒▒▒██████████████▄                                    [  · ]
+     ▀█████▒▒▒▒▒▒▒▒▒██████████████▄                                       ;
+       ▀███▒▒▒▒▒▒▒▒▒▒▒█████████████▄
+        ████▒▒▒▒▒▒▒▒▒▒▒█████████████▄
+        ▀█████▒▒▒▒▒▒▒▒▒▒█████████████▄
+         ███████▒▒▒▒▒▒▒▒██████████████
+          █████████▒▒▒▒████████████████
+           ████████████████████████████
+            ████████████████████████████▄
+             ▀████████████████████████████
+               ▀███████████████████████████
+                 ▀████████████████████████▀
+                   ▀█████████████████▀▀██▀
+                      ▀████████████▀
+                          ▀▀▀▀▀▀▀▀
 
-**Локальный индексатор кода для ИИ-агентов.** Выжимает максимум смысла из твоего кода в минимум токенов. Один .NET-бинарь, всё локально, никаких облаков.
+███████╗ ██████╗ ██╗   ██╗███████╗███████╗███████╗██████╗ 
+██╔════╝██╔═══██╗██║   ██║██╔════╝██╔════╝╚══███╔╝██╔══██╗
+███████╗██║   ██║██║   ██║█████╗  █████╗    ███╔╝ ██████╔╝
+╚════██║██║▄▄ ██║██║   ██║██╔══╝  ██╔══╝   ███╔╝  ██╔══██╗
+███████║╚██████╔╝╚██████╔╝███████╗███████╗███████╗██║  ██║
+╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝
+```
+
+**Squeezr — maximum meaning per token.**  
+*The eye that lets the horde find things without reading everything.*
+
+`await SummonAsync();` — part of the summoner's kit  
+overmind · grimoire · **▸ squeezr** · mindlash studio
 
 ---
 
-## Откуда он взялся
+## What it is
 
-Каждый, кто гонял LLM-агента по реальной репе, знает эту боль: агент начинает «изучать кодbase», читает файлы целиком, жрёт 30–80k токенов на навигацию grep'ом — и это *до того*, как написал первую строчку. Контекст кончается, качество падает, счёт за API растёт.
+Squeezr is a local code indexer for AI agents. It squeezes maximum signal out
+of your codebase into a minimum of LLM tokens: a hybrid exact + semantic index,
+served to agents as native MCP tools, so they navigate by map, symbol,
+references and spans instead of reading whole files. One .NET binary. Everything
+stays on your machine — the Docker pieces (Qdrant, Ollama) are optional infra
+for the semantic arm, managed by a single command.
 
-Мы посмотрели на это и подумали: а почему, собственно, агент должен читать файлы целиком? Люди так не делают. Люди смотрят **карту** проекта, находят **символ**, чекают **ссылки** и раскрывают **точечный спан**. Вот это агенту и надо — просто в машинном виде.
+## Why it exists
 
-Так родился Squeezr. Имя — от слова *squeeze*: выжимать. Выжимать сок из кода в токен-бюджет. 🍋
+Anyone who has run an LLM agent over a real repository knows this pain: the
+agent starts "exploring the codebase", reads whole files, burns 30–80k tokens
+on grep navigation — before writing a single line. The context window dies,
+quality drops, the API bill goes up.
 
-## Референсы
+We looked at that and asked: why should an agent read whole files at all?
+People don't. People look at the project **map**, find a **symbol**, check who
+**calls** it, and open the exact **span**. That is what an agent should get —
+just in machine form.
 
-Мы не изобретали велосипед — мы собрали лучшее у лучших:
+So Squeezr was born. The name is from *squeeze*: squeeze the juice out of your
+code into a token budget. 🍋
 
-- **[Zoekt](https://github.com/sourcegraph/zoekt)** и легендарная серия статей **[Расса Кокса про code search с триграммами](https://swtch.com/~rsc/regexp/regexp4.html)** — наш триграммный движок написан по этим мотивам. Поиск подстроки и regex по миллионам строк за миллисекунды, без внешних процессов.
-- **ripgrep** — эталон того, каким должен быть быстрый и честный поиск. Smart-case в `search` — оттуда.
-- **ctags / LSP** — идея символьной навигации, только у нас символы извлекает Roslyn с компиляторной точностью.
-- **[Model Context Protocol](https://modelcontextprotocol.io)** — агенты получают индекс как нативные MCP-тулы, а не как «запусти grep и молись».
+## Lineage
 
-## Что умеет
+Nothing here was invented from scratch — it is the best of prior art, rebuilt
+local-first:
 
-- **Триграммный индекс** — собственный движок: бинарный формат, delta+varint, tombstone-сегменты, append-only инкремент, crash-safe хвост. Lookup триграммы — ~0.5 мс на 100k документов.
-- **Точный `search`** — литерал, regex (через конъюнкцию обязательных триграмм, как у Кокса), smart-case, фильтры по репо/путям/языку, ранжирование.
-- **Символьный слой (C#)** — Roslyn извлекает символы, сигнатуры, doc-comments и refs с точностью компилятора.
-- **Символьный слой (JS/TS/TSX)** — tree-sitter извлекает функции, классы, интерфейсы, type-alias'ы и import-граф; прочий текст (Markdown, YAML, JSON…) — fallback-чанкер скользящим окном, тоже участвует в поиске.
-- **Токен-бюджет first-class** — каждая команда уважает `--max-tokens`: набирает результаты по рангу, честно говорит `truncated: true`, когда бюджет кончился.
-- **MCP-сервер** — агент ходит по картам и сниппетам, а не по простыням: `repo_map` → `code_search` → `find_references` → `expand_span`.
-- **Всё локально** — LiteDB + файлы в центральном сторе `~/.squeezr/`, Qdrant и Ollama в Docker под управлением `squeezr services`, эмбеддинги: по умолчанию `auto` — ollama на GPU, если endpoint отвечает, иначе локальный ONNX на CPU; явно — ollama/OpenAI-compatible по конфигу. Ни одного байта кода не уходит наружу.
+- **[Zoekt](https://github.com/sourcegraph/zoekt)** and Russ Cox's legendary
+  [trigram code-search series](https://swtch.com/~rsc/regexp/regexp4.html) —
+  our trigram engine follows these designs. Substring and regex search over
+  millions of lines in milliseconds, no external processes.
+- **ripgrep** — the reference for fast, honest search. Smart-case in `search`
+  is its idea.
+- **ctags / LSP** — the symbol-navigation idea; here the symbols are extracted
+  by Roslyn with compiler-grade accuracy.
+- **[Model Context Protocol](https://modelcontextprotocol.io)** — agents get
+  the index as native MCP tools, not "run grep and pray".
 
-## Быстрый старт
+## Quickstart
 
-Установка (self-contained, .NET не нужен):
+Install (self-contained, no .NET runtime needed):
 
 ```bash
 # Linux
@@ -41,60 +85,102 @@ scripts/install.sh
 ```
 
 ```powershell
-# Windows: из исходников (нужен .NET 10 SDK)
+# Windows: from source (needs the .NET 10 SDK)
 powershell -File scripts\install.ps1
 ```
 
-На Windows есть и второй путь — готовый установщик `SqueezrSetup-<version>-win-x64.exe`: двойной клик, без админа, с записью в «Программы и компоненты». Его собирают локально одной командой, см. [Windows: установщик `.exe`](#windows-установщик-exe).
+On Windows there is a second path — a ready installer `SqueezrSetup-<version>-win-x64.exe`:
+double-click, no admin, registered in "Apps & features". It is built locally with
+one command, see [Windows: the `.exe` installer](#windows-the-exe-installer).
 
-Скрипты объявляют `#Requires -Version 5.1`, так что работают и в штатном Windows PowerShell (`powershell -File ...`), и в pwsh 7 — отдельно ставить pwsh не нужно.
+Both scripts declare `#Requires -Version 5.1`, so they run in stock Windows
+PowerShell (`powershell -File ...`) and in pwsh 7 alike — no separate pwsh install.
 
-Или просто собрать для разработки (нужен .NET 10 SDK): `dotnet build Squeezr.slnx`.
+Or just build for development (needs the .NET 10 SDK): `dotnet build Squeezr.slnx`.
 
-Дальше одинаково на обеих платформах:
+Then, identically on both platforms:
 
 ```bash
-# создать workspace в корне твоего проекта (в проекте НОЛЬ файлов squeezr —
-# манифест, конфиг и индекс живут в центральном сторе ~/.squeezr/)
+# create a workspace at your project root (the project itself gets ZERO
+# squeezr files — manifest, config and index live in the central store ~/.squeezr/)
 squeezr init --name my-project
 squeezr add /path/to/repo
 
-# поднять инфраструктуру (Qdrant + Ollama в Docker, см. раздел про services)
+# bring up the infrastructure (Qdrant + Ollama in Docker, see the services section)
 squeezr services up
 
-# проиндексировать и искать
-squeezr index          # live-прогресс по фазам; --reembed для полного переэмбеддинга
-squeezr search "WorkspaceManager"            # гибрид: точный + семантический (RRF)
+# index and search
+squeezr index          # live progress by phase; --reembed for a full re-embed
+squeezr search "WorkspaceManager"            # hybrid: exact + semantic (RRF)
 squeezr search "w.rkspace" --regex --max-tokens 200
-squeezr refs Slugify                          # кто вызывает символ (C#)
-squeezr status                                # включая состояние Qdrant
-squeezr map --depth 2                         # карта репо: сигнатуры без тел
-squeezr symbol WorkspaceManager               # точный lookup символа
-squeezr expand src/Foo.cs 42 87               # раскрыть спан из живого файла
-squeezr compact                               # компактификация триграммного индекса
-squeezr vectors reconcile                     # точки Qdrant против meta.db: dry-run, --apply чистит сирот
-squeezr drop                                  # полное удаление индекса workspace
-squeezr workspace list                        # реестр воркспейсов из центрального стора
+squeezr refs Slugify                          # who calls a symbol (C#)
+squeezr status                                # includes Qdrant state
+squeezr map --depth 2                         # repo map: signatures, no bodies
+squeezr symbol WorkspaceManager               # exact symbol lookup
+squeezr expand src/Foo.cs 42 87               # expand a span from the live file
+squeezr compact                               # trigram index compaction
+squeezr vectors reconcile                     # Qdrant points vs meta.db: dry-run, --apply cleans orphans
+squeezr drop                                  # remove the workspace index entirely
+squeezr workspace list                        # workspace registry from the central store
 ```
 
-Машиночитаемый вывод (`--json`): `status --json` — один JSON-объект (camelCase, включая `staleFiles`/`indexAge`); `search --json` и `workspace list --json` — NDJSON (один объект на строку, флаш на строку; у search финальная строка — `{"type":"summary"}`). Ошибки в JSON-режиме — `{"error":{"code","message"}}` на stderr + ненулевой exit code, коды стабильные (`workspace_not_initialized`, `index_not_built`, `invalid_query`, ...). Человекочитаемый вывод при этом не меняется.
+Machine-readable output (`--json`): `status --json` — one JSON object
+(camelCase, including `staleFiles`/`indexAge`); `search --json` and
+`workspace list --json` — NDJSON (one object per line, flushed per line; for
+search the final line is `{"type":"summary"}`). Errors in JSON mode —
+`{"error":{"code","message"}}` on stderr + a non-zero exit code, codes are
+stable (`workspace_not_initialized`, `index_not_built`, `invalid_query`, ...).
+Human-readable output does not change.
 
-Прогресс-ивенты (`--events`): `squeezr index --events` и `squeezr serve --watch --events` стримят NDJSON-ивенты индексации — по одному на строку, флаш на строку: `started` (workspace; `provider?` — разрешённый провайдер эмбеддингов, только на `index`-прогонах с семантикой; у watch-проходов ещё `changedPaths`) → `fileIndexed` (`{repo, path, files}` — кумулятивный счётчик за прогон) → `progress` (`{repo, phase, total}` для фаз semantic/embeddings/trigram) → `completed` (`durationMs`, итоги `files/added/modified/deleted`, `symbols?`, `provider?`, счётчики отложенных чисток точек `deferredReaps`/`pendingReaps`, разбивка по репо) или терминальный `error` (`code`, `message`). Транспорт: у `index` — stdout, у `serve --watch` — stderr (stdout занят MCP JSON-RPC). Тихий инкрементный прогон даёт ровно `started → fileIndexed×N → completed`. Композиция с `--json`: сначала завершённая последовательность ивентов, затем финальный `--json`-объект; ошибки дублируются энвелопом 035 на stderr + exit 1. Занятый реестр воркспейсов (конкурентная запись в `workspaces.json`) валит прогон до старта: стрим открывается терминальным `error` без `started`, код `workspace_registry_busy` — сигнал «повторить через момент» для скриптов; тот же код приходит в `--json`/stderr-энвелопах всех команд, трогающих реестр.
+Progress events (`--events`): `squeezr index --events` and
+`squeezr serve --watch --events` stream NDJSON indexing events — one per line,
+flushed per line: `started` (workspace; `provider?` — the resolved embedding
+provider, only on `index` runs with semantics; watch passes also carry
+`changedPaths`) → `fileIndexed` (`{repo, path, files}` — cumulative counter for
+the run) → `progress` (`{repo, phase, total}` for the semantic/embeddings/trigram
+phases) → `completed` (`durationMs`, `files/added/modified/deleted` totals,
+`symbols?`, `provider?`, deferred point-cleanup counters
+`deferredReaps`/`pendingReaps`, per-repo breakdown) or a terminal `error`
+(`code`, `message`). Transport: `index` — stdout, `serve --watch` — stderr
+(stdout carries MCP JSON-RPC). A quiet incremental run emits exactly
+`started → fileIndexed×N → completed`. Composition with `--json`: first the
+completed event sequence, then the final `--json` object; errors are duplicated
+to the 035 envelope on stderr + exit 1. A busy workspace registry (concurrent
+write to `workspaces.json`) fails the run before it starts: the stream opens
+with a terminal `error` without `started`, code `workspace_registry_busy` — a
+"retry in a moment" signal for scripts; the same code arrives in the
+`--json`/stderr envelopes of every command touching the registry.
 
-Эмбеддинги — провайдер из `auto`/`onnx`/`ollama`/`openai`, выбирается секцией `embeddings` конфига воркспейса (лежит в сторе: `~/.squeezr/workspaces/<storeKey>/config.json`, правится удобнее через `squeezr tui` → Config):
+Embeddings — provider from `auto`/`onnx`/`ollama`/`openai`, chosen by the
+workspace config's `embeddings` section (it lives in the store:
+`~/.squeezr/workspaces/<storeKey>/config.json`; easier to edit via `squeezr tui` → Config):
 
-| Провайдер | Когда выбирать | Конфиг |
+| Provider | When to pick it | Config |
 |---|---|---|
-| `auto` (дефолт) | GPU без настройки: на каждом прогоне индексации ollama отвечает на пробе — считаем на GPU через него, не отвечает — локальный onnx на CPU | `provider: "auto"` (пишется `init`'ом по умолчанию) |
-| `onnx` | Локально на CPU, ничего не поднимать | Локальная ONNX-модель **nomic-embed-text-v1.5** (официальный int8-экспорт, ~131 МБ, 768d; WordPiece, mean pooling + L2, контекст модели 8192, squeezr режет до 512 — `maxSequenceLength`; префиксы `search_document:`/`search_query:` добавляет сам squeezr) |
-| `ollama` | Заметно быстрее на больших репо; на AMD-GPU считает через ROCm (см. раздел про services) | `embeddings.provider: "ollama"` + секция `embeddings.ollama`: endpoint `http://localhost:11434`, модель `nomic-embed-text` (768d, профиль `nomic-embed-text-v1.5` — префикс-симметрия с onnx по семантике (одинаковые `search_document: `/`search_query: ` на стороне squeezr; сами вектора onnx≠ollama, поэтому смена провайдера переэмбеддит чанки). Нативный `/api/embed`, API-ключа нет. Модель подтянется сама при первой индексации (auto-pull); ollama не запущен — явная ошибка с подсказкой `squeezr services up` |
-| `openai` | OpenAI-совместимый endpoint (OpenAI, Azure, vLLM) | Секция `embeddings.openAiCompatible` + ключ только через env `SQUEEZR_API_KEY` |
+| `auto` (default) | GPU with zero setup: on every indexing run ollama answers the probe — count on GPU through it; no answer — local ONNX on CPU | `provider: "auto"` (written by `init` by default) |
+| `onnx` | Locally on CPU, nothing to run | Local ONNX model **nomic-embed-text-v1.5** (official int8 export, ~131 MB, 768d; WordPiece, mean pooling + L2, model context 8192, squeezr cuts to 512 — `maxSequenceLength`; the `search_document:`/`search_query:` prefixes are added by squeezr itself) |
+| `ollama` | Noticeably faster on large repos; on AMD GPUs it computes via ROCm (see the services section) | `embeddings.provider: "ollama"` + an `embeddings.ollama` section: endpoint `http://localhost:11434`, model `nomic-embed-text` (768d, profile `nomic-embed-text-v1.5` — prefix symmetry with onnx, same semantics; the vectors themselves onnx≠ollama, so a provider switch re-embeds chunks). Native `/api/embed`, no API key. The model is pulled automatically at first indexing (auto-pull); ollama not running — an explicit error hinting `squeezr services up` |
+| `openai` | OpenAI-compatible endpoint (OpenAI, Azure, vLLM) | An `embeddings.openAiCompatible` section + the key only via env `SQUEEZR_API_KEY` |
 
-Скачать ONNX-модель: `scripts/fetch-model.sh` на Linux, `powershell -File scripts\fetch-model.ps1` на Windows. Порядок резолва модели: явный путь в конфиге → `~/.squeezr/models/` → bundled-копия рядом с бинарём. Обратно на bge-code-v1 (1536d, кодовая специализация): `scripts/fetch-model.sh --model bge-code-v1` (в pwsh: `-Model bge-code-v1`) + `"model": "bge-code-v1"` в секции `embeddings.onnx`; на существующем workspace смена модели честно ругнётся «collection vector size 768 ≠ 1536» — лечится `squeezr index --reembed`, молча перетереть коллекцию не выйдет. Смена провайдера/модели меняет ключ чанков — затронутые чанки переэмбеддятся автоматически. Qdrant недоступен — индексация и поиск мягко деградируют на точный слой, ничего не падает.
+Download the ONNX model: `scripts/fetch-model.sh` on Linux,
+`powershell -File scripts\fetch-model.ps1` on Windows. Model resolution order:
+explicit path in the config → `~/.squeezr/models/` → a bundled copy next to the
+binary. Back to bge-code-v1 (1536d, code specialization):
+`scripts/fetch-model.sh --model bge-code-v1` (in pwsh: `-Model bge-code-v1`) +
+`"model": "bge-code-v1"` in the `embeddings.onnx` section; on an existing
+workspace a model switch honestly complains "collection vector size 768 ≠ 1536"
+— cured by `squeezr index --reembed`, silently overwriting the collection is
+impossible. A provider/model switch changes the chunk key — affected chunks are
+re-embedded automatically. Qdrant unavailable — indexing and search degrade
+softly to the exact layer, nothing crashes.
 
 ## For AI agents
 
-An AI agent told to "use squeezr here" gets productive in one conversation. Run this only on an explicit human request — never install squeezr proactively. The full ritual with guardrails, tool cheat-sheet and troubleshooting lives in [`skills/squeezr/SKILL.md`](skills/squeezr/SKILL.md); short version:
+An AI agent told to "use squeezr here" gets productive in one conversation.
+Run this only on an explicit human request — never install squeezr
+proactively. The full ritual with guardrails, tool cheat-sheet and
+troubleshooting lives in [`skills/squeezr/SKILL.md`](skills/squeezr/SKILL.md);
+short version:
 
 ```bash
 curl -fsSL http://REDACTED-LAN-HOST:3000/REDACTED-FORGE-NS/Squeezr/raw/main/scripts/install-release.sh | bash
@@ -103,43 +189,117 @@ squeezr init && squeezr add . && squeezr index --events
 squeezr mcp install --all --scope user --yes
 ```
 
-1. The installer resolves the latest published Gitea release, unpacks it into `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if that dir is not on PATH, the script says so — fix the shell profile and open a new terminal). Pin or roll back with `--version <tag>`. **Linux only** — releases are published for `linux-x64` alone. On Windows, build the setup executable locally (`powershell -File scripts\build-installer.ps1`) or install from source with `powershell -File scripts\install.ps1`.
-2. Starts the managed Qdrant + Ollama stack; the first run pulls ~3.6 GB of images. If docker is missing, stop and ask the human — do not improvise.
-3. Creates a workspace in the current directory and indexes everything (zero files land in the project).
-4. Registers the MCP server in every detected client at user scope, non-interactive. Restart the agent session afterwards — MCP clients read configs at startup.
+1. The installer resolves the latest published Gitea release, unpacks it into
+   `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if
+   that dir is not on PATH, the script says so — fix the shell profile and open
+   a new terminal). Pin or roll back with `--version <tag>`. **Linux only** —
+   releases are published for `linux-x64` alone. On Windows, build the setup
+   executable locally (`powershell -File scripts\build-installer.ps1`) or
+   install from source with `powershell -File scripts\install.ps1`.
+2. Starts the managed Qdrant + Ollama stack; the first run pulls ~3.6 GB of
+   images. If docker is missing, stop and ask the human — do not improvise.
+3. Creates a workspace in the current directory and indexes everything (zero
+   files land in the project).
+4. Registers the MCP server in every detected client at user scope,
+   non-interactive. Restart the agent session afterwards — MCP clients read
+   configs at startup.
 
-From then on navigate via the six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — instead of reading whole files.
+From then on navigate via the six tools — `repo_map`, `code_search`,
+`symbol_lookup`, `find_references`, `expand_span`, `index_status` — instead of
+reading whole files.
 
-The skill content lives in this repo at `skills/squeezr/` and imports into Overmind as the kit «squeezr» (phase 1: manual kit import through the Overmind UI), so agent teams can onboard without reading this README.
+The skill content lives in this repo at `skills/squeezr/` and imports into
+Overmind as the kit «squeezr» (phase 1: manual kit import through the Overmind
+UI), so agent teams can onboard without reading this README.
 
-## Центральный стор воркспейсов
+## Trade-offs
 
-Squeezr не мусорит в проекте: `squeezr init` не создаёт в текущей папке ни одного файла — ни `.squeezr/`, ни манифеста, ни compose. Всё живёт в центральном сторе:
+Read these before you adopt. They are the same weight as the feature list —
+that is the deal.
+
+- **The index has a build cost up front**: CPU, disk, and a warm-up pass per
+  repo.
+- **The semantic arm needs Qdrant + an embedding provider** (Ollama or
+  equivalent). Exact search alone is useful; semantic is not free.
+- **C# is first class.** Roslyn-grade symbol precision means the matrix is
+  honest: C# gets symbols, signatures, doc-comments and real callers; JS/TS/TSX
+  get a tree-sitter symbol layer — functions, classes, interfaces, type
+  aliases, import graph; every other text (Markdown, YAML, JSON…) is indexed by
+  a sliding-window fallback chunker — searchable, but not symbol-aware.
+- **Adoption is the hard part, not the tech.** Agents must be *allowed* to
+  call it. Tool allowlists and flow gates decide whether the index gets used
+  at all.
+- **A hot index on every session burns background CPU** whether or not the
+  agent ends up querying it.
+
+## Central workspace store
+
+Squeezr does not litter your project: `squeezr init` creates zero files in the
+current folder — no `.squeezr/`, no manifest, no compose. Everything lives in
+the central store:
 
 ```
-~/.squeezr/                          # стор (override: env SQUEEZR_HOME)
-├── workspaces.json               # реестр: name/rootPath/storeKey/createdAt/lastUsedAt
-├── workspaces.lock                  # lock реестра — одна операция записи workspaces.json за раз
-├── workspaces/<storeKey>/          # index store одного workspace
-│   ├── workspace.json               # манифест (репозитории)
-│   ├── config.json                  # конфиг (embeddings, watch, ...)
+~/.squeezr/                          # the store (override: env SQUEEZR_HOME)
+├── workspaces.json               # registry: name/rootPath/storeKey/createdAt/lastUsedAt
+├── workspaces.lock                  # registry lock — one writer to workspaces.json at a time
+├── workspaces/<storeKey>/          # one workspace's index store
+│   ├── workspace.json               # manifest (repositories)
+│   ├── config.json                  # config (embeddings, watch, ...)
 │   ├── meta.db                      # LiteDB
-│   ├── trigram.idx                  # триграммный индекс
+│   ├── trigram.idx                  # trigram index
 │   ├── index.lock
-│   ├── watch.owner                  # claim watch-цикла: pid+host+kind, эксклюзивное создание; чужой host переживается только временем (×4 stale-окна), не pid
-│   ├── watch.heartbeat              # пока жив демон `watch` (флот, см. раздел про fleet)
-│   ├── serve-watch.heartbeat        # ...или `serve --watch` от MCP-клиента
-│   ├── queries.jsonl                # телеметрия запросов для `stats` (локально, drop сносит)
-│   └── queries.lock                 # сериализует писателей queries.jsonl: аппенды, scrub при compact и stats --reset (пишущие ждут бюджет; reset при занятом локе отказывается, ничего не снеся)
-├── models/                         # ONNX-модели эмбеддингов
-└── infra/docker-compose.yml        # qdrant + ollama (генерируется `squeezr services up`)
+│   ├── watch.owner                  # watch-loop claim: pid+host+kind, exclusive creation; a foreign host
+│   │                                # is outlived only by time (×4 stale windows), not by pid
+│   ├── watch.heartbeat              # per-kind heartbeat: written only by the process the claim names, i.e. the
+│   │                                # one running the watch loop (kind `watch` — the terminal daemon)
+│   ├── serve-watch.heartbeat        # ...or `serve --watch` from an MCP client, when it is the owner
+│   ├── beats/                       # per-pid beats of every live watch-role process: {kind}.{pid}.beat, same
+│   │                                # JSON {pid, kind, startedAt, lastBeatAt, host}; the roster fleet enumerates
+│   ├── queries.jsonl                # query telemetry for `stats` (local; drop removes it)
+│   └── queries.lock                 # serializes writers to queries.jsonl: appends, scrub on compact and
+│                                    # stats --reset (writers wait for the budget; reset refuses while busy,
+│                                    # removing nothing)
+├── models/                         # ONNX embedding models
+└── infra/docker-compose.yml        # qdrant + ollama (generated by `squeezr services up`)
 ```
 
-- **Discovery как у git:** любая команда, запущенная из любого сабдиректория воркспейса, находит его сама (поиск вверх по реестру). «Зашёл не в ту папку» исчезло как класс.
-- **Реестр:** `squeezr workspace list` показывает все воркспейсы из `workspaces.json`; записи, чей rootPath исчез с диска, помечаются `stale` — удаляются поодиночке через `squeezr drop --store-key <key>` или пакетно через `squeezr workspace repair --dry-run` / `--yes` (с размерами store-директорий). Записи с rootPath = `$HOME` или родитель стора (наследие инцидентов) помечаются `husk` с тем же хинтом на drop.
-- **Форма storeKey:** `<slug имени>-<первые 8 hex SHA1 от канонического rootPath>` (slug: lower, буквы/цифры, разделители в `-`; пустое имя → `workspace`). Ключ — всегда ровно один сегмент внутри `workspaces/`; `drop --store-key` и prune-свип в repair отказывают ключам другой формы (`.`, `..`, сепараторы, NUL, двоеточие — на обеих платформах) до первого обращения к файловой системе: отказ не читает и не удаляет ничего.
-- **Сироты и repair:** если store-директория пережила потерю реестра (крах, ручная чистка `workspaces.json`), `workspace list` показывает её как `orphan — adoptable` (манифест с rootPath, ключ сходится, корень жив), `orphan — needs root` (старый манифест без rootPath) или `orphan — root gone` (rootPath записан, но каталога нет на диске). `squeezr workspace repair` возвращает в реестр только живых сирот: адопт требует живого корня — и в батч-маршруте (живость снимается одним сканом), и в явном `--store-key <key> --root <path>` (путь проверяется на диске в момент записи ряда, хэш name+root обязан совпасть с ключом, чужой стор подсунуть нельзя). Мёртвый корень — тупик, а не работа: такой стор остаётся `needs root`-строкой с причиной `root-gone`, никогда не адоптится и никогда не свипуется (ряд без строки реестра primitive `drop` не трогает); единственный маршрут наружу — восстановить каталог по записанному пути и перезапустить repair. Пакетная чистка stale-записей требует явного подтверждения: `--dry-run` только показывает список, `--yes` или ответ в TTY подтверждают; без терминала и без `--yes` repair отказывается (отсутствие промпта — не согласие). Удаление идёт тем же единственным путём, что и `drop` (ряд + store-директория), adoptable-сироты и живые записи не удаляются; перед реальной чисткой — датированная копия `workspaces.json`. Запасной путь: `squeezr init` в корне проекта — поверх существующего store-дира он работает как lossless-adoption: живые `config.json`, манифест (со списком репо) и индекс (`meta.db`) сохраняются, сброса в дефолты нет.
-- **Side-car-файлы:** `index.lock`, `watch.owner` и `queries.lock` лежат в store-каталоге рядом с данными, но в `workspace.json` не регистрируются — это примитивы координации писателей, а не метаданные воркспейса.
+- **Discovery like git:** any command run from any subdirectory of a workspace
+  finds it on its own (search up the registry). "Opened it in the wrong folder"
+  disappeared as a class of problem.
+- **Registry:** `squeezr workspace list` shows all workspaces from
+  `workspaces.json`; entries whose rootPath vanished from disk are marked
+  `stale` — removed one by one via `squeezr drop --store-key <key>` or in bulk
+  via `squeezr workspace repair --dry-run` / `--yes` (with store dir sizes).
+  Entries with rootPath = `$HOME` or the store parent (incident heritage) are
+  marked `husk` with the same drop hint.
+- **storeKey shape:** `<name slug>-<first 8 hex of SHA1 over the canonical
+  rootPath>` (slug: lowercase, letters/digits, separators folded to `-`; empty
+  name → `workspace`). The key is always exactly one segment inside
+  `workspaces/`; `drop --store-key` and the repair prune sweep refuse keys of
+  any other shape (`.`, `..`, separators, NUL, colon — on both platforms)
+  before the first filesystem touch: the refusal reads and deletes nothing.
+- **Orphans and repair:** if a store dir outlived its registry (crash, manual
+  `workspaces.json` cleanup), `workspace list` shows it as
+  `orphan — adoptable` (manifest with rootPath, key matches, root alive),
+  `orphan — needs root` (old manifest without rootPath) or `orphan — root gone`
+  (rootPath recorded but the directory is not on disk). `squeezr workspace
+  repair` returns only live orphans to the registry: adoption requires a live
+  root — both in the batch route (liveness resolved in one scan) and in the
+  explicit `--store-key <key> --root <path>` act (the path is checked on disk
+  at the moment of writing the row, the hash of name+root must match the key,
+  a foreign store cannot be smuggled in). A dead root is a dead end, not work:
+  such a store stays a `needs root` row with reason `root-gone`, is never
+  adopted and never swept (a row without a registry line is untouched by the
+  primitive `drop`); the only route out is restoring the directory at the
+  recorded path and re-running repair. Bulk cleanup of stale rows requires
+  explicit confirmation: `--dry-run` only lists, `--yes` or a TTY answer
+  confirms; without a terminal and without `--yes` repair refuses (a missing
+  prompt is not consent). Deletion goes through the same single path as `drop`
+  (row + store dir); adoptable orphans and live entries are not deleted; a
+  dated copy of `workspaces.json` is written before any real cleanup. Fallback
+  path: `squeezr init` in the project root — on top of an existing store dir it
+  works as lossless adoption: a live `config.json`, the manifest (repo list)
+  and the index (`meta.db`) survive; no reset to defaults.
 
 ```
 $ squeezr workspace list
@@ -149,229 +309,541 @@ warning: workspace store 'squeezr-d23cb388' has no recorded root path; run 'sque
 $ squeezr workspace repair --store-key squeezr-d23cb388 --root REDACTED-PATH/Projects/AI-Tools/Squeezr
 Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI-Tools/Squeezr
 ```
-- **Переменные окружения:** `SQUEEZR_HOME` переносит весь стор, `SQUEEZR_CLIENT_HOME` переносит каталог, в котором `squeezr mcp install/remove/doctor` ищет конфиги агентских клиентов (по умолчанию — профиль пользователя). Вторая нужна в первую очередь тестам и песочницам: под Windows `GetFolderPath(UserProfile)` ходит в shell-API известных папок и `USERPROFILE` игнорирует, так что иначе профиль не перенаправить. Не задана — поведение ровно как раньше.
-- **Легаси-миграция автоматическая:** проекты со старым layout (`.squeezr/` + `squeezr.workspace.json` в корне) переезжают в стор при первом же обращении — переносится содержимое `.squeezr/` и манифест, squeezr-сгенерированный `docker-compose.yml` и мёртвый `state.json` удаляются. Детали — [docs/migration-central-store.md](docs/migration-central-store.md). Qdrant-коллекции (имя зависит от пути воркспейса, а не стора) переживают миграцию, вектора не теряются.
+
+- **Environment variables:** `SQUEEZR_HOME` relocates the whole store,
+  `SQUEEZR_CLIENT_HOME` relocates the directory where `squeezr
+  mcp/install/remove/doctor` looks for agent client configs (user profile by
+  default). The second exists mostly for tests and sandboxes: on Windows
+  `GetFolderPath(UserProfile)` goes through the shell API for known folders and
+  ignores `USERPROFILE`, so otherwise the profile cannot be redirected.
+  Unset — behavior is exactly as before.
+- **Legacy migration is automatic:** projects on the old layout (`.squeezr/` +
+  `squeezr.workspace.json` in the root) move to the store on first touch — the
+  contents of `.squeezr/` and the manifest are carried over, the
+  squeezr-generated `docker-compose.yml` and the dead `state.json` are removed.
+  Details: [docs/migration-central-store.md](docs/migration-central-store.md).
+  Qdrant collections (named after the workspace path, not the store) survive
+  the migration, no vectors are lost.
 
 ## Cross-repo workspaces
 
-A workspace is not limited to one repository — register sibling repos and search them as a single index:
+A workspace is not limited to one repository — register sibling repos and
+search them as a single index:
 
 ```bash
 squeezr add ../other-repo --name other-repo
 ```
 
-The path is absolute or relative (resolved against the workspace root); `--name` sets the repo name the tools filter on — without it, the directory name is taken.
+The path is absolute or relative (resolved against the workspace root);
+`--name` sets the repo name the tools filter on — without it, the directory
+name is taken.
 
-- One workspace, many repos: `squeezr index` covers them all, and the watch daemon keeps each one fresh.
-- Per-repo filtering: the `repo` parameter of `repo_map` / `code_search` / `symbol_lookup` / `find_references` (CLI twins: `--repo` on `search` and `map`).
-- Subtree scoping: the `prefix` parameter of `repo_map` / `code_search` (CLI twins: `--prefix` on `map` and `search`) answers only inside a directory subtree, matched against stored relative paths. An empty subtree is an error naming the nearest directories, not a silent empty answer.
-- Ranking curation: `indexing.rankExclude` in the workspace config (`["audits/**", "BACKLOG/**"]`) keeps doc trees out of `code_search` ranking — both arms — without unindexing them: `expand_span` / `find_references` / `symbol_lookup` still reach every excluded file, and no reindex is needed (query-time only). `prefix` narrows in, `rankExclude` pushes out, the two intersect. `index_status` lists the active patterns in `warnings`, `squeezr status` prints them next to the embeddings provider; a malformed glob produces a warning and is skipped instead of breaking the query. A value with a broken shape (a bare string instead of the array, non-string entries) no longer takes the whole config down: the string is salvaged as a one-pattern list, junk entries are dropped, and `squeezr status` still prints the surviving patterns. Drive-letter patterns (`C:/repo/**`, `C:\repo\**`) are rejected with a warning — patterns are repository-relative, so a drive prefix can never match anything.
-- Query globs (`indexing.rankExclude`, MCP/CLI `pathGlob`) read the same classes as the ignore dialect — `[abc]`, `[a-z]`, `[!…]`/`[^…]`, `?`, `**` — since 063/T14 they match there too. They differ in two places: there `\` stays a directory separator (`src\**\*.cs`), not an escape, and nothing guards residual shapes — an unterminated `[` or a POSIX `[:alpha:]` reads as literal characters and a plain member set instead of being skipped with a warning the way the ignore layer does. The separator asymmetry also means a query class cannot contain `/` — the splitter has no bracket awareness. So `**/[Bb]in/**` really excludes `src/Bin/…`, while a glob written to name literal brackets (`audits/[v1]/**`) no longer names that directory — it reads as a one-character set over `v`/`1`.
-- Coverage is visible before you query: `index_status` and `squeezr status` show per-repo file/symbol/chunk counts; `embeddings.coverage` in `index_status` adds the semantic share (embedded / total chunks).
+- One workspace, many repos: `squeezr index` covers them all, and the watch
+  daemon keeps each one fresh.
+- Per-repo filtering: the `repo` parameter of `repo_map` / `code_search` /
+  `symbol_lookup` / `find_references` (CLI twins: `--repo` on `search` and
+  `map`).
+- Subtree scoping: the `prefix` parameter of `repo_map` / `code_search` (CLI
+  twins: `--prefix` on `map` and `search`) answers only inside a directory
+  subtree, matched against stored relative paths. An empty subtree is an error
+  naming the nearest directories, not a silent empty answer.
+- Ranking curation: `indexing.rankExclude` in the workspace config
+  (`["audits/**", "BACKLOG/**"]`) keeps doc trees out of `code_search` ranking
+  — both arms — without unindexing them: `expand_span` / `find_references` /
+  `symbol_lookup` still reach every excluded file, and no reindex is needed
+  (query-time only). `prefix` narrows in, `rankExclude` pushes out, the two
+  intersect. `index_status` lists the active patterns in `warnings`,
+  `squeezr status` prints them next to the embeddings provider; a malformed
+  glob produces a warning and is skipped instead of breaking the query. A value
+  with a broken shape (a bare string instead of the array, non-string entries)
+  no longer takes the whole config down: the string is salvaged as a
+  one-pattern list, junk entries are dropped, and `squeezr status` still prints
+  the surviving patterns. Drive-letter patterns (`C:/repo/**`, `C:\repo\**`)
+  are rejected with a warning — patterns are repository-relative, so a drive
+  prefix can never match anything.
+- Query globs (`indexing.rankExclude`, MCP/CLI `pathGlob`) read the same
+  classes as the ignore dialect — `[abc]`, `[a-z]`, `[!…]`/`[^…]`, `?`, `**` —
+  and since 063/T14 they match there too. They differ in two places: there `\`
+  stays a directory separator (`src\**\*.cs`), not an escape, and nothing
+  guards residual shapes — an unterminated `[` or a POSIX `[:alpha:]` reads as
+  literal characters and a plain member set instead of being skipped with a
+  warning the way the ignore layer does. The separator asymmetry also means a
+  query class cannot contain `/` — the splitter has no bracket awareness. So
+  `**/[Bb]in/**` really excludes `src/Bin/…`, while a glob written to name
+  literal brackets (`audits/[v1]/**`) no longer names that directory — it reads
+  as a one-character set over `v`/`1`.
+- Coverage is visible before you query: `index_status` and `squeezr status`
+  show per-repo file/symbol/chunk counts; `embeddings.coverage` in
+  `index_status` adds the semantic share (embedded / total chunks).
 
-Discovery stays per-directory: a project resolved from inside its tree keeps its own workspace — sibling repos join only when deliberately added with `add`.
+Discovery stays per-directory: a project resolved from inside its tree keeps
+its own workspace — sibling repos join only when deliberately added with
+`add`.
 
-## Исключения при индексации
+## Indexing exclusions
 
-Squeezr не индексирует всё подряд: встроенные дефолты режут `node_modules`, `bin`, `obj`, `dist`, `.next`, `.vs`, `coverage` и прочий шум. поверх дефолтов — три слоя, каждый следующий перебивает предыдущий (last-match-wins):
+Squeezr does not index everything: built-in defaults cut `node_modules`, `bin`,
+`obj`, `dist`, `.next`, `.vs`, `coverage` and other noise. On top of the
+defaults — three layers, each next one overrides the previous
+(last-match-wins):
 
-1. **`indexing.ignore`** в конфиге воркспейса (`~/.squeezr/workspaces/<storeKey>/config.json`) — глобы, которые ты хочешь видеть всегда.
-2. **`.squeezrignore`** в корне репо — синтаксис gitignore, НЕ каскадируется (только корневой файл).
-3. **`.gitignore`-каскад** — любой `.gitignore` по пути к файлу, паттерны относятся к директории этого файла. Включён по умолчанию.
+1. **`indexing.ignore`** in the workspace config
+   (`~/.squeezr/workspaces/<storeKey>/config.json`) — globs you always want
+   ignored.
+2. **`.squeezrignore`** in the repo root — gitignore syntax, NOT cascading
+   (root file only).
+3. **The `.gitignore` cascade** — any `.gitignore` along the path to a file,
+   patterns relative to that file's directory. Enabled by default.
 
-Флаг `indexing.respectGitignore` (bool, дефолт `true` в `IndexingConfig`) — выключает весь слой `.gitignore`. Старые конфиги без ключа грузятся в `true`, миграция не нужна.
+The `indexing.respectGitignore` flag (bool, default `true` in
+`IndexingConfig`) switches the whole `.gitignore` layer off. Old configs
+without the key load as `true`, no migration needed.
 
-Поддерживаемое подмножество gitignore: пустые строки, `#`-комментарии, `!`-негация, ведущий/внутренний `/` = якорь к директории, завершающий `/` = только директории, `*`, `?`, `**`, символьные классы — наборы `[abc]`, диапазоны `[a-z]`, инверсия `[!…]` и `[^…]` — и `\`-эскейпы, снимающие магию с `* ? [ ]` и делающие литералом пробел, `#`, `!` (`Generated\ Files/` читается как `Generated Files/`). С 063/T14 эти формы матчатся, а не отбрасываются: <removed 2026-10-05 — 063/T14>~~НЕ поддерживаются `[character-classes]` и `\`-эскейпы~~</removed>. Отбрасываются с warning только остаточные формы — незакрытый `[`, POSIX-классы вида `[[:alpha:]]` (и вложенные в набор: `[a[:digit:]b]` — скипается весь паттерн, git-resolving не эмулируем), экранированный разделитель `\/`, `\ `-эскейп завершающего пробела (строка тримится до валидации, поэтому `Generated\ Files` работает, а `foo\ ` — нет) и висячий `\` в конце: `unsupported ignore pattern '<raw>' in <file>; pattern skipped.` В `<raw>` — строка файла как она в нём стоит, с исходными пробелами. Классы и эскейпы в `indexing.secretGuardExtra` ширят маску, но не сужают её: негатум `!` по-прежнему не проходит в компиляцию extras.
+Supported gitignore subset: empty lines, `#` comments, `!` negation, a
+leading/inner `/` = anchor to the directory, a trailing `/` = directories
+only, `*`, `?`, `**`, character classes — sets `[abc]`, ranges `[a-z]`,
+negation `[!…]` and `[^…]` — and `\` escapes that strip the magic from
+`* ? [ ]` and make a literal of space, `#`, `!` (`Generated\ Files/` reads as
+`Generated Files/`). Since 063/T14 these forms match instead of being dropped:
+<removed 2026-10-05 — 063/T14>~~character classes and `\` escapes are NOT
+supported~~</removed>. Only residual shapes are dropped with a warning — an
+unterminated `[`, POSIX classes like `[:alpha:]` (and nested inside a set:
+`[a[:digit:]b]` — the whole pattern is skipped, not git-resolvable), an
+escaped separator `\/`, a `\ `-escape of a trailing space (the line is trimmed
+before validation, so `Generated\ Files` works but `foo\ ` does not) and a
+dangling `\` at line end: `unsupported ignore pattern '<raw>' in <file>;
+pattern skipped.` `<raw>` is the file line as it stands, original spaces
+included. Character classes and escapes in `indexing.secretGuardExtra` widen
+the mask but never narrow it: a `!` negation still cannot pass into the
+compiled extras.
 
-Наблюдаемость: `squeezr index` печатает `ignored N file(s)` рядом со skipped/added/modified. `squeezr status --json` и MCP `index_status` отдают блок `ignored: { files, bySource: { defaults|config|squeezrignore|gitignore } }` per repo (ключи с нулевым счётчиком отсутствуют — экономия токенов); `index --json`/`--events` отдают те же числа плоскими полями `ignored` (int) + `ignoredBySource` (ключи — тот же словарь, что в `ignored.bySource`). Юнит — файлы: директория, усечённая правилом (`out/`), засчитывается не как 1, а как все файлы внутри неё (посчитаны по именам, без чтения содержимого). Числа — снимок последнего индексационного прохода (не текущее состояние диска): удаление/перемещение файла на диске не меняет `ignored` до следующего `squeezr index`. Если исключения есть, warning указывает доминирующий источник и как его выключить/поправить. Молчаливый filter-out запрещён: `ignored > 0` всегда виден. Воркспейс, проиндексированный до появления этого поля, показывает `ignored` absent/0 без ошибок — честное отсутствие данных, не фейковые нули.
+Observability: `squeezr index` prints `ignored N file(s)` next to
+skipped/added/modified. `squeezr status --json` and MCP `index_status` carry an
+`ignored: { files, bySource: { defaults|config|squeezrignore|gitignore } }`
+block per repo (zero-count keys are absent — token economy); `index
+--json`/`--events` carry the same numbers as flat fields `ignored` (int) +
+`ignoredBySource` (keys — the same dictionary as `ignored.bySource`). The unit
+is files: a directory cut by a rule (`out/`) counts not as 1 but as every file
+inside it (counted by name, contents unread). The numbers are a snapshot of
+the last indexing pass (not the current disk state): deleting/moving a file on
+disk does not change `ignored` until the next `squeezr index`. When
+exclusions exist, a warning names the dominant source and how to disable/fix
+it. Silent filter-out is forbidden: `ignored > 0` is always visible. A
+workspace indexed before this field existed shows `ignored` absent/0 without
+errors — an honest absence of data, not fake zeros.
 
-Снятие с индекса происходит на следующем проходе: файл, попавший в `.gitignore` после индексации, исчезнет при следующем `squeezr index` (или watch-проходе).
+Removal happens on the next pass: a file that landed in `.gitignore` after
+indexing disappears on the next `squeezr index` (or watch pass).
 
-Read-path (`code_search`/`symbol_lookup`/`repo_map`/`find_references`, inline-освежение протухшего файла) не обходит дерево: каскад `.gitignore` собирается только по предкам пути этого файла, решения при этом те же, что у полного каскада.
+The read path (`code_search`/`symbol_lookup`/`repo_map`/`find_references`,
+inline refresh of a stale file) does not walk the tree: the `.gitignore`
+cascade is collected only over the ancestors of that file's path, and the
+decisions are identical to the full cascade.
 
-**Breaking change (035 --json contract):** `RepoIndexResult` получил 7-ю позицию `Ignored` (int, total count) и 8-ю `IgnoredBySource` (`Dictionary<string,int>?`, ключи `defaults|config|squeezrignore|gitignore`, `null`/отсутствие — ничего не исключено). В `--json`-выводе `index`/`events` каждый `repos[]`-элемент теперь несёт поле `ignored` (int) и аддитивное `ignoredBySource` (объект со строковыми ключами — тот же словарь значений, что `ignored.bySource` в status). В `status --json` и `index_status` добавлен блок `ignored: { files, bySource }` per repo. Существующие поля не переименованы и не удалены — только аддитивные.
+**Breaking change (035 --json contract):** `RepoIndexResult` gained a 7th
+position `Ignored` (int, total count) and an 8th `IgnoredBySource`
+(`Dictionary<string,int>?`, keys `defaults|config|squeezrignore|gitignore`,
+`null`/absent — nothing excluded). In the `--json` output of `index`/`events`,
+every `repos[]` element now carries an `ignored` field (int) and an additive
+`ignoredBySource` (an object with string keys — the same value dictionary as
+`ignored.bySource` in status). In `status --json` and `index_status` there is
+an `ignored: { files, bySource }` block per repo. Existing fields are neither
+renamed nor removed — additive only.
 
-## Секрет-гард: что отказывает и как почистить старый стор
+## Secret guard: what it refuses, and how to clean an old store
 
-Гард решает **по форме пути**: чтобы классифицировать файл, он его не открывает — в классификаторе нет ни одного обращения к ФС (`SecretGuardTests.Classifier_SourceHasNoFileSystemProbe`). Значения секретов гард не видит и не пишет никуда: ни в отчёты, ни в `--json`, ни в телеметрию. Имена защищённых путей в отчётах прохода и чистки тоже не появляются — только счётчики. Имя звучит разве что на чтении, и там по-разному: **отказ** возвращает путь, который спрашивающий назвал сам, а **withheld-строка** называет первый снятый гардом результат — его спрашивающий мог вообще не называть (см. ниже).
+The guard decides **by path shape**: to classify a file it never opens it —
+the classifier contains zero filesystem probes
+(`SecretGuardTests.Classifier_SourceHasNoFileSystemProbe`). It never sees
+secret values and never writes them anywhere: not to reports, not to `--json`,
+not to telemetry. Protected path names do not appear in pass or cleanup
+reports either — counters only. The name does sound on reads, and differently
+there: a **refusal** returns the path the caller named itself, while a
+**withheld line** names the first result the guard removed — the caller may
+never have named it at all (see below).
 
-**Встроенный набор — 19 масок.** `SecretGuard.BuiltInPatterns`, список заморожен тестом `BuiltInPatterns_AreTheFrozenSpecList`:
+**The built-in set — 19 masks.** `SecretGuard.BuiltInPatterns`, the list is
+frozen by test `BuiltInPatterns_AreTheFrozenSpecList`:
 
-`**/.env`, `**/.env.*`, `**/*.key`, `**/*.pem`, `**/*.pfx`, `**/*.p12`, `**/*.jks`, `**/*.kdbx`, `**/id_rsa*`, `**/id_dsa*`, `**/id_ecdsa*`, `**/id_ed25519*`, `**/.npmrc`, `**/.netrc`, `**/.git-credentials`, `**/.pgpass`, `**/secrets.json`, `**/secrets.*.json`, `**/*.secret`
+`**/.env`, `**/.env.*`, `**/*.key`, `**/*.pem`, `**/*.pfx`, `**/*.p12`,
+`**/*.jks`, `**/*.kdbx`, `**/id_rsa*`, `**/id_dsa*`, `**/id_ecdsa*`,
+`**/id_ed25519*`, `**/.npmrc`, `**/.netrc`, `**/.git-credentials`,
+`**/.pgpass`, `**/secrets.json`, `**/secrets.*.json`, `**/*.secret`
 
-Единственное исключение — конвенциональные заглушки `.env.example` / `.env.sample` / `.env.template`, и только для `.env`-семейства: имя, которое формально заглушка, но по форме попадает в остальной набор (`.env.key`), защищено всё равно.
+The single exception — conventional stubs `.env.example` / `.env.sample` /
+`.env.template`, and only for the `.env` family: a name that is formally a
+stub but shape-matches the rest of the set (`.env.key`) is protected anyway.
 
-**Встроенное нельзя сузить.** Единственная конфигурационная ручка — `indexing.secretGuardExtra` (массив глобов в `config.json` воркспейса), и она **union-only**: пользовательские маски проверяются первыми, встроенные применяются всегда, вычитать из них нечем. Форма, которая ничего не называет, в `secretGuardExtra` не компилируется вообще — негатив `!`, комментарий, dir-only (`secrets/`) и остаточные неподдерживаемые формы **инертны по построению**, а не «отфильтрованы потом» (`SecretGuardTests.SecretGuardExtra_ClassesAndEscapesWidenOnly_NegationStaysInert`, `SecretGuardExtra_CannotNameAFileShape_NeitherWidensNorNarrows`). Символьные классы и `\`-эскейпы умеют только расширять маску. Пустые `indexing.ignore` и `secretGuardExtra` не сужают ничего (`EmptyIgnoreAndEmptyExtra_NarrowNothing`), а встроенные маски не входят в редактируемые дефолты (`BuiltInPatterns_AreNotPartOfTheEditableIgnoreDefaults`) — их нельзя убрать и через ignore-конфиг.
+**The built-in set cannot be narrowed.** The only configuration knob is
+`indexing.secretGuardExtra` (a glob array in the workspace `config.json`), and
+it is **union-only**: user masks are checked first, the built-ins always
+apply, nothing subtracts from them. A shape that names nothing does not
+compile into `secretGuardExtra` at all — a negation `!`, a comment, dir-only
+(`secrets/`) and residual unsupported forms are **inert by construction**, not
+"filtered later"
+(`SecretGuardTests.SecretGuardExtra_ClassesAndEscapesWidenOnly_NegationStaysInert`,
+`SecretGuardExtra_CannotNameAFileShape_NeitherWidensNorNarrows`). Character
+classes and `\` escapes only ever widen the mask. Empty `indexing.ignore` and
+`secretGuardExtra` narrow nothing (`EmptyIgnoreAndEmptyExtra_NarrowNothing`),
+and the built-in masks are not part of the editable ignore defaults
+(`BuiltInPatterns_AreNotPartOfTheEditableIgnoreDefaults`) — they cannot be
+removed through the ignore config either.
 
-**Диалект `secretGuardExtra` — тот же, что у `indexing.ignore`** (подмножество gitignore, см. «Исключения при индексации»): неанкорированная форма читается **на любой глубине** — `*.tokens` закрывает и `root.tokens`, и `src/deep.tokens`; внутренний `/` анкорит от корня репо — `deploy/*.crt` закрывает `deploy/server.crt`, но не `deploy/sub/deep.crt`; `**/tokens.txt` — любая глубина, но не `tokens.txt.bak`. Смысл совпадает с ignore-слойем дословно, ряд проверок закреплён тестом `SecretGuardExtra_MeansWhatIndexingIgnoreMeans`.
+**The `secretGuardExtra` dialect is the same as `indexing.ignore`** (the
+gitignore subset, see "Indexing exclusions"): an unanchored form matches **at
+any depth** — `*.tokens` covers both `root.tokens` and `src/deep.tokens`; an
+inner `/` anchors from the repo root — `deploy/*.crt` covers
+`deploy/server.crt` but not `deploy/sub/deep.crt`; `**/tokens.txt` — any
+depth, but not `tokens.txt.bak`. The meaning matches the ignore layer
+verbatim; the row of checks is pinned by test
+`SecretGuardExtra_MeansWhatIndexingIgnoreMeans`.
 
-**Две известные границы — это документированные limitations, а не молчание:**
+**Two known boundaries — documented limitations, not silence:**
 
-1. **Путь, у которого `.env` — директория, не защищён.** Классификатор решает по **последнему сегменту**: `.env/dev`, `.env/local.json`, `vault/token.key/readme.md` protected не считаются (`DirectoryShapedSecret_LastSegmentDecides_NotProtected`). Файл с секретным именем *внутри* такой директории защищён своей маской (`.env/prod.key` — да). Хвостовой разделитель при этом тримится: запрос `.env/` — это отказ, а не «not found».
-2. **`id_rsa*` матчит и публичные ключи.** `.ssh/id_rsa.pub` попадает под маску вместе с приватным ключом — публичная часть тоже не индексируется и не отдаётся. Осознанная цена: перестраховаться маской проще, чем пропустить приватный ключ.
+1. **A path whose `.env` is a directory is not protected.** The classifier
+   decides by the **last segment**: `.env/dev`, `.env/local.json`,
+   `vault/token.key/readme.md` do not count as protected
+   (`DirectoryShapedSecret_LastSegmentDecides_NotProtected`). A file with a
+   secret name *inside* such a directory is protected by its own mask
+   (`.env/prod.key` — yes). A trailing separator is trimmed: a request for
+   `.env/` is a refusal, not "not found".
+2. **`id_rsa*` matches public keys too.** `.ssh/id_rsa.pub` falls under the
+   mask together with the private key — the public part is not indexed and not
+   served either. A deliberate price: over-covering with a mask is cheaper
+   than leaking a private key.
 
-**Как выглядит отказ для агента.** Явный запрос защищённого пути — ошибка, а не пустой ответ:
+**What a refusal looks like to an agent.** An explicit request for a protected
+path is an error, not an empty answer:
 
 ```
 '.env' is protected by squeezr's built-in secret guard: never indexed, never rendered
 ```
 
-Имя в **отказе** — запрошенный путь (плюс у `find_references`: если все объявления символа protected, в отказе окажется файл **первого** из них — не «единственного», а просто первого по порядку; молчать про «не найдено», когда файл есть, было бы враньем).
+The name in a **refusal** is the requested path (plus, for `find_references`:
+if all declarations of a symbol are protected, the refusal names the file of
+the **first** one — not "the only", just the first in order; staying silent
+about "not found" when the file exists would be a lie).
 
-Молча пропущенные результаты считаются в `warnings` одной фразой во всех поверхностях (CLI stderr, MCP-конверт, TUI — wording не разъезжается):
+Silently dropped results are counted in `warnings`, one phrase, identical in
+every surface (CLI stderr, MCP envelope, TUI — the wording never drifts):
 
 ```
 warning: secret guard: 3 result(s) withheld ('.env' matches built-in patterns)
 ```
 
-Внимание к референту: имя в этой строке — **не то, что ты набрал**, а первый результат, который гард снял. `repo_map` с префиксом `deploy/` назовёт файл под этим префиксом, запрос без префикса — защищённый путь, который вообще ни в одном аргументе не звучал. Так что сама warning-строка «безопасна для скриншота» ровно в той же мере, что и содержимое файла: не безопасна. Источник решения — `built-in patterns` либо `indexing.secretGuardExtra`; отказ же всегда говорит *built-in*, даже если решила твоя маска из extras — различает источник только tally. Тот же словарь у ingestion: `secret guard: 3 file(s) withheld from indexing (2 built-in patterns, 1 indexing.secretGuardExtra)`. Если `config.json` не прочитался, встроенные маски остаются, пользовательские выключаются, и это сказано отдельно: `could not read indexing config (…); user secret-guard masks are inactive`.
+Attention to the reader: the name in that line is **not what you typed**, but
+the first result the guard removed. `repo_map` with prefix `deploy/` names a
+file under that prefix; a query without a prefix names a protected path that
+appeared in none of your arguments. So the warning line is "safe for
+screenshots" exactly to the same degree as the file's contents: not safe. The
+decision source is `built-in patterns` or `indexing.secretGuardExtra`; a
+refusal always says *built-in*, even when your extras mask decided — only the
+tally distinguishes the sources. The same dictionary in ingestion:
+`secret guard: 3 file(s) withheld from indexing (2 built-in patterns, 1
+indexing.secretGuardExtra)`. If `config.json` failed to read, the built-in
+masks stay, the user masks switch off, and this is said separately: `could not
+read indexing config (…); user secret-guard masks are inactive`.
 
-**Счётчики — где их искать.** `index --json` несёт `guardWithheld` / `guardWithheldBuiltIns` / `guardDropped` в корне и те же три в каждом `repos[]`; в `--events` корневой `completed` — `guardWithheld` и `guardDropped` (третий лежит только в `repos[]`); `squeezr status` даёт колонки `Withheld`/`Dropped` плюс строку-итог; `status --json` и MCP `index_status` — объект `guard { withheld, withheldByBuiltIns, withheldByConfig, dropped }` per repo. Числа — снимок последнего прохода, не живое состояние диска. Отказ гарда считается как skipped, проход от этого не падает.
+**The counters — where to find them.** `index --json` carries
+`guardWithheld` / `guardWithheldBuiltIns` / `guardDropped` at the root and the
+same three in each `repos[]`; in `--events` the root `completed` —
+`guardWithheld` and `guardDropped` (the third lives only in `repos[]`);
+`squeezr status` gives `Withheld`/`Dropped` columns plus a summary line;
+`status --json` and MCP `index_status` — a
+`guard { withheld, withheldByBuiltIns, withheldByConfig, dropped }` object per
+repo. The numbers are a snapshot of the last pass, not live disk state. A
+guard refusal counts as skipped; the pass does not fail because of it.
 
-**Что делает апгрейд — и чего он не делает.** Установка нового бинаря **не убирает уже проиндексированное**: центральный стор (`~/.squeezr/workspaces/<storeKey>/`) переустановка не трогает, и в старом `meta.db`, `trigram.idx` и `queries.jsonl` строки и имена protected-файлов лежат как лежали. С момента установки меняется только поведение read-пути — такие строки он больше не отдаёт. Данные уходят в один из двух моментов:
+**What an upgrade does — and what it does not.** Installing a new binary
+**does not remove what was already indexed**: the central store
+(`~/.squeezr/workspaces/<storeKey>/`) is untouched by a reinstall, and in an
+old `meta.db`, `trigram.idx` and `queries.jsonl` the rows and names of
+protected files lie as they lay. From the moment of installation only read-path
+behavior changes — those rows are no longer served. The data leaves in one of
+two moments:
 
-- **следующий проход индексации** (`squeezr index`, включая фоновый watch-проход): защищённые пути не попадают в обход, поэтому их строки в сторе считаются удалёнными и уходят через тот же каскад (символы, чанки, ссылки, очередь чистки векторов). Имена уходят из строк файлов и из **новых** записей reap-журнала (новые ставятся без имени); ряд `pending_reaps`, оставленный прежным билдом, своего имени в этом проходе не теряет — только в `squeezr compact`;
-- **`squeezr compact`** — явный маршрут и единственная операторская команда, которая чистит стор целиком: гард вычищает оставшиеся защищённые строки, **redact-ит имена в reap-журнале**, **scrub-ит значения параметров в `queries.jsonl`** (включая repo-qualified и абсолютные формы, которые сам продукт и выводит), переписывает `trigram.idx`, перестраивает `meta.db` и возвращает освободившиеся байты.
+- **the next indexing pass** (`squeezr index`, including a background watch
+  pass): protected paths do not enter the walk, so their rows in the store
+  count as removed and leave through the same cascade (symbols, chunks,
+  references, the vector-cleanup queue). Names leave the file rows and the
+  **new** reap-journal entries (new ones are written without a name); a
+  `pending_reaps` row left by the previous build keeps its name through this
+  pass — it loses it only in `squeezr compact`;
+- **`squeezr compact`** — the explicit route and the only operator command
+  that cleans the whole store: the guard purges the remaining protected rows,
+  **redacts names in the reap journal**, **scrubs parameter values in
+  `queries.jsonl`** (including repo-qualified and absolute forms the product
+  itself prints), rewrites `trigram.idx`, rebuilds `meta.db` and returns the
+  freed bytes.
 
-Флага `--purge` у `compact` нет: чистка по гарду выполняется всегда как часть компактификации, и без запроса оператора не чистится ничего. Отчёт — только числами:
+There is no `--purge` flag on `compact`: guard cleanup always runs as part of
+compaction, and without an operator request nothing is cleaned. The report is
+numbers only:
 
 ```
 secret guard: 7 path(s) purged, 186 row(s) removed · 1 reap journal name(s) redacted · 28 recorded parameter value(s) redacted · 7 point cleanup(s) queued
 ```
 
-Точки, которые проход не смог снять сам, доигрывает `squeezr vectors reconcile --apply`. Сырые байты очищенного стора проверены свипом по `meta.db`/`trigram.idx`/телеметрии — evidence в `audits/store-purge-2026-10-05.md`.
+Points a pass could not remove itself are finished by `squeezr vectors
+reconcile --apply`. The raw bytes of the cleaned store were verified with a
+sweep over `meta.db`/`trigram.idx`/telemetry — evidence in
+`audits/store-purge-2026-10-05.md`.
 
 ## Managed services: `squeezr services`
 
-Docker-инфраструктура — qdrant и ollama — управляется одной командой, руками compose не трогаешь:
+Docker infrastructure — qdrant and ollama — is managed by one command; you
+never touch compose by hand:
 
 ```bash
-squeezr services up       # сгенерировать compose и поднять оба сервиса
-squeezr services status   # таблица контейнеров (+ --json, rocm, версия compose)
-squeezr services down     # остановить (данные в volume'ах НЕ удаляются)
+squeezr services up       # generate the compose file and start both services
+squeezr services status   # container table (+ --json, rocm, compose version)
+squeezr services down     # stop (data in volumes is NOT removed)
 ```
 
-- Compose-файл — `~/.squeezr/infra/docker-compose.yml`, перегенерируется на каждый `up` (первой строкой — маркер `# managed by squeezr`); project `squeezr`.
-- Сервисы: **qdrant** (`qdrant/qdrant:latest`, 6333/6334, volume `squeezr-qdrant`) и **ollama** (`ollama/ollama:latest`, 11434, volume `squeezr-ollama`), restart `unless-stopped`.
-- **AMD GPU (ROCm):** если на хосте видны `/dev/kfd` и `/dev/dri` (например, Radeon RX 7900 XTX), ollama получает проброс этих устройств и считает на GPU; без них — CPU-режим.
-- Команда глобальна: работает из любой директории, workspace не нужен. Без Docker — понятная ошибка со ссылкой на установку.
+- The compose file — `~/.squeezr/infra/docker-compose.yml`, regenerated on
+  every `up` (first line: the `# managed by squeezr` marker); project
+  `squeezr`.
+- Services: **qdrant** (`qdrant/qdrant:latest`, 6333/6334, volume
+  `squeezr-qdrant`) and **ollama** (`ollama/ollama:latest`, 11434, volume
+  `squeezr-ollama`), restart `unless-stopped`.
+- **AMD GPU (ROCm):** if the host exposes `/dev/kfd` and `/dev/dri` (e.g. a
+  Radeon RX 7900 XTX), ollama gets those devices passed through and computes
+  on GPU; without them — CPU mode.
+- The command is global: it works from any directory, no workspace needed.
+  Without Docker — a clear error pointing at installation.
 
-**Первый запуск — будь готов к загрузке.** Первый `services up` тянет образы из registry: qdrant ~70 МБ, ollama ~3.6 ГБ — на средней сети это минуты, на медленной — десятки минут. Команда показывает этапы (`Pulling images…`, `Starting containers…`; сырой docker-вывод — под `--verbose`). Таймаута у загрузки нет — если она застынет или надоест, прерви Ctrl+C: процесс compose будет остановлен, выход чистый. Скачанные слои кэшируются — докачай с видимым прогрессом и повтори:
+**First run — be ready for a download.** The first `services up` pulls images
+from the registry: qdrant ~70 MB, ollama ~3.6 GB — minutes on an average
+network, tens of minutes on a slow one. The command shows the stages
+(`Pulling images…`, `Starting containers…`; raw docker output under
+`--verbose`). There is no download timeout — if it stalls or you get bored,
+Ctrl+C: the compose process is stopped, the exit is clean. Downloaded layers
+are cached — resume with visible progress and retry:
 
 ```bash
-docker compose -f ~/.squeezr/infra/docker-compose.yml -p squeezr pull   # resume, слои докачаются
-squeezr services up                                                     # повторный up
+docker compose -f ~/.squeezr/infra/docker-compose.yml -p squeezr pull   # resume, layers continue
+squeezr services up                                                     # up again
 ```
 
-Повторные `up` ходят в registry только за отсутствующими образами (`pull --policy missing`, compose v2.24+; на v2.21–2.23 — полный pull) — офлайн-перезапуск с уже скачанными образами работает. Требования: Docker Engine + compose plugin v2.21+ (`status` использует `ps --format json`); поддерживается и standalone `docker-compose`. `down` останавливает контейнеры, но **никогда** не трогает volume'ы — данные qdrant/ollama переживают циклы down/up.
+Repeat `up` visits the registry only for missing images
+(`pull --policy missing`, compose v2.24+; on v2.21–2.23 — a full pull) — an
+offline restart with images already downloaded works. Requirements: Docker
+Engine + compose plugin v2.21+ (`status` uses `ps --format json`); standalone
+`docker-compose` also supported. `down` stops the containers but **never**
+touches the volumes — qdrant/ollama data survives down/up cycles.
 
-Установка кладёт единый бинарь: на Linux — в `~/.local/share/squeezr` + symlink `~/.local/bin/squeezr` (снести: `scripts/uninstall.sh`), на Windows — `squeezr.exe` в `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (снести: `powershell -File scripts\uninstall.ps1`). Оба установщика сами проверят Docker и подскажут, если его нет — он понадобится для `squeezr services up` (Qdrant и, опционально, Ollama). Важно: ни установка, ни удаление не трогают стор `~/.squeezr` — воркспейсы и модели переживают переустановку бинаря.
+The install lays down a single binary: on Linux — `~/.local/share/squeezr` +
+symlink `~/.local/bin/squeezr` (remove: `scripts/uninstall.sh`), on Windows —
+`squeezr.exe` in `%LOCALAPPDATA%\Programs\Squeezr` + user PATH (remove:
+`powershell -File scripts\uninstall.ps1`). Both installers check for Docker
+themselves and hint if it is missing — it will be needed for `squeezr services
+up` (Qdrant and, optionally, Ollama). Note: neither install nor uninstall
+touches the `~/.squeezr` store — workspaces and models survive a binary
+reinstall.
 
-### Windows: установщик `.exe`
+### Windows: the `.exe` installer
 
-Кроме скриптовой установки Windows умеет нормальный установщик — `SqueezrSetup-<version>-win-x64.exe`. Он ставится **без прав администратора** в `%LOCALAPPDATA%\Programs\Squeezr` (тот же каталог, куда кладёт `install.ps1`, так что одно аккуратно перекрывает другое), сам добавляет каталог в user PATH и регистрируется в «Программах и компонентах» — удаление идёт оттуда, а не поиском скрипта в забытом чекауте. Если запустить с повышением прав, предложит поставить на всю машину в `%ProgramFiles%\Squeezr`.
+Besides the script route, Windows has a real installer —
+`SqueezrSetup-<version>-win-x64.exe`. It installs **without admin rights**
+into `%LOCALAPPDATA%\Programs\Squeezr` (the same directory `install.ps1` uses,
+so one cleanly overlays the other), adds the directory to user PATH itself and
+registers in "Apps & features" — uninstall goes from there, not from hunting
+a script in a forgotten checkout. Run with elevation, it offers a
+per-machine install into `%ProgramFiles%\Squeezr`.
 
-Готовых сборок под Windows нигде не лежит и не будет: Gitea-релизы собираются только под `linux-x64`, Windows-раннера нет. Пакет собирается локально, на любой виндовой машине:
+No ready Windows builds exist anywhere and none will: Gitea releases are built
+for `linux-x64` only, there is no Windows runner. The package is built
+locally, on any Windows machine:
 
 ```powershell
-# пререквизит: Inno Setup 6 (плюс .NET 10 SDK)
+# prerequisite: Inno Setup 6 (plus the .NET 10 SDK)
 winget install -e --id JRSoftware.InnoSetup
 
 powershell -File scripts\build-installer.ps1
 # → artifacts\installer\SqueezrSetup-1.0.2-win-x64.exe
 ```
 
-Флаги: `-Rid win-x64|win-arm64` (дефолт `win-x64`), `-Version <строка>` (по умолчанию берётся `<Version>` из `src\Squeezr.Cli\Squeezr.Cli.csproj`), `-SkipBuild` (упаковать уже опубликованное дерево `artifacts\publish`), `-IsccPath <путь>` (явный компилятор), `-OutputDir <путь>`, `-InstallInno` (доставить Inno Setup через winget, если его нет). Inno ищется по PATH, в ключах удаления HKCU и HKLM и в стандартных каталогах — per-user установка в `%LOCALAPPDATA%\Programs\Inno Setup 6` находится так же, как машинная.
+Flags: `-Rid win-x64|win-arm64` (default `win-x64`), `-Version <string>`
+(default taken from `<Version>` in
+`src\Squeezr.Cli\Squeezr.Cli.csproj`), `-SkipBuild` (package the already
+published `artifacts\publish` tree), `-IsccPath <path>` (explicit compiler),
+`-OutputDir <path>`, `-InstallInno` (deliver Inno Setup via winget if
+missing). Inno is found on PATH, in HKCU/HKLM uninstall keys and in the
+standard directories — a per-user install in
+`%LOCALAPPDATA%\Programs\Inno Setup 6` is found just like a machine-wide one.
 
-Что стоит знать:
+Worth knowing:
 
-- **Пакет не подписан** — сертификата нет. При первом запуске SmartScreen покажет «Windows protected your PC»: *More info* → *Run anyway*.
-- **PATH подхватится только в новом терминале** — установщик рассылает `WM_SETTINGCHANGE`, но уже открытые консоли его не перечитывают.
-- **Перед переустановкой поверх живых демонов** останови их: `squeezr fleet stop <storeKey>`. Иначе бинарь залочен, и закрывать его будет Restart Manager.
-- **Удаление не трогает стор `~/.squeezr`** — воркспейсы, модели и compose-файл переживают деинсталл; снести их можно только руками, после `squeezr drop` и `squeezr services down`.
-- **Модель эмбеддингов в пакет не входит** (+131 МБ ради опциональной семантики) — тянется отдельно через `scripts\fetch-model.ps1`.
+- **The package is unsigned** — there is no certificate. On first run
+  SmartScreen shows "Windows protected your PC": *More info* → *Run anyway*.
+- **PATH is picked up only in a new terminal** — the installer broadcasts
+  `WM_SETTINGCHANGE`, but already-open consoles do not re-read it.
+- **Before reinstalling over live daemons** stop them: `squeezr fleet stop
+  <storeKey>`. Otherwise the binary is locked and Restart Manager will close
+  it for you.
+- **Uninstall does not touch the `~/.squeezr` store** — workspaces, models
+  and the compose file survive a uninstall; removing them is manual, after
+  `squeezr drop` and `squeezr services down`.
+- **The embedding model is not in the package** (+131 MB for optional
+  semantics) — fetched separately via `scripts\fetch-model.ps1`.
 
-Переехали со старой Windows-машины? Миграционный чек-лист — [docs/migration-windows-to-linux.md](docs/migration-windows-to-linux.md). Проект ещё на старом layout с `.squeezr/` в корне? Миграция в центральный стор происходит сама — [docs/migration-central-store.md](docs/migration-central-store.md).
+Moved from an old Windows machine? The migration checklist —
+[docs/migration-windows-to-linux.md](docs/migration-windows-to-linux.md).
+Project still on the old layout with `.squeezr/` in the root? Migration to the
+central store happens by itself —
+[docs/migration-central-store.md](docs/migration-central-store.md).
 
-## TUI: человеческий интерфейс
+## TUI: the human interface
 
-Не любишь помнить флаги — просто запусти `squeezr tui` (или голый `squeezr` в интерактивном терминале: без аргументов он открывает TUI). Если терминал неинтерактивный (pipe, CI) — бинарь честно падает в справку вместо меню.
+Don't feel like remembering flags — run `squeezr tui` (or bare `squeezr` in an
+interactive terminal: with no arguments it opens the TUI). If the terminal is
+not interactive (pipe, CI) — the binary honestly falls to the help instead of
+a menu.
 
-Меню контекстное — зависит от состояния workspace:
+The menu is contextual — it depends on workspace state:
 
-- **Папка без workspace** (воркспейс не найден — squeezr ищет его вверх по дереву от текущей папки) — сразу предложение «No workspace found here. Initialize now?» (дефолт — да) → форма `init`. Отказ — не тупик: остаётся меню из двух пунктов — Initialize workspace / Exit, можно передумать без рестарта.
-- **Workspace инициализирован** — полный круг: Dashboard / Search / Map / Index / Add repository / Config / Drop workspace / Token stats / Usage analytics / Exit.
+- **Folder without a workspace** (no workspace found — squeezr searches up the
+  tree from the current folder) — an immediate "No workspace found here.
+  Initialize now?" (default — yes) → the `init` form. Declining is not a dead
+  end: a two-item menu remains — Initialize workspace / Exit, change your mind
+  without a restart.
+- **Workspace initialized** — the full circle: Dashboard / Search / Map /
+  Index / Add repository / Config / Drop workspace / Token stats / Usage
+  analytics / Exit.
 
-Пункты верхнего уровня:
+Top-level items:
 
-- **Dashboard** — сводка: счётчики файлов/символов/чанков по репо, состояние обоих сервисов (qdrant — points/pending, ollama — running + модель провайдера установлена/нет), pending-эмбеддинги, возраст индекса. Сервис лежит — под статусом явный хинт `qdrant is down — start it with: squeezr services up` (для ollama — аналогично). Репозиториев ещё нет — в конце предложение «No repositories yet. Add one now?» (дефолт — да) → форма Add repository.
-- **Search** — вводишь запрос, получаешь хиты с флагами `[exact]`/`[semantic]`/`[both]` (repo, file:line, сниппет — без тел). Выбор хита раскрывает спан с контекстом из живого файла; «More context (×2)» раздувает контекст, пока хватает бюджета. Qdrant лежит — видишь warning и exact-only выдачу.
-- **Map** — браузер карты: репо → директории → файл → символы с сигнатурами (тел нет). Из символа — тот же expand его спана.
-- **Index** — инкремент, полный реиндекс или `--reembed` с live-прогрессом по фазам.
-- **Add repository** — форма `add` вместо флагов.
-- **Config** — формы поверх конфига воркспейса (в сторе: `~/.squeezr/workspaces/<storeKey>/config.json`): qdrant, embeddings (onnx/ollama/openai), chunking, indexing. Валидация на вводе (URL, int > 0, provider), diff-сводка «было → станет» перед сохранением, после смены embeddings — напоминание про `index --reembed`.
-- **Drop workspace** — подтверждение и полное удаление индекса workspace (`drop`).
-- **Token stats** — per-workspace аналитика телеметрии: таблица по тулам, savings, cache hit-rate, разрезы By agent / By session — тот же контент, что у `squeezr stats` (общий рендерер). Снапшот на входе в экран; свежие данные = повторный вход.
-- **Usage analytics** — глобальный rollup по всем воркспейсам реестра: per-workspace блоки со stale-пометками + итоговая таблица By agent — то же, что `squeezr usage` без флагов. Текущий воркспейс не нужен по смыслу (данные fleet-wide), пункт живёт в общем меню.
+- **Dashboard** — the summary: file/symbol/chunk counters per repo, both
+  services' state (qdrant — points/pending, ollama — running + the provider's
+  model installed or not), pending embeddings, index age. A service down — an
+  explicit hint under the status: `qdrant is down — start it with: squeezr
+  services up` (same for ollama). No repositories yet — a trailing "No
+  repositories yet. Add one now?" (default — yes) → the Add repository form.
+- **Search** — type a query, get hits with `[exact]`/`[semantic]`/`[both]`
+  flags (repo, file:line, snippet — no bodies). Picking a hit expands the span
+  with context from the live file; "More context (×2)" grows the context while
+  the budget holds. Qdrant down — a warning and exact-only results.
+- **Map** — the map browser: repo → directories → file → symbols with
+  signatures (no bodies). From a symbol — the same span expand.
+- **Index** — incremental, full reindex or `--reembed`, live progress by
+  phase.
+- **Add repository** — the `add` form instead of flags.
+- **Config** — forms over the workspace config (in the store:
+  `~/.squeezr/workspaces/<storeKey>/config.json`): qdrant, embeddings
+  (onnx/ollama/openai), chunking, indexing. Input validation (URL, int > 0,
+  provider), a "was → will be" diff summary before saving, and after an
+  embeddings change — a reminder about `index --reembed`.
+- **Drop workspace** — confirmation and full removal of the workspace index
+  (`drop`).
+- **Token stats** — per-workspace telemetry analytics: the per-tool table,
+  savings, cache hit-rate, By agent / By session cuts — the same content as
+  `squeezr stats` (one shared renderer). A snapshot taken on entering the
+  screen; fresh data — re-enter.
+- **Usage analytics** — a global rollup over every workspace in the registry:
+  per-workspace blocks with stale marks + a final By agent table — the same as
+  `squeezr usage` without flags. The current workspace is not needed by
+  definition (fleet-wide data); the item lives in the common menu.
 
-Всё то же самое через CLI-флаги остаётся доступным — TUI это надстройка, не замена.
+Everything is also available through CLI flags — the TUI is a layer, not a
+replacement.
 
-## MCP-сервер: агент ходит по индексу, а не по файлам
+## MCP server: the agent navigates the index, not the files
 
-`squeezr serve` поднимает MCP-сервер (stdio, JSON-RPC на stdout). Агент получает индекс как шесть тулов — карту, поиск, символы, ссылки и раскрытие спанов — и не читает файлы целиком вообще.
+`squeezr serve` runs an MCP server (stdio, JSON-RPC on stdout). The agent gets
+the index as six tools — map, search, symbols, references and span expansion —
+and never reads whole files at all.
 
-### Подключение: `squeezr mcp install`
+### Attach: `squeezr mcp install`
 
-Руками в конфиги лезть не нужно — одна команда зарегистрирует сервер у клиента:
+No need to edit configs by hand — one command registers the server with a
+client:
 
 ```bash
-squeezr mcp install                          # интерактив: детект клиентов → мультивыбор → scope → инструкции
+squeezr mcp install                          # interactive: detect clients → multi-select → scope → instructions
 squeezr mcp install --client claude --scope project
-squeezr mcp install --client all --scope user --yes   # все найденные клиенты, без вопросов (для скриптов)
-squeezr mcp install --client all --yes       # «почини всё» после апгрейда: перетирает регистрации на актуальный путь
+squeezr mcp install --client all --scope user --yes   # every found client, no questions (for scripts)
+squeezr mcp install --client all --yes       # "fix everything" after an upgrade: rewrites registrations to the current path
 ```
 
-| Флаг | Что делает |
+| Flag | What it does |
 |---|---|
-| `--client claude\|kimi\|qwen\|codex\|all` | Кого подключать; без флага squeezr сам найдёт установленных клиентов и предложит мультивыбор; `all` — все найденные |
-| `--scope user\|project` | `user` — сервер доступен во всех проектах, `project` — только в этом workspace; без флага спросит (с `--yes` дефолт — `user`) |
-| `--no-watch` | Не добавлять `--watch` к `serve` (по умолчанию индекс сам догоняет правки на диске) |
-| `--no-instructions` | Не писать агенту блок навигационных инструкций |
-| `--yes` | Неинтерактивный режим: ни одного вопроса (для скриптов); требует явный `--client`; блок инструкций при этом НЕ пишется — только с `--instructions` |
-| `--instructions` | Явное согласие на блок инструкций в паре с `--yes` (без `--yes` флаг не действует; если задан и `--no-instructions` — побеждает он) |
-| `--json` | Машиночитаемый ответ вместо таблички |
+| `--client claude\|kimi\|qwen\|codex\|all` | Whom to attach; without the flag squeezr finds installed clients itself and offers a multi-select; `all` — every found one |
+| `--scope user\|project` | `user` — the server is available in all projects, `project` — only in this workspace; without the flag it asks (with `--yes` the default is `user`) |
+| `--no-watch` | Do not add `--watch` to `serve` (by default the index chases disk edits on its own) |
+| `--no-instructions` | Do not write the agent the navigation-instructions block |
+| `--yes` | Non-interactive mode: zero questions (for scripts); requires an explicit `--client`; the instructions block is NOT written in this mode — only with `--instructions` |
+| `--instructions` | Explicit consent to the instructions block, paired with `--yes` (without `--yes` the flag does nothing; if set together with `--no-instructions` — the latter wins) |
+| `--json` | Machine-readable answer instead of the table |
 
-Что происходит под капотом: запись регистрируется как `serve --watch`, конфиг пишет родной CLI клиента (`claude mcp add`, `qwen mcp add`, `codex mcp add`), а где CLI нет (Kimi Code) — squeezr сам мержит JSON в конфиг-файл. В `command` попадает **стабильный путь** — `~/.local/bin/squeezr`, если такая ссылка существует (dev-сборка из репо — путь бинаря как есть): после `install-release.sh` клиенты сами подхватывают новую версию при следующем переподключении, протухших регистраций больше нет. Чужие серверы в конфиге не трогаются; повторный install обновляет запись при прямой записи (Kimi), а по CLI-пути клиент ответит «already exists» — это нормально, запись уже на месте. Отдельно спросит (дефолт — «да»), дописать ли агенту маркер-блок с флоу навигации: идемпотентно, в инструкционный файл клиента (Claude — CLAUDE.md, Kimi и Codex — AGENTS.md, Qwen — QWEN.md), `mcp remove` убирает его за собой.
+What happens under the hood: the entry is registered as `serve --watch`, the
+config is written by the client's own CLI (`claude mcp add`, `qwen mcp add`,
+`codex mcp add`), and where there is no CLI (Kimi Code) squeezr merges the
+JSON into the config file itself. `command` gets the **stable path** —
+`~/.local/bin/squeezr` if that symlink exists (a dev build from the repo — the
+binary's own path): after `install-release.sh` clients pick up a new version
+on their next reconnect, stale registrations are gone. Foreign servers in the
+config are untouched; a repeated install updates the entry on the direct-write
+path (Kimi), while via the CLI path the client answers "already exists" —
+that is fine, the entry is already in place. It separately asks (default —
+"yes") whether to append the agent the marker block with the navigation flow:
+idempotent, into the client's instruction file (Claude — CLAUDE.md, Kimi and
+Codex — AGENTS.md, Qwen — QWEN.md); `mcp remove` takes it back out.
 
-`squeezr mcp doctor` — чекап подключения: клиент найден, запись есть (user/project), бинарь в PATH, workspace проиндексирован, headless-статус через CLI клиента. Плюс детект **stale-регистраций**: если в конфиге клиента прописан путь, отличающийся от стабильного, doctor покажет `stale` с парой «registered → expected» и готовой командой лечения (`squeezr mcp install --client <id> --yes`); в `--json` — аддитивные поля `userCommand`/`projectCommand`/`userStale`/`projectStale`/`expectedCommand`, exit code стабильный stale не меняет. `squeezr mcp remove [--client ...] [--scope ...]` удаляет запись и блок инструкций; обе команды уважают `--client` и `--json`. Живой `serve` при старте сверяет свой бинарь с целью стабильной ссылки и на несовпадении выводит в stderr одну строку-хитрость: «регистрация могла устареть — прогони doctor/install» (молчит, если ссылки нет или всё совпало).
-
-Корень workspace сервер разрешает от cwd процесса вверх (запускай клиент из корня проекта); Claude Code не умеет cwd в конфиге сервера — поэтому `serve` дополнительно уважает `CLAUDE_PROJECT_DIR`, который Claude выставляет своим MCP-процессам. Перед подключением нужны `squeezr init` / `add` / `index` — сервер читает готовый индекс и сам его не строит. Qdrant опционален: без него семантический слой молча отключается, `code_search` работает exact-only (warning в ответе).
+`squeezr mcp doctor` — the attach checkup: client found, entry present
+(user/project), binary on PATH, workspace indexed, headless status through the
+client's CLI. Plus detection of **stale registrations**: if a client config
+names a path other than the stable one, doctor shows `stale` with the pair
+"registered → expected" and a ready repair command (`squeezr mcp install
+--client <id> --yes`); in `--json` — additive
+`userCommand`/`projectCommand`/`userStale`/`projectStale`/`expectedCommand`
+fields, the exit code is unchanged by staleness. `squeezr mcp remove [--client
+...] [--scope ...]` removes the entry and the instructions block; both
+commands honor `--client` and `--json`. A live `serve` compares its own binary
+against the stable symlink target at startup and prints one stderr hint on a
+mismatch: "the registration may be stale — run doctor/install" (silent when
+the symlink is absent or everything matches).
 
 ### Project-level onboarding
 
-The default instructions block is per-client and per-machine — it never lands in the repo. The project block is the other tier: a committed `squeezr:project-instructions` section in the project's own agent files, so everyone who clones the project gets the same navigation rules and command cheat-sheet.
+The default instructions block is per-client and per-machine — it never lands
+in the repo. The project block is the other tier: a committed
+`squeezr:project-instructions` section in the project's own agent files, so
+everyone who clones the project gets the same navigation rules and command
+cheat-sheet.
 
 ```bash
 squeezr mcp install --project   # write/refresh the block; no client registration
 squeezr mcp remove --project    # strip the block from every carrier file
 ```
 
-Without `--client`/`--all` the command only writes the block (block-only mode, works non-interactively); combined with clients it registers them and writes the block in one pass. Targeting: `AGENTS.md` always (created when missing); `CLAUDE.md`/`QWEN.md` only when they are real files — a one-line `@AGENTS.md` import pointer is left untouched. Plain `mcp install` never touches project files: the flag is explicit (`--yes` does not imply it), and the interactive prompt for it defaults to "no".
+Without `--client`/`--all` the command only writes the block (block-only mode,
+works non-interactively); combined with clients it registers them and writes
+the block in one pass. Targeting: `AGENTS.md` always (created when missing);
+`CLAUDE.md`/`QWEN.md` only when they are real files — a one-line `@AGENTS.md`
+import pointer is left untouched. Plain `mcp install` never touches project
+files: the flag is explicit (`--yes` does not imply it), and the interactive
+prompt for it defaults to "no".
 
-Re-running install refreshes the block in place between its markers — no duplicates. The block header carries the squeezr version that wrote it: after upgrading squeezr, re-run `squeezr mcp install --project` to refresh the text. If a target file has one-sided markers (start without end or vice versa), the file is left untouched and you get exactly one stderr warning naming it. `mcp remove --project` strips the block from every file carrying it and never deletes files — a file left empty is fine.
+Re-running install refreshes the block in place between its markers — no
+duplicates. The block header carries the squeezr version that wrote it: after
+upgrading squeezr, re-run `squeezr mcp install --project` to refresh the text.
+If a target file has one-sided markers (a start without an end or vice versa),
+the file is left untouched and you get exactly one stderr warning naming it.
+`mcp remove --project` strips the block from every file carrying it and never
+deletes files — a file left empty is fine.
 
-### Ручная настройка (справка)
+### Manual configuration (reference)
 
-Если хочешь прописать конфиг сам — куда писать запись `squeezr`:
+If you want to write the config yourself — where the `squeezr` entry goes:
 
-| Клиент | user-scope | project-scope |
+| Client | user-scope | project-scope |
 |---|---|---|
 | Claude Code | `~/.claude.json` | `.mcp.json` |
-| Kimi Code | `~/.kimi-code/mcp.json` (или `$KIMI_CODE_HOME/mcp.json`) | `.kimi-code/mcp.json` |
+| Kimi Code | `~/.kimi-code/mcp.json` (or `$KIMI_CODE_HOME/mcp.json`) | `.kimi-code/mcp.json` |
 | Qwen Code | `~/.qwen/settings.json` | `.qwen/settings.json` |
-| Codex CLI | `~/.codex/config.toml` | `.codex/config.toml` (только trusted-проекты) |
+| Codex CLI | `~/.codex/config.toml` | `.codex/config.toml` (trusted projects only) |
 
-JSON-клиентам (Claude, Kimi, Qwen) — блок `mcpServers`:
+JSON clients (Claude, Kimi, Qwen) — the `mcpServers` block:
 
 ```json
 {
@@ -384,15 +856,30 @@ JSON-клиентам (Claude, Kimi, Qwen) — блок `mcpServers`:
 }
 ```
 
-Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`args` (плюс `startup_timeout_sec = 30`, чтобы индексатор успел стартовать). `cwd` в запись писать не нужно — корень workspace `serve` разрешает сам от cwd процесса (и `CLAUDE_PROJECT_DIR`, см. выше).
+Codex — a `[mcp_servers.squeezr]` TOML section with the same
+`command`/`args` (plus `startup_timeout_sec = 30`, so the indexer has time to
+start). No `cwd` key is needed in the entry — the workspace root is resolved
+by `serve` itself from the process cwd (and `CLAUDE_PROJECT_DIR`, see above).
 
 ### Advisory hook: `squeezr hook pre-read`
 
-Хук для Claude Code (PreToolUse на Read): squeezr читает payload хука из stdin и, если файл лежит в зарегистрированном workspace и выглядит как массовое чтение — на диске ≥ 256 KB, либо запрошен широкий диапазон (limit ≥ 400 строк) — добавляет в контекст агента мягкий nudge: «workspace проиндексирован — рассмотри code_search / symbol_lookup + expand_span вместо чтения целиком». Явно узкий limit подавляет nudge: агент уже читает прицельный спан.
+A hook for Claude Code (PreToolUse on Read): squeezr reads the hook payload
+from stdin and, if the file lives in a registered workspace and looks like a
+bulk read — ≥ 256 KB on disk, or a wide range requested (limit ≥ 400 lines) —
+it appends a soft nudge into the agent's context: "the workspace is indexed —
+consider code_search / symbol_lookup + expand_span instead of reading it
+whole". An explicitly narrow limit suppresses the nudge: the agent is already
+reading a targeted span.
 
-Остальное — тишина: не-workspace путь, маленький файл, отсутствующий файл, кривой stdin → пустой stdout, exit 0. Хук advisory-only — `permissionDecision` не выставляет и никогда не блокирует Read; на внутренние ошибки реагирует fail-open (молча, код 0). Сети нет — только реестр workspaces и stat файла, поэтому дёшево бегает на каждый Read.
+Everything else — silence: a non-workspace path, a small file, a missing
+file, malformed stdin → empty stdout, exit 0. The hook is advisory-only — it
+sets no `permissionDecision` and never blocks Read; internal errors are
+fail-open (silent, code 0). No network — only the workspace registry and a
+stat of the file, so it is cheap to run on every Read.
 
-Сниппет применяется руками (политика crew: агентам писать в hook-конфиги запрещено). В `~/.claude/settings.json` (user scope; для одного проекта — `.claude/settings.json`):
+The snippet is applied by hand (crew policy: agents are forbidden from
+writing hook configs). In `~/.claude/settings.json` (user scope; for a single
+project — `.claude/settings.json`):
 
 ```json
 {
@@ -412,45 +899,73 @@ Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`
 }
 ```
 
-### Тулы
+### Tools
 
-| Тул | Параметры (дефолты) | Возвращает |
+| Tool | Parameters (defaults) | Returns |
 |---|---|---|
-| `repo_map` | `repo?`, `prefix?`, `depth?` (2), `maxTokens?` (4000) | дерево репо: директории → файлы → члены с сигнатурами. Тел нет, только карта для навигации. `prefix` (например `"src/"`) сужает выдачу до поддерева — имена директорий рендерятся относительно prefix, `depth` сохраняет структурный смысл (1 = директории, 2 = файлы, 3 = члены) |
-| `code_search` | `query` (обяз.), `repo?`, `prefix?`, `topK?`, `maxTokens?` (2000) | гибридные совпадения `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; тела не возвращаются. Один хит = один файл: выигрывает лучший спан, прочие спаны того же файла схлопываются в `alsoMatched` (поле присутствует только когда их ≥1), поэтому `topK` ограничивает число разных файлов, а не спанов. `prefix` фильтрует оба рука (exact и semantic) по поддереву директорий. Ранжирование курит конфиг `indexing.rankExclude`: исключённые деревья не попадают в выдачу, но остаются в индексе. Hybrid-ветка получила identifier-точную руку: многотокенные запросы с code-shaped токенами (camelCase, `snake_case`, длина ≥ 12) или редкими токенами (df ≤ 5% docs) попадают в отдельную ветку с `source=exact` — точнее, чем phrase-literal для составных имён. Фильтры `repo`/`language`/`pathGlob`/`prefix`/rankExclude сужают и эту ветку — тем же `BuildFilter`, что и phrase-руку. Ограничение ветки: case-развёртка триграмм кэпируется (`CaseVariantCap = 64` делится на число триграмм токена, вариантов на триграмму 8), поэтому lowercase-токен длиннее ~10 символов не достанет написание, существующее только в PascalCase, и молча выпадает из дискриминантов — тихая потеря recall (phrase-рука в том же случае уходит в FullScan по диску, одиночные литералы не теряют). Лечение — case-folded триграммы в индексе: это смена формата индекса с ребилдом, своей фичи в бэклоге пока нет |
-| `symbol_lookup` | `name` (обяз.), `kind?`, `repo?`, `maxTokens?` (300) | определения символа: сигнатура, doc-comment, `span`, тело — если влезло в бюджет. Тело типа не влезло → `members` (имя, kind, строка) в том же бюджете + счётчик `membersOmitted`: каждая строка — готовая координата для `expand_span`, тупика больше нет. Символ не найден → пустой `data` + `didYouMean` (топ-3 кандидата по trigram-Jaccard, порог 0.34), не ошибка |
-| `find_references` | `symbol` (обяз.), `repo?` | все точки вызова `{repo, file, line, kind, enclosingSymbol}` — `repo` в каждой строке различает побайтово одинаковые пути из разных репозиториев (checkout плюс его worktree). Одноимённые определения с одним и тем же списком вызовов дают один набор строк, и конверт несёт аддитивное `definitions` — `{repo, kind, file, startLine, endLine}` по каждому объявлению за схлопнутыми строками (те же поля, что в `refs --json`). Поле появляется ровно в двух случаях: два и более одноимённых объявления делят один список вызовов, либо вызовов у символа нет вовсе (иначе пустой `data` не сказал бы про объявления ничего); в прочих ответах поля нет, и конверт остаётся шестиключевым. `definitions` — метаданные схлопнутых строк: в `tokensUsed`, как и в CLI, не считаются. enclosingSymbol захватывается на индексации Roslyn'ом (точно, включая partial-классы); для индексов, построенных до захвата, значение выводится по спанам символов (fallback-инференс). Символ не найден → tool error (как `squeezr refs`, exit 1) |
-| `expand_span` | `file`, `startLine` (обяз.), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | строки спана + контекст из живого файла на диске (видит правки после индексации). Единственный тул, отдающий код построчно |
-| `index_status` | — | свежесть: возраст индекса, per-repo счётчики файлов/символов/чанков, блок `ignored: { files, bySource }` per repo (исключённые файлы с разбивкой по источнику: defaults/config/squeezrignore/gitignore; нулевые источники отсутствуют), pending-эмбеддинги и `embeddings.coverage` (доля эмбедженных чанков, 0..1; `null`, когда эмбеддить нечего), доступность Qdrant, `rootPath` воркспейса (если это не корень твоего проекта — сессия смотрит в чужой воркспейс). Когда есть исключения, `warnings` указывает доминирующий источник и как его выключить. Когда ранжирование курируется, `warnings` перечисляют активные паттерны `indexing.rankExclude`. **Аддитивно (контракт 035):** если в реестре два и более воркспейса, `data` несёт `workspaces` — массив `{ name, rootPath, storeKey, current, stale }` (не больше 12 строк, строка текущей сессии идёт первой; сверх лимита считаются в `workspacesOmitted`). При одном воркспейсе обоих ключей нет вовсе, и вывод `data` совпадает с прежним байт в байт — существующие поля не переименованы и не удалены |
+| `repo_map` | `repo?`, `prefix?`, `depth?` (2), `maxTokens?` (4000) | the repo tree: directories → files → members with signatures. No bodies, a map for navigation only. `prefix` (e.g. `"src/"`) narrows the output to a subtree — directory names render relative to the prefix, `depth` keeps its structural meaning (1 = directories, 2 = files, 3 = members) |
+| `code_search` | `query` (required), `repo?`, `prefix?`, `topK?`, `maxTokens?` (2000) | hybrid matches `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; bodies are never returned. One hit = one file: the best span wins, the file's other spans collapse into `alsoMatched` (the field appears only when ≥1), so `topK` bounds distinct files, not spans. `prefix` filters both arms (exact and semantic) by a directory subtree. Ranking honors the `indexing.rankExclude` config: excluded trees never surface but stay indexed. The hybrid branch gained an identifier-exact arm: multi-token queries with code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens (df ≤ 5% of docs) take a separate branch with `source=exact` — more precise than phrase-literal for compound names. The `repo`/`language`/`pathGlob`/`prefix`/rankExclude filters narrow that branch too — through the same `BuildFilter` as the phrase arm. Branch limitation: trigram case-expansion is capped (`CaseVariantCap = 64` divided across the token's trigrams, 8 variants per trigram), so a lowercase token longer than ~10 chars cannot reach a spelling that exists only in PascalCase and silently drops out of the discriminants — a quiet recall loss (the phrase arm in the same case goes to a FullScan over disk; single literals never lose). The cure is case-folded trigrams in the index: an index-format change with a rebuild, no backlog feature for it yet |
+| `symbol_lookup` | `name` (required), `kind?`, `repo?`, `maxTokens?` (300) | the symbol's definition: signature, doc comment, `span`, body — if it fits the budget. When a type's body does not fit → `members` (name, kind, line) in the same budget + a `membersOmitted` counter: every line is a ready coordinate for `expand_span`, no more dead ends. Symbol not found → empty `data` + `didYouMean` (top-3 candidates by trigram-Jaccard, threshold 0.34), not an error |
+| `find_references` | `symbol` (required), `repo?` | every call site `{repo, file, line, kind, enclosingSymbol}` — `repo` on each row distinguishes byte-identical paths from different repositories (a checkout plus its worktree). Same-name definitions sharing one call list yield one row set, and the envelope carries additive `definitions` — `{repo, kind, file, startLine, endLine}` per declaration behind the collapsed rows (the same fields as `refs --json`). The field appears in exactly two cases: two or more same-name declarations share one call list, or the symbol has no calls at all (otherwise an empty `data` would say nothing about declarations); in other answers the field is absent and the envelope stays six-keyed. `definitions` is metadata of the collapsed rows: it does not count into `tokensUsed`, same as the CLI. enclosingSymbol is captured by Roslyn at index time (exact, partial classes included); for indexes built before capture the value is inferred from symbol spans (a fallback inference). Symbol not found → tool error (like `squeezr refs`, exit 1) |
+| `expand_span` | `file`, `startLine` (required), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | the span's lines + context from the live file on disk (sees edits made after indexing). The only tool that returns source lines |
+| `index_status` | — | freshness: index age, per-repo file/symbol/chunk counters, the `ignored: { files, bySource }` block per repo (excluded files broken down by source: defaults/config/squeezrignore/gitignore; zero-count sources absent), pending embeddings and `embeddings.coverage` (the embedded share of chunks, 0..1; `null` when there is nothing to embed), Qdrant availability, the workspace `rootPath` (if it is not your project's root, this session is looking into a foreign workspace). When exclusions exist, `warnings` name the dominant source and how to turn it off. When ranking is curated, `warnings` list the active `indexing.rankExclude` patterns. **Additive (035 contract):** if the registry holds two or more workspaces, `data` carries `workspaces` — an array of `{ name, rootPath, storeKey, current, stale }` (at most 12 rows, the current session's row first; the rest counted in `workspacesOmitted`). With one workspace neither key exists, and the `data` output matches the old one byte for byte — existing fields are neither renamed nor removed |
 
-Все тулы имеют дефолтный токен-бюджет (см. таблицу); при `truncated: true` сузь запрос или подними `maxTokens` явно.
+All tools have a default token budget (see the table); on `truncated: true`
+narrow the query (`repo`, `kind`) or raise `maxTokens` explicitly.
 
-### Флоу навигации
+### Navigation flow
 
-Двухуровневая выдача: тулы дают координаты, код раскрывается только через `expand_span`.
+A two-tier output: tools give coordinates, code opens only through
+`expand_span`.
 
-1. `repo_map` — незнакомый репо: структура и сигнатуры, ноль тел.
-2. `code_search` (по тексту) или `symbol_lookup` (по имени) — точки интереса: file:line, сниппеты, сигнатуры.
-3. `find_references` — кто вызывает найденный символ.
-4. `expand_span` — раскрыть спан с контекстом, когда нужен сам код.
+1. `repo_map` — an unfamiliar repo: structure and signatures, zero bodies.
+2. `code_search` (by text) or `symbol_lookup` (by name) — points of interest:
+   file:line, snippets, signatures.
+3. `find_references` — who calls the found symbol.
+4. `expand_span` — open the span with context when you need the code itself.
 
-### Семантика ответа
+### Response envelope semantics
 
-Каждый тул отвечает единым конвертом:
+Every tool answers in one envelope:
 
 ```json
 { "data": ..., "tokensUsed": 42, "truncated": false, "warnings": [], "indexAge": "00:12:03", "staleFiles": [] }
 ```
 
-- `tokensUsed` / `truncated` — фактическая стоимость ответа. `truncated: true` → сузь запрос (`repo`, `kind`) или подними `maxTokens`.
-- `warnings` — мягкая деградация (например, «vector store unavailable, falling back to exact search only» при полном отказе или «semantic coverage: 76% (3017 chunks pending embedding)» в `code_search`, когда семантический слой накачан не целиком — при 100% строки нет), подсказки при обрезке и «cache: invalidated (index changed)» — метка смерти кэша (см. ниже).
-- `indexAge` / `staleFiles` — свежесть. Изменённые файлы освежаются inline при чтении; то, что освежить не удалось, честно попадает в `staleFiles` — агент видит, что данные по этим файлам протухли, и может предложить `squeezr index`. Окончательное решение о реиндексе — за хозяином workspace.
+- `tokensUsed` / `truncated` — the actual cost of the answer. `truncated:
+  true` → narrow the query (`repo`, `kind`) or raise `maxTokens`.
+- `warnings` — soft degradation (e.g. "vector store unavailable, falling back
+  to exact search only" on a full outage, or "semantic coverage: 76% (3017
+  chunks pending embedding)" in `code_search` when the semantic layer is not
+  fully pumped — at 100% the line is absent), trimming hints, and "cache:
+  invalidated (index changed)" — the cache-death mark (see below).
+- `indexAge` / `staleFiles` — freshness. Modified files refresh inline on
+  read; what could not be refreshed lands honestly in `staleFiles` — the
+  agent sees the data for those files is stale and may suggest `squeezr
+  index`. The final call on a reindex belongs to the workspace owner.
 
-Повторные запросы почти бесплатны: дорогие тулы (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) кэшируют ответы внутри serve-сессии — LRU на 100 записей, ключ по каноническому JSON параметров (порядок свойств и null-и-absent на ключ не влияют). Идентичный запрос в той же сессии = мгновенный повтор сохранённого конверта, телеметрия помечает его `cacheHit: true` (и он виден в hit-rate у `squeezr stats`). Любая переиндексация — watch-проход или внешний `squeezr index` — меняет поколение кэша (mtime meta.db): мёртвые записи выбрасываются сразу, не дожидаясь LRU-эвикции, а первый ответ после смены поколения несёт в `warnings` строку `cache: invalidated (index changed)` — один раз на поколение за сессию, в сам кэшируемый конверт она не попадает и при повторах не размножается. Такой запрос помечается в телеметрии `cacheInvalidated: true`, так что «кэш умер» отличимо от «кэша просто не было». `expand_span` не кэшируется (читает живой файл с диска), `index_status` дешёвый сам по себе.
+Repeat queries are nearly free: the expensive tools (`repo_map`,
+`code_search`, `symbol_lookup`, `find_references`) cache answers within a
+serve session — an LRU of 100 entries, keyed by the canonical JSON of the
+parameters (property order and null-vs-absent do not affect the key). An
+identical query in the same session = an instant replay of the stored
+envelope; telemetry marks it `cacheHit: true` (and it shows in the hit-rate
+of `squeezr stats`). Any reindex — a watch pass or an external `squeezr index`
+— changes the cache generation (mtime of meta.db): dead entries are dropped
+immediately, not left for LRU eviction, and the first answer after the change
+carries `cache: invalidated (index changed)` in `warnings` — once per
+generation per session, never baked into the cached envelope and never
+multiplied on repeats. Such a query is marked `cacheInvalidated: true` in
+telemetry, so "the cache died" is distinguishable from "there was no cache".
+`expand_span` is not cached (it reads the live file from disk), `index_status`
+is cheap on its own.
 
-### Error-плоскость: structuredContent
+### Error plane: structuredContent
 
-Успех и ошибка едут в разных плоскостях — клиент должен уметь читать обе. Успех — `content[0].text` с JSON-конвертом выше. Ошибка — `isError: true`, человекочитаемый текст в `content[0].text` и машиночитаемый контракт в `structuredContent`:
+Success and error travel in different planes — a client must be able to read
+both. Success — `content[0].text` with the JSON envelope above. Error —
+`isError: true`, human-readable text in `content[0].text` and a
+machine-readable contract in `structuredContent`:
 
 ```json
 {
@@ -465,32 +980,116 @@ Codex — TOML-секция `[mcp_servers.squeezr]` с теми же `command`/`
 }
 ```
 
-- `code` — машина-читаемая причина (`workspace_not_initialized`, `index_not_built`, …), стабильна между релизами в рамках аддитивного контракта 035.
-- `nextSteps` — точные команды для следующего шага, в одном словаре с `squeezr mcp doctor` и `hook pre-read`.
-- `cause` — уточнение внутри кода, там где причин несколько: у `workspace_not_initialized` это `root_without_manifest` (сессия внутри рута — инициализируй и проиндексируй его) или `session_outside_root` (сессия вне рута — перерегистрируй клиента, **не сей второй стор**).
+- `code` — the machine-readable cause (`workspace_not_initialized`,
+  `index_not_built`, …), stable across releases within the additive 035
+  contract.
+- `nextSteps` — the exact commands for the next step, one dictionary with
+  `squeezr mcp doctor` and `hook pre-read`.
+- `cause` — a refinement inside the code where causes are several: for
+  `workspace_not_initialized` it is `root_without_manifest` (the session is
+  inside the root — initialize and index it) or `session_outside_root` (the
+  session is outside the root — re-register the client, **do not seed a second
+  store**).
 
-В CLI-плоскости (`--json` у команд, не в MCP-тулах) конверт ошибки дополнительно несёт `error.removedPaths` на drop-операциях: что уже удалилось, когда реестр обновить не удалось.
+In the CLI plane (`--json` on commands, not MCP tools) the error envelope
+additionally carries `error.removedPaths` on drop operations: what already
+got removed when the registry update failed.
 
-`mcp doctor` (поле `indexState` в `--json`) и `hook pre-read` печатают тот же словарь кодов и команд; doctor видит сессионную директорию и в состоянии `session_outside_root` (сессия вне анкоренного рута) выдаёт rebind-шаги вместо запрещённой инициализации, а `workspaceIndexed` выводится из той же классификации, что и `indexState` — флаг и блок состояния не противоречат друг другу.
+`mcp doctor` (the `indexState` field in `--json`) and `hook pre-read` print
+the same dictionary of codes and commands; doctor sees the session directory
+and in the `session_outside_root` state (a session outside the anchored root)
+returns rebind steps instead of the forbidden initialization, and
+`workspaceIndexed` is derived from the same classification as `indexState` —
+the flag and the state block never contradict each other.
 
-## Watch-режим: индекс догоняет рабочее дерево сам
+## Watch mode: the index chases the working tree on its own
 
-Индекс по требованию — это компромисс: правишь файл, а `code_search` ещё отвечает про старую версию. FreshnessGuard освежает точечно при чтении, но полный догоняющий проход запускаешь руками. Watch-режим убирает и это.
+An on-demand index is a compromise: you edit a file and `code_search` still
+answers about the old version. FreshnessGuard refreshes point-wise on read,
+but the full catch-up pass you trigger by hand. Watch mode removes that too.
 
-Две формы, один движок:
+Two forms, one engine:
 
 ```bash
-squeezr watch            # человек: демон в терминале, Ctrl+C — чистый выход
-squeezr serve --watch    # агент: тот же движок внутри MCP-сервера
+squeezr watch            # human: a daemon in the terminal, Ctrl+C — a clean exit
+squeezr serve --watch    # agent: the same engine inside the MCP server
 ```
 
-Как работает: `FileSystemWatcher` на корнях репо → фильтрация (те же ignore-глобы и расширения, что у индексации; служебные файлы стора не считаются — они живут вне проекта) → изменённые пути копятся в changed-сет → после окна тишины один инкрементальный проход по всему накопленному. «Save-all из 50 файлов» = один проход. Индекс занят (ручной `index`, TUI) — движок ждёт с экспоненциальным backoff и никогда не отбирает лок; второй `serve --watch` на том же сторе до проходов не доходит вообще — вотчу держит владелец клейма, второй процесс становится наблюдателем и отвечает на запросы без фоновых проходов. `squeezr watch` держит то же клеймо (один `watch.owner` на стор, kind внутри маркера только говорит, кто им владеет): не-владелец не поднимает движок, печатает `warning: watch not started: pid N owns this store; no watch loop runs in this process` на stderr и выходит с кодом 0 — второму индексатору тут нечего делать. Живой статус: в терминале — Live-грид (workspace / status / last pass / error), в pipe — строки `pass started: N changed paths` / `pass completed: +A ~M -D` в stdout. Для программного потребления — `serve --watch --events`: NDJSON-ивенты проходов (`started` с `changedPaths` → `fileIndexed` → `completed`, у `completed` есть счётчик `embedded`) на stderr, JSON-RPC на stdout не тронут (схема — в разделе про `--json` выше). Без `--events` serve не молчит в трёх местах: журнал отложенных чисток точек — строка `{"type":"watchPass","deferredReaps":N,"pendingReaps":M}`, дренаж эмбеддингов — строка `{"type":"watchDrain","at":"…","embedded":N}` на каждый проход, что что-то вдребезжал (или `{"type":"watchDrain","at":"…","embedded":0,"idleReason":"…"}` один раз на причину простоя — недоступный провайдер или векторный стор), и роль в вотче — ровно одна строка на старте, обоим ролям: `{"type":"watchRole","role":"owner"|"observer","verdict":"<вердикт клейма>","ownerPid":N}`. Наблюдатель к этой строке добавляет и человеческую: `warning: watch not started: pid N owns this store; serving queries + per-query freshness`. Pid называется только там, где маркер его реально несёт — `StoreUnavailable`, `MarkerUnreadable` и `RaceLost` без маркера называют свою настоящую причину и никакой pid не выдумывают. Тот же вердикт доходит и до агента: первый ответ сессии-наблюдателя несёт это в `warnings` конверта, дальше конверты идут чисто. Неудачный graceful release маркера тоже слышен в stderr (`warning: serve watch: owner marker could not be released`, повторно — только если текст изменился), успешный молчит байт в байт.
+How it works: `FileSystemWatcher` on the repo roots → filtering (the same
+ignore globs and extensions as indexing; store service files do not count —
+they live outside the project) → changed paths accumulate in a changed-set →
+after a quiet window, one incremental pass over everything accumulated. A
+"save-all of 50 files" = one pass. The index is busy (a manual `index`, TUI) —
+the engine waits with exponential backoff and never steals the lock; a second
+`serve --watch` on the same store never reaches passes at all — the watch is
+held by the claim owner, the second process becomes an observer and answers
+queries without background passes. `squeezr watch` holds the same claim (one
+`watch.owner` per store, the kind inside the marker only says who owns it):
+a watch that is not the owner starts no engine, prints `warning: watch not
+started: pid N owns this store; no watch loop runs in this process` on stderr
+and exits 0 — a second indexer has nothing to do here. Live status: in a
+terminal — the Live grid (workspace / status / last pass / error), in a pipe —
+`pass started: N changed paths` / `pass completed: +A ~M -D` lines on stdout.
+For programmatic consumption — `serve --watch --events`: NDJSON pass events
+(`started` with `changedPaths` → `fileIndexed` → `completed`, `completed`
+carries an `embedded` counter) on stderr, JSON-RPC on stdout untouched (the
+schema is in the `--json` section above). Without `--events` serve is not
+silent in three places: the deferred point-cleanup journal — a
+`{"type":"watchPass","deferredReaps":N,"pendingReaps":M}` line, the embedding
+drain — a `{"type":"watchDrain","at":"…","embedded":N}` line per pass that
+drained something (or
+`{"type":"watchDrain","at":"…","embedded":0,"idleReason":"…"}` once per idle
+reason — an unavailable provider or vector store), and the watch role —
+exactly one line at start, to both roles:
+`{"type":"watchRole","role":"owner"|"observer","verdict":"<claim verdict>","ownerPid":N}`.
+The observer adds a human line to that one:
+`warning: watch not started: pid N owns this store; serving queries +
+per-query freshness`. A pid is named only where the marker actually carries
+one — `StoreUnavailable`, `MarkerUnreadable` and `RaceLost` without a marker
+name their real cause and invent no pid. The same verdict reaches the agent:
+the observer session's first answer carries it in the envelope's `warnings`,
+further envelopes go clean. A failed graceful release of the marker is also
+heard on stderr (`warning: serve watch: owner marker could not be released`,
+repeated only if the text changed), a successful one is silent byte for byte.
 
-Дренаж эмбеддингов: `serve --watch` носит провайдер и векторный стор и сам доэмбеддит `embeddings.pending` до нуля — ручной `squeezr index` для догоняния не нужен. Провайдер + стор конструируются один раз на процесс serve, в фоне, до старта JSON-RPC это не доходит (тулы отвечают сразу, даже пока onnx грузит модель или resolver пробивает эндпоинт). Темп дренажа ограничен бюджетом `watch.embedBudgetPerPass` чанков на проход; как только проход выбрал бюджет целиком, движок сам перевзводит следующий пустой проход — догоняющая очередь размазывается по проходам с шагом debounce-окна, а не долбит в провайдер без паузы. На старте дренажа и по каждому проходу в stderr уходят строки провайдера (`watch embed drain ready (provider=ollama)`), отключения (`watch embed drain off (…)` с причиной) и счётчика `watchDrain` — по ним считается скорость (чанков/мин) и видна причина простоя. Эмбед-фейлы деградируют в warnings: чанки остаются в `embeddings.pending` (видны в `index_status`/`fleet`), serve живёт; упавший посреди прохода стор просто съедает остаток бюджета — недоэмбедденные чанки подбирает следующий проход. Смена модели (auto→onnx→ollama, другая модель/профиль) — это смена modelKey у чанков: вся очередь переэмбеддится один раз под новый ключ, проход честно предупредит `model key of repo … changed: N chunk(s) carry vectors from another embedding model`; старые ключи молча не переписываются, точки перезаписываются по тем же hash-id. Интерактивный `squeezr watch` дренаж не носит — это человеческий режим наблюдения; FreshnessGuard в query-пути тоже остаётся embed-free, чтобы не платить загрузкой модели за чтение.
+The embedding drain: `serve --watch` carries the provider and the vector
+store and re-embeds `embeddings.pending` down to zero itself — a manual
+`squeezr index` for catch-up is not needed. The provider + store are
+constructed once per serve process, in the background, before JSON-RPC starts
+this is not observable (tools answer immediately even while onnx loads the
+model or the resolver probes the endpoint). The drain rate is capped by the
+`watch.embedBudgetPerPass` budget of chunks per pass; as soon as a pass has
+spent its whole budget, the engine schedules the next empty pass itself — the
+catch-up queue is spread over passes at debounce-window steps instead of
+hammering the provider without pause. At drain start and on every pass, the
+provider lines go to stderr (`watch embed drain ready (provider=ollama)`),
+switch-offs (`watch embed drain off (…)` with a reason) and the `watchDrain`
+counter — from these you compute the rate (chunks/min) and see the idle
+cause. Embed failures degrade to warnings: chunks stay in
+`embeddings.pending` (visible in `index_status`/`fleet`), serve lives on; a
+store that died mid-pass simply eats the rest of the budget — under-embedded
+chunks are picked up by the next pass. A model switch (auto→onnx→ollama,
+another model/profile) is a modelKey change for chunks: the whole queue is
+re-embedded once under the new key, the pass honestly warns `model key of repo
+… changed: N chunk(s) carry vectors from another embedding model`; old keys
+are not silently rewritten, points are overwritten by the same hash-ids. The
+interactive `squeezr watch` carries no drain — it is the human observation
+mode; FreshnessGuard in the query path also stays embed-free, so a read never
+pays a model load.
 
-Удаления — полный жизненный цикл (tombstone триграмм, чистка документов/чанков, drop Qdrant-точек файла): после `git checkout`/`git clean` выдача не содержит призраков. `serve --watch` с дренажем доигрывает журнал `pending_reaps` сам в ближайшем проходе; у watch без дренажа (интерактивный `squeezr watch`, `--no-embed-watch`) удаление уходит в журнал и доигрывается следующим `squeezr index` с эмбеддингами — и не молча: `deferredReaps`/`pendingReaps` в отчёте прохода. `serve --watch` не блокирует JSON-RPC — тулы отвечают и во время фонового прохода, конверт не меняется. FreshnessGuard остаётся страховкой: пока watch не догнал, конверт честно показывает `staleFiles`.
+Deletions — the full lifecycle (trigram tombstones, document/chunk cleanup,
+Qdrant point drops for the file): after a `git checkout`/`git clean` the
+answers contain no ghosts. `serve --watch` with the drain finishes the
+`pending_reaps` journal in the nearest pass itself; a watch without a drain
+(the interactive `squeezr watch`, `--no-embed-watch`) records the deletion
+into the journal and the next `squeezr index` with embeddings finishes it —
+not silently: `deferredReaps`/`pendingReaps` in the pass report. `serve
+--watch` does not block JSON-RPC — tools answer during a background pass too,
+the envelope unchanged. FreshnessGuard stays the safety net: until watch
+catches up, the envelope honestly shows `staleFiles`.
 
-Конфиг — секция `watch` в конфиге воркспейса (`~/.squeezr/workspaces/<storeKey>/config.json`):
+Config — the `watch` section of the workspace config
+(`~/.squeezr/workspaces/<storeKey>/config.json`):
 
 ```json
 {
@@ -504,15 +1103,27 @@ squeezr serve --watch    # агент: тот же движок внутри MCP
 }
 ```
 
-`enabled` включает движок у `serve` без флага (флаг главнее конфига); явный `squeezr watch` — всегда намерение пользователя, конфиг не консультируется. `embedPending: false` выключает дренаж эмбеддингов у `serve --watch` (проходы остаются, эмбедов нет); `embedBudgetPerPass` — потолок чанков на проход дренажа, ноль и отрицательные значения невалидны и нарочно откатываются к дефолту (не «выключить по-другому»: единственный способ глушить дренаж — `embedPending: false` или `--no-embed-watch`). Флаг `--no-embed-watch` у `serve` глушит дренаж независимо от конфига. Отсутствие секции или невалидные значения = дефолты (движок выключен, дренаж включён, бюджет 256).
+`enabled` turns the engine on for `serve` without the flag (the flag beats
+the config); an explicit `squeezr watch` is always the user's intent and does
+not consult the config. `embedPending: false` switches the embedding drain
+off for `serve --watch` (passes remain, no embeds); `embedBudgetPerPass` —
+the per-drain-pass chunk ceiling, zero and negatives are invalid and
+deliberately fall back to the default (not "switch off differently": the only
+ways to mute the drain are `embedPending: false` or `--no-embed-watch`). The
+`--no-embed-watch` flag on `serve` mutes the drain regardless of the config.
+A missing section or invalid values = defaults (engine off, drain on, budget
+256).
 
-## Fleet: все демоны разом
+## Fleet: all daemons at once
 
-Watch-демоны рассыпаны по воркспейсам, и помнить, где что крутится, — работа для машины. `squeezr fleet` показывает каждый воркспейс реестра и состояние демонов на нём (работает из любой директории, сам воркспейс не нужен):
+Watch daemons are scattered across workspaces, and remembering what runs
+where is a machine's job. `squeezr fleet` shows every workspace in the
+registry and the state of its daemons (works from any directory, no workspace
+needed):
 
 ```bash
-squeezr fleet         # таблица: демоны, pending, свежесть индекса, stale
-squeezr fleet --json  # NDJSON, по одному объекту на воркспейс (контракт 035)
+squeezr fleet         # table: daemons, pending, index freshness, stale
+squeezr fleet --json  # NDJSON, one object per workspace (the 035 contract)
 ```
 
 ```
@@ -521,32 +1132,99 @@ squeezr   /home/dev/squeezr    squeezr    pid 4217, up 2h 14m   —             
 old-proj  /home/dev/old-proj   old-proj   dead (pid 9021)       —              n/a      n/a               stale
 ```
 
-Колонки `WATCH` / `SERVE-WATCH` — демоны двух kind: `squeezr watch` (терминал) и `serve --watch` (MCP-клиент); живой показывает `pid N, up …`, мёртвый — `dead (pid N)` (файл heartbeat остался, а пид/бит протух), нет файла — `—`. `Pending` — необработанные чанки, `Last indexed` — время последнего полного прохода; оба best-effort из `meta.db` воркспейса (`n/a`, если БД недоступна — fleet не падает). Записи с исчезнувшим rootPath помечаются `stale` и дают warning в stderr с хинтом на `squeezr drop --store-key`.
+The `WATCH` / `SERVE-WATCH` columns are the live processes of two kinds:
+`squeezr watch` (terminal) and `serve --watch` (MCP client). Where a cell used
+to hold a single pid, there are now as many as there are processes on the
+store: every live pid on its own row, the claim owner marked `(owner)`, the
+rest `(observer)`; a dead bit — `dead (pid N)` (the file remains but the
+pid/bit went stale), no bits at all — `—`. The role mark appears only where
+`watch.owner` actually names an owner: with no claim, fleet invents no
+observer out of an absence of evidence. `Pending` — unprocessed chunks, `Last
+indexed` — the last full pass time; both best-effort from the workspace's
+`meta.db` (`n/a` if the DB is unreachable — fleet does not crash). Entries
+with a vanished rootPath are marked `stale` and emit a stderr warning with a
+`squeezr drop --store-key` hint — the verdict comes from the same
+`OrphanScanner` as `workspace list` (067); fleet does not recompute it. Row
+ordering (a store with a live daemon on top) is unchanged: a store counts as
+live when at least one of its bits is alive.
 
-Как демон объявляет себя: каждый живой демон пишет heartbeat-файл в store-дире воркспейса — `~/.squeezr/workspaces/<storeKey>/<kind>.heartbeat`, kind = `watch` или `serve-watch`. Внутри JSON `{pid, kind, startedAt, lastBeatAt}`: бит раз в 5 с и после каждого успешного прохода, запись атомарная (tmp + move), при чистом выходе файл удаляется. Демон «жив» = `lastBeatAt` свежее 30 с И pid реально существует. Два kind живут независимо как записи (два heartbeat-файла на стор), но не как работа: терминальный `watch` и `serve --watch` держат одно общее клеймо `watch.owner`, поэтому индексирует кто-то один — второй либо наблюдатель (serve), либо честно отказывается стартовать (watch). Мёртвые heartbeat-файлы никто не чистит: они видны как `dead` — это маркер «демон умер некрасиво», а не мусор.
+How a daemon declares itself: every live watch-role process writes a per-pid
+beat into the store dir — `~/.squeezr/workspaces/<storeKey>/beats/<kind>.<pid>.beat`,
+kind = `watch` or `serve-watch`. Inside: JSON
+`{pid, kind, startedAt, lastBeatAt, host}`; a beat every 5 s and after every
+successful pass, the write is atomic (tmp + move), a clean exit removes the
+file; the `beats/` directory itself is created by the writer and only inside
+an existing store — a daemon whose store was carried away does not resurrect
+the directory, it warns. A daemon is "alive" = `lastBeatAt` fresher than 30 s
+AND the pid really exists — the same semantics as the old single-file
+heartbeat. The role in the fleet roster is decided not by the beat and not by
+a second marker but by `watch.owner`: the owner is exactly one per store,
+regardless of kind. Besides the per-pid beats, the indexing process keeps the
+former per-kind `<kind>.heartbeat` file — the shape binaries before 070 read
+(both the `index.lock` lock-owner report and `fleet stop|restart`): only the
+claim holder writes it, so an observer that does not index the store never
+appears in it, and an old reader sees the indexer, not whichever racer came
+last. Garbage is collected by the writer: a beat of a foreign process whose
+pid is gone and whose beat went stale past the stale window is removed on the
+next beat (at most once a minute) — otherwise fleet would name a daemon that
+does not exist until the end of time; a stale beat of a live pid (a wedged
+daemon) and a beat with a foreign host are left alone, and the per-kind
+heartbeat remains as the evidence "the daemon died ugly" — it is the `dead
+(pid N)` row.
 
-Управление — по точному storeKey (как у `drop --store-key`, без fuzzy-резолва):
+Control — by exact storeKey (like `drop --store-key`, no fuzzy resolution):
 
 ```bash
-squeezr fleet stop <storeKey>     # остановить демонов обоих kind
-squeezr fleet restart <storeKey>  # перезапустить watch-демон
+squeezr fleet stop <storeKey>     # stop the daemons of both kinds
+squeezr fleet restart <storeKey>  # restart the watch daemon
 ```
 
-- `stop` читает heartbeat обоих kind и останавливает живых: SIGTERM → 5 секунд грейса → SIGKILL (на Windows — kill всего дерева процессов). Пид из heartbeat перед сигналом верифицируется: процесс должен выглядеть как squeezr (имя/командная строка + сверка времени старта с `startedAt` heartbeat) — чужой процесс или переиспользованный пид не тронут, будет понятная ошибка. Живых нет — `not-running`, exit 0.
-- `restart` работает только с `watch`: живой демон аккуратно останавливается, затем detached-процесс `squeezr watch` спавнится с cwd = rootPath воркспейса (rootPath исчез — ошибка с хинтом на `drop`). Живой `serve --watch` не трогается: им владеет MCP-клиент, и попытка его перезапуска честно ошибается с хинтом (`squeezr mcp install` или рестарт агента).
-- Обе команды умеют `--json`: один NDJSON-объект результата, stdout чистый (контракт 035).
+- `stop` reads the heartbeats of both kinds and stops the live ones: SIGTERM
+  → 5 s grace → SIGKILL (on Windows — kill of the whole process tree). The
+  pid from the heartbeat is verified before the signal: the process must look
+  like squeezr (name/command line + a start-time cross-check against the
+  heartbeat's `startedAt`) — a foreign process or a reused pid is untouched,
+  you get a clear error. Nothing alive — `not-running`, exit 0.
+- `restart` works with `watch` only: a live daemon is stopped cleanly, then a
+  detached `squeezr watch` process is spawned with cwd = the workspace's
+  rootPath (rootPath gone — an error with a `drop` hint). A live `serve
+  --watch` is not touched: the MCP client owns it, and trying to restart it
+  honestly errors with a hint (`squeezr mcp install` or an agent restart).
+- Both commands do `--json`: one NDJSON result object, clean stdout (the 035
+  contract).
 
-## Гигиена векторов: `squeezr vectors reconcile`
+## Vector hygiene: `squeezr vectors reconcile`
 
-Штатную чистку делает индексация: у файла изменился набор чанков — его старые точки удаляются до вставки новых. Удаление файла точками занимается тот проход, который носит векторный стор; watch-проход его не носит, поэтому такое удаление записывается в журнал `pending_reaps` и доигрывается следующим `squeezr index` с эмбеддингами. Журнал ключуется не только id файла: `MetaStore` выдаёт id как `max(_id)+1`, то есть освобождённый id достаётся следующему добавленному файлу, и replay по одному id снёс бы точки уже живого файла — записью владеет пара (репо, путь), и если id отвечает другому файлу, запись сбрасывается, а осиротевшие точки закрывает `reconcile` (он сверяет хеши, а не id). А вот коллекция, собранная до этой механики, несёт точки-сироты: чанков давно нет в `meta.db`, а вектора лежат. `reconcile` разбирает этот завал одним проходом.
+Routine cleanup is done by indexing: a file's chunk set changed — its old
+points are deleted before the new ones are inserted. Deleting a file's points
+is the job of the pass that carries the vector store; a watch pass does not
+carry it, so such a deletion is recorded into the `pending_reaps` journal and
+finished by the next `squeezr index` with embeddings. The journal is keyed by
+more than the file id: `MetaStore` issues ids as `max(_id)+1`, meaning a freed
+id goes to the next added file, and replaying by that one id would delete the
+points of an already-live file — a row is owned by the pair (repo, path), and
+if the id answers to another file the row is dropped, with the orphaned points
+left for `reconcile` (it compares hashes, not ids). But a collection built
+before this machinery carries orphan points: chunks long gone from `meta.db`
+while the vectors lie on. `reconcile` clears that yard in one pass.
 
 ```bash
-squeezr vectors reconcile            # dry-run: посчитать и показать, ничего не трогая (это дефолт)
-squeezr vectors reconcile --apply    # удалить сироты + снять в pending чанки, у которых точка исчезла
-squeezr vectors reconcile --json     # тот же отчёт машиночитаемо (один объект, camelCase)
+squeezr vectors reconcile            # dry-run: count and show, touch nothing (the default)
+squeezr vectors reconcile --apply    # delete orphans + reset chunks whose point disappeared to pending
+squeezr vectors reconcile --json     # the same report, machine-readable (one object, camelCase)
 ```
 
-Механика: scroll всех id коллекции → сравнение с полным множеством живых хешей чанков из `meta.db` → точка живёт, только если её id равен `ChunkPointId.FromHash(h)` для какого-то текущего хеша. Сверка по id, а не по payload `fileId`, поэтому одинаковый текст в двух файлах (точки схлопываются в одну, в payload остаётся один из файлов) вектор не теряет: хеш жив — точка жива. Второй фронт — обратная сторона той же схлопнутости: реп одного файла сносит общую точку, а ряд второго остаётся помечен `ok`, хотя вектора нет; такой ряд не видит ни один следующий проход, поэтому `--apply` сбрасывает его в `pending` и `squeezr index` переэмбеддит (в `--json` — `staleMarkers` в хешах и `requeued` в строках; единицы разные, потому и имена разные).
+The mechanics: scroll all ids of the collection → compare against the full
+set of live chunk hashes from `meta.db` → a point lives only if its id equals
+`ChunkPointId.FromHash(h)` for some current hash. Compared by id, not by
+payload `fileId`, so identical text in two files (points collapse into one,
+the payload keeps one of the files) never loses a vector: the hash lives —
+the point lives. The second front is the other side of the same collapse:
+a repo of one file deletes the shared point while the second file's row stays
+marked `ok` with no vector behind it; no following pass ever sees such a row,
+so `--apply` resets it to `pending` and `squeezr index` re-embeds it (in
+`--json` — `staleMarkers` in hashes and `requeued` in rows; the units differ,
+hence the different names).
 
 ```
 Collection squeezr-d23cb38850eb: 7492 → 6172 point(s) · 6707 chunk(s) · 6301 distinct chunk hash(es)
@@ -555,18 +1233,36 @@ Deleted 1320 orphan point(s).
 Re-queued 2 chunk(s) whose vectors are gone — run 'squeezr index' with embeddings available to re-embed them (watch passes do not embed).
 ```
 
-Предохранители: без `--apply` не пишется ничего — ни точек не удаляется, ни маркеры в `meta.db` не сбрасываются (`--dry-run` и `--apply` вместе — ошибка `invalid_usage`); нет `meta.db` — отказ с кодом `index_not_built`; Qdrant не отвечает — ошибка до всяких чтений; в индексе ноль чанков, а в коллекции точки — отказ считать сиротами всё подряд (сначала `squeezr index`); на проход берётся `index.lock`, чтобы параллельная индексация не переписала чанки под сравнением. Прогон идемпотентен: второй запуск находит 0 сирот. В саму индексацию reconcile не встроен намеренно — скролл всей коллекции на каждый проход был бы O(корпус) ради легаси-проблемы.
+Safety rails: without `--apply` nothing is written — no points are deleted,
+no markers in `meta.db` are reset (`--dry-run` together with `--apply` is an
+`invalid_usage` error); no `meta.db` — a refusal with code
+`index_not_built`; Qdrant not answering — an error before any reads; zero
+chunks in the index while the collection has points — a refusal to count
+everything an orphan (`squeezr index` first); the pass takes `index.lock`, so
+a parallel indexing cannot rewrite chunks under the comparison. The run is
+idempotent: a second run finds 0 orphans. Reconcile is deliberately not built
+into indexing — scrolling the whole collection on every pass would be
+O(corpus) for the sake of a legacy problem.
 
-Отдельно тула `index_status` (MCP) подсказывает, когда точек заметно больше, чем чанков: warning `the collection carries N more point(s) than the index has chunks …` — повод запустить `reconcile`. Сироты остаются не только из легаси: реп сносит общую точку второго файла (см. выше), а запись журнала, чей id уже достался другому файлу, сбрасывается — обе заначки подметает именно `reconcile --apply`; все остальные пути удаления точек либо делают, либо записывают в журнал и отчитываются числом.
+Separately, the `index_status` tool (MCP) hints when there are noticeably
+more points than chunks: the warning `the collection carries N more point(s)
+than the index has chunks …` — a reason to run `reconcile`. Orphans come not
+only from legacy: a repo deletes the second file's shared point (see above),
+and a journal row whose id already went to another file is dropped — both
+stashes are swept exactly by `reconcile --apply`; every other point-removal
+path either does it or journals it and reports the count.
 
-## Stats: экономия токенов в цифрах
+## Stats: token savings in numbers
 
-«А он правда экономит?» — `squeezr stats` отвечает числами, а не обещаниями. Каждая навигационная команда (CLI: `search`/`symbol`/`refs`/`map`/`expand`; MCP: все шесть тулов) пишет одну строку телеметрии в `queries.jsonl` в сторе воркспейса, stats считает по ней сводку:
+"But does it actually save?" — `squeezr stats` answers with numbers, not
+promises. Every navigation command (CLI: `search`/`symbol`/`refs`/`map`/
+`expand`; MCP: all six tools) appends one telemetry line to `queries.jsonl`
+in the workspace store, and stats rolls it into a summary:
 
 ```bash
-squeezr stats           # таблица по тулам + savings + кэш
-squeezr stats --json    # один JSON-объект (контракт 035)
-squeezr stats --reset   # очистить телеметрию
+squeezr stats           # per-tool table + savings + cache
+squeezr stats --json    # one JSON object (the 035 contract)
+squeezr stats --reset   # clear the telemetry
 ```
 
 ```
@@ -579,17 +1275,47 @@ Cache hit-rate: no hits yet across 4 recorded session(s)
 Period: 2026-09-17 14:57 — 2026-09-17 14:58 (4 records)
 ```
 
-- **Таблица по тулам** — вызовы, средний `tokensUsed` и доля обрезанных бюджетом ответов.
-- **Savings** — counterfactual-сравнение с whole-file базовой линией. Формула (без изменений со спеки 021/050):
-  - `actual` (query cost) = сумма `tokensUsed` всех ответов;
-  - `counterfactual` (whole-file baseline) = сумма оценок токенов ПОЛНЫХ файлов, раскрытых через `expand`/`expand_span` — файл считается один раз, оценка по размеру та же формула, что у чанкера; файлы, которых уже нет в индексе, честно исключаются со строкой `unknownFiles`;
-  - `saved = max(0, counterfactual − actual)`, `ratio = counterfactual / actual`.
+- **The per-tool table** — calls, average `tokensUsed` and the share of
+  budget-truncated answers.
+- **Savings** — a counterfactual against the whole-file baseline. The formula
+  (unchanged since specs 021/050):
+  - `actual` (query cost) = the sum of `tokensUsed` over all answers;
+  - `counterfactual` (whole-file baseline) = the sum of token estimates of
+    the FULL files opened via `expand`/`expand_span` — a file counts once,
+    the size-based estimate is the same formula as the chunker's; files no
+    longer in the index are honestly excluded with an `unknownFiles` line;
+  - `saved = max(0, counterfactual − actual)`, `ratio = counterfactual /
+    actual`.
 
-  Базовая линия осмысленна, только когда она перевешивает фактические затраты (`counterfactual > actual`) — тогда строка читается `Savings: query cost X · whole-file baseline Y · saved Z (×N)`. В противном случае (search-центрированный микс, где `counterfactual ≤ actual`, либо expand'ов не было вовсе) выводится `Savings: no whole-file baseline for this usage mix (query cost X; the baseline counts whole files read via expand only)` — без бессмысленного `saved 0 (×0.3)` рядом с двумя ненулевыми числами: `saved` и `×N` печатаются только в первой ветке. В `--json` аддитивно добавлены `savings.baseline` (метка базовой линии) и `savings.baselineApplies` (bool — перевешивает ли она query cost); существующие поля байт-совместимы (контракт 035).
-- **Cache hit-rate** — доля повторных ответов из кэша serve-сессий (см. семантику ответа ниже) и число сессий, где кэш срабатывал; CLI-запуски кэш не используют — каждый запуск и есть своя сессия. Когда попаданий нет вовсе, строка не врёт: вместо противоречивого `0.0 % across 0 session(s)` рядом с живой таблицей By session печатается `Cache hit-rate: no hits yet across N recorded session(s)` — N сходится с числом сессий ниже, — а если кэш выбивала пересборка индекса, добавляется `— the index changed K time(s), last at <ts>`. В `--json` аддитивно добавлены `cache.invalidations` и `cache.lastInvalidation` (контракт 035: `lastInvalidation` отсутствует, пока инвалидаций не было).
-- **Period** — окно записей и их количество; больше 50 000 записей — серый хинт на `--reset` (авточистки нет, осознанно).
-- **By agent** — кто дёргал тулы: MCP-клиенты по имени и версии из initialize-handshake (`kimi-code 1.2.0`, `claude-code 2.0.5`), CLI-запуски как `cli`, записи до появления поля — `unknown`.
-- **By session** — раскладка по сессиям (одна serve-сессия = один клиентский коннект): короткий id, клиент, число запросов, last-seen и топ-3 тула — видно «эта сессия жила три часа и сделала два code_search».
+  The baseline only means something when it outweighs the actual cost
+  (`counterfactual > actual`) — then the line reads `Savings: query cost X ·
+  whole-file baseline Y · saved Z (×N)`. Otherwise (a search-centered mix
+  where `counterfactual ≤ actual`, or no expands at all) it prints `Savings:
+  no whole-file baseline for this usage mix (query cost X; the baseline
+  counts whole files read via expand only)` — no meaningless `saved 0 (×0.3)`
+  next to two non-zero numbers: `saved` and `×N` print only in the first
+  branch. In `--json` `savings.baseline` (the baseline label) and
+  `savings.baselineApplies` (bool — whether it outweighs the query cost) are
+  added additively; existing fields are byte-compatible (the 035 contract).
+- **Cache hit-rate** — the share of answers replayed from serve-session
+  caches (see the envelope semantics) and the number of sessions where the
+  cache fired; CLI runs use no cache — every run is its own session. With no
+  hits at all the line does not lie: instead of a contradictory `0.0 % across
+  0 session(s)` next to a live By session table, it prints `Cache hit-rate:
+  no hits yet across N recorded session(s)` — N matches the session count
+  below — and if the index killed the cache, it adds `— the index changed K
+  time(s), last at <ts>`. In `--json` `cache.invalidations` and
+  `cache.lastInvalidation` are added additively (the 035 contract:
+  `lastInvalidation` is absent until the first invalidation).
+- **Period** — the window of records and their count; over 50 000 records —
+  a grey hint toward `--reset` (no auto-cleanup, deliberate).
+- **By agent** — who called the tools: MCP clients by name and version from
+  the initialize handshake (`kimi-code 1.2.0`, `claude-code 2.0.5`), CLI runs
+  as `cli`, records from before the field — `unknown`.
+- **By session** — the per-session breakdown (one serve session = one client
+  connection): short id, client, query count, last-seen and the top-3 tools —
+  you can see "this session lived three hours and made two code_search
+  calls".
 
 ```
 By agent
@@ -607,19 +1333,25 @@ c0ffee00  cli          1      2026-09-25 11:31  search
 deadbeef  unknown      1      2026-09-18 08:00  search
 ```
 
-Приватность: телеметрия — это локальный `queries.jsonl` в store-каталоге воркспейса (`~/.squeezr/workspaces/<storeKey>/`). В проекте и в git её нет, наружу не уходит, с воркспейсом и умирает — `squeezr drop` сносит вместе со всем стором.
+Privacy: the telemetry is a local `queries.jsonl` in the workspace's store
+dir (`~/.squeezr/workspaces/<storeKey>/`). It is not in the project, not in
+git, never leaves the machine, and dies with the workspace — `squeezr drop`
+removes it with the whole store.
 
-## Usage: adoption по агентам, проектам и сессиям
+## Usage: adoption across agents, projects and sessions
 
-`stats` отвечает за один воркспейс, а `squeezr usage` собирает rollup по всем воркспейсам реестра — какие агенты в каких проектах реально работают (команда не требует текущего воркспейса и запускается из любой директории, как `fleet`):
+`stats` covers one workspace, while `squeezr usage` rolls the telemetry up
+across every workspace in the registry — which agents actually work in which
+projects (the command needs no current workspace and runs from any directory,
+like `fleet`):
 
 ```bash
-squeezr usage                      # rollup по всем воркспейсам + итоговая таблица по агентам
-squeezr usage --agent kimi-code    # один клиент (точное совпадение, case-insensitive)
-squeezr usage --workspace <key>    # один воркспейс по storeKey
-squeezr usage --since 7d           # окно по времени: 90m / 24h / 7d / 30d
-squeezr usage --json               # один JSON-объект (контракт 035)
-squeezr usage --watch              # живой рефреш (3 с, --interval N), Ctrl+C — чистый выход
+squeezr usage                      # rollup over all workspaces + a final by-agent table
+squeezr usage --agent kimi-code    # one client (exact match, case-insensitive)
+squeezr usage --workspace <key>    # one workspace by storeKey
+squeezr usage --since 7d           # a time window: 90m / 24h / 7d / 30d
+squeezr usage --json               # one JSON object (the 035 contract)
+squeezr usage --watch              # a live refresh (3 s, --interval N), Ctrl+C — a clean exit
 ```
 
 ```
@@ -636,50 +1368,36 @@ unknown      -        1      2026-09-18 08:00
 Period: 2026-09-18 08:00 — 2026-09-25 11:31 (11 records)
 ```
 
-- Фильтры комбинируются (AND): `squeezr usage --agent kimi-code --since 24h` — только kimi за сутки.
-- Воркспейс с исчезнувшим rootPath помечается `(stale)` — команда не падает (best-effort, как `fleet`).
-- `--watch` и `--json` несовместимы (json не бывает живым) — ошибка по контракту 035; в пайпе (не-TTY) `--watch` печатает один снапшот с предупреждением в stderr и выходит.
-- Совсем без записей — честное `No usage telemetry yet.`.
-- Retention тот же: суммарно больше 50 000 записей — хинт прогнать `squeezr stats --reset` по воркспейсам.
+- Filters combine (AND): `squeezr usage --agent kimi-code --since 24h` — only
+  kimi for the last day.
+- A workspace with a vanished rootPath is marked `(stale)` — the command does
+  not crash (best-effort, like `fleet`).
+- `--watch` and `--json` are incompatible (json is never live) — an error per
+  the 035 contract; in a pipe (non-TTY) `--watch` prints one snapshot with a
+  stderr warning and exits.
+- No records at all — an honest `No usage telemetry yet.`
+- Retention is the same: over 50 000 records total — a hint to run `squeezr
+  stats --reset` across the workspaces.
 
 ## Roadmap
 
-- [x] **M1** — каркас CLI, LiteDB-схемы, конфиг, workspace
-- [x] **M2** — триграммный индекс, точный `search`, инкремент, `compact`
-- [x] **M3** — Roslyn: символы, чанки, `symbol`, `map`, `expand`
-- [x] **M4** — Qdrant + ONNX-эмбеддинги: гибридный `search`, `refs`
-- [x] **M5** — MCP `serve` со всеми тулами + README с agent-инструкциями
-- [x] **M6** — tree-sitter для JS/TS, fallback-чанкер
+- [x] **M1** — CLI skeleton, LiteDB schemas, config, workspace
+- [x] **M2** — trigram index, exact `search`, incremental, `compact`
+- [x] **M3** — Roslyn: symbols, chunks, `symbol`, `map`, `expand`
+- [x] **M4** — Qdrant + ONNX embeddings: hybrid `search`, `refs`
+- [x] **M5** — MCP `serve` with all tools + agent-facing README
+- [x] **M6** — tree-sitter for JS/TS, the fallback chunker
 
-## Стек
+## Stack
 
-.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · tree-sitter (JS/TS) · Qdrant · Ollama · ONNX Runtime · xUnit + Shouldly
+.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · tree-sitter (JS/TS)
+· Qdrant · Ollama · ONNX Runtime · xUnit + Shouldly
 
 ---
 
-## English (short)
+*summonasync — one dev, a swarm of agents, nothing leaves the machine.*  
+overmind · grimoire · squeezr · mindlash studio
 
-**Squeezr is a local code indexer for AI agents.** It squeezes maximum signal from your codebase into a minimum of LLM tokens — a single .NET binary, fully offline.
-
-Born from a simple observation: agents waste 30–80k tokens navigating code by reading whole files. Squeezr gives them what senior devs actually use — a repo **map**, **symbol** lookup, **references**, and precise **span expansion** — as fast local queries and MCP tools.
-
-The trigram engine is built after [Zoekt](https://github.com/sourcegraph/zoekt) and [Russ Cox's code-search design](https://swtch.com/~rsc/regexp/regexp4.html): substring and regex search over millions of lines in milliseconds, incremental and crash-safe. C# symbols come from Roslyn with compiler-grade accuracy. Every response respects a token budget (`--max-tokens`, honest `truncated` flag). Storage: central workspace store in `~/.squeezr` (registry + per-workspace store dirs, zero files in your project, `SQUEEZR_HOME` override; legacy in-project `.squeezr/` auto-migrates) + Qdrant/Ollama in Docker managed by `squeezr services up|down|status` (ROCm device passthrough on AMD GPUs) + embeddings: `auto` by default — ollama (GPU) when the endpoint is reachable, otherwise local ONNX on CPU (nomic-embed-text-v1.5, int8, ~131 MB, 768d); explicit ollama (native `/api/embed`, auto-pull, GPU-capable) or any OpenAI-compatible endpoint — nothing leaves your machine. If a store dir ever outlives the registry (crash, manual cleanup), `squeezr workspace list` surfaces it as an orphan and `squeezr workspace repair` (or a lossless `squeezr init` in the project root — config, repo list and index are preserved) re-registers it without data loss **while the recorded root is on disk** — adoption always requires a live root, both in the batch route and in the explicit `--root` act, so a store whose root is gone is reported honestly as `orphan — root gone` and is neither adopted nor swept (restore the directory and re-run repair to adopt it); the same `repair` can bulk-prune stale rows whose roots are gone, but only behind explicit confirmation (`--dry-run` lists with store sizes, `--yes` or a TTY answer confirms, a non-TTY run without `--yes` refuses) and only through the single existing drop path. Default embedding model: local ONNX nomic-embed-text-v1.5 (legacy bge-code-v1, 1536d, stays a supported option via `scripts/fetch-model.sh --model bge-code-v1` + `embeddings.onnx.model` in the workspace config — switching models on an existing workspace requires `squeezr index --reembed`).
-
-An MCP server (`squeezr serve`) exposes the index to agents as six tools — `repo_map`, `code_search`, `symbol_lookup`, `find_references`, `expand_span`, `index_status` — with a uniform envelope (`tokensUsed`, `truncated`, `warnings`, `indexAge`, `staleFiles`). Client onboarding is one command: `squeezr mcp install` detects supported agent CLIs (Claude Code, Kimi Code, Qwen Code, Codex), registers a `serve --watch` entry via the client's own CLI (direct config merge for Kimi), and optionally writes an idempotent instruction block into the client's instruction file; `squeezr mcp doctor` verifies the setup per client (exit 0/1), `squeezr mcp remove` undoes it. The registered `command` is a **stable path** — `~/.local/bin/squeezr` when that release symlink exists, the running binary's path otherwise — so upgrading squeezr no longer leaves clients pinned to a stale binary; `doctor` flags any registration whose `command` drifted from the expected path (a `stale` line with `registered → expected` and a ready `squeezr mcp install --client <id> --yes` repair, plus additive `userCommand`/`projectCommand`/`userStale`/`projectStale`/`expectedCommand` fields in `--json`), and a running `serve` that was launched from an off-target binary emits one stderr hint naming the repair (silent when the symlink is absent or already correct). Flags: `--client claude|kimi|qwen|codex|all`, `--scope user|project`, `--no-watch`, `--no-instructions`, `--instructions`, `--yes`, `--json`. Workspace root = server process cwd, with a `CLAUDE_PROJECT_DIR` fallback for Claude Code (no `cwd` key is ever written to client configs); manual config paths (e.g. `~/.claude.json` / `.mcp.json`, `~/.codex/config.toml`) are listed in the RU section above. Watch mode (`squeezr watch`, `squeezr serve --watch`) keeps the index fresh automatically: debounced catch-up passes with lock backoff, full delete/rename lifecycle, no ghost hits. Every running daemon writes a heartbeat file (`<storeDir>/<kind>.heartbeat`, refreshed every 5 s, removed on clean exit), so `squeezr fleet` shows all workspaces' daemons at a glance — pid, uptime, stale root paths, pending chunks — and `squeezr fleet stop|restart <storeKey>` manages them: stop covers both daemon kinds (SIGTERM → 5 s grace → SIGKILL, heartbeat pids verified as squeezr processes), restart respawns the CLI watch daemon only (`serve --watch` is owned by the MCP client); `--json` is NDJSON per the 035 contract. For programmatic progress, `index --events` / `serve --watch --events` stream NDJSON events (`started` → `fileIndexed` → `progress` → `completed`/`error`), flushed per line — stdout for `index`, stderr for `serve` (stdout carries MCP JSON-RPC); a quiet incremental run emits exactly `started` → `fileIndexed`×N → `completed`. A `serve --watch` that did not win the store's watch claim says so on that same stderr channel instead of leaving the operator to guess: one human line naming the owning pid where the marker carries one, and always one machine line `{"type":"watchRole","role":"owner"|"observer","verdict":"<claim verdict>","ownerPid":N}`; the session's first tool answer carries the same standing in `warnings`, so an agent can tell it is reading an observer and not the indexer. `squeezr watch` obeys the same claim (one `watch.owner` per store): a watch that is not the owner starts no engine, prints `warning: watch not started: pid N owns this store; no watch loop runs in this process` on stderr and exits 0.
-
-Token economics are measurable: every navigation command (CLI and all six MCP tools) appends a local telemetry line to `queries.jsonl` in the workspace store dir, and `squeezr stats [--json|--reset]` turns it into a per-tool table plus counterfactual savings — actual tokens spent vs reading every expanded file whole — and the serve-cache hit-rate; telemetry never leaves the machine and is removed with the workspace. Every record also carries the client identity (MCP handshake `clientInfo` for serve sessions, `cli` for CLI runs, `unknown` for pre-050 records), so `stats` breaks usage down By agent and By session, and `squeezr usage [--agent|--workspace|--since|--json|--watch]` rolls the telemetry up across every workspace in the registry — per-project blocks plus a fleet-wide by-agent table, runnable from any directory, with a live `--watch` view (3 s refresh, `--interval`) for watching adoption as agents work. The four expensive MCP tools cache responses per serve session (LRU 100, canonical-JSON key), and any reindex invalidates the cache generation — dead entries are dropped on the spot rather than lingering until LRU eviction, and the first response after the change carries `cache: invalidated (index changed)` in `warnings` (once per generation per session, never baked into the cached envelope) with the query flagged `cacheInvalidated` in telemetry — so identical requests replay instantly only while the index is unchanged, and an agent can tell a dead cache from a cold one.
-
-```bash
-dotnet build Squeezr.slnx
-squeezr init --name my-project && squeezr add /path/to/repo
-squeezr services up
-squeezr index && squeezr search "WorkspaceManager"
-```
-
-Linux install (self-contained binary + `~/.local/bin` symlink, no .NET required): `scripts/install.sh`. Uninstall: `scripts/uninstall.sh` (the `~/.squeezr` store with workspaces and models is left intact — remove it manually if you really want it gone).
-
-Windows install (self-contained exe + PATH, no .NET required): `powershell -File scripts\install.ps1`. Uninstall: `powershell -File scripts\uninstall.ps1`. The scripts declare `#Requires -Version 5.1`, so stock Windows PowerShell is enough — pwsh 7 is optional.
-
-Windows setup executable: `powershell -File scripts\build-installer.ps1` packages the published tree with Inno Setup 6 (a build prerequisite — `winget install -e --id JRSoftware.InnoSetup`, or pass `-InstallInno`) into `artifacts\installer\SqueezrSetup-<version>-<rid>.exe`. It installs per-user without admin, registers in Add/Remove Programs, puts the install dir on PATH and leaves the `~/.squeezr` store alone on uninstall. Flags: `-Rid win-x64|win-arm64`, `-Version`, `-SkipBuild`, `-IsccPath`, `-OutputDir`, `-InstallInno`. There is no published Windows release artifact and there will not be one — the Gitea instance has no Windows runner, so the package is always built locally. The package is unsigned: SmartScreen warns on first run (*More info* → *Run anyway*).
-
-Status: M1–M6 done (CLI skeleton, trigram index, Roslyn symbols, hybrid semantic search + refs, MCP server with all six tools, tree-sitter JS/TS + fallback chunker). See the roadmap above.
+Everything here runs on your machine: the index lives in `~/.squeezr`, the
+telemetry never leaves it, and it dies with the workspace. If it does not —
+that is a bug, file it.
