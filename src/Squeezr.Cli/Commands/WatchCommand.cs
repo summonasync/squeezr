@@ -1,9 +1,11 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Spectre.Console.Rendering;
+using Squeezr.Cli.Mcp;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -26,18 +28,36 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
         try
         {
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var claimFaults = new ServeWatchAnnouncer(Console.Error, "watch");
+            var claim = new WatchOwnerClaim(
+                SqueezrPaths.StoreDir(workspaceRoot), DaemonHeartbeat.DefaultKind, claimFaults.Fault);
+            var outcome = claim.TryAcquire();
+            if (outcome.Status == WatchOwnerStatus.RaceLost)
+            {
+                outcome = claim.TryAcquire();
+            }
+
+            var role = ServeWatchRole.FromOutcome(outcome);
+            if (!role.IsOwner)
+            {
+                // The decline is one-shot prose, not a repeating fault, so it goes straight to stderr; the
+                // machine watchRole channel stays serve's (watch declares no machine channel).
+                Console.Error.WriteLine($"warning: {role.DaemonStartupLine}");
+                return 0;
+            }
+
             if (AnsiConsole.Profile.Capabilities.Interactive)
             {
                 var status = new LiveWatchStatus(workspaceRoot);
                 AnsiConsole.Live(status.Render()).Start(live =>
                 {
                     status.Bind(live);
-                    RunWatcher(status, workspaceRoot, cts.Token);
+                    RunWatcher(status, workspaceRoot, claim, cts.Token);
                 });
             }
             else
             {
-                RunWatcher(new PlainWatchStatus(), workspaceRoot, cts.Token,
+                RunWatcher(new PlainWatchStatus(), workspaceRoot, claim, cts.Token,
                     () => Console.WriteLine($"watching {workspaceRoot} (press Ctrl+C to stop)"));
             }
 
@@ -57,11 +77,22 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
     private static void RunWatcher(
         IWatchStatus status,
         string workspaceRoot,
+        WatchOwnerClaim claim,
         CancellationToken cancellationToken,
         Action? onReady = null)
     {
-        var watcher = new WorkspaceWatcher(status, onStaleTakeover: StaleLockWarningSink.ToStderr);
-        watcher.StartAsync(workspaceRoot, cancellationToken).GetAwaiter().GetResult();
+        var watcher = new WorkspaceWatcher(
+            status, onStaleTakeover: StaleLockWarningSink.ToStderr, claim: claim);
+        try
+        {
+            watcher.StartAsync(workspaceRoot, cancellationToken).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            claim.Release();
+            throw;
+        }
+
         onReady?.Invoke();
         cancellationToken.WaitHandle.WaitOne();
         watcher.StopAsync().GetAwaiter().GetResult();

@@ -26,6 +26,11 @@ internal sealed record ServeWatchRole(
     public string StartupLine =>
         $"watch not started: {Reason}; serving queries + per-query freshness";
 
+    // The CLI watch daemon has no observer half to fall back on: a process that did not win the claim starts no
+    // watch engine and has nothing else to do, so the tail names that outcome instead of serve's query standing.
+    public string DaemonStartupLine =>
+        $"watch not started: {Reason}; no watch loop runs in this process";
+
     public string AgentNotice =>
         $"watch engine off on this session: {Reason}; this session answers queries and refreshes only what a " +
         "query touches, it runs no indexing pass";

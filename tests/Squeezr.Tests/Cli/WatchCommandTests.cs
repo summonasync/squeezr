@@ -6,6 +6,8 @@ using Spectre.Console.Testing;
 using Squeezr.Cli.Commands;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Cli;
@@ -128,6 +130,63 @@ public sealed class WatchCommandTests
             Environment.CurrentDirectory = previousDir;
             AnsiConsole.Console = previousConsole;
         }
+    }
+
+    [Fact]
+    public async Task Watch_OwnerClaimHeldElsewhere_StartsNoWatcherAndNamesTheOwnerPid()
+    {
+        var workspace = NewWatchWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"watchclaim1\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        var storeDir = SqueezrPaths.StoreDir(workspace);
+        var owner = new WatchOwnerClaim(storeDir);
+        owner.TryAcquire().IsOwner.ShouldBeTrue();
+
+        var result = await RunCliAsync(workspace, "watch");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdErr.ShouldContain($"watch not started: pid {Environment.ProcessId} owns this store");
+        result.StdErr.ShouldContain("no watch loop runs in this process");
+        result.StdErr.ShouldNotContain("watching");
+        result.StdOut.ShouldNotContain("watching");
+        File.Exists(DaemonHeartbeat.PathFor(storeDir, DaemonHeartbeat.DefaultKind)).ShouldBeFalse(
+            "the refused watch armed a heartbeat writer on a store it does not own");
+        owner.ReadOwner()!.Pid
+            .ShouldBe(Environment.ProcessId, "the refused watch reaped or overwrote the live owner's claim");
+    }
+
+    [Fact]
+    public async Task Watch_FirstClaimant_BecomesOwner_StartsWatcher_WritesHeartbeat()
+    {
+        var workspace = NewWatchWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"watchclaim2\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        var storeDir = SqueezrPaths.StoreDir(workspace);
+
+        using var process = StartWatchProcess(workspace);
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        string claimed;
+        try
+        {
+            claimed = await AwaitLineAsync(process, line => line.Contains("watching"));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            await process.WaitForExitAsync();
+        }
+
+        claimed.ShouldNotBeNullOrWhiteSpace();
+        new WatchOwnerClaim(storeDir).ReadOwner()!.Pid
+            .ShouldBe(process.Id, "the first claimant recorded a claim naming somebody else");
+        var heartbeat = DaemonHeartbeatReader.TryRead(storeDir, DaemonHeartbeat.DefaultKind);
+        heartbeat.ShouldNotBeNull("the owning watch armed no heartbeat");
+        heartbeat.Pid.ShouldBe(process.Id);
+        heartbeat.Kind.ShouldBe(DaemonHeartbeat.DefaultKind);
+        (await stderrTask).ShouldNotContain("watch not started");
     }
 
     private static async Task<string> AwaitLineAsync(Process process, Func<string, bool> match)
