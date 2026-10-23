@@ -25,6 +25,7 @@
 ╚════██║██║▄▄ ██║██║   ██║██╔══╝  ██╔══╝   ███╔╝  ██╔══██╗
 ███████║╚██████╔╝╚██████╔╝███████╗███████╗███████╗██║  ██║
 ╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝
+```
 
 **Squeezr — maximum meaning per token.**  
 *The eye that lets the horde find things without reading everything.*
