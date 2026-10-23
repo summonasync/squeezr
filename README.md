@@ -769,13 +769,16 @@ squeezr mcp install --client all --yes       # "fix everything" after an upgrade
 |---|---|
 | `--client claude\|kimi\|qwen\|codex\|all` | Whom to attach; without the flag squeezr finds installed clients itself and offers a multi-select; `all` — every found one |
 | `--scope user\|project` | `user` — the server is available in all projects, `project` — only in this workspace; without the flag it asks (with `--yes` the default is `user`) |
-| `--no-watch` | Do not add `--watch` to `serve` (by default the index chases disk edits on its own) |
+| `--watch` | Register the entry as `serve --watch`: this client's sessions run the background indexer themselves. Off by default (070/T5) — a plain `serve` answers queries and refreshes what a query touches; the watcher is a fleet decision you start on purpose, and the store claim makes an extra `serve --watch` an observer, not a second indexer |
+| `--no-watch` | Kept for compatibility: it became the default, so an old pasted command still means exactly what it says |
 | `--no-instructions` | Do not write the agent the navigation-instructions block |
 | `--yes` | Non-interactive mode: zero questions (for scripts); requires an explicit `--client`; the instructions block is NOT written in this mode — only with `--instructions` |
 | `--instructions` | Explicit consent to the instructions block, paired with `--yes` (without `--yes` the flag does nothing; if set together with `--no-instructions` — the latter wins) |
 | `--json` | Machine-readable answer instead of the table |
 
-What happens under the hood: the entry is registered as `serve --watch`, the
+What happens under the hood: the entry is registered as `serve` — since 070/T5
+registrations no longer breed a watcher per client session (`--watch` opts a
+client back in) — the
 config is written by the client's own CLI (`claude mcp add`, `qwen mcp add`,
 `codex mcp add`), and where there is no CLI (Kimi Code) squeezr merges the
 JSON into the config file itself. `command` gets the **stable path** —
@@ -796,7 +799,16 @@ names a path other than the stable one, doctor shows `stale` with the pair
 "registered → expected" and a ready repair command (`squeezr mcp install
 --client <id> --yes`); in `--json` — additive
 `userCommand`/`projectCommand`/`userStale`/`projectStale`/`expectedCommand`
-fields, the exit code is unchanged by staleness. `squeezr mcp remove [--client
+fields, the exit code is unchanged by staleness. Doctor also reads the store's
+watch claim: one `watch` row names who runs the background indexer (pid and
+kind), how many live processes merely observe, and — when nobody owns the loop
+— the exact command that starts one (`squeezr fleet restart <storeKey>`); in
+`--json` an additive per-entry `watch` object (`name`, `storeKey`,
+`ownerState` = alive/wedged/gone/foreign/none, `ownerPid`, `ownerKind`,
+`ownerHost`, `observers`, `startCommand`). This is the checkable half of the
+registration default flip: re-registering clients without `--watch` trades a
+watcher per session for a deliberately started one, and doctor says whether
+the store still has an indexer at all. `squeezr mcp remove [--client
 ...] [--scope ...]` removes the entry and the instructions block; both
 commands honor `--client` and `--json`. A live `serve` compares its own binary
 against the stable symlink target at startup and prints one stderr hint on a
@@ -1015,6 +1027,12 @@ squeezr watch            # human: a daemon in the terminal, Ctrl+C — a clean e
 squeezr serve --watch    # agent: the same engine inside the MCP server
 ```
 
+Registered clients run neither form by default (070/T5): `mcp install`
+registers a plain `serve`, so the engine is a fleet decision started on
+purpose, not a side effect of every client session; `squeezr mcp doctor` names
+the owner of each store and hands the exact start command where nobody owns
+one.
+
 How it works: `FileSystemWatcher` on the repo roots → filtering (the same
 ignore globs and extensions as indexing; store service files do not count —
 they live outside the project) → changed paths accumulate in a changed-set →
@@ -1168,13 +1186,12 @@ heartbeat. The role in the fleet roster is decided not by the beat and not by
 a second marker but by `watch.owner`: the owner is exactly one per store,
 regardless of kind. Besides the per-pid beats, the indexing process keeps the
 former per-kind `<kind>.heartbeat` file — the shape binaries before 070 read
-(both the `index.lock` lock-owner report and `fleet stop|restart`): the process
-running the watch loop writes it and an observer never does, so an old reader
-sees the indexer, not whichever racer came last. One boundary stated plainly:
-the mirror writer is chosen when the loop starts, and a watcher that loses the
-claim mid-run stops indexing but keeps beating until it is stopped — which is
-why the roster's `(owner)` mark comes from `watch.owner` and never from the
-mirror. Garbage is collected by the writer: a beat of a foreign process whose
+(the `index.lock` lock-owner report still does): only the live claim owner
+stamps it, and a watcher demoted mid-run stops stamping the moment ownership
+moves on and deletes the file while it still names its writer — so an old
+reader sees the indexer or nothing, never whichever racer wrote last. The
+demoted process keeps its own per-pid beat: the roster still counts it as a
+live observer. Garbage is collected by the writer: a beat of a foreign process whose
 pid is gone and whose beat went stale past the stale window is removed on the
 next beat (at most once a minute) — otherwise fleet would name a daemon that
 does not exist until the end of time; a stale beat of a live pid (a wedged
@@ -1185,21 +1202,30 @@ heartbeat remains as the evidence "the daemon died ugly" — it is the `dead
 Control — by exact storeKey (like `drop --store-key`, no fuzzy resolution):
 
 ```bash
-squeezr fleet stop <storeKey>     # stop the daemons of both kinds
+squeezr fleet stop <storeKey>     # stop the process the watch claim names
 squeezr fleet restart <storeKey>  # restart the watch daemon
 ```
 
-- `stop` reads the heartbeats of both kinds and stops the live ones: SIGTERM
-  → 5 s grace → SIGKILL (on Windows — kill of the whole process tree). The
-  pid from the heartbeat is verified before the signal: the process must look
-  like squeezr (name/command line + a start-time cross-check against the
-  heartbeat's `startedAt`) — a foreign process or a reused pid is untouched,
-  you get a clear error. Nothing alive — `not-running`, exit 0.
-- `restart` works with `watch` only: a live daemon is stopped cleanly, then a
+- `stop` follows the claim (070/T5): where `watch.owner` is present it is the
+  only name the kill surface reads — the claimed process is stopped (a wedged
+  owner too; stopping the named process is the documented recovery for a
+  store whose lock never came back), a claim held on another host is refused
+  with a hint, a gone owner leaves nothing to stop, and live observers are
+  never killed by surprise — they are MCP clients' live servers; the result
+  counts them (additive `observers` in `--json`). With no claim marker at all
+  the store is in pre-070 shape and the per-kind heartbeats decide, as they
+  always did. The pid is verified before the signal either way: the process
+  must look like squeezr (name/command line + a start-time cross-check
+  against the marker's or heartbeat's `startedAt`) — a foreign process or a
+  reused pid is untouched, you get a clear error. Nothing alive —
+  `not-running`, exit 0.
+- `restart` works with `watch` only: a live watch owner is stopped cleanly, then a
   detached `squeezr watch` process is spawned with cwd = the workspace's
-  rootPath (rootPath gone — an error with a `drop` hint). A live `serve
-  --watch` is not touched: the MCP client owns it, and trying to restart it
-  honestly errors with a hint (`squeezr mcp install` or an agent restart).
+  rootPath (rootPath gone — an error with a `drop` hint). A claimed
+  `serve --watch` is not restarted and not stopped: the MCP client owns it,
+  and trying honestly errors with a hint naming the owner pid (`squeezr mcp
+  install` or an agent restart); beside an owner or a gone claim, observers do
+  not block the restart.
 - Both commands do `--json`: one NDJSON result object, clean stdout (the 035
   contract).
 

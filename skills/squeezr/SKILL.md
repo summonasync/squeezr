@@ -105,10 +105,16 @@ squeezr mcp install --all --scope user --yes
 
 Registers the squeezr MCP server (stdio) in every MCP client detected on the
 machine, at user scope, fully non-interactive (`--yes` without `--scope` also
-defaults to user). After it succeeds, restart the agent session — MCP clients
+defaults to user). The registration is a plain `serve`: it answers queries and
+refreshes what a query touches, but runs no background indexer — since 070/T5
+a watcher is a fleet decision (`squeezr watch`, or `--watch` at install to opt
+one client in), not something every session breeds. After a successful
+install, restart the agent session — MCP clients
 load server configs at startup, not live. Six tools then appear: `code_search`,
 `symbol_lookup`, `find_references`, `repo_map`, `expand_span`, `index_status`.
-`squeezr mcp doctor` verifies the registration later; `squeezr mcp remove` undoes it.
+`squeezr mcp doctor` verifies the registration later — per store it names the
+watch owner pid, counts live observers and, where nobody owns the loop, hands
+the exact `squeezr fleet restart <storeKey>` that starts one; `squeezr mcp remove` undoes it.
 
 Repo-level onboarding (only when the human explicitly asks for it): after MCP
 registration, `squeezr mcp install --project` writes a committed
@@ -353,9 +359,11 @@ Two boundaries of the classifier, so you do not misread a result as a leak:
   registration (`squeezr mcp doctor` still reports the server healthy); check
   the client settings for auto-activation options.
 - **Daemons** — `squeezr fleet` lists watch/serve-watch daemons across all
-  registered workspaces (pid, uptime, staleness); `squeezr fleet stop <storeKey>`
-  and `squeezr fleet restart <storeKey>` manage one (exact store key from the
-  table).
+  registered workspaces (every live pid, the claim owner marked `(owner)`,
+  uptime, staleness); `squeezr fleet stop <storeKey>` stops the process the
+  watch claim names and never kills observers (they are MCP clients' live
+  servers), `squeezr fleet restart <storeKey>` restarts the watch daemon
+  (exact store key from the table).
 - **Telemetry** — `squeezr stats` shows per-tool call counts, token savings
   versus reading files, and cache hit-rate; `squeezr stats --reset` clears.
 - **Vector drift** — `squeezr vectors reconcile` compares Qdrant points and

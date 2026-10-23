@@ -30,6 +30,11 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         [CommandOption("--scope")]
         public string? Scope { get; set; }
 
+        [CommandOption("--watch")]
+        public bool Watch { get; set; }
+
+        // Accepted for compatibility: it became the default when registrations stopped breeding a watcher per
+        // client session (070/T5), so pasting an old --no-watch command still does exactly what it says.
         [CommandOption("--no-watch")]
         public bool NoWatch { get; set; }
 
@@ -51,6 +56,12 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
 
     protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        if (settings.Watch && settings.NoWatch)
+        {
+            Console.Error.WriteLine("error: --watch and --no-watch cannot be combined; --no-watch is the default.");
+            return 1;
+        }
+
         var interactive = AnsiConsole.Profile.Capabilities.Interactive;
         McpOnboardingEnvironment environment;
         try
@@ -125,7 +136,7 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             try
             {
                 results.Add(await service.InstallAsync(
-                    client, scope, !settings.NoWatch, writeInstructions, environment, cancellationToken));
+                    client, scope, settings.Watch, writeInstructions, environment, cancellationToken));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or
                                         ClientCliException or TimeoutException or InvalidOperationException or NotSupportedException)

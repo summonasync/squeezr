@@ -16,4 +16,7 @@ public sealed record McpClientDiagnostics(
     bool UserStale = false,
     bool ProjectStale = false,
     string? ExpectedCommand = null,
-    ToolErrorPayload? IndexState = null);
+    ToolErrorPayload? IndexState = null,
+    // Additive per 035: what the store's watch claim says about this workspace — the checkable half of the
+    // --watch default flip. Existing keys keep their values; a store nothing resolves carries no watch object.
+    StoreWatchDiagnostics? Watch = null);

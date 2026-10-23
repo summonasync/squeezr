@@ -269,6 +269,95 @@ public sealed class FleetManagementTests : IAsyncLifetime
         TrackSpawned(newPid).HasExited.ShouldBeFalse();
     }
 
+    [Fact]
+    public async Task Stop_ClaimNamesOneDaemon_MirrorNamesAnother_KillsOnlyTheClaimed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var name = UniqueName("fleet-stop-claim");
+        var root = await NewInitializedWorkspaceAsync(name);
+        var storeKey = StoreKeyFor(root);
+        var storeDir = SqueezrPaths.StoreDir(root);
+        var ownerDaemon = StartFakeSqueezrDaemon();
+        var observerDaemon = StartFakeSqueezrDaemon();
+        WriteClaim(storeDir, new WatchOwnerMarker(
+            ownerDaemon.Id, Environment.MachineName, DaemonHeartbeat.DefaultKind,
+            ownerDaemon.StartTime.ToUniversalTime(), DateTime.UtcNow));
+        WriteHeartbeat(storeDir, DaemonHeartbeat.DefaultKind, ownerDaemon.Id,
+            ownerDaemon.StartTime.ToUniversalTime(), DateTime.UtcNow);
+        WriteHeartbeat(storeDir, DaemonHeartbeat.ServeWatchKind, observerDaemon.Id,
+            observerDaemon.StartTime.ToUniversalTime(), DateTime.UtcNow);
+
+        var result = await RunCliAsync(TestDirs.NewTempDir(), "fleet", "stop", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(0);
+        var payload = SingleJsonLine(result.StdOut);
+        var results = payload.GetProperty("results");
+        results[0].GetProperty("kind").GetString().ShouldBe(DaemonHeartbeat.DefaultKind);
+        results[0].GetProperty("pid").GetInt32().ShouldBe(ownerDaemon.Id,
+            "fleet stop killed the mirror's pid instead of the one the claim names");
+        results[1].GetProperty("kind").GetString().ShouldBe(DaemonHeartbeat.ServeWatchKind);
+        results[1].GetProperty("status").GetString().ShouldBe("not-running");
+        payload.GetProperty("observers").GetInt32().ShouldBe(1);
+
+        (await WaitForExitAsync(ownerDaemon, TimeSpan.FromSeconds(10))).ShouldBeTrue();
+        observerDaemon.HasExited.ShouldBeFalse(
+            "fleet stop killed an observer by surprise: it is some MCP client's live server");
+    }
+
+    [Fact]
+    public async Task Stop_ClaimOwnerGone_KillsNothing_ObserversSurviveAndAreNamed()
+    {
+        var name = UniqueName("fleet-stop-gone");
+        var root = await NewInitializedWorkspaceAsync(name);
+        var storeKey = StoreKeyFor(root);
+        var storeDir = SqueezrPaths.StoreDir(root);
+        var observerDaemon = StartFakeSqueezrDaemon();
+        WriteClaim(storeDir, new WatchOwnerMarker(
+            int.MaxValue, Environment.MachineName, DaemonHeartbeat.DefaultKind,
+            DateTime.UtcNow.AddMinutes(-10), DateTime.UtcNow));
+        WriteHeartbeat(storeDir, DaemonHeartbeat.ServeWatchKind, observerDaemon.Id,
+            observerDaemon.StartTime.ToUniversalTime(), DateTime.UtcNow);
+
+        var result = await RunCliAsync(TestDirs.NewTempDir(), "fleet", "stop", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(0);
+        var payload = SingleJsonLine(result.StdOut);
+        payload.GetProperty("results")[0].GetProperty("status").GetString().ShouldBe("not-running");
+        payload.GetProperty("observers").GetInt32().ShouldBe(1);
+        observerDaemon.HasExited.ShouldBeFalse("a gone owner's pid made fleet stop kill a live observer");
+
+        var human = await RunCliAsync(TestDirs.NewTempDir(), "fleet", "stop", storeKey);
+        human.StdErr.ShouldContain("names pid");
+    }
+
+    [Fact]
+    public async Task Restart_ClaimHeldByServeWatchDaemon_ErrorsWithMcpHint_LeavesOwnerRunning()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var name = UniqueName("fleet-restart-claim");
+        var root = await NewInitializedWorkspaceAsync(name);
+        var storeKey = StoreKeyFor(root);
+        var ownerDaemon = StartFakeSqueezrDaemon();
+        WriteClaim(SqueezrPaths.StoreDir(root), new WatchOwnerMarker(
+            ownerDaemon.Id, Environment.MachineName, DaemonHeartbeat.ServeWatchKind,
+            ownerDaemon.StartTime.ToUniversalTime(), DateTime.UtcNow));
+
+        var result = await RunCliAsync(TestDirs.NewTempDir(), "fleet", "restart", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(1, "fleet restart restarted a store whose watch loop belongs to an MCP client");
+        result.StdErr.ShouldContain("owned by the MCP client");
+        result.StdErr.ShouldContain($"pid {ownerDaemon.Id}");
+        ownerDaemon.HasExited.ShouldBeFalse();
+    }
+
     private static string UniqueName(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
     private static async Task<string> NewInitializedWorkspaceAsync(string name)
@@ -287,6 +376,10 @@ public sealed class FleetManagementTests : IAsyncLifetime
         var json = JsonSerializer.Serialize(new DaemonHeartbeat(pid, kind, startedAt, lastBeatAt), SqueezrJson.FileOptions);
         File.WriteAllText(DaemonHeartbeat.PathFor(storeDir, kind), json);
     }
+
+    private static void WriteClaim(string storeDir, WatchOwnerMarker marker) =>
+        File.WriteAllText(
+            WatchOwnerMarker.PathFor(storeDir), JsonSerializer.Serialize(marker, SqueezrJson.FileOptions));
 
     private static bool HeartbeatAlive(string storeDir, string kind)
     {

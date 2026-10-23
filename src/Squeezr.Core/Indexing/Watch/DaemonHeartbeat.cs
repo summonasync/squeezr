@@ -14,9 +14,10 @@ public sealed record DaemonHeartbeat(
     public static readonly TimeSpan BeatInterval = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan StaleThreshold = TimeSpan.FromSeconds(30);
 
-    // One file per (store, kind) answering "who runs the watch loop here": only the process the store claim
-    // names writes it, so a reader from before the per-pid carrier still finds one truthful pid instead of
-    // whichever writer raced last. The full roster of live processes lives in beats/.
+    // One file per (store, kind) answering "who runs the watch loop here": only the live claim owner writes it,
+    // and a writer demoted from the claim stops stamping the moment ownership moves on and drops the file while
+    // it still names that writer, so a reader from before the per-pid carrier finds one truthful pid or none —
+    // never whichever writer raced last. The full roster of live processes lives in beats/.
     public static string PathFor(string storeDir, string kind) => Path.Combine(storeDir, $"{kind}.heartbeat");
 
     public static string BeatsDirFor(string storeDir) => Path.Combine(storeDir, BeatsDirName);

@@ -41,30 +41,68 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
 
             var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
             var now = DateTime.UtcNow;
-            var watch = DaemonHeartbeatReader.TryRead(storeDir, DaemonHeartbeat.DefaultKind);
-            var watchAlive = watch is not null && DaemonHeartbeatReader.IsAlive(watch, now);
-            var serveWatch = DaemonHeartbeatReader.TryRead(storeDir, DaemonHeartbeat.ServeWatchKind);
-            var serveWatchAlive = serveWatch is not null && DaemonHeartbeatReader.IsAlive(serveWatch, now);
-
-            if (!watchAlive && serveWatchAlive)
-            {
-                throw new WorkspaceException(
-                    $"Cannot restart workspace '{entry.Name}': a serve --watch daemon is running (pid {serveWatch!.Pid}) " +
-                    "but it is owned by the MCP client and cannot be restarted from the CLI. " +
-                    "Run 'squeezr mcp install' or restart your agent.");
-            }
-
+            var owner = WatchOwnerMarker.TryRead(storeDir);
             string previousStatus;
             int? previousPid = null;
-            if (watchAlive)
+
+            if (owner is not null)
             {
-                DaemonProcessGuard.EnsureSqueezrProcess(watch!);
-                previousStatus = await DaemonTerminator.StopAsync(watch!.Pid, cancellationToken);
-                previousPid = watch.Pid;
+                // The restart follows the claim (070/T5): watch.owner names the process that runs the loop, and the
+                // heartbeat files are only the pre-claim shape's fallback. Observers beating beside the owner are
+                // MCP clients' live servers — a restart never stops one of them, and a fresh watch claim on this
+                // store belongs to whoever the marker points at.
+                if (!string.Equals(owner.Host, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new WorkspaceException(
+                        $"Cannot restart workspace '{entry.Name}': the watch claim is held on host '{owner.Host}' " +
+                        $"(pid {owner.Pid}); restart the watch loop there, not from this machine.");
+                }
+
+                if (DaemonHeartbeatReader.IsProcessAlive(owner.Pid))
+                {
+                    if (owner.Kind == DaemonHeartbeat.ServeWatchKind)
+                    {
+                        throw new WorkspaceException(
+                            $"Cannot restart workspace '{entry.Name}': a serve --watch daemon is running (pid {owner.Pid}) " +
+                            "but it is owned by the MCP client and cannot be restarted from the CLI. " +
+                            "Run 'squeezr mcp install' or restart your agent.");
+                    }
+
+                    var heartbeat = owner.AsHeartbeat();
+                    DaemonProcessGuard.EnsureSqueezrProcess(heartbeat);
+                    previousStatus = await DaemonTerminator.StopAsync(owner.Pid, cancellationToken);
+                    previousPid = owner.Pid;
+                }
+                else
+                {
+                    previousStatus = "not-running";
+                }
             }
             else
             {
-                previousStatus = "not-running";
+                var watch = DaemonHeartbeatReader.TryRead(storeDir, DaemonHeartbeat.DefaultKind);
+                var watchAlive = watch is not null && DaemonHeartbeatReader.IsAlive(watch, now);
+                var serveWatch = DaemonHeartbeatReader.TryRead(storeDir, DaemonHeartbeat.ServeWatchKind);
+                var serveWatchAlive = serveWatch is not null && DaemonHeartbeatReader.IsAlive(serveWatch, now);
+
+                if (!watchAlive && serveWatchAlive)
+                {
+                    throw new WorkspaceException(
+                        $"Cannot restart workspace '{entry.Name}': a serve --watch daemon is running (pid {serveWatch!.Pid}) " +
+                        "but it is owned by the MCP client and cannot be restarted from the CLI. " +
+                        "Run 'squeezr mcp install' or restart your agent.");
+                }
+
+                if (watchAlive)
+                {
+                    DaemonProcessGuard.EnsureSqueezrProcess(watch!);
+                    previousStatus = await DaemonTerminator.StopAsync(watch!.Pid, cancellationToken);
+                    previousPid = watch.Pid;
+                }
+                else
+                {
+                    previousStatus = "not-running";
+                }
             }
 
             int pid;

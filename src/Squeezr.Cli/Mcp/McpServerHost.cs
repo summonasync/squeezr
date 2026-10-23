@@ -168,6 +168,19 @@ public static class McpServerHost
                 stderr.WriteLine("warning: --events has no effect: watch engine is off (pass --watch or set watch.enabled)");
             }
 
+            // A plain serve used to be the silent case: the registration shipped --watch, so every session either
+            // owned the loop or watched someone else own it. With the default flipped (070/T5), a store can now
+            // legitimately run with no indexer at all, and an agent must not read that as a fresh index.
+            if (workspace.IsWorkspace)
+            {
+                var health = WatchStoreHealth.Probe(SqueezrPaths.StoreDir(workspace.Root), DateTime.UtcNow);
+                if (!health.IndexerRunning)
+                {
+                    workspace.WatchNotice = NoIndexerNotice.ForAgent(health);
+                    stderr.WriteLine(NoIndexerNotice.StartupLine(health));
+                }
+            }
+
             return null;
         }
 
@@ -199,7 +212,8 @@ public static class McpServerHost
                 announcer.Announce(role);
                 // An observer indexes nothing, but it is a live process on this store holding memory and answers:
                 // publishing its own beat is what lets the fleet count it. It touches no per-kind heartbeat — that
-                // file stays the claim owner's, so a pre-070 reader is never handed an observer as the indexer.
+                // file belongs to the claim owner alone, and an owner demoted mid-run stops stamping it and drops
+                // it the same way (070/T5), so a pre-070 reader is never handed a non-indexer as the indexer.
                 var observerBeat = new DaemonHeartbeatWriter(
                     SqueezrPaths.StoreDir(workspace.Root),
                     DaemonHeartbeat.ServeWatchKind,

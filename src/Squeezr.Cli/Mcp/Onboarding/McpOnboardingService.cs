@@ -118,6 +118,7 @@ public sealed class McpOnboardingService
         var userStale = userEntry && userCommand is not null && expectedPath is not null && !PathsMatch(userCommand, expectedPath);
         var projectStale = projectEntry && projectCommand is not null && expectedPath is not null && !PathsMatch(projectCommand, expectedPath);
         var indexState = WorkspaceState(environment.WorkspaceRoot, environment.SessionDirectory ?? environment.WorkspaceRoot);
+        var watch = StoreWatchProbe.TryProbe(environment.WorkspaceRoot);
         var warnings = new List<string>();
         var userWarning = userDecision.Warning;
         if (userWarning is not null)
@@ -148,7 +149,8 @@ public sealed class McpOnboardingService
             userStale,
             projectStale,
             expectedPath,
-            indexState);
+            indexState,
+            watch);
     }
 
     private static ToolErrorPayload? WorkspaceState(string workspaceRoot, string sessionDirectory)

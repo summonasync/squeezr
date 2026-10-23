@@ -15,7 +15,7 @@ public sealed class DaemonHeartbeatWriter : IDisposable
     private readonly string _kind;
     private readonly string _kindPath;
     private readonly string _beatPath;
-    private readonly bool _publishKindHeartbeat;
+    private bool _publishKindHeartbeat;
     private readonly Func<DateTime> _utcNow;
     private readonly TimeSpan _beatInterval;
     private readonly Action<string>? _onWarning;
@@ -55,6 +55,34 @@ public sealed class DaemonHeartbeatWriter : IDisposable
     public string FilePath => _kindPath;
 
     public string BeatPath => _beatPath;
+
+    // The demotion door: a writer the store claim has moved away from must stop stamping the per-kind heartbeat
+    // the moment the claim is gone, not at its own shutdown — until now this file was the pre-roster reader's
+    // only answer to "who runs the watch loop here", and a demoted writer kept signing its own name there.
+    // The mirror is deleted only while it still names this process: whoever won the claim has already stamped
+    // its own file, and erasing that one would leave old readers with no indexer at all.
+    public void StopPublishingKindHeartbeat()
+    {
+        bool wasPublishing;
+        lock (_gate)
+        {
+            wasPublishing = _publishKindHeartbeat && !_disposed;
+            _publishKindHeartbeat = false;
+        }
+
+        if (!wasPublishing)
+        {
+            return;
+        }
+
+        var mirror = DaemonHeartbeatReader.TryRead(_storeDir, _kind);
+        if (mirror is not null
+            && mirror.Pid == _pid
+            && (mirror.Host is null || string.Equals(mirror.Host, _host, StringComparison.OrdinalIgnoreCase)))
+        {
+            TryDelete(_kindPath);
+        }
+    }
 
     public void Start()
     {

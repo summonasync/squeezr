@@ -33,6 +33,18 @@ public class ServerEntryBuilderTests
     [InlineData(McpClientId.Kimi)]
     [InlineData(McpClientId.Qwen)]
     [InlineData(McpClientId.Codex)]
+    public void Build_DefaultWatch_NoSupportedClientStampsTheWatchFlag(McpClientId clientId)
+    {
+        var entry = Build(clientId, watch: false);
+
+        Args(entry).ShouldBe(["serve"]);
+    }
+
+    [Theory]
+    [InlineData(McpClientId.Claude)]
+    [InlineData(McpClientId.Kimi)]
+    [InlineData(McpClientId.Qwen)]
+    [InlineData(McpClientId.Codex)]
     public void Build_AnyClient_NeverPinsWorkingDirectory(McpClientId clientId)
     {
         var entry = ServerEntryBuilder.Build(

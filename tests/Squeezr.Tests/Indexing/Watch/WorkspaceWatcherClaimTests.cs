@@ -84,6 +84,42 @@ public class WorkspaceWatcherClaimTests
         recorder.Faults.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task ClaimLostMidRun_DropsTheKindMirror_AtDemotionNotAtShutdown()
+    {
+        var workspace = NewIndexedWorkspace();
+        var storeDir = SqueezrPaths.StoreDir(workspace);
+        var claim = new WatchOwnerClaim(storeDir, DaemonHeartbeat.DefaultKind);
+        claim.TryAcquire().IsOwner.ShouldBeTrue();
+        var recorder = new WatchRecorder();
+        using var cts = new CancellationTokenSource();
+        var watcher = new WorkspaceWatcher(recorder, claim: claim);
+        await watcher.StartAsync(workspace, cts.Token);
+        var mirrorPath = DaemonHeartbeat.PathFor(storeDir, DaemonHeartbeat.DefaultKind);
+        try
+        {
+            await UntilAsync(() => File.Exists(mirrorPath));
+
+            var winner = new WatchOwnerMarker(
+                4242, Environment.MachineName, DaemonHeartbeat.DefaultKind, DateTime.UtcNow, DateTime.UtcNow);
+            File.WriteAllText(
+                WatchOwnerMarker.PathFor(storeDir),
+                System.Text.Json.JsonSerializer.Serialize(winner, Squeezr.Core.Serialization.SqueezrJson.FileOptions));
+
+            await UntilAsync(() =>
+                recorder.Faults.Any(f => f.Contains("watch ownership lost")) && !File.Exists(mirrorPath));
+            File.Exists(DaemonHeartbeat.BeatPathFor(storeDir, DaemonHeartbeat.DefaultKind, Environment.ProcessId))
+                .ShouldBeTrue("a demoted process still belongs on the roster of live processes");
+
+            await Task.Delay(QuietSettle);
+            File.Exists(mirrorPath).ShouldBeFalse("the demoted watcher re-stamped the mirror it had just dropped");
+        }
+        finally
+        {
+            await StopWatcherAsync(watcher, cts);
+        }
+    }
+
     private static WatchOwnerClaim ClaimAs(string storeDir, int pid) =>
         new(storeDir, DaemonHeartbeat.ServeWatchKind, null, null, null, pid);
 

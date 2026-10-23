@@ -368,6 +368,11 @@ public sealed class WorkspaceWatcher
         var outcome = _claim.RefreshBeat();
         if (!outcome.IsOwner)
         {
+            // demotion is where the mirror stops lying: the per-kind heartbeat is the pre-roster reader's only
+            // answer to who runs the watch loop, and the claim has just moved on — so stamping this writer's
+            // name into that file ends here, not at StopAsync. The per-pid beat keeps beating: this process is
+            // still a live presence on the store, just not the indexer anymore.
+            _heartbeat?.StopPublishingKindHeartbeat();
             _status?.Faulted("watch ownership lost: stopping watch passes");
             return false;
         }

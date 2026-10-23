@@ -53,6 +53,20 @@ public sealed class McpOnboardingServiceTests
     }
 
     [Fact]
+    public async Task Install_CliFirstClientWithoutWatch_AddsServeOnly()
+    {
+        var (service, environment, _, binDir) = NewService();
+        var fake = FakeCli.Install(binDir, "claude");
+        var client = McpClientRegistry.Get(McpClientId.Claude);
+
+        var result = await service.InstallAsync(client, McpScope.User, watch: false, writeInstructions: false, environment, CancellationToken.None);
+
+        result.Method.ShouldBe("cli");
+        fake.ReadCapturedArguments().ShouldBe(
+            ["mcp", "add", "squeezr", "-s", "user", "--", environment.CommandPath, "serve"]);
+    }
+
+    [Fact]
     public async Task Install_CliFirstClientWithoutCli_FallsBackToWriterWithWarning()
     {
         var (service, environment, _, _) = NewService();

@@ -34,6 +34,7 @@ public sealed class McpCommandsTests
         combined.ShouldContain("--client");
         combined.ShouldContain("--all");
         combined.ShouldContain("--scope");
+        combined.ShouldContain("--watch");
         combined.ShouldContain("--no-watch");
         combined.ShouldContain("--no-instructions");
         combined.ShouldContain("--project");
@@ -67,7 +68,37 @@ public sealed class McpCommandsTests
         console.Output.ShouldContain("scope: user (--yes default");
         error.ShouldBeEmpty();
         var entry = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".kimi-code", "mcp.json")))!["mcpServers"]!["squeezr"]!;
+        entry["args"]!.ToJsonString().ShouldBe("""["serve"]""");
+    }
+
+    [Fact]
+    public async Task Install_ExplicitWatchFlag_RegistersServeWithWatch()
+    {
+        var workspace = TestDirs.NewTempDir();
+        string? homeDir = null;
+
+        var (exitCode, _, _, error) = await RunAsync(
+            workspace,
+            ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes", "--watch"],
+            configureHome: home => homeDir = home);
+
+        exitCode.ShouldBe(0);
+        error.ShouldBeEmpty();
+        var entry = JsonNode.Parse(File.ReadAllText(Path.Combine(workspace, ".kimi-code", "mcp.json")))!["mcpServers"]!["squeezr"]!;
         entry["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
+    }
+
+    [Fact]
+    public async Task Install_WatchAndNoWatchTogether_ExitWithConflict()
+    {
+        var workspace = TestDirs.NewTempDir();
+
+        var (exitCode, _, _, error) = await RunAsync(
+            workspace,
+            ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes", "--watch", "--no-watch"]);
+
+        exitCode.ShouldBe(1);
+        error.ShouldContain("cannot be combined");
     }
 
     [Fact]
@@ -114,9 +145,9 @@ public sealed class McpCommandsTests
             exitCode.ShouldBe(0);
             console.Output.ShouldContain("detected: claude, kimi");
             var claude = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".claude.json")))!["mcpServers"]!["squeezr"]!;
-            claude["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
+            claude["args"]!.ToJsonString().ShouldBe("""["serve"]""");
             JsonNode.Parse(File.ReadAllText(Path.Combine(overrideDir, "mcp.json")))!["mcpServers"]!["squeezr"]!["args"]!
-                .ToJsonString().ShouldBe("""["serve","--watch"]""");
+                .ToJsonString().ShouldBe("""["serve"]""");
         }
         finally
         {
@@ -146,7 +177,7 @@ public sealed class McpCommandsTests
         var configPath = Path.Combine(workspace, ".kimi-code", "mcp.json");
         File.Exists(configPath).ShouldBeTrue();
         var entry = JsonNode.Parse(File.ReadAllText(configPath))!["mcpServers"]!["squeezr"]!;
-        entry["args"]!.ToJsonString().ShouldBe("""["serve","--watch"]""");
+        entry["args"]!.ToJsonString().ShouldBe("""["serve"]""");
         entry.AsObject().Select(static property => property.Key).Order().ShouldBe(["args", "command"]);
         File.ReadAllText(Path.Combine(workspace, "AGENTS.md")).ShouldContain("squeezr:instructions");
     }

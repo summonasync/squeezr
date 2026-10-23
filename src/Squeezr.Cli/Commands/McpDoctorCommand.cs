@@ -101,6 +101,57 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
                 AnsiConsole.MarkupLine($"  [yellow]warning:[/] {Markup.Escape(warning)}");
             }
         }
+
+        RenderWatch(diagnostics);
+    }
+
+    // The store the registration lives on, as the watch claim answers it: who runs the indexer, who merely
+    // observes, and — since 070/T5 stopped stamping --watch into every client — the exact command that starts
+    // a watcher where none runs. One block per doctor run: the store is the same under every client entry.
+    private static void RenderWatch(IReadOnlyList<McpClientDiagnostics> diagnostics)
+    {
+        var watch = diagnostics.FirstOrDefault(entry => entry.Watch is not null)?.Watch;
+        if (watch is null)
+        {
+            return;
+        }
+
+        var label = Markup.Escape($"'{watch.Name}'");
+        var observers = watch.Observers > 0 ? $" — {watch.Observers} observer(s)" : string.Empty;
+        switch (watch.OwnerState)
+        {
+            case "alive":
+                AnsiConsole.MarkupLine(
+                    $"[bold]watch[/] {label}: owner pid {watch.OwnerPid} ({Markup.Escape(watch.OwnerKind ?? "")}){observers}");
+                break;
+            case "foreign":
+                AnsiConsole.MarkupLine(
+                    $"[bold]watch[/] {label}: indexer runs on host '{Markup.Escape(watch.OwnerHost ?? "")}' (pid {watch.OwnerPid})");
+                break;
+            case "wedged":
+                AnsiConsole.MarkupLine(
+                    $"[bold]watch[/] {label}: [yellow]wedged[/] — pid {watch.OwnerPid} holds the claim with a stale beat and runs no passes{observers}");
+                RenderStart(watch);
+                break;
+            case "gone":
+                AnsiConsole.MarkupLine(
+                    $"[bold]watch[/] {label}: [yellow]no indexer[/] — the last claim named pid {watch.OwnerPid}, which is gone{observers}");
+                RenderStart(watch);
+                break;
+            default:
+                AnsiConsole.MarkupLine(
+                    $"[bold]watch[/] {label}: [yellow]no background indexer[/] — nothing owns the watch loop on this store{observers}");
+                RenderStart(watch);
+                break;
+        }
+    }
+
+    private static void RenderStart(StoreWatchDiagnostics watch)
+    {
+        if (watch.StartCommand is { } command)
+        {
+            AnsiConsole.MarkupLine($"  [yellow]start:[/] {Markup.Escape(command)}");
+        }
     }
 
     private static void RenderIndexRemedy(McpClientDiagnostics entry)

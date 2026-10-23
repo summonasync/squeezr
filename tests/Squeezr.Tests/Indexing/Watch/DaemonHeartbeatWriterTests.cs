@@ -188,6 +188,63 @@ public sealed class DaemonHeartbeatWriterTests : IDisposable
         Directory.Exists(missingDir).ShouldBeFalse("a beat publisher minted a store directory nothing owns");
     }
 
+    [Fact]
+    public void StopPublishingKindHeartbeat_DemotedOwner_DropsItsMirror_KeepsBeatingItsOwnBeat()
+    {
+        var writer = new DaemonHeartbeatWriter(_storeDir, DaemonHeartbeat.DefaultKind, onWarning: _warnings.Add);
+        writer.Start();
+        File.Exists(writer.FilePath).ShouldBeTrue();
+
+        writer.StopPublishingKindHeartbeat();
+
+        File.Exists(writer.FilePath).ShouldBeFalse(
+            "a demoted writer kept signing its name into the per-kind heartbeat it no longer owns");
+        File.Exists(writer.BeatPath).ShouldBeTrue(
+            "demotion ends the indexer claim, not the process presence: the roster must still name it");
+
+        writer.Beat();
+        File.Exists(writer.FilePath).ShouldBeFalse("the kind mirror was re-stamped after demotion");
+
+        writer.Dispose();
+        File.Exists(writer.BeatPath).ShouldBeFalse();
+        _warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void StopPublishingKindHeartbeat_WhenTheMirrorNamesAnotherWriter_LeavesThatFileAlone()
+    {
+        var writer = new DaemonHeartbeatWriter(_storeDir, DaemonHeartbeat.DefaultKind);
+        writer.Start();
+
+        var newOwner = new DaemonHeartbeat(4242, DaemonHeartbeat.DefaultKind, DateTime.UtcNow, DateTime.UtcNow);
+        File.WriteAllText(writer.FilePath, JsonSerializer.Serialize(newOwner, SqueezrJson.FileOptions));
+
+        writer.StopPublishingKindHeartbeat();
+
+        File.Exists(writer.FilePath).ShouldBeTrue("the demotion deleted a mirror that no longer named its writer");
+        ReadBeat(writer.FilePath)!.Pid.ShouldBe(4242);
+
+        writer.Dispose();
+        File.Exists(writer.FilePath).ShouldBeTrue("a disposed demoted writer erased the live owner's mirror");
+        File.Exists(writer.BeatPath).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void StopPublishingKindHeartbeat_OnAnObserver_PublishesNothingExtra_AndKeepsItsBeat()
+    {
+        var ownerWrote = new DaemonHeartbeat(4242, DaemonHeartbeat.DefaultKind, DateTime.UtcNow, DateTime.UtcNow);
+        var kindPath = DaemonHeartbeat.PathFor(_storeDir, DaemonHeartbeat.DefaultKind);
+        File.WriteAllText(kindPath, JsonSerializer.Serialize(ownerWrote, SqueezrJson.FileOptions));
+        var writer = new DaemonHeartbeatWriter(_storeDir, DaemonHeartbeat.DefaultKind, publishKindHeartbeat: false);
+        writer.Start();
+
+        writer.StopPublishingKindHeartbeat();
+
+        File.Exists(writer.BeatPath).ShouldBeTrue();
+        ReadBeat(kindPath)!.Pid.ShouldBe(4242);
+        writer.Dispose();
+    }
+
     private string PlantBeat(
         int pid, DateTime startedAt, DateTime lastBeatAt, string? host = null)
     {

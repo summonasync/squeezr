@@ -26,52 +26,47 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
             var entry = FleetStoreKeyResolver.Require(settings.StoreKey);
             var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
             var now = DateTime.UtcNow;
-            var alive = ProbeAlive(storeDir, now);
+            var (targets, observers, noOwnerReason) = ResolveKillTargets(storeDir, now);
 
-            if (alive.Count == 0)
+            if (targets.Count == 0)
             {
                 Report(
                     new FleetStopResult(
                         entry.Name,
                         entry.StoreKey,
-                        [
-                            new FleetStopKindResult(DaemonHeartbeat.DefaultKind, "not-running", null, null),
-                            new FleetStopKindResult(DaemonHeartbeat.ServeWatchKind, "not-running", null, null),
-                        ]),
+                        KindFill(null),
+                        observers.Count),
                     settings.Json);
                 if (!settings.Json)
                 {
-                    Console.Error.WriteLine($"warning: no running daemons for workspace '{entry.Name}'.");
+                    Console.Error.WriteLine(
+                        noOwnerReason
+                        ?? (observers.Count > 0
+                            ? $"warning: no watch owner to stop for workspace '{entry.Name}'; " +
+                              $"{observers.Count} observer(s) left running (fleet stop never kills observers)."
+                            : $"warning: no running daemons for workspace '{entry.Name}'."));
                 }
 
                 return 0;
             }
 
-            foreach (var (_, heartbeat) in alive)
+            foreach (var (_, heartbeat) in targets)
             {
                 DaemonProcessGuard.EnsureSqueezrProcess(heartbeat);
             }
 
             var results = new List<FleetStopKindResult>();
-            foreach (var (kind, heartbeat) in alive)
+            foreach (var (kind, heartbeat) in targets)
             {
                 var detail = await DaemonTerminator.StopAsync(heartbeat.Pid, cancellationToken);
                 results.Add(new FleetStopKindResult(kind, "stopped", heartbeat.Pid, detail));
             }
 
-            foreach (var kind in new[] { DaemonHeartbeat.DefaultKind, DaemonHeartbeat.ServeWatchKind })
-            {
-                if (results.All(result => result.Kind != kind))
-                {
-                    results.Add(new FleetStopKindResult(kind, "not-running", null, null));
-                }
-            }
-
-            results = results
+            results = KindFill(results)
                 .OrderBy(result => result.Kind == DaemonHeartbeat.DefaultKind ? 0 : 1)
                 .ToList();
 
-            Report(new FleetStopResult(entry.Name, entry.StoreKey, results), settings.Json);
+            Report(new FleetStopResult(entry.Name, entry.StoreKey, results, observers.Count), settings.Json);
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -84,19 +79,79 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
         }
     }
 
-    private static List<(string Kind, DaemonHeartbeat Heartbeat)> ProbeAlive(string storeDir, DateTime now)
+    // The kill surface follows the claim (070/T5): watch.owner names the process that runs the watch loop, the
+    // roster only proves it still lives here, and everything else beating on the store is an observer — some
+    // MCP client's live server — which nothing here stops by accident. A wedged owner (stale beat, live pid)
+    // stays a target: stopping the named process is the supported recovery for a store whose lock never came
+    // back. With no marker the store is in pre-070 shape, where the per-kind heartbeat was the only name an
+    // indexer ever had.
+    internal static (List<(string Kind, DaemonHeartbeat Heartbeat)> Targets,
+        List<DaemonHeartbeat> Observers,
+        string? NoOwnerReason) ResolveKillTargets(string storeDir, DateTime now)
     {
-        var alive = new List<(string Kind, DaemonHeartbeat Heartbeat)>();
-        foreach (var kind in new[] { DaemonHeartbeat.DefaultKind, DaemonHeartbeat.ServeWatchKind })
+        var roster = DaemonHeartbeatReader.TryReadAll(storeDir);
+        var owner = WatchOwnerMarker.TryRead(storeDir);
+        if (owner is null)
         {
-            var heartbeat = DaemonHeartbeatReader.TryRead(storeDir, kind);
-            if (heartbeat is not null && DaemonHeartbeatReader.IsAlive(heartbeat, now))
+            var legacy = new List<(string, DaemonHeartbeat)>();
+            foreach (var kind in (string[])[DaemonHeartbeat.DefaultKind, DaemonHeartbeat.ServeWatchKind])
             {
-                alive.Add((kind, heartbeat));
+                var heartbeat = DaemonHeartbeatReader.TryRead(storeDir, kind);
+                if (heartbeat is not null && DaemonHeartbeatReader.IsAlive(heartbeat, now))
+                {
+                    legacy.Add((kind, heartbeat));
+                }
+            }
+
+            var legacyObservers = roster
+                .Where(beat => DaemonHeartbeatReader.IsAlive(beat, now))
+                .Where(beat => legacy.All(pair => pair.Item2.Pid != beat.Pid))
+                .ToList();
+            return (legacy, legacyObservers, null);
+        }
+
+        var targets = new List<(string, DaemonHeartbeat)>();
+        var sameHost = string.Equals(owner.Host, Environment.MachineName, StringComparison.OrdinalIgnoreCase);
+        string? noOwnerReason = null;
+        if (!sameHost)
+        {
+            noOwnerReason =
+                $"warning: the watch claim for this store is held on host '{owner.Host}' (pid {owner.Pid}); " +
+                "nothing on this machine runs the loop and nothing here stops a foreign pid.";
+        }
+        else if (DaemonHeartbeatReader.IsProcessAlive(owner.Pid))
+        {
+            targets.Add((owner.Kind, owner.AsHeartbeat()));
+        }
+        else
+        {
+            noOwnerReason =
+                $"warning: the watch claim names pid {owner.Pid}, which is gone; its beat may still read alive " +
+                "until the stale window passes, and a surviving observer takes the store over.";
+        }
+
+        var observers = roster
+            .Where(beat => DaemonHeartbeatReader.IsAlive(beat, now) && !owner.OwnsBeat(beat))
+            .ToList();
+        return (targets, observers, noOwnerReason);
+    }
+
+    private static List<FleetStopKindResult> KindFill(List<FleetStopKindResult>? stopped)
+    {
+        var results = new List<FleetStopKindResult>();
+        foreach (var kind in (string[])[DaemonHeartbeat.DefaultKind, DaemonHeartbeat.ServeWatchKind])
+        {
+            if (stopped?.All(result => result.Kind != kind) is not false)
+            {
+                results.Add(new FleetStopKindResult(kind, "not-running", null, null));
+            }
+            else
+            {
+                results.Add(stopped!.First(result => result.Kind == kind));
             }
         }
 
-        return alive;
+        return results;
     }
 
     private static void Report(FleetStopResult result, bool json)
