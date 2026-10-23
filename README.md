@@ -1,10 +1,10 @@
 ```
-            ▄████████▄▄▄                         [{((<                    ·                   >))}]
-      ▄▄  ▄██████████████▄▄                           [{((               ·              ))}]
-     ███████████████████████▄                              [{(          ·         )}]
-    ██████████████████████████▄                                 [{     ·    }]
-    ▀██████▒▒▒▒▒▒▒██████████████▄                                    [  · ]
-     ▀█████▒▒▒▒▒▒▒▒▒██████████████▄                                       ;
+            ▄████████▄▄▄                     [{((<             ·            >))}]
+      ▄▄  ▄██████████████▄▄                      [{((          ·         ))}]
+     ███████████████████████▄                        [{(       ·      )}]
+    ██████████████████████████▄                          [{    ·   }]
+    ▀██████▒▒▒▒▒▒▒██████████████▄                            [  · ]
+     ▀█████▒▒▒▒▒▒▒▒▒██████████████▄                            ;
        ▀███▒▒▒▒▒▒▒▒▒▒▒█████████████▄
         ████▒▒▒▒▒▒▒▒▒▒▒█████████████▄
         ▀█████▒▒▒▒▒▒▒▒▒▒█████████████▄
@@ -25,7 +25,6 @@
 ╚════██║██║▄▄ ██║██║   ██║██╔══╝  ██╔══╝   ███╔╝  ██╔══██╗
 ███████║╚██████╔╝╚██████╔╝███████╗███████╗███████╗██║  ██║
 ╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝
-```
 
 **Squeezr — maximum meaning per token.**  
 *The eye that lets the horde find things without reading everything.*
@@ -1147,6 +1146,12 @@ with a vanished rootPath are marked `stale` and emit a stderr warning with a
 `OrphanScanner` as `workspace list` (067); fleet does not recompute it. Row
 ordering (a store with a live daemon on top) is unchanged: a store counts as
 live when at least one of its bits is alive.
+
+The same roster reaches `fleet --json` as a per-store `daemons[]` array (`kind`, `pid`, `status`,
+`uptimeSeconds`, `owner`, `host`): every process the store's beats name, empty when the store names
+nobody, with exactly the claim holder flagged `owner: true`. Additive per 035 — `watch`, `serveWatch`,
+`stale`, `pendingChunks` and `lastIndexedAt` keep their names, their meanings and their order among
+themselves; the array simply sits between `serveWatch` and `stale`.
 
 How a daemon declares itself: every live watch-role process writes a per-pid
 beat into the store dir — `~/.squeezr/workspaces/<storeKey>/beats/<kind>.<pid>.beat`,
