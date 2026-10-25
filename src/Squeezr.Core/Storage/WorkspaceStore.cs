@@ -166,10 +166,9 @@ public static class WorkspaceStore
     private static void RefuseCentralStoreMigration(string root)
     {
         var storeDir = Path.Combine(root, SqueezrPaths.StoreDirName);
-        if (SqueezrHome.IsCentralStore(storeDir))
+        if (SqueezrHome.IsCentralStore(storeDir) || SqueezrHome.LooksLikeCentralStore(storeDir))
         {
-            throw new WorkspaceException(
-                $"Refusing to migrate '{storeDir}': it is the central squeezr store, not a legacy in-project store.");
+            throw new WorkspaceException(CentralStoreRefusalText.Migration(storeDir));
         }
     }
 

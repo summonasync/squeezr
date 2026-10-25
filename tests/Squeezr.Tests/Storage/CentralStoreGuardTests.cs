@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -8,7 +9,9 @@ namespace Squeezr.Tests.Storage;
 public sealed class CentralStoreGuardTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
+    private const string ProfileEnvironmentVariable = "HOME";
     private readonly string? _previousEnv;
+    private readonly string? _previousHome;
     private readonly string _home;
     private readonly string _storeDir;
     private readonly List<string> _createdDirs = [];
@@ -16,6 +19,7 @@ public sealed class CentralStoreGuardTests : IDisposable
     public CentralStoreGuardTests()
     {
         _previousEnv = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
+        _previousHome = Environment.GetEnvironmentVariable(ProfileEnvironmentVariable);
         _home = TestDirs.NewTempDir();
         _createdDirs.Add(_home);
         _storeDir = Path.Combine(_home, SqueezrPaths.StoreDirName);
@@ -185,9 +189,117 @@ public sealed class CentralStoreGuardTests : IDisposable
         WorkspaceRegistry.FindByRootPath(secondRoot).ShouldNotBeNull();
     }
 
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Init_DefaultHomeUnderOverride_RefusesAndNamesBothHomes()
+    {
+        var pinnedHome = NewDir(Path.Combine(TestDirs.NewTempDir(), "pinned"));
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, _home);
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        SqueezrHome.Reset();
+
+        var message = Should.Throw<WorkspaceException>(() => new WorkspaceManager(_home).Init("home")).Message;
+
+        message.ShouldContain("central squeezr store");
+        message.ShouldContain(SqueezrHome.DefaultHome());
+        message.ShouldContain(SqueezrHome.Resolve());
+        message.ShouldContain($"{SqueezrHome.HomeEnvironmentVariable}='{pinnedHome}' is in effect.");
+        message.ShouldContain("Nothing was created or changed.");
+        WorkspaceRegistry.Load().ShouldBeEmpty();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_WalkIntoManifestRootAtDefaultHome_RefusesOnThePathSignalAlone()
+    {
+        var pinnedHome = NewDir(Path.Combine(TestDirs.NewTempDir(), "pinned"));
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, _home);
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        SqueezrHome.Reset();
+        File.WriteAllText(Path.Combine(_home, SqueezrPaths.ManifestFileName), """{"name":"home","repos":[]}""");
+        Directory.CreateDirectory(_storeDir);
+
+        var message = Should.Throw<WorkspaceException>(
+            () => WorkspaceStore.Resolve(NewDir(Path.Combine(_home, "projects", "fresh")))).Message;
+
+        message.ShouldContain("central squeezr store");
+        message.ShouldContain(_storeDir);
+        message.ShouldContain(SqueezrHome.DefaultHome());
+        message.ShouldContain(SqueezrHome.Resolve());
+        message.ShouldContain($"{SqueezrHome.HomeEnvironmentVariable}='{pinnedHome}' is in effect.");
+        message.ShouldContain("Nothing was moved, renamed or deleted.");
+        SqueezrHome.LooksLikeCentralStore(_storeDir).ShouldBeFalse();
+        Directory.Exists(_storeDir).ShouldBeTrue();
+        File.Exists(Path.Combine(_home, SqueezrPaths.ManifestFileName)).ShouldBeTrue();
+        WorkspaceRegistry.Load().ShouldBeEmpty();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_WalkIntoManifestRootWithForeignCentralShapedStore_RefusesOnTheStructuralSignalAlone()
+    {
+        var temp = TestDirs.NewTempDir();
+        var homeProfile = NewDir(Path.Combine(temp, "home"));
+        var pinnedHome = NewDir(Path.Combine(temp, "pinned"));
+        var foreignProfile = NewDir(Path.Combine(temp, "foreign"));
+        var foreignStore = NewDir(Path.Combine(foreignProfile, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(foreignStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName), "[]");
+        File.WriteAllText(
+            Path.Combine(foreignProfile, SqueezrPaths.ManifestFileName), """{"name":"foreign","repos":[]}""");
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, homeProfile);
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        SqueezrHome.Reset();
+
+        var canonicalStore = WorkspaceCanonicalPath.ResolveThroughLinks(foreignStore);
+        canonicalStore.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.Resolve()));
+        canonicalStore.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome()));
+
+        var message = Should.Throw<WorkspaceException>(
+            () => WorkspaceStore.Resolve(NewDir(Path.Combine(foreignProfile, "work")))).Message;
+
+        message.ShouldContain("central squeezr store");
+        message.ShouldContain("Nothing was moved, renamed or deleted.");
+        message.ShouldContain($"{SqueezrHome.HomeEnvironmentVariable}='{pinnedHome}' is in effect.");
+        Directory.Exists(foreignStore).ShouldBeTrue();
+        File.Exists(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+        File.Exists(Path.Combine(foreignProfile, SqueezrPaths.ManifestFileName)).ShouldBeTrue();
+        WorkspaceRegistry.Load().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Resolve_RegisteredRowWithCentralShapedStore_RefusesOnStructureBeforeTheMove()
+    {
+        var root = NewDir(TestDirs.NewTempDir());
+        var decoyStore = NewDir(Path.Combine(root, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(decoyStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName), "[]");
+        File.WriteAllText(Path.Combine(root, SqueezrPaths.ManifestFileName), """{"name":"registered","repos":[]}""");
+        var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
+        var storeKey = WorkspaceStoreKeys.Create("registered", canonicalRoot);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            "registered", canonicalRoot, storeKey, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+
+        var canonicalDecoy = WorkspaceCanonicalPath.ResolveThroughLinks(decoyStore);
+        canonicalDecoy.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.Resolve()));
+        canonicalDecoy.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome()));
+
+        var message = Should.Throw<WorkspaceException>(() => WorkspaceStore.Resolve(root)).Message;
+
+        message.ShouldContain("central squeezr store");
+        message.ShouldContain("Nothing was moved, renamed or deleted.");
+        message.ShouldContain(SqueezrHome.DefaultHome());
+        message.ShouldContain(SqueezrHome.Resolve());
+        Directory.Exists(decoyStore).ShouldBeTrue();
+        File.Exists(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+        File.Exists(Path.Combine(root, SqueezrPaths.ManifestFileName)).ShouldBeTrue();
+        WorkspaceRegistry.FindByRootPath(canonicalRoot).ShouldNotBeNull();
+    }
+
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _previousEnv);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, _previousHome);
         SqueezrHome.Reset();
         foreach (var dir in _createdDirs)
         {

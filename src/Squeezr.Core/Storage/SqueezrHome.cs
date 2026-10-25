@@ -2,7 +2,7 @@ namespace Squeezr.Core.Storage;
 
 public static class SqueezrHome
 {
-    private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
+    public const string HomeEnvironmentVariable = "SQUEEZR_HOME";
     private static readonly object Sync = new();
     private static string? _resolved;
 

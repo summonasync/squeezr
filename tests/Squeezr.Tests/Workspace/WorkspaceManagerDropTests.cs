@@ -34,8 +34,13 @@ public sealed class WorkspaceManagerDropTests : IDisposable
         SqueezrHome.Reset();
         var root = WorkspaceCanonicalPath.Canonicalize(profile);
 
-        Should.Throw<WorkspaceException>(() => new WorkspaceManager(root).Drop())
-            .Message.ShouldContain("central squeezr store");
+        var message = Should.Throw<WorkspaceException>(() => new WorkspaceManager(root).Drop()).Message;
+
+        message.ShouldContain("central squeezr store");
+        message.ShouldContain(SqueezrHome.DefaultHome());
+        message.ShouldContain(SqueezrHome.Resolve());
+        message.ShouldContain($"{SqueezrHome.HomeEnvironmentVariable}='{pinnedHome}' is in effect.");
+        message.ShouldContain("Nothing was deleted.");
 
         Directory.Exists(defaultStore).ShouldBeTrue();
         File.ReadAllText(Path.Combine(defaultStore, "canary.txt")).ShouldBe("keep me");
