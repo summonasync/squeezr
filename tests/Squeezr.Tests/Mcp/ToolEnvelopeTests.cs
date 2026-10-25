@@ -83,7 +83,7 @@ public class ToolEnvelopeTests
         var envelope = ToolEnvelope.Wrap(null, 0, false);
 
         envelope.Truncated.ShouldBeFalse();
-        envelope.Cost.Complete.ShouldBeTrue();
+        envelope.Cost!.Complete.ShouldBeTrue();
         envelope.Cost.Ratio.ShouldBeNull();
     }
 
@@ -94,7 +94,7 @@ public class ToolEnvelopeTests
 
         var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true, cost: cost);
 
-        envelope.Cost.TokensUsed.ShouldBe(7);
+        envelope.Cost!.TokensUsed.ShouldBe(7);
         envelope.Cost.Complete.ShouldBeFalse();
         envelope.Cost.BaselineTokens.ShouldBe(100L);
     }

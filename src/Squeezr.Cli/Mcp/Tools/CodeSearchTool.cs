@@ -100,16 +100,28 @@ public sealed class CodeSearchTool
                 }
             }
 
-            if (response.Hint is not null)
+            if (response.Truncated)
             {
-                warnings.Add(response.Hint.ForMcp());
+                warnings.Add(HintText.TruncationLine(
+                    response.TokensUsed,
+                    maxTokens ?? DefaultMaxTokens,
+                    response.Hint?.ForMcp() ?? "raise maxTokens"));
             }
 
             var data = response.Matches.Select(m => new SearchHitData(
                 m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet,
                 m.AlsoMatched == 0 ? null : m.AlsoMatched)).ToList();
 
-            var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
+            var (cost, unknownBaselineFiles) = CostBaseline.Measure(
+                root, data.Select(d => (d.Repo, d.File)).ToList(), response.TokensUsed, !response.Truncated);
+            if (unknownBaselineFiles > 0)
+            {
+                warnings.Add(
+                    $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
+                freshness.Stale, cost: cost);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 response.TokensUsed, response.Truncated, data.Count,

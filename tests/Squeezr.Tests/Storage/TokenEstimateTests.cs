@@ -16,6 +16,7 @@ public class TokenEstimateTests
     {
         TokenEstimate.WholeFile(41).ShouldBe(12);
         TokenEstimate.WholeFile(960).ShouldBe(264);
+        TokenEstimate.WholeFile(4_000).ShouldBe(1_100);
         TokenEstimate.WholeFile(4_000_000).ShouldBe(1_100_000);
     }
 

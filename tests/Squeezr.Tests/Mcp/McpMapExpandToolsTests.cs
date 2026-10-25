@@ -50,7 +50,8 @@ public class McpMapExpandToolsTests
         envelope.GetRawText().ShouldNotContain("--");
         envelope.GetProperty("warnings").EnumerateArray()
             .Select(w => w.GetString()!)
-            .ShouldContain("lower depth or raise maxTokens");
+            .ShouldContain(w => w.StartsWith("truncated: ")
+                && w.EndsWith("lower depth or raise maxTokens"));
     }
 
     [Fact]

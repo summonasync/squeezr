@@ -20,6 +20,9 @@ public static class HintText
 
     public static string ForMcp(this TruncationHint hint) => hint.Render(static parameter => parameter);
 
+    public static string TruncationLine(int tokensUsed, int ceiling, string remedy) =>
+        $"truncated: {tokensUsed} of {ceiling} token ceiling — {remedy}";
+
     public static string? CollapseNote(this SearchMatch match) => match.AlsoMatched switch
     {
         0 => null,

@@ -172,7 +172,8 @@ public class McpToolsTests
         envelope.GetRawText().ShouldNotContain("--");
         envelope.GetProperty("warnings").EnumerateArray()
             .Select(w => w.GetString()!)
-            .ShouldContain("raise maxTokens or narrow (repo, prefix)");
+            .ShouldContain(w => w.StartsWith("truncated: ")
+                && w.EndsWith("raise maxTokens or narrow (repo, prefix)"));
     }
 
     [Fact]

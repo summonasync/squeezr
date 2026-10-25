@@ -76,9 +76,12 @@ public sealed class SymbolLookupTool
                 warnings.AddRange(withheld);
             }
 
-            if (result.Hint is not null)
+            if (result.Truncated)
             {
-                warnings.Add(result.Hint.ForMcp());
+                warnings.Add(HintText.TruncationLine(
+                    result.TokensUsed,
+                    budget,
+                    result.Hint?.ForMcp() ?? "raise maxTokens"));
             }
 
             if (result.Matches.Count == 0 && result.DidYouMean is null && result.GuardWarnings is null)
@@ -93,8 +96,16 @@ public sealed class SymbolLookupTool
                     : m.Members.Select(member => new SymbolMemberData(member.Name, member.Kind, member.Line)).ToList(),
                 m.MembersOmitted)).ToList();
 
+            var (cost, unknownBaselineFiles) = CostBaseline.Measure(
+                root, data.Select(d => (d.Repo, d.File)).ToList(), result.TokensUsed, !result.Truncated);
+            if (unknownBaselineFiles > 0)
+            {
+                warnings.Add(
+                    $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
+            }
+
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale,
-                result.DidYouMean);
+                result.DidYouMean, cost: cost);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                 result.TokensUsed, result.Truncated, data.Count,

@@ -70,9 +70,12 @@ public sealed class RepoMapTool
                 warnings.AddRange(withheld);
             }
 
-            if (result.Hint is not null)
+            if (result.Truncated)
             {
-                warnings.Add(result.Hint.ForMcp());
+                warnings.Add(HintText.TruncationLine(
+                    result.TokensUsed,
+                    resolvedMaxTokens,
+                    result.Hint?.ForMcp() ?? "raise maxTokens"));
             }
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();

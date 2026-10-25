@@ -55,7 +55,8 @@ public class McpNavigationToolsTests
         envelope.GetRawText().ShouldNotContain("--");
         envelope.GetProperty("warnings").EnumerateArray()
             .Select(w => w.GetString()!)
-            .ShouldContain("narrow the query (repo, kind) or raise maxTokens");
+            .ShouldContain(w => w.StartsWith("truncated: ")
+                && w.EndsWith("narrow the query (repo, kind) or raise maxTokens"));
     }
 
     [Fact]

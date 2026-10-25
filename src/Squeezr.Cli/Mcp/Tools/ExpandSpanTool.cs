@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -67,7 +68,24 @@ public sealed class ExpandSpanTool
                 warnings.AddRange(guardLines);
             }
 
-            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, staleFiles: null);
+            if (result.Truncated)
+            {
+                warnings.Add(HintText.TruncationLine(
+                    result.TokensUsed,
+                    maxTokens ?? SpanExpander.DefaultMaxTokens,
+                    "raise maxTokens, or narrow the span (startLine/endLine)"));
+            }
+
+            var (cost, unknownBaselineFiles) = CostBaseline.Measure(
+                root, [(result.Repo, result.File)], result.TokensUsed, !result.Truncated);
+            if (unknownBaselineFiles > 0)
+            {
+                warnings.Add(
+                    $"{unknownBaselineFiles} file(s) not in the index — excluded from the whole-file baseline");
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root,
+                staleFiles: null, cost: cost);
             QueryTelemetry.Record(root, _workspace.SessionId, "expand_span",
                 new { file, startLine, endLine, contextLines },
                 result.TokensUsed, result.Truncated, data.Span.Count,
