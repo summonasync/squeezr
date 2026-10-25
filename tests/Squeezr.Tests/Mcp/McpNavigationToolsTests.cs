@@ -136,7 +136,7 @@ public class McpNavigationToolsTests
         text.ShouldContain("No symbol named 'Nope'");
 
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
-        tools.Count.ShouldBe(6);
+        tools.Count.ShouldBe(7);
     }
 
     [Fact]

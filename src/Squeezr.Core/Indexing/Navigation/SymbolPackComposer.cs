@@ -25,7 +25,7 @@ public sealed record SymbolPack(
     int BudgetTokens,
     bool LookupTruncated,
     int AdditionalMatches,
-    int LaggingDeclarations,
+    IReadOnlyList<GhostRefDeclaration> LaggingDeclarations,
     IReadOnlyList<string> GuardWarnings,
     IReadOnlyList<string>? DidYouMean)
 {
@@ -49,7 +49,7 @@ public sealed class SymbolPackComposer
         {
             return new SymbolPack(
                 name, kind ?? "symbol", repo ?? string.Empty, string.Empty, "0-0", null, null, null,
-                [], false, [], 0, [], 0, lookup.TokensUsed, 0, maxTokens, lookup.Truncated, 0, 0,
+                [], false, [], 0, [], 0, lookup.TokensUsed, 0, maxTokens, lookup.Truncated, 0, [],
                 lookup.GuardWarnings ?? [], lookup.DidYouMean);
         }
 
@@ -80,7 +80,7 @@ public sealed class SymbolPackComposer
             taken.Add(row);
         }
 
-        var guardWarnings = (lookup.GuardWarnings ?? []).Concat(refs.GuardWarnings ?? []).ToList();
+        var guardWarnings = (lookup.GuardWarnings ?? []).Concat(refs.GuardWarnings ?? []).Distinct().ToList();
 
         return new SymbolPack(
             hit.Name,
@@ -102,7 +102,7 @@ public sealed class SymbolPackComposer
             maxTokens,
             lookup.Truncated,
             lookup.Matches.Count - 1,
-            refs.LaggingDeclarations?.Count ?? 0,
+            refs.LaggingDeclarations ?? [],
             guardWarnings,
             lookup.DidYouMean);
     }

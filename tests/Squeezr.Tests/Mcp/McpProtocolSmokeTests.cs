@@ -29,7 +29,7 @@ public class McpProtocolSmokeTests
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
 
         tools.Select(t => t.Name).OrderBy(n => n, StringComparer.Ordinal)
-            .ShouldBe(["code_search", "expand_span", "find_references", "index_status", "repo_map", "symbol_lookup"]);
+            .ShouldBe(["code_pack", "code_search", "expand_span", "find_references", "index_status", "repo_map", "symbol_lookup"]);
         foreach (var tool in tools)
         {
             tool.Description.ShouldNotBeNullOrWhiteSpace($"{tool.Name} must expose a non-empty description");

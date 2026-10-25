@@ -20,7 +20,7 @@ public class McpToolsTests
 
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
 
-        tools.Count.ShouldBe(6);
+        tools.Count.ShouldBe(7);
         var search = tools.Single(t => t.Name == "code_search");
         search.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldContain("query");
         search.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()).ShouldContain("query");

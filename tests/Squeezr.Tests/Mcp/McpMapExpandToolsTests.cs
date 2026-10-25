@@ -238,7 +238,8 @@ public class McpMapExpandToolsTests
             ["find_references"] = new() { ["symbol"] = "Add" },
             ["repo_map"] = [],
             ["expand_span"] = new() { ["file"] = "src/Calc.cs", ["startLine"] = 6, ["endLine"] = 9 },
-            ["index_status"] = []
+            ["index_status"] = [],
+            ["code_pack"] = new() { ["name"] = "Add" }
         };
 
         string[]? expectedKeys = null;
