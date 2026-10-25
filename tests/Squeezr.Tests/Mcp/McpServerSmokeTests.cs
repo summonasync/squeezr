@@ -25,7 +25,7 @@ public class McpServerSmokeTests
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
 
         tools.Select(t => t.Name).OrderBy(n => n, StringComparer.Ordinal)
-            .ShouldBe(["code_search", "expand_span", "find_references", "index_status", "repo_map", "symbol_lookup"]);
+            .ShouldBe(["code_pack", "code_search", "expand_span", "find_references", "index_status", "repo_map", "symbol_lookup"]);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public class McpServerSmokeTests
                 cancellationToken: CancellationToken.None).AsTask());
 
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
-        tools.Count.ShouldBe(6);
+        tools.Count.ShouldBe(7);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class McpServerSmokeTests
         text.ShouldContain("not initialized");
 
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
-        tools.Count.ShouldBe(6);
+        tools.Count.ShouldBe(7);
     }
 
     [Fact]

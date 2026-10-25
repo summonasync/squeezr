@@ -57,12 +57,17 @@ public sealed class SymbolLookup
 
     public SymbolLookupResult Find(string name, string? repo, string? kind, int maxTokens, bool body)
     {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
+        return Find(name, repo, kind, maxTokens, body, store);
+    }
+
+    public SymbolLookupResult Find(string name, string? repo, string? kind, int maxTokens, bool body, MetaStore store)
+    {
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
         var guard = SecretGuardReader.Load(_workspaceRoot);
         var budget = new TokenBudget(maxTokens);
         var hits = new List<SymbolHit>();
 
-        using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
         var all = new List<(RepoEntry Entry, RepoDocument Repo, SymbolDocument Symbol)>();
         foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
         {

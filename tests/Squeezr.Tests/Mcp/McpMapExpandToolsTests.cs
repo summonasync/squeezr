@@ -50,7 +50,8 @@ public class McpMapExpandToolsTests
         envelope.GetRawText().ShouldNotContain("--");
         envelope.GetProperty("warnings").EnumerateArray()
             .Select(w => w.GetString()!)
-            .ShouldContain("lower depth or raise maxTokens");
+            .ShouldContain(w => w.StartsWith("truncated: ")
+                && w.EndsWith("lower depth or raise maxTokens"));
     }
 
     [Fact]
@@ -237,7 +238,8 @@ public class McpMapExpandToolsTests
             ["find_references"] = new() { ["symbol"] = "Add" },
             ["repo_map"] = [],
             ["expand_span"] = new() { ["file"] = "src/Calc.cs", ["startLine"] = 6, ["endLine"] = 9 },
-            ["index_status"] = []
+            ["index_status"] = [],
+            ["code_pack"] = new() { ["name"] = "Add" }
         };
 
         string[]? expectedKeys = null;
@@ -249,14 +251,15 @@ public class McpMapExpandToolsTests
             result.IsError.ShouldNotBe(true);
             var envelope = ParseEnvelope(result);
             var keys = envelope.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray();
-            expectedKeys ??= keys;
-            keys.ShouldBe(expectedKeys);
+            var withoutOptional = keys.Where(k => k != "fileFreshness").ToArray();
+            expectedKeys ??= withoutOptional;
+            withoutOptional.ShouldBe(expectedKeys);
 
             envelope.GetProperty("tokensUsed").GetInt32().ShouldBeGreaterThanOrEqualTo(0);
             envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
         }
 
-        expectedKeys!.ShouldBe(["data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"]);
+        expectedKeys!.ShouldBe(["cost", "data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"]);
     }
 
     private static JsonElement ParseEnvelope(CallToolResult result)

@@ -81,7 +81,8 @@ public sealed class CodeSearchTool
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                    baselineTokens: hit.Cost?.BaselineTokens);
                 return hit;
             }
 
@@ -109,22 +110,43 @@ public sealed class CodeSearchTool
                 }
             }
 
-            if (response.Hint is not null)
+            if (response.Truncated)
             {
-                warnings.Add(response.Hint.ForMcp());
+                warnings.Add(HintText.TruncationLine(
+                    response.TokensUsed,
+                    maxTokens ?? DefaultMaxTokens,
+                    response.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
             }
 
             var data = response.Matches.Select(m => new SearchHitData(
                 m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet,
                 m.AlsoMatched == 0 ? null : m.AlsoMatched)).ToList();
 
-            var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
+            var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
+            var (cost, unknownBaselineFiles) = CostBaseline.Measure(
+                root, namedFiles, response.TokensUsed, !response.Truncated);
+            var fileFreshness = namedFiles.Count > 0
+                ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
+                : null;
+            if (StoreWriterNotice.For(root) is { } writerNotice)
+            {
+                warnings.Add(writerNotice);
+            }
+            if (unknownBaselineFiles > 0)
+            {
+                warnings.Add(
+                    $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
+                freshness.Stale, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 response.TokensUsed, response.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("code_search", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }

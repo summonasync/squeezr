@@ -33,10 +33,11 @@ public sealed record WatchStoreHealth(
     public static WatchStoreHealth Probe(
         string storeDir,
         DateTime utcNow,
-        Func<int, bool>? isProcessAlive = null)
+        Func<int, bool>? isProcessAlive = null,
+        WatchOwnerMarker? owner = null)
     {
         var probe = isProcessAlive ?? DaemonHeartbeatReader.IsProcessAlive;
-        var owner = WatchOwnerMarker.TryRead(storeDir);
+        owner ??= WatchOwnerMarker.TryRead(storeDir);
         var observers = 0;
         foreach (var beat in DaemonHeartbeatReader.TryReadAll(storeDir))
         {

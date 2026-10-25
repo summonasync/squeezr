@@ -50,7 +50,7 @@ public sealed class SpanExpander
 {
     public const int DefaultContextLines = 3;
 
-    public const int DefaultMaxTokens = 1000;
+    public const int DefaultMaxTokens = 1500;
 
     private readonly string _workspaceRoot;
 

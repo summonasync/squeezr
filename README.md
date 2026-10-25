@@ -945,10 +945,26 @@ project — `.claude/settings.json`):
 | `symbol_lookup` | `name` (required), `kind?`, `repo?`, `maxTokens?` (300) | the symbol's definition: signature, doc comment, `span`, body — if it fits the budget. When a type's body does not fit → `members` (name, kind, line) in the same budget + a `membersOmitted` counter: every line is a ready coordinate for `expand_span`, no more dead ends. Symbol not found → empty `data` + `didYouMean` (top-3 candidates by trigram-Jaccard, threshold 0.34), not an error |
 | `find_references` | `symbol` (required), `repo?` | every call site `{repo, file, line, kind, enclosingSymbol}` — `repo` on each row distinguishes byte-identical paths from different repositories (a checkout plus its worktree). Same-name definitions sharing one call list yield one row set, and the envelope carries additive `definitions` — `{repo, kind, file, startLine, endLine}` per declaration behind the collapsed rows (the same fields as `refs --json`). The field appears in exactly two cases: two or more same-name declarations share one call list, or the symbol has no calls at all (otherwise an empty `data` would say nothing about declarations); in other answers the field is absent and the envelope stays six-keyed. `definitions` is metadata of the collapsed rows: it does not count into `tokensUsed`, same as the CLI. enclosingSymbol is captured by Roslyn at index time (exact, partial classes included); for indexes built before capture the value is inferred from symbol spans (a fallback inference). Symbol not found → tool error (like `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (required), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | the span's lines + context from the live file on disk (sees edits made after indexing). The only tool that returns source lines |
+| `code_pack` | `name` (required), `repo?`, `kind?`, `maxTokens?` (2000) | the task-shaped front door: one call answers "what is this symbol and who touches it" — definition (signature, doc comment, `span`), the defining member's body (`bodyLines`, or the `members` mode for oversized types), every caller as `{repo, file, line, kind, enclosingSymbol}`, trust signals (`guardWarnings`, `laggingDeclarations`, `additionalMatches`), and the per-file `cost` block. Budget order: definition and body spend first, callers truncate — `withheldCallers` counts what did not fit, `complete:false` names it. Measured live on a 2.6k-file store: ~2.3× faster than the equivalent `symbol_lookup` → `expand_span` → `find_references` chain (one store session instead of three; the ratio narrows on bigger stores — the saved overhead is constant). Prefer the per-tool calls when you need only one of the three answers — the pack buys breadth, not depth |
 | `index_status` | — | freshness: index age, per-repo file/symbol/chunk counters, the `kindChunks` block (chunk counts per kind: `code`/`docs`; the values sum to the per-repo chunks counts), the `ignored: { files, bySource }` block per repo (excluded files broken down by source: defaults/config/squeezrignore/gitignore; zero-count sources absent), pending embeddings and `embeddings.coverage` (the embedded share of chunks, 0..1; `null` when there is nothing to embed), Qdrant availability, the workspace `rootPath` (if it is not your project's root, this session is looking into a foreign workspace). When exclusions exist, `warnings` name the dominant source and how to turn it off. When ranking is curated, `warnings` list the active `indexing.rankExclude` patterns. **Additive (035 contract):** if the registry holds two or more workspaces, `data` carries `workspaces` — an array of `{ name, rootPath, storeKey, current, stale }` (at most 12 rows, the current session's row first; the rest counted in `workspacesOmitted`). With one workspace neither key exists, and the `data` output matches the old one byte for byte — existing fields are neither renamed nor removed |
 
 All tools have a default token budget (see the table); on `truncated: true`
 narrow the query (`repo`, `kind`) or raise `maxTokens` explicitly.
+
+### Freshness
+
+Tools that name files answer with a per-file verdict, not a gut feeling: the
+additive `fileFreshness` block carries `{repo, path, verdict, lagSeconds?}` —
+`fresh` (the index knows the file's current state), `lagging` (the disk has
+moved past the index; the lag is named where the clock shows it), `unknown`
+(the read path never classified it). The projection is a stat against the
+indexed stamp (~6 ms per answer on the largest store), while the freshness
+guard stays the content-exact authority — a file it refreshed inline reads
+`fresh` afterwards, and one whose inline refresh failed stays `lagging` even
+when its mtime reads young. A live watcher on the store is named in the same
+answer (`active writer on this store: pid N, watch beat Ns old`) so a verdict
+about to flip is never mistaken for a settled one; `index_status` and
+`repo_map` aggregate rather than name files and say so in `warnings`.
 
 ### Navigation flow
 
@@ -1321,7 +1337,12 @@ path either does it or journals it and reports the count.
 "But does it actually save?" — `squeezr stats` answers with numbers, not
 promises. Every navigation command (CLI: `search`/`symbol`/`refs`/`map`/
 `expand`; MCP: all six tools) appends one telemetry line to `queries.jsonl`
-in the workspace store, and stats rolls it into a summary:
+in the workspace store, and stats rolls it into a summary. MCP answers
+carry the same arithmetic in their own envelope: the additive `cost` block
+(`tokensUsed`, `baselineTokens`, `savedTokens`, `ratio`, `complete`) shows
+the whole-file price of the returned files at the moment of the call, and
+telemetry records that same per-call `baselineTokens`, so the dashboard
+and the transcript cannot disagree:
 
 ```bash
 squeezr stats           # per-tool table + savings + cache
