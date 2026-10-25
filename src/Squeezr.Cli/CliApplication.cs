@@ -39,6 +39,8 @@ public static class CliApplication
                 .WithDescription("Exact substring or regex search over the trigram index");
             config.AddCommand<RankEvalCommand>("rank-eval")
                 .WithDescription("Score ranking quality: run a golden query set through hybrid search, report MRR@10/P@5/Recall@10");
+            config.AddCommand<DoctorCommand>("doctor")
+                .WithDescription("One-point diagnosis: workspaces, services, daemons, orphans — findings with remedy hints, never repairs");
             config.AddCommand<SymbolCommand>("symbol")
                 .WithDescription("Exact symbol lookup: signature, doc-comment, file:span");
             config.AddCommand<RefsCommand>("refs")
