@@ -65,6 +65,41 @@ public class ToolEnvelopeTests
     }
 
     [Fact]
+    public void Serialize_WithoutFreshness_FieldAbsent_Regression()
+    {
+        var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true);
+
+        var json = JsonSerializer.Serialize(envelope);
+        using var document = JsonDocument.Parse(json);
+
+        document.RootElement.TryGetProperty("fileFreshness", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Serialize_FileFreshness_AfterCost_WithVerdictVocabulary()
+    {
+        var freshness = new[]
+        {
+            new Squeezr.Core.Indexing.FileFreshness("demo", "a.cs", "fresh", null),
+            new Squeezr.Core.Indexing.FileFreshness("demo", "b.cs", "lagging", 42),
+        };
+
+        var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true, fileFreshness: freshness);
+
+        var json = JsonSerializer.Serialize(envelope);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        root.EnumerateObject().Select(p => p.Name).ShouldBe(
+            ["data", "tokensUsed", "truncated", "warnings", "indexAge", "staleFiles", "cost", "fileFreshness"]);
+        var rows = root.GetProperty("fileFreshness").EnumerateArray().ToList();
+        rows[0].GetProperty("verdict").GetString().ShouldBe("fresh");
+        rows[0].TryGetProperty("lagSeconds", out _).ShouldBeFalse();
+        rows[1].GetProperty("verdict").GetString().ShouldBe("lagging");
+        rows[1].GetProperty("lagSeconds").GetInt64().ShouldBe(42);
+    }
+
+    [Fact]
     public void Wrap_DefaultCost_UnknownNullsAndCompleteMatchesTruncation()
     {
         var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true);

@@ -251,8 +251,9 @@ public class McpMapExpandToolsTests
             result.IsError.ShouldNotBe(true);
             var envelope = ParseEnvelope(result);
             var keys = envelope.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray();
-            expectedKeys ??= keys;
-            keys.ShouldBe(expectedKeys);
+            var withoutOptional = keys.Where(k => k != "fileFreshness").ToArray();
+            expectedKeys ??= withoutOptional;
+            withoutOptional.ShouldBe(expectedKeys);
 
             envelope.GetProperty("tokensUsed").GetInt32().ShouldBeGreaterThanOrEqualTo(0);
             envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();

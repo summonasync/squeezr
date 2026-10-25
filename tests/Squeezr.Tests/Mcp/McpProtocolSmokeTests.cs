@@ -100,7 +100,9 @@ public class McpProtocolSmokeTests
 
         foreach (var envelope in envelopes)
         {
-            envelope.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal)
+            envelope.EnumerateObject().Select(p => p.Name)
+                .Where(n => n != "fileFreshness")
+                .OrderBy(n => n, StringComparer.Ordinal)
                 .ShouldBe(expectedKeys);
             envelope.GetProperty("data").ValueKind.ShouldNotBe(JsonValueKind.Null);
             envelope.GetProperty("warnings").ValueKind.ShouldBe(JsonValueKind.Array);

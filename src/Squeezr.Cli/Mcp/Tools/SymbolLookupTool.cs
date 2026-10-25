@@ -97,8 +97,12 @@ public sealed class SymbolLookupTool
                     : m.Members.Select(member => new SymbolMemberData(member.Name, member.Kind, member.Line)).ToList(),
                 m.MembersOmitted)).ToList();
 
+            var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
             var (cost, unknownBaselineFiles) = CostBaseline.Measure(
-                root, data.Select(d => (d.Repo, d.File)).ToList(), result.TokensUsed, !result.Truncated);
+                root, namedFiles, result.TokensUsed, !result.Truncated);
+            var fileFreshness = namedFiles.Count > 0
+                ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
+                : null;
             if (unknownBaselineFiles > 0)
             {
                 warnings.Add(
@@ -106,7 +110,7 @@ public sealed class SymbolLookupTool
             }
 
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale,
-                result.DidYouMean, cost: cost);
+                result.DidYouMean, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                 result.TokensUsed, result.Truncated, data.Count,

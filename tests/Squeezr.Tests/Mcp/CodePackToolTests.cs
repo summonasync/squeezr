@@ -86,6 +86,42 @@ public class CodePackToolTests
         line.GetProperty("baselineTokens").GetInt64().ShouldBeGreaterThan(0);
     }
 
+    [Fact]
+    public async Task CodePack_NotFound_NamesItInsteadOfPosing()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "code_pack",
+            new Dictionary<string, object?> { ["name"] = "Nope" },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        envelope.GetProperty("warnings").EnumerateArray()
+            .Select(w => w.GetString()!)
+            .ShouldContain(w => w.Contains("No symbol named 'Nope' found"));
+        envelope.GetProperty("cost").TryGetProperty("baselineTokens", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task CodePack_TruncatedLookup_SuppressesDidYouMean()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "code_pack",
+            new Dictionary<string, object?> { ["name"] = "MaterializationServce", ["maxTokens"] = 1 },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.TryGetProperty("didYouMean", out _).ShouldBeFalse();
+    }
+
     private static int FullLookupTokens(string workspace, string name) =>
         new Squeezr.Core.Indexing.Navigation.SymbolPackComposer(workspace)
             .Compose(name, null, null, 2000).LookupTokens;
@@ -127,6 +163,17 @@ public class CodePackToolTests
                 public int Go()
                 {
                     return new Calc().Add(1, 2);
+                }
+            }
+            """);
+        WriteFile(workspace, "repo/src/Materializer.cs", """
+            namespace Demo;
+
+            public class Materializer
+            {
+                public string Flatten(string input)
+                {
+                    return input.Trim();
                 }
             }
             """);

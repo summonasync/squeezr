@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -27,7 +28,7 @@ public sealed class CodePackTool
         _identity = identity;
     }
 
-    [Description("Answer \"what is this symbol and who touches it\" in ONE call: definition (signature, doc comment, file:span), the defining member's body within the budget, every caller as file:line rows, and per-file cost — instead of chaining symbol_lookup → expand_span → find_references. Budget order: definition and body spend first, callers truncate (the withheld count is in the response). complete:false names the way out; expand_span reads the exact lines around any coordinate. Per-tool exactness stays available: symbol_lookup, find_references and expand_span keep their contracts.")]
+    [Description("Answer \"what is this symbol and who touches it\" in ONE call: definition (signature, doc comment, file:span), the defining member's body within the budget (maxTokens default 2000), every caller as file:line rows, and per-file cost — instead of chaining symbol_lookup → expand_span → find_references. Budget order: definition and body spend first, callers truncate (the withheld count is in the response). complete:false names the way out; expand_span reads the exact lines around any coordinate. Per-tool exactness stays available: symbol_lookup, find_references and expand_span keep their contracts.")]
     [McpServerTool(Name = "code_pack", Title = "Code pack")]
     public object Pack(
         string name,
@@ -44,7 +45,14 @@ public sealed class CodePackTool
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
             var budget = maxTokens ?? DefaultMaxTokens;
-            var parameters = new { name, repo, kind, maxTokens = budget };
+            var parameters = new
+            {
+                name,
+                repo,
+                kind,
+                maxTokens = budget,
+                secretGuardExtra = SecretGuardReader.Load(root).ExtraPatterns,
+            };
             if (_cache is not null && _cache.TryGet("code_pack", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -59,6 +67,11 @@ public sealed class CodePackTool
             var warnings = new List<string>();
             var pack = new SymbolPackComposer(root).Compose(name, repo, kind, budget);
 
+            if (pack.File.Length == 0)
+            {
+                warnings.Add($"No symbol named '{name}' found — use code_search for paraphrase queries.");
+            }
+
             if (pack.WithheldCallers > 0)
             {
                 warnings.Add(
@@ -67,13 +80,24 @@ public sealed class CodePackTool
 
             if (pack.LookupTruncated)
             {
-                warnings.Add("the definition itself exceeded the budget — raise maxTokens");
+                warnings.Add(HintText.TruncationLine(pack.LookupTokens, budget, "raise maxTokens"));
             }
 
             var tokens = pack.LookupTokens + pack.CallerTokens;
-            var files = new List<(string Repo, string Path)> { (pack.Repo, pack.File) };
-            files.AddRange(pack.Callers.Select(c => (c.Repo, c.File)));
-            var (cost, unknownBaselineFiles) = CostBaseline.Measure(root, files, tokens, pack.Complete);
+            AnswerCost cost;
+            IReadOnlyList<FileFreshness>? fileFreshness = null;
+            var unknownBaselineFiles = 0;
+            if (pack.File.Length > 0)
+            {
+                var files = new List<(string Repo, string Path)> { (pack.Repo, pack.File) };
+                files.AddRange(pack.Callers.Select(c => (c.Repo, c.File)));
+                (cost, unknownBaselineFiles) = CostBaseline.Measure(root, files, tokens, pack.Complete);
+                fileFreshness = FreshnessVerdict.Classify(root, files);
+            }
+            else
+            {
+                cost = AnswerCost.Unknown(tokens, pack.Complete);
+            }
             if (unknownBaselineFiles > 0)
             {
                 warnings.Add(
@@ -105,14 +129,17 @@ public sealed class CodePackTool
                 pack.GuardWarnings.Count == 0 ? null : pack.GuardWarnings);
 
             var envelope = ToolEnvelope.Wrap(data, tokens, !pack.Complete, warnings, root, staleFiles: null,
-                didYouMean: pack.LookupTruncated ? null : pack.DidYouMean, cost: cost);
+                didYouMean: pack.LookupTruncated ? null : pack.DidYouMean, cost: cost,
+                fileFreshness: fileFreshness);
+            var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_pack", parameters,
                 envelope.TokensUsed, envelope.Truncated, pack.Callers.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                cacheInvalidated: invalidated is not null,
                 baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("code_pack", parameters, envelope);
-            return envelope;
+            return envelope.WithWarning(invalidated);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
         {

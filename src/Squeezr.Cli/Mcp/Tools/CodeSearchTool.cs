@@ -113,8 +113,12 @@ public sealed class CodeSearchTool
                 m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet,
                 m.AlsoMatched == 0 ? null : m.AlsoMatched)).ToList();
 
+            var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
             var (cost, unknownBaselineFiles) = CostBaseline.Measure(
-                root, data.Select(d => (d.Repo, d.File)).ToList(), response.TokensUsed, !response.Truncated);
+                root, namedFiles, response.TokensUsed, !response.Truncated);
+            var fileFreshness = namedFiles.Count > 0
+                ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
+                : null;
             if (unknownBaselineFiles > 0)
             {
                 warnings.Add(
@@ -122,7 +126,7 @@ public sealed class CodeSearchTool
             }
 
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
-                freshness.Stale, cost: cost);
+                freshness.Stale, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 response.TokensUsed, response.Truncated, data.Count,

@@ -80,8 +80,13 @@ public sealed class FindReferencesTool
                 warnings.Add(LaggingWarning(lagging));
             }
 
+            var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
             var (cost, unknownBaselineFiles) = CostBaseline.Measure(
-                root, data.Select(d => (d.Repo, d.File)).ToList(), tokensUsed, true);
+                root, namedFiles, tokensUsed, true);
+            var fileFreshness = namedFiles.Count > 0
+                ? FreshnessVerdict.Classify(root, namedFiles,
+                    guardStaleKeys: MergeStale(freshness.Stale, lagging))
+                : null;
             if (unknownBaselineFiles > 0)
             {
                 warnings.Add(
@@ -89,7 +94,7 @@ public sealed class FindReferencesTool
             }
 
             var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, MergeStale(freshness.Stale, lagging),
-                definitions: definitions, cost: cost);
+                definitions: definitions, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                 tokensUsed, false, data.Count,
