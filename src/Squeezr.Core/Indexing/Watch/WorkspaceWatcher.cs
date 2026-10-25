@@ -470,8 +470,12 @@ public sealed class WorkspaceWatcher
         {
             try
             {
+                var heartbeat = _heartbeat;
+                var progress = heartbeat is null
+                    ? _progress
+                    : new WatchActivityProgress(heartbeat, _progress);
                 var result = _indexer.Index(
-                    _workspaceRoot, progress: _progress, onStaleTakeover: _onStaleTakeover,
+                    _workspaceRoot, progress: progress, onStaleTakeover: _onStaleTakeover,
                     changedPaths: batch, sessions: _sessions,
                     embeddings: runtime?.Provider, vectorStore: runtime?.Store,
                     embeddingProviderResolution: runtime?.Resolution,
@@ -514,6 +518,7 @@ public sealed class WorkspaceWatcher
             }
             catch (WorkspaceLockedException)
             {
+                _heartbeat?.ClearActivity();
                 _status?.RetryScheduled(backoff);
             }
             catch (VectorDimensionMismatchException ex)
