@@ -18,7 +18,7 @@ public static class ScopedVectorBudget
             return Ceiling;
         }
 
-        var scaled = (int)((BaseTopK * (long)universeFiles + inScopeFiles - 1) / inScopeFiles);
-        return Math.Min(Ceiling, Math.Max(BaseTopK, scaled));
+        var scaled = (int)Math.Min(Ceiling, (BaseTopK * (long)universeFiles + inScopeFiles - 1) / inScopeFiles);
+        return Math.Max(BaseTopK, scaled);
     }
 }
