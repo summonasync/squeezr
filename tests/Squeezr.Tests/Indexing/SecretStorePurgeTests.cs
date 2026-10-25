@@ -492,6 +492,12 @@ public class SecretStorePurgeTests
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([]);
 
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
+
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {
             Deleted.AddRange(fileIds);
@@ -517,7 +523,7 @@ public class SecretStorePurgeTests
             foreach (var fileId in fileIds)
             {
                 _points[_nextId] = new VectorPoint(
-                    _nextId, [0.1f, 0.2f, 0.3f, 0.4f], $"seeded-{_nextId}", fileId, 1, 1, 2);
+                    _nextId, [0.1f, 0.2f, 0.3f, 0.4f], $"seeded-{_nextId}", fileId, 1, 1, 2, DocKindDetector.Code);
                 _nextId++;
             }
         }
@@ -548,6 +554,12 @@ public class SecretStorePurgeTests
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([.. _points.Keys]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {

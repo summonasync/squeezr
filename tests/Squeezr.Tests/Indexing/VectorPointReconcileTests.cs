@@ -289,7 +289,7 @@ public class VectorPointReconcileTests
         foreach (var hash in chunkHashes)
         {
             var id = ChunkPointId.FromHash(hash);
-            vectorStore.Points[id] = new VectorPoint(id, [0.25f, 0.5f, 0.75f, 1f], hash, 4242, 1, 3, 9);
+            vectorStore.Points[id] = new VectorPoint(id, [0.25f, 0.5f, 0.75f, 1f], hash, 4242, 1, 3, 9, DocKindDetector.Code);
         }
     }
 
@@ -375,6 +375,12 @@ public class VectorPointReconcileTests
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>(Points.Keys.ToList());
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {

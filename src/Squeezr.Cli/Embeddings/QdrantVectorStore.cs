@@ -72,20 +72,40 @@ public sealed class QdrantVectorStore : IVectorStore
 
     public async Task EnsureCollectionAsync(int dimensions, CancellationToken ct)
     {
+        CollectionInfo? info = null;
         if (!await _client.CollectionExistsAsync(_collection, ct))
         {
             await _client.CreateCollectionAsync(
                 _collection,
                 new VectorParams { Size = (ulong)dimensions, Distance = Distance.Cosine },
                 cancellationToken: ct);
+        }
+        else
+        {
+            info = await _client.GetCollectionInfoAsync(_collection, ct);
+            var existing = info.Config.Params.VectorsConfig?.Params?.Size;
+            if (existing.HasValue && existing.Value != (ulong)dimensions)
+            {
+                throw new VectorDimensionMismatchException(_collection, existing.Value, dimensions);
+            }
+        }
+
+        if (info?.PayloadSchema?.ContainsKey("kind") == true)
+        {
             return;
         }
 
-        var info = await _client.GetCollectionInfoAsync(_collection, ct);
-        var existing = info.Config.Params.VectorsConfig?.Params?.Size;
-        if (existing.HasValue && existing.Value != (ulong)dimensions)
+        try
         {
-            throw new VectorDimensionMismatchException(_collection, existing.Value, dimensions);
+            await _client.CreatePayloadIndexAsync(
+                _collection,
+                "kind",
+                PayloadSchemaType.Keyword,
+                null,
+                cancellationToken: ct);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.AlreadyExists)
+        {
         }
     }
 
@@ -109,6 +129,7 @@ public sealed class QdrantVectorStore : IVectorStore
                         ["repoId"] = (long)p.RepoId,
                         ["startLine"] = (long)p.StartLine,
                         ["endLine"] = (long)p.EndLine,
+                        ["kind"] = p.Kind,
                     },
                 });
             }
@@ -194,6 +215,98 @@ public sealed class QdrantVectorStore : IVectorStore
         catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
         {
             return ids;
+        }
+    }
+
+    public async Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct)
+    {
+        var filter = new Filter
+        {
+            Must =
+            {
+                new Condition
+                {
+                    Field = new FieldCondition
+                    {
+                        Key = "repoId",
+                        Match = new Match { Integer = (long)repoId },
+                    },
+                },
+                new Condition
+                {
+                    IsEmpty = new IsEmptyCondition { Key = "kind" },
+                },
+            },
+        };
+
+        var fileIds = new HashSet<uint>();
+        PointId? offset = null;
+        try
+        {
+            while (true)
+            {
+                var page = await _client.ScrollAsync(
+                    _collection,
+                    filter,
+                    limit: ScrollPageSize,
+                    offset: offset,
+                    payloadSelector: new WithPayloadSelector { Enable = true },
+                    vectorsSelector: new WithVectorsSelector { Enable = false },
+                    cancellationToken: ct);
+                foreach (var point in page.Result)
+                {
+                    if (point.Payload.TryGetValue("fileId", out var value))
+                    {
+                        fileIds.Add((uint)value.IntegerValue);
+                    }
+                }
+
+                if (page.NextPageOffset is not { } next)
+                {
+                    return fileIds.ToList();
+                }
+
+                offset = next;
+            }
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        {
+            return fileIds.ToList();
+        }
+    }
+
+    public async Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct)
+    {
+        foreach (var group in kindByFileId.GroupBy(kv => kv.Value))
+        {
+            var fileIds = group.Select(kv => kv.Key).ToList();
+            for (var i = 0; i < fileIds.Count; i += BatchSize)
+            {
+                var batch = fileIds.Skip(i).Take(BatchSize).ToList();
+                var filter = new Filter
+                {
+                    Should =
+                    {
+                        new Condition
+                        {
+                            Field = new FieldCondition
+                            {
+                                Key = "fileId",
+                                Match = new Match
+                                {
+                                    Integers = new RepeatedIntegers { Integers = { batch.Select(id => (long)id) } },
+                                },
+                            },
+                        },
+                    },
+                };
+
+                await _client.SetPayloadAsync(
+                    _collection,
+                    new Dictionary<string, Value> { ["kind"] = group.Key },
+                    filter,
+                    cancellationToken: ct);
+            }
         }
     }
 

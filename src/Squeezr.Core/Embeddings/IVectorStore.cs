@@ -14,6 +14,10 @@ public interface IVectorStore
 
     Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct);
 
+    Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct);
+
+    Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct);
+
     Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct);
 
     Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct);
