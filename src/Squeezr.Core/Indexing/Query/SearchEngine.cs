@@ -66,7 +66,7 @@ public sealed class SearchEngine
                 ? []
                 : IdentifierTokenLeg.Execute(_workspaceRoot, store, reader, query, fileScope, guard);
         }
-        var semantic = new List<(string Key, SearchMatch Match)>();
+        var semantic = SemanticArm.Empty;
         var warnings = new List<string>();
 
         if (vectorStore is not null && embeddings is not null)
@@ -104,8 +104,8 @@ public sealed class SearchEngine
             .Concat(dedupedIdentifier)
             .Select(hit => (hit.Key!, hit.Match))
             .ToList();
-        var merged = RrfMerger.Merge(exactRanked, semantic);
-        var semanticScores = semantic.Select(hit => hit.Match.Score).ToList();
+        var merged = RrfMerger.Merge(exactRanked, semantic.Hits);
+        var semanticScores = semantic.Hits.Select(hit => hit.Match.Score).ToList();
         return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores);
     }
 

@@ -114,6 +114,8 @@ public sealed class MetaStore : IDisposable
 
     public int CountFiles(uint repoId) => _db.GetCollection<FileDocument>(FilesCollection).Count(f => f.RepoId == repoId);
 
+    public int CountAllFiles() => _db.GetCollection<FileDocument>(FilesCollection).Count();
+
     public uint GetNextFileId() => NextId(FilesCollection);
 
     public IReadOnlyList<SymbolDocument> ListSymbolsByFile(uint fileId) =>

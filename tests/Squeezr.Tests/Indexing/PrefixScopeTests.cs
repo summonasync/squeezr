@@ -220,7 +220,8 @@ public class PrefixScopeTests
         var engine = new SearchEngine(workspace);
 
         var scoped = Hybrid(engine, store, "src/");
-        store.LastTopK.ShouldBe(80);
+        store.LastTopK.ShouldBe(ScopedVectorBudget.For(2, 4));
+        store.LastTopK.ShouldBe(40);
         scoped.Matches.ShouldHaveSingleItem().Path.ShouldBe("src/Core/Alpha.cs");
 
         var unscoped = Hybrid(engine, store, null);

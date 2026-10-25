@@ -5,14 +5,7 @@ namespace Squeezr.Core.Indexing.Query;
 
 public static class SemanticHitsResolver
 {
-    private const int VectorTopK = 20;
-
-    // A scoped query drops out-of-scope hits post-hoc, so the vector query asks for more than
-    // VectorTopK to still fill the semantic arm; bounded, unlike a fileId must-match filter
-    // that would put the whole allowed set into the Qdrant payload.
-    private const int ScopedVectorTopK = VectorTopK * 4;
-
-    public static async Task<List<(string Key, SearchMatch Match)>> Resolve(
+    public static async Task<SemanticArm> Resolve(
         string workspaceRoot,
         SearchQuery query,
         IEmbeddingProvider embeddings,
@@ -29,7 +22,7 @@ public static class SemanticHitsResolver
             var repo = store.FindRepoIgnoringCase(query.Repo);
             if (repo is null)
             {
-                return [];
+                return SemanticArm.Empty;
             }
 
             repoId = repo.Id;
@@ -38,17 +31,21 @@ public static class SemanticHitsResolver
         var vectors = await embeddings.EmbedAsync([query.Query], EmbeddingUsage.Query, ct);
         if (vectors.Length == 0)
         {
-            return [];
+            return SemanticArm.Empty;
         }
 
+        var requestedTopK = fileScope is null
+            ? ScopedVectorBudget.BaseTopK
+            : ScopedVectorBudget.For(fileScope.Count, UniverseFiles(store, repoId));
         var hits = await vectorStore.SearchAsync(
             vectors[0],
-            fileScope is null ? VectorTopK : ScopedVectorTopK,
+            requestedTopK,
             new VectorSearchFilter(repoId, DocKindDetector.FilterKind(query.Kind)),
             ct);
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
 
         var result = new List<(string Key, SearchMatch Match)>();
+        var inScopeCandidates = 0;
         foreach (var hit in hits)
         {
             if (fileScope is not null && !fileScope.Contains(hit.FileId))
@@ -56,6 +53,7 @@ public static class SemanticHitsResolver
                 continue;
             }
 
+            inScopeCandidates++;
             if (!reposById.TryGetValue(hit.RepoId, out var repo))
             {
                 continue;
@@ -81,12 +79,15 @@ public static class SemanticHitsResolver
                     Source = "semantic"
                 }));
 
-            if (result.Count == VectorTopK)
+            if (result.Count == ScopedVectorBudget.BaseTopK)
             {
                 break;
             }
         }
 
-        return result;
+        return new SemanticArm(result, requestedTopK, hits.Count, inScopeCandidates);
     }
+
+    private static int UniverseFiles(MetaStore store, uint? repoId) =>
+        repoId is { } id ? store.CountFiles(id) : store.CountAllFiles();
 }

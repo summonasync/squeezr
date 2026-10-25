@@ -241,7 +241,7 @@ public class HybridSearchTests
             null,
             SecretGuardReader.Load(workspace));
 
-        var hit = hits.ShouldHaveSingleItem().Match;
+        var hit = hits.Hits.ShouldHaveSingleItem().Match;
         hit.Source.ShouldBe("semantic");
         hit.Line.ShouldBe(chunk.StartLine);
         hit.Snippet.ShouldStartWith("the planning slug carries slugmark for this fixture line");

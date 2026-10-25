@@ -207,7 +207,8 @@ public class RankExcludeTests
         var engine = new SearchEngine(workspace, RankExclusion.Load(workspace));
 
         var curated = Hybrid(engine, store);
-        store.LastTopK.ShouldBe(80);
+        store.LastTopK.ShouldBe(ScopedVectorBudget.For(3, 5));
+        store.LastTopK.ShouldBe(34);
         curated.Matches.Select(m => m.Path).ShouldNotContain("audits/Note.md");
         curated.Matches.ShouldContain(m => m.Path == "src/Core/Alpha.cs");
     }
