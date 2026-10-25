@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Serialization;
@@ -137,6 +138,48 @@ public sealed class DaemonHeartbeatActivityTests : IDisposable
 
         written.Count.ShouldBe(5, "a five-file pass must rewrite the beat only on the phase boundaries " +
             "and the completion, never once per item — the pass holds the store lock while it runs");
+    }
+
+    [Fact]
+    public void SetEmbeddingExecutor_EmbeddingsPhase_CarriesExecutorAndProvider()
+    {
+        using var writer = CreateWriter();
+        writer.Start();
+        writer.SetEmbeddingExecutor(new EmbeddingExecutor("gpu", null), "ollama");
+
+        writer.PhaseStarted("demo", IndexPhase.Embeddings, 9);
+
+        var activity = ReadBeat().ShouldNotBeNull().Activity.ShouldNotBeNull();
+        activity.Phase.ShouldBe("embeddings");
+        activity.Executor.ShouldBe("gpu");
+        activity.Provider.ShouldBe("ollama");
+    }
+
+    [Fact]
+    public void SetEmbeddingExecutor_NonEmbeddingPhase_LeavesTheExecutorOutOfTheBeat()
+    {
+        using var writer = CreateWriter();
+        writer.Start();
+        writer.SetEmbeddingExecutor(new EmbeddingExecutor("cpu", null), "onnx");
+
+        writer.PhaseStarted("demo", IndexPhase.Files, 5);
+
+        var text = ReadBeatText();
+        text.Contains("executor", StringComparison.Ordinal).ShouldBeFalse(
+            "only the embeddings phase answers where inference runs, walk and files stay shape-identical to T1");
+        ReadBeat().ShouldNotBeNull().Activity.ShouldNotBeNull().Executor.ShouldBeNull();
+    }
+
+    [Fact]
+    public void OldActivity_ShapeWithoutExecutor_ReadsDefaultsForTheNewFields()
+    {
+        var legacy = JsonSerializer.Deserialize<DaemonActivity>(
+            """{"phase":"embeddings","repo":"demo","doneItems":0,"totalItems":9,"currentItem":null,"phaseStartedAt":"2026-10-25T12:00:00Z"}""",
+            SqueezrJson.FileOptions);
+
+        legacy.ShouldNotBeNull();
+        legacy.Executor.ShouldBeNull();
+        legacy.Provider.ShouldBeNull();
     }
 
     [Fact]

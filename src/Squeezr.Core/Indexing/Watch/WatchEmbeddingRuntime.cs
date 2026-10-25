@@ -13,5 +13,25 @@ public sealed record WatchEmbeddingRuntime(
     IVectorStore Store,
     EmbeddingProviderResolution? Resolution)
 {
+    private EmbeddingExecutor? _executor;
+
     public string ProviderName => Resolution?.Provider ?? "unknown";
+
+    public EmbeddingExecutor Executor => _executor ??= Provider is IEmbeddingExecutorEvidence evidenced
+        ? ProbeEvidenced(evidenced)
+        : new EmbeddingExecutor("unknown", $"provider '{ProviderName}' offers no executor evidence");
+
+    // The seam owns the failure: an evidence source is expected to degrade on its own, but a future one
+    // that throws must cost the verdict, never the pass that reads it.
+    private static EmbeddingExecutor ProbeEvidenced(IEmbeddingExecutorEvidence evidenced)
+    {
+        try
+        {
+            return evidenced.ProbeExecutor();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            return new EmbeddingExecutor("unknown", $"executor evidence failed: {ex.Message}");
+        }
+    }
 }

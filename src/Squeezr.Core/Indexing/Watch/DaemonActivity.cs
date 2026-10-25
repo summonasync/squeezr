@@ -6,4 +6,6 @@ public sealed record DaemonActivity(
     int DoneItems,
     int TotalItems,
     string? CurrentItem,
-    DateTime PhaseStartedAt);
+    DateTime PhaseStartedAt,
+    string? Executor = null,
+    string? Provider = null);

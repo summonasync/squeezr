@@ -6,7 +6,7 @@ using Squeezr.Core.Embeddings;
 
 namespace Squeezr.Cli.Embeddings;
 
-public sealed class OpenAiCompatibleEmbeddingProvider : IEmbeddingProvider
+public sealed class OpenAiCompatibleEmbeddingProvider : IEmbeddingProvider, IEmbeddingExecutorEvidence
 {
     private const int MaxAttempts = 3;
     private const int BaseDelayMs = 200;
@@ -27,6 +27,8 @@ public sealed class OpenAiCompatibleEmbeddingProvider : IEmbeddingProvider
         _http.BaseAddress = new Uri(options.Endpoint.TrimEnd('/') + "/");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
     }
+
+    public EmbeddingExecutor ProbeExecutor() => new("remote", null);
 
     public async Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage = EmbeddingUsage.Document, CancellationToken ct = default)
     {

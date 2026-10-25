@@ -385,6 +385,11 @@ public sealed class WorkspaceWatcher
     {
         _status?.PassStarted(batch.Count);
         var runtime = await ResolveRuntimeAsync(cancellationToken).ConfigureAwait(false);
+        if (runtime is not null)
+        {
+            _heartbeat?.SetEmbeddingExecutor(runtime.Executor, runtime.ProviderName);
+        }
+
         var storeDir = SqueezrPaths.StoreDir(_workspaceRoot);
         var passStart = DateTime.UtcNow;
         PassPhaseStampFile.Write(storeDir, new PassPhaseStamp(
