@@ -935,6 +935,21 @@ project — `.claude/settings.json`):
 All tools have a default token budget (see the table); on `truncated: true`
 narrow the query (`repo`, `kind`) or raise `maxTokens` explicitly.
 
+### Freshness
+
+Tools that name files answer with a per-file verdict, not a gut feeling: the
+additive `fileFreshness` block carries `{repo, path, verdict, lagSeconds?}` —
+`fresh` (the index knows the file's current state), `lagging` (the disk has
+moved past the index; the lag is named where the clock shows it), `unknown`
+(the read path never classified it). The projection is a stat against the
+indexed stamp (~6 ms per answer on the largest store), while the freshness
+guard stays the content-exact authority — a file it refreshed inline reads
+`fresh` afterwards, and one whose inline refresh failed stays `lagging` even
+when its mtime reads young. A live watcher on the store is named in the same
+answer (`active writer on this store: pid N, watch beat Ns old`) so a verdict
+about to flip is never mistaken for a settled one; `index_status` and
+`repo_map` aggregate rather than name files and say so in `warnings`.
+
 ### Navigation flow
 
 A two-tier output: tools give coordinates, code opens only through
