@@ -48,4 +48,68 @@ public class ToolEnvelopeTests
         envelope.IndexAge.ShouldNotBeNull();
         envelope.IndexAge!.Value.ShouldBeGreaterThan(TimeSpan.Zero);
     }
+
+    [Fact]
+    public void Serialize_CostIsLastField_WithFiveMembersInOrder()
+    {
+        var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true, ["w1"]);
+
+        var json = JsonSerializer.Serialize(envelope);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        root.EnumerateObject().Select(p => p.Name).ShouldBe(
+            ["data", "tokensUsed", "truncated", "warnings", "indexAge", "staleFiles", "cost"]);
+        root.GetProperty("cost").EnumerateObject().Select(p => p.Name).ShouldBe(
+            ["tokensUsed", "baselineTokens", "savedTokens", "ratio", "complete"]);
+    }
+
+    [Fact]
+    public void Wrap_DefaultCost_UnknownNullsAndCompleteMatchesTruncation()
+    {
+        var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true);
+
+        envelope.Cost.ShouldNotBeNull();
+        envelope.Cost.TokensUsed.ShouldBe(7);
+        envelope.Cost.BaselineTokens.ShouldBeNull();
+        envelope.Cost.SavedTokens.ShouldBeNull();
+        envelope.Cost.Ratio.ShouldBeNull();
+        envelope.Cost.Complete.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Wrap_UntruncatedZeroHits_CostIsComplete()
+    {
+        var envelope = ToolEnvelope.Wrap(null, 0, false);
+
+        envelope.Truncated.ShouldBeFalse();
+        envelope.Cost.Complete.ShouldBeTrue();
+        envelope.Cost.Ratio.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Wrap_ExplicitCost_NormalizedToEnvelopeTruncation()
+    {
+        var cost = AnswerCost.Measured(99, 100, true);
+
+        var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true, cost: cost);
+
+        envelope.Cost.TokensUsed.ShouldBe(7);
+        envelope.Cost.Complete.ShouldBeFalse();
+        envelope.Cost.BaselineTokens.ShouldBe(100L);
+    }
+
+    [Fact]
+    public void Measured_SavedIsDifference_RatioNullAtZeroTokens()
+    {
+        var cost = AnswerCost.Measured(40, 110, true);
+
+        cost.BaselineTokens.ShouldBe(110L);
+        cost.SavedTokens.ShouldBe(70L);
+        cost.Ratio.ShouldBe(2.75);
+        cost.Complete.ShouldBeTrue();
+
+        var zero = AnswerCost.Measured(0, 110, true);
+        zero.Ratio.ShouldBeNull();
+    }
 }

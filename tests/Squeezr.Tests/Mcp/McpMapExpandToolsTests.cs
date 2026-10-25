@@ -256,7 +256,7 @@ public class McpMapExpandToolsTests
             envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
         }
 
-        expectedKeys!.ShouldBe(["data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"]);
+        expectedKeys!.ShouldBe(["cost", "data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"]);
     }
 
     private static JsonElement ParseEnvelope(CallToolResult result)

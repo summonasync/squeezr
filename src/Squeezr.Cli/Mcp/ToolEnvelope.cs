@@ -13,7 +13,8 @@ public sealed record ToolEnvelope(
     [property: JsonPropertyName("didYouMean"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? DidYouMean = null,
     [property: JsonPropertyName("definitions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<RefDefinitionData>? Definitions = null)
+    IReadOnlyList<RefDefinitionData>? Definitions = null,
+    [property: JsonPropertyName("cost")] AnswerCost? Cost = null)
 {
     public static ToolEnvelope Wrap(
         object? data,
@@ -23,9 +24,13 @@ public sealed record ToolEnvelope(
         string? workspaceRoot = null,
         IReadOnlyList<string>? staleFiles = null,
         IReadOnlyList<string>? didYouMean = null,
-        IReadOnlyList<RefDefinitionData>? definitions = null) =>
-        new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [], didYouMean,
-            definitions);
+        IReadOnlyList<RefDefinitionData>? definitions = null,
+        AnswerCost? cost = null)
+    {
+        var resolved = cost ?? AnswerCost.Unknown(tokensUsed, !truncated);
+        return new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [],
+            didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = !truncated });
+    }
 
     public ToolEnvelope WithWarning(string? warning) =>
         warning is null ? this : this with { Warnings = [.. Warnings, warning] };

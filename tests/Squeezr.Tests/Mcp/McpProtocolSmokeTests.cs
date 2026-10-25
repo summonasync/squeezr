@@ -72,7 +72,7 @@ public class McpProtocolSmokeTests
         var workspace = NewSmokeWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        string[] expectedKeys = ["data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"];
+        string[] expectedKeys = ["cost", "data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"];
 
         var search = await CallTool(harness, "code_search", new Dictionary<string, object?> { ["query"] = Needle });
         var searchEnvelope = ParseEnvelope(search);
