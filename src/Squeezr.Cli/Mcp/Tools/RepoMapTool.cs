@@ -70,12 +70,19 @@ public sealed class RepoMapTool
                 warnings.AddRange(withheld);
             }
 
-            if (result.Hint is not null)
+            if (result.Truncated)
             {
-                warnings.Add(result.Hint.ForMcp());
+                warnings.Add(HintText.TruncationLine(
+                    result.TokensUsed,
+                    resolvedMaxTokens,
+                    result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
             }
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();
+
+            warnings.Add(
+                "repo_map renders the tree structurally — per-file freshness is not attached to map lines; " +
+                "code_search or code_pack carries the verdict for a file you are about to open");
 
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
             var invalidated = _cache?.TakeInvalidationWarning();

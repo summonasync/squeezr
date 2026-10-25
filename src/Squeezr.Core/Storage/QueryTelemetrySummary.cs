@@ -60,7 +60,11 @@ public static class QueryTelemetrySummary
             .OrderBy(t => t.Tool, StringComparer.Ordinal)
             .ToList();
 
-        var (counterfactual, unknownFiles, guardWarnings) = EstimateCounterfactual(entries, workspaceRoot);
+        var withBaseline = entries.Where(e => e.BaselineTokens is not null).ToList();
+        var legacy = entries.Where(e => e.BaselineTokens is null).ToList();
+        var recorded = withBaseline.Sum(e => e.BaselineTokens!.Value);
+        var (fallback, unknownFiles, guardWarnings) = EstimateCounterfactual(legacy, workspaceRoot);
+        var counterfactual = recorded + fallback;
         var actual = entries.Sum(e => (long)e.TokensUsed);
         var saved = Math.Max(0, counterfactual - actual);
         var ratio = counterfactual == 0 || actual == 0 ? 0 : counterfactual / (double)actual;
@@ -178,7 +182,7 @@ public static class QueryTelemetrySummary
                 continue;
             }
 
-            counterfactual += Math.Max(1, (int)Math.Ceiling(indexed.SizeBytes / 4.0 * 1.1));
+            counterfactual += TokenEstimate.WholeFile(indexed.SizeBytes);
         }
 
         return (counterfactual, unknownFiles, guard.Warnings);

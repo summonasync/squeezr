@@ -29,7 +29,7 @@ public class McpProtocolSmokeTests
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
 
         tools.Select(t => t.Name).OrderBy(n => n, StringComparer.Ordinal)
-            .ShouldBe(["code_search", "expand_span", "find_references", "index_status", "repo_map", "symbol_lookup"]);
+            .ShouldBe(["code_pack", "code_search", "expand_span", "find_references", "index_status", "repo_map", "symbol_lookup"]);
         foreach (var tool in tools)
         {
             tool.Description.ShouldNotBeNullOrWhiteSpace($"{tool.Name} must expose a non-empty description");
@@ -72,7 +72,7 @@ public class McpProtocolSmokeTests
         var workspace = NewSmokeWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        string[] expectedKeys = ["data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"];
+        string[] expectedKeys = ["cost", "data", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"];
 
         var search = await CallTool(harness, "code_search", new Dictionary<string, object?> { ["query"] = Needle });
         var searchEnvelope = ParseEnvelope(search);
@@ -100,7 +100,9 @@ public class McpProtocolSmokeTests
 
         foreach (var envelope in envelopes)
         {
-            envelope.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal)
+            envelope.EnumerateObject().Select(p => p.Name)
+                .Where(n => n != "fileFreshness")
+                .OrderBy(n => n, StringComparer.Ordinal)
                 .ShouldBe(expectedKeys);
             envelope.GetProperty("data").ValueKind.ShouldNotBe(JsonValueKind.Null);
             envelope.GetProperty("warnings").ValueKind.ShouldBe(JsonValueKind.Array);

@@ -7,5 +7,5 @@ public static class CacheEligibleTools
     // would only inflate the hit-rate denominator. CacheEligibleToolsGuardTests ties this list to the tools
     // that actually hold a ToolResponseCache.
     public static bool Includes(string tool) =>
-        tool is "code_search" or "symbol_lookup" or "repo_map" or "find_references";
+        tool is "code_search" or "symbol_lookup" or "repo_map" or "find_references" or "code_pack";
 }

@@ -120,6 +120,10 @@ public sealed class IndexStatusTool
                 BuildWorkspaceRows(siblings),
                 siblings.Omitted);
 
+            warnings.Add(
+                "per-file freshness is not part of this aggregate report — fileFreshness rides the answers of the " +
+                "file-naming tools (code_search, symbol_lookup, find_references, expand_span, code_pack)");
+
             var envelope = ToolEnvelope.Wrap(data, 0, false, warnings, root, staleFiles: null);
             QueryTelemetry.Record(root, _workspace.SessionId, "index_status",
                 null, envelope.TokensUsed, envelope.Truncated, 1,

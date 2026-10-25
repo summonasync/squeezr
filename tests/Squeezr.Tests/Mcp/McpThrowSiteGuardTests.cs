@@ -57,9 +57,9 @@ public sealed partial class McpThrowSiteGuardTests
     {
         var sites = McpSourceFiles().SelectMany(ErrorCallSites).ToList();
 
-        sites.Count.ShouldBe(6,
-            "the MCP error envelope has exactly six producers; a new tool must be wired and counted here");
-        sites.Select(site => site.Name).Distinct().Count().ShouldBe(6);
+        sites.Count.ShouldBe(7,
+            "the MCP error envelope has exactly seven producers; a new tool must be wired and counted here");
+        sites.Select(site => site.Name).Distinct().Count().ShouldBe(7);
 
         sites.Where(site => !IsWiredToWorkspace(site.Arguments))
             .Select(site => $"{site.Name}:{site.Line}: ToolErrors.From({string.Join(", ", site.Arguments)})")

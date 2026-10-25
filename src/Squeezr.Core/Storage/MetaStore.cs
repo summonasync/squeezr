@@ -49,6 +49,7 @@ public sealed class MetaStore : IDisposable
         }
         _db.GetCollection(ReposCollection).EnsureIndex("name", unique: true);
         _db.GetCollection(FilesCollection).EnsureIndex("repoId");
+        _db.GetCollection(FilesCollection).EnsureIndex("path");
         _db.GetCollection(SymbolsCollection).EnsureIndex("fileId");
         _db.GetCollection(SymbolsCollection).EnsureIndex("repoId");
         _db.GetCollection(RefsCollection).EnsureIndex("fromSymbolId");
@@ -106,6 +107,11 @@ public sealed class MetaStore : IDisposable
         _db.GetCollection<FileDocument>(FilesCollection).FindAll().OrderBy(f => f.Id).ToList();
 
     public FileDocument? FindFileById(uint id) => _db.GetCollection<FileDocument>(FilesCollection).FindById((long)id);
+
+    public FileDocument? FindFile(uint repoId, string path) =>
+        _db.GetCollection<FileDocument>(FilesCollection)
+            .Find(f => f.Path == path)
+            .FirstOrDefault(f => f.RepoId == repoId);
 
     public void UpsertFile(FileDocument file) => _db.GetCollection<FileDocument>(FilesCollection).Upsert(file);
 
