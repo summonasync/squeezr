@@ -1,4 +1,5 @@
 using Shouldly;
+using LiteDB;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -12,6 +13,7 @@ namespace Squeezr.Tests.Storage;
 public class MetaStoreReclaimTests
 {
     private const string Canary = "T4-CANARY-5820193746";
+    private const string CapCanary = "RECLAIM-CAP-CANARY";
     private const string ProtectedName = "deploy/prod-key.pem";
     private const string BulkPath = "src/Bulk.cs";
 
@@ -31,6 +33,7 @@ public class MetaStoreReclaimTests
 
         reclaim.Reclaimed.ShouldBeTrue();
         reclaim.SkippedReason.ShouldBeNull();
+        reclaim.RebuildMode.ShouldBe(StoreReclaimResult.EngineRebuildMode);
         reclaim.SizeAfterBytes.ShouldBeLessThan(reclaim.SizeBeforeBytes);
         reclaim.BytesFreed.ShouldBe(reclaim.SizeBeforeBytes - reclaim.SizeAfterBytes);
         reopen.ListChunksByFile(bulkId).ShouldBeEmpty();
@@ -166,6 +169,134 @@ public class MetaStoreReclaimTests
         entries.Single(e => e.FileId == 78).Path.ShouldBe(BulkPath);
         store.RedactPendingReapPaths([77L]).ShouldBe(0);
         store.RedactPendingReapPaths([]).ShouldBe(0);
+    }
+
+    // The live-store refusal shape: LiteDB 5.0.21's RebuildContent creates each collection's IndexService
+    // with _disk.MAX_ITEMS_COUNT captured from the barely-born temp file (about 2.5k), so the EnsureIndex
+    // pass over a larger collection walks past that counter and the FindAll loop guard fires as a false
+    // positive — "Detected loop in FindAll({0})", deterministic on every big store, invisible on small ones.
+    private static string StoreAboveTheEngineRebuildCap()
+    {
+        var dbPath = Path.Combine(TestDirs.NewTempDir(), "meta.db");
+        using (var db = new LiteDatabase(dbPath))
+        {
+            var rows = db.GetCollection("rows");
+            rows.EnsureIndex("v_idx", "$.v", false);
+            for (var batch = 0; batch < 40; batch++)
+            {
+                rows.Insert(Enumerable.Range(0, 500).Select(i =>
+                {
+                    var id = batch * 500 + i;
+                    var doc = new BsonDocument
+                    {
+                        ["_id"] = id,
+                        ["v"] = $"v-{id}",
+                        ["pad"] = new string('r', 48),
+                    };
+                    if (id % 2 == 0 && id < 128)
+                    {
+                        // the live-store retention shape: a purged row big enough to chain extended pages
+                        // leaves whole free pages holding its bytes; small freed slots get rewritten away
+                        doc["gone"] = CapCanary + new string('z', 20_000);
+                    }
+
+                    return doc;
+                }));
+            }
+
+            db.Checkpoint();
+            rows.DeleteMany("_id % 2 = 0");
+            db.Checkpoint();
+        }
+
+        return dbPath;
+    }
+
+    private static string ReadRawPath(string dbPath) =>
+        System.Text.Encoding.ASCII.GetString(File.ReadAllBytes(dbPath));
+
+    [Fact]
+    public void Reclaim_StoreAboveTheEngineRebuildCap_FallsBackAndKeepsEveryLiveRow()
+    {
+        var dbPath = StoreAboveTheEngineRebuildCap();
+        int liveRows;
+        using (var probe = new LiteDatabase(dbPath))
+        {
+            liveRows = probe.GetCollection("rows").Count();
+        }
+
+        liveRows.ShouldBe(10_000);
+
+        using (var store = new MetaStore(dbPath, createIfMissing: true))
+        {
+            var reclaim = store.Reclaim();
+
+            reclaim.Reclaimed.ShouldBeTrue();
+            reclaim.SkippedReason.ShouldBeNull();
+            reclaim.RebuildMode.ShouldBe(StoreReclaimResult.CopyOutFallbackMode);
+            reclaim.FallbackNote.ShouldNotBeNull();
+            reclaim.SizeAfterBytes.ShouldBeGreaterThan(0);
+            store.ListRepos().ShouldBeEmpty();
+        }
+
+        using (var verify = new LiteDatabase(dbPath))
+        {
+            var rows = verify.GetCollection("rows");
+            rows.Count().ShouldBe(liveRows);
+            rows.FindById(17).ShouldNotBeNull();
+            rows.FindById(16).ShouldBeNull();
+            verify.GetCollection("$indexes").FindAll()
+                .Any(i => i["collection"] == "rows" && i["name"] == "v_idx")
+                .ShouldBeTrue();
+        }
+
+        ReadRawPath(dbPath).ShouldNotContain(CapCanary);
+        Directory.GetFiles(Path.GetDirectoryName(dbPath)!, "meta*")
+            .Select(Path.GetFileName)
+            .ShouldBe(["meta.db"], StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void FillLoopPlaceholder_NamesTheCollectionTheEngineLeftUnnamed()
+    {
+        RebuildRefusalText.FillLoopPlaceholder("Detected loop in FindAll({0})", "chunks")
+            .ShouldBe("Detected loop in FindAll(chunks)");
+        RebuildRefusalText.FillLoopPlaceholder("Detected loop in FindAll({0})", null)
+            .ShouldBe("Detected loop in FindAll(unknown)");
+        RebuildRefusalText.FillLoopPlaceholder("sharing violation", "chunks")
+            .ShouldBe("sharing violation");
+    }
+
+    [LinuxFact]
+    public void Reclaim_WhenEvenTheFallbackRefuses_ReportsTheRefusalAndKeepsTheStoreIntact()
+    {
+        var dbPath = StoreAboveTheEngineRebuildCap();
+        var storeDir = Path.GetDirectoryName(dbPath)!;
+        int liveRows;
+        using (var probe = new LiteDatabase(dbPath))
+        {
+            liveRows = probe.GetCollection("rows").Count();
+        }
+
+        using var store = new MetaStore(dbPath, createIfMissing: true);
+        var originalMode = File.GetUnixFileMode(storeDir);
+        File.SetUnixFileMode(storeDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var reclaim = store.Reclaim();
+
+            reclaim.Reclaimed.ShouldBeFalse();
+            reclaim.SkippedReason.ShouldNotBeNull();
+            reclaim.RebuildMode.ShouldBe(StoreReclaimResult.CopyOutFallbackMode);
+            reclaim.SizeAfterBytes.ShouldBe(reclaim.SizeBeforeBytes);
+        }
+        finally
+        {
+            File.SetUnixFileMode(storeDir, originalMode);
+        }
+
+        using var reopen = new LiteDatabase(dbPath);
+        reopen.GetCollection("rows").Count().ShouldBe(liveRows);
     }
 
     private static string StoreWithBulkChunks()

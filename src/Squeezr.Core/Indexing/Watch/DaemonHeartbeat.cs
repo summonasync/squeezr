@@ -5,8 +5,12 @@ public sealed record DaemonHeartbeat(
     string Kind,
     DateTime StartedAt,
     DateTime LastBeatAt,
-    string? Host = null)
+    string? Host = null,
+    DaemonActivity? Activity = null)
 {
+    // The activity tail is additive on purpose: a reader built before it drops the unknown member, and an
+    // idle daemon omits it entirely (WhenWritingNull), so old beats and idle beats share one file shape.
+
     public const string DefaultKind = "watch";
     public const string ServeWatchKind = "serve-watch";
     public const string BeatsDirName = "beats";

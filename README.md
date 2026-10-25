@@ -255,7 +255,8 @@ the central store:
 │   │                                # by an observer) — kind `watch`, the terminal daemon
 │   ├── serve-watch.heartbeat        # ...or `serve --watch` from an MCP client, when it is the owner
 │   ├── beats/                       # per-pid beats of every live watch-role process: {kind}.{pid}.beat, same
-│   │                                # JSON {pid, kind, startedAt, lastBeatAt, host}; the roster fleet enumerates
+│   │                                # JSON {pid, kind, startedAt, lastBeatAt, host} plus an additive activity
+│   │                                # member while a pass runs; the roster fleet enumerates
 │   ├── queries.jsonl                # query telemetry for `stats` (local; drop removes it)
 │   └── queries.lock                 # serializes writers to queries.jsonl: appends, scrub on compact and
 │                                    # stats --reset (writers wait for the budget; reset refuses while busy,
@@ -1186,9 +1187,9 @@ squeezr fleet --json  # NDJSON, one object per workspace (the 035 contract)
 ```
 
 ```
-Name      Root path            Store key  WATCH                 SERVE-WATCH    Pending  Last indexed      Status
-squeezr   /home/dev/squeezr    squeezr    pid 4217, up 2h 14m   —              0        2026-09-16 10:31  ok
-old-proj  /home/dev/old-proj   old-proj   dead (pid 9021)       —              n/a      n/a               stale
+Name      Root path            Store key  WATCH                 SERVE-WATCH    Activity                       Pending  Last indexed      Status
+squeezr   /home/dev/squeezr    squeezr    pid 4217, up 2h 14m   —              indexing docs · files 12/40    0        2026-09-16 10:31  ok
+old-proj  /home/dev/old-proj   old-proj   dead (pid 9021)       —              idle?                          n/a      n/a               stale
 ```
 
 The `WATCH` / `SERVE-WATCH` columns are the live processes of two kinds:
@@ -1207,17 +1208,37 @@ with a vanished rootPath are marked `stale` and emit a stderr warning with a
 ordering (a store with a live daemon on top) is unchanged: a store counts as
 live when at least one of its bits is alive.
 
+The `Activity` column is what the live processes are doing right now, one
+line per live pid in the roster's own order: `indexing <repo> · files 12/40`,
+`embedding <repo> · chunks 3/9 · ollama · gpu`, `walking <repo>`, `semantic
+<repo> · 5/20`. A live process between passes answers `idle`; a store whose
+every beat aged out or whose pids are gone answers `idle?` — the question
+mark is the honesty: an absence of evidence never renders as work. The
+executor tail repeats what the daemon's own beat measured (`ollama · gpu`,
+`onnx · cpu`); fleet names no hardware the beat did not name first. A store
+with no roster at all answers `—` in this column.
+
 The same roster reaches `fleet --json` as a per-store `daemons[]` array (`kind`, `pid`, `status`,
 `uptimeSeconds`, `owner`, `host`, plus `isAlive` — the same derived member the sibling `watch`/`serveWatch`
 objects already carry): every process the store's beats name, empty when the store names nobody, with exactly
-the claim holder flagged `owner: true`. Additive per 035 — `watch`, `serveWatch`, `stale`, `pendingChunks` and
-`lastIndexedAt` keep their names, their meanings and their order among themselves; the array simply sits
-between `serveWatch` and `stale`.
+the claim holder flagged `owner: true`. Each live row also carries what that process is doing and what it costs,
+additive per 035: `phase` (`walk|files|semantic|embeddings|trigram`), `repo`, `doneItems`, `totalItems`,
+`phaseSeconds`, `provider` and `executor` — the beat's own evidence, null between passes — plus `cpuPercent`
+and `rssBytes`, measured by fleet itself over every live pid of every store in one shared 300 ms
+sampling window per pass (null where a pid is gone or unreadable — never 0 standing in for an
+unmeasured row). Machine values stay
+machine: numbers and enum-like strings, human phrasing lives only in the table. A row that is not alive carries
+none of it — a stale beat or a dead pid never publishes activity, and a daemon that has never started a pass
+reads `phase: null` (`idle` in the table), not an empty cell. Otherwise additive per 035 — `watch`,
+`serveWatch`, `stale`, `pendingChunks` and `lastIndexedAt` keep their names, their meanings and their order
+among themselves; the array simply sits between `serveWatch` and `stale`.
 
 How a daemon declares itself: every live watch-role process writes a per-pid
 beat into the store dir — `~/.squeezr/workspaces/<storeKey>/beats/<kind>.<pid>.beat`,
 kind = `watch` or `serve-watch`. Inside: JSON
-`{pid, kind, startedAt, lastBeatAt, host}`; a beat every 5 s and after every
+`{pid, kind, startedAt, lastBeatAt, host}` — plus an additive `activity`
+member while a pass runs (phase, repo, item counters, phase start, provider,
+executor), absent again between passes; a beat every 5 s and after every
 successful pass, the write is atomic (tmp + move), a clean exit removes the
 file; the `beats/` directory itself is created by the writer and only inside
 an existing store — a daemon whose store was carried away does not resurrect

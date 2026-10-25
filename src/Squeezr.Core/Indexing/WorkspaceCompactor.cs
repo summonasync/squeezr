@@ -122,6 +122,11 @@ public static class WorkspaceCompactor
             {
                 warnings.Add($"index store rebuild skipped: {reclaim.SkippedReason}");
             }
+            else if (reclaim.RebuildMode == StoreReclaimResult.CopyOutFallbackMode)
+            {
+                warnings.Add(
+                    $"index store rebuilt via copy-out fallback — engine rebuild refused: {reclaim.FallbackNote}");
+            }
 
             if (reclaim.SnapshotCopiesLeft > 0)
             {
