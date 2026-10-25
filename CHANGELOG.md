@@ -2,6 +2,18 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
+## [Unreleased]
+
+The central-store relocation guard: a pinned `SQUEEZR_HOME` can no longer make the live `~/.squeezr` look like a legacy in-project store, so discovery never moves, renames or deletes it — the 2026-10-19 store-loss incident class is closed, and a regression test replays that exact weapon configuration against a fingerprinted decoy store.
+
+### Added
+- `squeezr workspace migrate <root> [--yes] [--json]` — the only deliberate store relocation. It refuses the live home outright and moves a registry/workspaces-signed store only with `--yes`, printing source, destination and the exact moved-file count; `--json` emits the same facts as `sourceDir`, `destinationDir`, `storeKey`, `movedFileCount`.
+
+### Changed
+- Store centrality is absolute: a directory that is the default home (`~/.squeezr`) or the resolved home is central under any `SQUEEZR_HOME` override, and a directory carrying the central-store signature (`workspaces.json` or a `workspaces/` dir) is never treated as a legacy in-project store by discovery.
+- New refusals, each naming the default home, the resolved home, the active `SQUEEZR_HOME` value and what was left untouched: `init`/`drop` aimed at a directory holding the central store, and a migration of a central-store-shaped directory without `--yes` (which also names the exact `squeezr workspace migrate` command).
+- A legacy move that leaves anything behind no longer blind-deletes: the leftovers are listed by path and kept in place, and a re-run resumes the move from what is left.
+
 ## [1.0.10] — 2026-10-24
 
 The one-indexer release: the store learned who owns its watch loop — a claim marker every role obeys (serve, watch, fleet, doctor), a per-pid beat roster that finally names every live process, and registrations that stopped breeding watchers by default: `mcp install` now registers a plain `serve`, and a watcher became a fleet decision made on purpose. The warm `code_search` latency the same dogfood line measured against 1.0.7 is fixed (−740 ms), and the post-1.0.9 wave fix rounds closed the surfaces they shipped open. Full suite 2391 → 2801.
