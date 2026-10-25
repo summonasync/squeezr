@@ -29,7 +29,8 @@ public sealed class WorkspaceManager
             throw new WorkspaceException($"Workspace is already initialized at '{_root}'.");
         }
 
-        if (SqueezrHome.IsCentralStore(Path.Combine(_root, SqueezrPaths.StoreDirName)))
+        var candidateStoreDir = Path.Combine(_root, SqueezrPaths.StoreDirName);
+        if (SqueezrHome.IsCentralStore(candidateStoreDir) || SqueezrHome.LooksLikeCentralStore(candidateStoreDir))
         {
             throw new WorkspaceException(CentralStoreRefusalText.InitAt(_root));
         }
@@ -160,7 +161,7 @@ public sealed class WorkspaceManager
     {
         var wasRegistered = WorkspaceRegistry.TryGetStoreDir(_root, out _);
         var storeDir = SqueezrPaths.StoreDir(_root);
-        if (SqueezrHome.IsCentralStore(storeDir))
+        if (SqueezrHome.IsCentralStore(storeDir) || SqueezrHome.LooksLikeCentralStore(storeDir))
         {
             throw new WorkspaceException(CentralStoreRefusalText.Drop(_root, storeDir));
         }

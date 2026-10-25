@@ -191,6 +191,70 @@ public sealed class CentralStoreGuardTests : IDisposable
 
     [LinuxFact]
     [SupportedOSPlatform("linux")]
+    public void Drop_CentralLookingStoreWithNoEquality_RefusesAndKeepsTheStore()
+    {
+        // The W1 hole: a root whose .squeezr is central-shaped but equals no home passed the
+        // path-identity guard, and drop deleted the whole foreign store.
+        var temp = NewDir(TestDirs.NewTempDir());
+        var root = NewDir(Path.Combine(temp, "proj"));
+        var foreignStore = NewDir(Path.Combine(root, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(foreignStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName), "[]");
+        File.WriteAllText(Path.Combine(foreignStore, "canary.txt"), "keep me");
+        var pinnedHome = NewDir(Path.Combine(temp, "pinned"));
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, NewDir(Path.Combine(temp, "home-profile")));
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        SqueezrHome.Reset();
+        WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome())
+            .ShouldStartWith(WorkspaceCanonicalPath.Canonicalize(temp));
+
+        var canonicalStore = WorkspaceCanonicalPath.ResolveThroughLinks(foreignStore);
+        canonicalStore.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.Resolve()));
+        canonicalStore.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome()));
+
+        var message = Should.Throw<WorkspaceException>(() => new WorkspaceManager(root).Drop()).Message;
+
+        message.ShouldContain("central squeezr store");
+        message.ShouldContain("Nothing was deleted");
+        message.ShouldContain(SqueezrHome.Resolve());
+        message.ShouldContain(SqueezrHome.DefaultHome());
+        File.ReadAllText(Path.Combine(foreignStore, "canary.txt")).ShouldBe("keep me");
+        File.Exists(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Init_CentralLookingStoreWithNoEquality_RefusesAndWritesNoMetaDb()
+    {
+        var temp = NewDir(TestDirs.NewTempDir());
+        var root = NewDir(Path.Combine(temp, "proj"));
+        var foreignStore = NewDir(Path.Combine(root, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(foreignStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName), "[]");
+        var pinnedHome = NewDir(Path.Combine(temp, "pinned"));
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, NewDir(Path.Combine(temp, "home-profile")));
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        SqueezrHome.Reset();
+        WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome())
+            .ShouldStartWith(WorkspaceCanonicalPath.Canonicalize(temp));
+
+        var canonicalStore = WorkspaceCanonicalPath.ResolveThroughLinks(foreignStore);
+        canonicalStore.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.Resolve()));
+        canonicalStore.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome()));
+
+        var message = Should.Throw<WorkspaceException>(() => new WorkspaceManager(root).Init("probe")).Message;
+
+        message.ShouldContain("central squeezr store");
+        message.ShouldContain("Nothing was created or changed");
+        message.ShouldContain(SqueezrHome.Resolve());
+        message.ShouldContain(SqueezrHome.DefaultHome());
+        File.Exists(Path.Combine(foreignStore, SqueezrPaths.MetaDbFileName)).ShouldBeFalse();
+        File.Exists(Path.Combine(foreignStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+        WorkspaceRegistry.Load().ShouldBeEmpty();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
     public void Init_DefaultHomeUnderOverride_RefusesAndNamesBothHomes()
     {
         var pinnedHome = NewDir(Path.Combine(TestDirs.NewTempDir(), "pinned"));
