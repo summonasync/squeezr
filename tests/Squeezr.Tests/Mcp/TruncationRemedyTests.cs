@@ -16,10 +16,10 @@ public class TruncationRemedyTests
         var workspace = NewIndexedWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        var warnings = CallWarnings(harness, "code_search", new Dictionary<string, object?>
+        var warnings = (await CallWarnings(harness, "code_search", new Dictionary<string, object?>
         {
             ["query"] = "Add", ["maxTokens"] = 1,
-        }).Warnings;
+        })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
         warnings.ShouldContain(w => w.Contains(" of 1 token ceiling — raise maxTokens"));
@@ -31,7 +31,7 @@ public class TruncationRemedyTests
         var workspace = NewIndexedWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        var envelope = CallWarnings(harness, "code_search", new Dictionary<string, object?>
+        var envelope = await CallWarnings(harness, "code_search", new Dictionary<string, object?>
         {
             ["query"] = "Add", ["maxTokens"] = 2000,
         });
@@ -45,10 +45,10 @@ public class TruncationRemedyTests
         var workspace = NewIndexedWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        var warnings = CallWarnings(harness, "symbol_lookup", new Dictionary<string, object?>
+        var warnings = (await CallWarnings(harness, "symbol_lookup", new Dictionary<string, object?>
         {
             ["name"] = "Add", ["maxTokens"] = 1,
-        }).Warnings;
+        })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
         warnings.ShouldContain(w => w.Contains(" of 1 token ceiling — narrow the query"));
@@ -60,10 +60,10 @@ public class TruncationRemedyTests
         var workspace = NewIndexedWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        var warnings = CallWarnings(harness, "repo_map", new Dictionary<string, object?>
+        var warnings = (await CallWarnings(harness, "repo_map", new Dictionary<string, object?>
         {
             ["depth"] = 3, ["maxTokens"] = 1,
-        }).Warnings;
+        })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
         warnings.ShouldContain(w => w.Contains(" of 1 token ceiling — lower depth"));
@@ -75,20 +75,19 @@ public class TruncationRemedyTests
         var workspace = NewIndexedWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        var warnings = CallWarnings(harness, "expand_span", new Dictionary<string, object?>
+        var warnings = (await CallWarnings(harness, "expand_span", new Dictionary<string, object?>
         {
             ["file"] = "src/Calc.cs", ["startLine"] = 1, ["endLine"] = 15, ["maxTokens"] = 1,
-        }).Warnings;
+        })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
         warnings.ShouldContain(w => w.Contains(" of 1 token ceiling — raise maxTokens, or narrow the span"));
     }
 
-    private static (JsonElement Envelope, IReadOnlyList<string> Warnings) CallWarnings(
+    private static async Task<(JsonElement Envelope, IReadOnlyList<string> Warnings)> CallWarnings(
         McpTestHarness harness, string tool, Dictionary<string, object?> args)
     {
-        var result = harness.Client.CallToolAsync(tool, args, cancellationToken: CancellationToken.None)
-            .GetAwaiter().GetResult();
+        var result = await harness.Client.CallToolAsync(tool, args, cancellationToken: CancellationToken.None);
         result.IsError.ShouldNotBe(true);
         var json = result.Content.ShouldHaveSingleItem().ToString()!;
         var envelope = JsonDocument.Parse(json).RootElement.Clone();

@@ -105,7 +105,7 @@ public sealed class CodeSearchTool
                 warnings.Add(HintText.TruncationLine(
                     response.TokensUsed,
                     maxTokens ?? DefaultMaxTokens,
-                    response.Hint?.ForMcp() ?? "raise maxTokens"));
+                    response.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
             }
 
             var data = response.Matches.Select(m => new SearchHitData(

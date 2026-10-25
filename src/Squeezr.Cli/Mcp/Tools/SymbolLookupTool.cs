@@ -81,7 +81,7 @@ public sealed class SymbolLookupTool
                 warnings.Add(HintText.TruncationLine(
                     result.TokensUsed,
                     budget,
-                    result.Hint?.ForMcp() ?? "raise maxTokens"));
+                    result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
             }
 
             if (result.Matches.Count == 0 && result.DidYouMean is null && result.GuardWarnings is null)

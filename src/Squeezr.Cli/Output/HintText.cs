@@ -6,6 +6,8 @@ namespace Squeezr.Cli.Output;
 
 public static class HintText
 {
+    public const string RaiseMaxTokensRemedy = "raise maxTokens";
+
     private static readonly Dictionary<string, string> CliFlags = new(StringComparer.Ordinal)
     {
         ["repo"] = "--repo",

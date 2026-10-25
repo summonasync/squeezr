@@ -75,7 +75,7 @@ public sealed class RepoMapTool
                 warnings.Add(HintText.TruncationLine(
                     result.TokensUsed,
                     resolvedMaxTokens,
-                    result.Hint?.ForMcp() ?? "raise maxTokens"));
+                    result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
             }
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();
