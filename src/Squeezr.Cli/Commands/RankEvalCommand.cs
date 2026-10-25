@@ -57,9 +57,7 @@ public sealed class RankEvalCommand : Command<RankEvalCommand.Settings>
                 Console.Error.WriteLine($"warning: {warning}");
             }
 
-            var mrr = rows.Average(r => r.Mrr);
-            var p5 = rows.Average(r => r.PrecisionAt5);
-            var recall = rows.Average(r => r.RecallAt10);
+            var (mrr, p5, recall) = RankEvalRunner.Aggregate(rows);
 
             if (settings.Json)
             {
@@ -103,8 +101,14 @@ public sealed class RankEvalCommand : Command<RankEvalCommand.Settings>
     private static int RunSweep(
         RankEvalRunner runner, IReadOnlyList<GoldenQuery> set, Settings settings, CancellationToken cancellationToken)
     {
-        var rows = runner.RunSweepAsync(set, cancellationToken).GetAwaiter().GetResult();
+        var outcome = runner.RunSweepAsync(set, cancellationToken).GetAwaiter().GetResult();
+        var rows = outcome.Rows;
         var baseline = rows.FirstOrDefault(r => r.K == RrfMerger.K);
+
+        foreach (var warning in outcome.Warnings)
+        {
+            Console.Error.WriteLine($"warning: {warning}");
+        }
 
         if (settings.Json)
         {
@@ -123,17 +127,17 @@ public sealed class RankEvalCommand : Command<RankEvalCommand.Settings>
                 AnsiConsole.MarkupLine(
                     $"K {row.K,4}  MRR@10 {row.Mrr:F3}  P@5 {row.P5:F3}  Recall@10 {row.Recall:F3}{marker}");
             }
-        }
 
-        if (baseline is not null && !settings.Json)
-        {
-            foreach (var row in rows.Where(r => r.K != RrfMerger.K))
+            if (baseline is not null)
             {
-                var dmrr = row.Mrr - baseline.Mrr;
-                var dp5 = row.P5 - baseline.P5;
-                var dr10 = row.Recall - baseline.Recall;
-                AnsiConsole.MarkupLine(
-                    $"[grey]K {row.K,4} vs baseline: dMRR {dmrr:+0.000;-0.000;0.000}  dP5 {dp5:+0.000;-0.000;0.000}  dR10 {dr10:+0.000;-0.000;0.000}[/]");
+                foreach (var row in rows.Where(r => r.K != RrfMerger.K))
+                {
+                    var dmrr = row.Mrr - baseline.Mrr;
+                    var dp5 = row.P5 - baseline.P5;
+                    var dr10 = row.Recall - baseline.Recall;
+                    AnsiConsole.MarkupLine(
+                        $"[grey]K {row.K,4} vs baseline: dMRR {dmrr:+0.000;-0.000;0.000}  dP5 {dp5:+0.000;-0.000;0.000}  dR10 {dr10:+0.000;-0.000;0.000}[/]");
+                }
             }
         }
 
@@ -141,7 +145,7 @@ public sealed class RankEvalCommand : Command<RankEvalCommand.Settings>
         {
             File.WriteAllText(
                 settings.Out,
-                JsonSerializer.Serialize(new EvalSweepOut("rank-sweep", rows), SqueezrJson.OutputOptions));
+                JsonSerializer.Serialize(new EvalSweepOut("eval-sweep-out", rows), SqueezrJson.FileOptions));
             if (!settings.Json)
             {
                 AnsiConsole.MarkupLine($"[grey]sweep report written to {settings.Out.EscapeMarkup()}[/]");

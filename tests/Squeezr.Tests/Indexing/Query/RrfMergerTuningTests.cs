@@ -25,7 +25,7 @@ public class RrfMergerTuningTests
     [Fact]
     public void CustomK_ChangesAbsoluteScoresNotSingleArmOrder()
     {
-        var merged = RrfMerger.Merge(Arm("a.cs", "b.cs"), [], new FusionTuning(K: 1));
+        var merged = RrfMerger.Merge(Arm("a.cs", "b.cs"), [], new FusionTuning { K = 1 });
 
         merged[0].Score.ShouldBe(1.0 / 2, 1e-9);
         merged[1].Score.ShouldBe(1.0 / 3, 1e-9);
@@ -34,7 +34,7 @@ public class RrfMergerTuningTests
     [Fact]
     public void ZeroWeight_DropsTheArmToZeroScoreButKeepsTheEntry()
     {
-        var merged = RrfMerger.Merge(Arm("a.cs"), Arm("s.cs"), new FusionTuning(ExactWeight: 0.0));
+        var merged = RrfMerger.Merge(Arm("a.cs"), Arm("s.cs"), new FusionTuning { ExactWeight = 0.0 });
 
         merged[0].Path.ShouldBe("s.cs");
         merged[0].Score.ShouldBe(1.0 / 61, 1e-9);
@@ -45,7 +45,7 @@ public class RrfMergerTuningTests
     [Fact]
     public void WeightedArm_AmplifiesItsContribution()
     {
-        var merged = RrfMerger.Merge([], Arm("s.cs"), new FusionTuning(SemanticWeight: 2.0));
+        var merged = RrfMerger.Merge([], Arm("s.cs"), new FusionTuning { SemanticWeight = 2.0 });
 
         merged[0].Score.ShouldBe(2.0 / 61, 1e-9);
     }
@@ -53,9 +53,18 @@ public class RrfMergerTuningTests
     [Fact]
     public void BothArmsWeightedZero_LeaveZeroScoresButKeepEntries()
     {
-        var merged = RrfMerger.Merge(Arm("a.cs"), Arm("s.cs"), new FusionTuning(ExactWeight: 0.0, SemanticWeight: 0.0));
+        var merged = RrfMerger.Merge(Arm("a.cs"), Arm("s.cs"), new FusionTuning { ExactWeight = 0.0, SemanticWeight = 0.0 });
 
         merged.Select(m => m.Score).ShouldBe([0.0, 0.0]);
         merged.Select(m => m.Source).ShouldBe(["exact", "semantic"]);
+    }
+
+    [Fact]
+    public void InvalidTuningValues_AreRejectedAtConstruction()
+    {
+        Should.Throw<ArgumentOutOfRangeException>(() => new FusionTuning { K = 0 });
+        Should.Throw<ArgumentOutOfRangeException>(() => new FusionTuning { K = -5 });
+        Should.Throw<ArgumentOutOfRangeException>(() => new FusionTuning { ExactWeight = -0.1 });
+        Should.Throw<ArgumentOutOfRangeException>(() => new FusionTuning { SemanticWeight = -1.0 });
     }
 }

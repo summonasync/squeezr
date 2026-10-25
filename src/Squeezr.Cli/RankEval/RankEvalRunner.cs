@@ -11,6 +11,8 @@ public sealed record RankEvalOutcome(
 
 public sealed record SweepRow(int K, double Mrr, double P5, double Recall, bool SemanticDegraded);
 
+public sealed record SweepOutcome(IReadOnlyList<SweepRow> Rows, IReadOnlyList<string> Warnings);
+
 public sealed class RankEvalRunner
 {
     // deep enough that a miss is a real miss, not a topK artifact; metrics cut at their own depths
@@ -45,26 +47,27 @@ public sealed class RankEvalRunner
         return new RankEvalOutcome(scored, warnings, semanticOff || HasVectorFailure(warnings));
     }
 
-    public async Task<IReadOnlyList<SweepRow>> RunSweepAsync(
+    public async Task<SweepOutcome> RunSweepAsync(
         IReadOnlyList<GoldenQuery> set,
         CancellationToken cancellationToken,
         IReadOnlyList<int>? kGrid = null)
     {
         var grid = kGrid ?? DefaultSweepGrid;
         var rows = new List<SweepRow>(grid.Count);
+        var warnings = new List<string>();
         foreach (var k in grid)
         {
-            var outcome = await RunAsync(set, cancellationToken, new FusionTuning(K: k));
-            rows.Add(new SweepRow(
-                k,
-                outcome.Rows.Average(r => r.Mrr),
-                outcome.Rows.Average(r => r.PrecisionAt5),
-                outcome.Rows.Average(r => r.RecallAt10),
-                outcome.SemanticDegraded));
+            var outcome = await RunAsync(set, cancellationToken, new FusionTuning { K = k });
+            var (mrr, p5, recall) = Aggregate(outcome.Rows);
+            rows.Add(new SweepRow(k, mrr, p5, recall, outcome.SemanticDegraded));
+            warnings.AddRange(outcome.Warnings);
         }
 
-        return rows;
+        return new SweepOutcome(rows, warnings);
     }
+
+    public static (double Mrr, double P5, double Recall) Aggregate(IReadOnlyList<ScoredQuery> rows) =>
+        (rows.Average(r => r.Mrr), rows.Average(r => r.PrecisionAt5), rows.Average(r => r.RecallAt10));
 
     private static bool HasVectorFailure(IReadOnlyList<string> warnings) => warnings.Any(w =>
         w == SearchEngine.VectorStoreUnavailableWarning ||
