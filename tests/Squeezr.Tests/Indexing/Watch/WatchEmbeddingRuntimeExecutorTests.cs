@@ -109,13 +109,19 @@ public class WatchEmbeddingRuntimeExecutorTests : IDisposable
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult(0L);
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
 
