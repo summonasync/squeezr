@@ -81,6 +81,10 @@ public sealed class ExpandSpanTool
             var (cost, unknownBaselineFiles) = CostBaseline.Measure(
                 root, namedFiles, result.TokensUsed, !result.Truncated);
             var fileFreshness = FreshnessVerdict.Classify(root, namedFiles);
+            if (StoreWriterNotice.For(root) is { } writerNotice)
+            {
+                warnings.Add(writerNotice);
+            }
             if (unknownBaselineFiles > 0)
             {
                 warnings.Add(

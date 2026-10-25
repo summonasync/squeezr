@@ -119,6 +119,10 @@ public sealed class CodeSearchTool
             var fileFreshness = namedFiles.Count > 0
                 ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
                 : null;
+            if (StoreWriterNotice.For(root) is { } writerNotice)
+            {
+                warnings.Add(writerNotice);
+            }
             if (unknownBaselineFiles > 0)
             {
                 warnings.Add(

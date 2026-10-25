@@ -87,6 +87,10 @@ public sealed class FindReferencesTool
                 ? FreshnessVerdict.Classify(root, namedFiles,
                     guardStaleKeys: MergeStale(freshness.Stale, lagging))
                 : null;
+            if (StoreWriterNotice.For(root) is { } writerNotice)
+            {
+                warnings.Add(writerNotice);
+            }
             if (unknownBaselineFiles > 0)
             {
                 warnings.Add(

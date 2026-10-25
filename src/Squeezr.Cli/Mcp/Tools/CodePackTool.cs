@@ -93,6 +93,10 @@ public sealed class CodePackTool
                 files.AddRange(pack.Callers.Select(c => (c.Repo, c.File)));
                 (cost, unknownBaselineFiles) = CostBaseline.Measure(root, files, tokens, pack.Complete);
                 fileFreshness = FreshnessVerdict.Classify(root, files);
+                if (StoreWriterNotice.For(root) is { } writerNotice)
+                {
+                    warnings.Add(writerNotice);
+                }
             }
             else
             {

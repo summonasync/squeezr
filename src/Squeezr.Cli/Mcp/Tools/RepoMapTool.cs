@@ -80,6 +80,10 @@ public sealed class RepoMapTool
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();
 
+            warnings.Add(
+                "repo_map renders the tree structurally — per-file freshness is not attached to map lines; " +
+                "code_search or code_pack carries the verdict for a file you are about to open");
+
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
