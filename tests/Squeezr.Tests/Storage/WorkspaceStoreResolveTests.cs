@@ -122,6 +122,42 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
     }
 
     [Fact]
+    public void Resolve_LegacyMoveWithWriterBehindTheSnapshot_FailsLoudAndKeepsTheLeftover()
+    {
+        var root = NewDir();
+        CreateLegacyLayout(root, withComposeMarker: false);
+        var leftoverPath = Path.Combine(root, SqueezrPaths.StoreDirName, "daemon-wrote.txt");
+        WorkspaceStore.AfterLegacyStoreSnapshot = legacyDir =>
+            File.WriteAllText(Path.Combine(legacyDir, "daemon-wrote.txt"), "late writer");
+
+        try
+        {
+            var message = Should.Throw<WorkspaceException>(() => WorkspaceStore.Resolve(root)).Message;
+
+            message.ShouldContain(leftoverPath);
+            message.ShouldContain("Nothing was deleted");
+            File.Exists(leftoverPath).ShouldBeTrue();
+            File.ReadAllText(leftoverPath).ShouldBe("late writer");
+            File.Exists(Path.Combine(root, SqueezrPaths.ManifestFileName)).ShouldBeTrue();
+            var storeKey = WorkspaceStoreKeys.Create("legacy", WorkspaceCanonicalPath.Canonicalize(root));
+            File.Exists(Path.Combine(_home, SqueezrPaths.WorkspacesDirName, storeKey, SqueezrPaths.MetaDbFileName))
+                .ShouldBeTrue();
+            WorkspaceRegistry.FindByRootPath(WorkspaceCanonicalPath.Canonicalize(root)).ShouldNotBeNull();
+
+            var resumed = WorkspaceStore.Resolve(root);
+            resumed.IsWorkspace.ShouldBeTrue();
+            resumed.MigratedFromLegacy.ShouldBeTrue();
+            Directory.Exists(Path.Combine(root, SqueezrPaths.StoreDirName)).ShouldBeFalse();
+            File.Exists(Path.Combine(_home, SqueezrPaths.WorkspacesDirName, storeKey, "daemon-wrote.txt"))
+                .ShouldBeTrue();
+        }
+        finally
+        {
+            WorkspaceStore.AfterLegacyStoreSnapshot = null;
+        }
+    }
+
+    [Fact]
     public void Resolve_RegisteredRowWithCentralLookingStoreDir_CompletesNothingAndKeepsTheStore()
     {
         // The second route into MoveLegacyContent: a registry row whose root still carries a

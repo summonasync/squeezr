@@ -8,6 +8,11 @@ public static class WorkspaceStore
 {
     private const string ClaudeProjectDirEnvironmentVariable = "CLAUDE_PROJECT_DIR";
 
+    // A writer racing the migration lands entries after the snapshot and before the tail check -
+    // the daemon-write shape that turned a move into a silent mix of both locations. The hook is
+    // that window, so a test replays the writer deterministically instead of racing the move.
+    internal static Action<string>? AfterLegacyStoreSnapshot;
+
     public static WorkspaceResolution Resolve(string startDirectory)
     {
         var start = WorkspaceCanonicalPath.Canonicalize(startDirectory);
@@ -182,7 +187,11 @@ public static class WorkspaceStore
         var legacyStoreDir = Path.Combine(root, SqueezrPaths.StoreDirName);
         if (Directory.Exists(legacyStoreDir))
         {
-            foreach (var file in Directory.EnumerateFiles(legacyStoreDir))
+            var legacyFiles = Directory.EnumerateFiles(legacyStoreDir).ToList();
+            var legacyDirs = Directory.EnumerateDirectories(legacyStoreDir).ToList();
+            AfterLegacyStoreSnapshot?.Invoke(legacyStoreDir);
+
+            foreach (var file in legacyFiles)
             {
                 var fileName = Path.GetFileName(file);
                 if (string.Equals(fileName, SqueezrPaths.StateFileName, StringComparison.Ordinal))
@@ -194,12 +203,22 @@ public static class WorkspaceStore
                 File.Move(file, Path.Combine(storeDir, fileName), overwrite: true);
             }
 
-            foreach (var dir in Directory.EnumerateDirectories(legacyStoreDir))
+            foreach (var dir in legacyDirs)
             {
                 MoveDirectoryContents(dir, Path.Combine(storeDir, Path.GetFileName(dir)));
             }
 
-            Directory.Delete(legacyStoreDir, recursive: true);
+            var leftovers = CollectLeftovers(legacyStoreDir);
+            if (leftovers.Count > 0)
+            {
+                throw new WorkspaceException(
+                    $"Refusing to finish the legacy migration: '{legacyStoreDir}' holds entries the move did not " +
+                    $"carry over: {string.Join(", ", leftovers.Select(entry => $"'{entry}'"))}. " +
+                    "Nothing was deleted and the leftovers stay exactly where they are. " +
+                    "Re-run the command once the entries are accounted for; the move resumes from what is left.");
+            }
+
+            DeleteVerifiedEmptyTree(legacyStoreDir);
         }
 
         var legacyManifest = Path.Combine(root, SqueezrPaths.ManifestFileName);
@@ -259,5 +278,42 @@ public static class WorkspaceStore
         {
             MoveDirectoryContents(dir, Path.Combine(destDir, Path.GetFileName(dir)));
         }
+    }
+
+    // A leftover is a file the move left behind anywhere in the legacy tree; the recursion leaves
+    // an empty source shell at every moved directory level, and shells are the move's own debris,
+    // cleaned by the tail, never reported.
+    private static List<string> CollectLeftovers(string legacyStoreDir)
+    {
+        var leftovers = new List<string>();
+        Collect(legacyStoreDir, leftovers);
+        return leftovers;
+
+        static void Collect(string directory, List<string> leftovers)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                if (Directory.Exists(entry))
+                {
+                    Collect(entry, leftovers);
+                    continue;
+                }
+
+                leftovers.Add(entry);
+            }
+        }
+    }
+
+    // The leftover check above proved the tree holds nothing but empty shells, so every delete
+    // here is a single-level remove of a directory just verified empty; any surprise entry makes
+    // the delete throw instead of taking the surprise with it.
+    private static void DeleteVerifiedEmptyTree(string directory)
+    {
+        foreach (var child in Directory.EnumerateDirectories(directory).ToList())
+        {
+            DeleteVerifiedEmptyTree(child);
+        }
+
+        Directory.Delete(directory);
     }
 }
