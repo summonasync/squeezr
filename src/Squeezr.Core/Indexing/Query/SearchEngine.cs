@@ -31,7 +31,7 @@ public sealed class SearchEngine
         var matches = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: false, fileScope, guard)
             .Select(hit => hit.Match)
             .ToList();
-        return Finalize(matches, query, AppendWithheld([], guard));
+        return Finalize(matches, query, AppendWithheld([], guard), matches.Count, []);
     }
 
     public async Task<SearchResponse> SearchHybridAsync(
@@ -105,7 +105,8 @@ public sealed class SearchEngine
             .Select(hit => (hit.Key!, hit.Match))
             .ToList();
         var merged = RrfMerger.Merge(exactRanked, semantic);
-        return Finalize(merged, query, AppendWithheld(warnings, guard));
+        var semanticScores = semantic.Select(hit => hit.Match.Score).ToList();
+        return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores);
     }
 
     private static List<string> AppendWithheld(List<string> warnings, SecretGuardReader guard)
@@ -185,7 +186,12 @@ public sealed class SearchEngine
         return $"semantic coverage: {percent}% ({coverage.PendingChunks} {noun} pending embedding)";
     }
 
-    private static SearchResponse Finalize(IReadOnlyList<SearchMatch> ranked, SearchQuery query, IReadOnlyList<string> warnings)
+    private static SearchResponse Finalize(
+        IReadOnlyList<SearchMatch> ranked,
+        SearchQuery query,
+        IReadOnlyList<string> warnings,
+        int exactArmHits,
+        IReadOnlyList<double> semanticScores)
     {
         // collapse before the cap so topK counts files, not spans of one file
         var files = FileHitCollapser.Collapse(ranked);
@@ -218,6 +224,13 @@ public sealed class SearchEngine
             taken.Add(clipped ? match with { Snippet = snippet } : match);
         }
 
-        return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null) { Warnings = warnings };
+        var weakWarning = WeakMatchPolicy.IsWeak(exactArmHits, semanticScores)
+            ? WeakMatchPolicy.Warning(taken.Count(match => match.Source == "semantic"), query.Kind)
+            : null;
+
+        return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null)
+        {
+            Warnings = weakWarning is null ? warnings : [.. warnings, weakWarning]
+        };
     }
 }

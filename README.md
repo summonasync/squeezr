@@ -353,6 +353,12 @@ name is taken.
   never silently treated as `all`. Points without a `kind` payload (orphans,
   or points written by pre-057 binaries until the backfill converges them)
   match only `kind=all`.
+- Weak-match honesty: when a hybrid query gets no exact-arm support (neither
+  the phrase arm nor the identifier leg) and the top semantic score sits below
+  the embedding model's relevance band, `code_search` and `search` still return
+  the hits but the envelope carries a warning naming the narrowing moves —
+  `narrow with kind=code or prefix` — so low-confidence prose matches never
+  pose as a confident answer. Strong answers stay warning-free.
 - Subtree scoping: the `prefix` parameter of `repo_map` / `code_search` (CLI
   twins: `--prefix` on `map` and `search`) answers only inside a directory
   subtree, matched against stored relative paths. An empty subtree is an error

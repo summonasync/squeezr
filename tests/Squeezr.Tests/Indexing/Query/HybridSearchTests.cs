@@ -135,6 +135,55 @@ public class HybridSearchTests
     }
 
     [Fact]
+    public void Hybrid_SemanticOnlyBelowFloor_WarnsButStillDeliversHits()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First();
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.3)]
+        };
+
+        var response = Search(workspace, "zzznotaword", store);
+
+        response.Matches.ShouldNotBeEmpty();
+        response.Warnings.ShouldHaveSingleItem().ShouldBe(
+            "no exact-arm match; 1 semantic hit at low confidence — narrow with kind=code or prefix");
+    }
+
+    [Fact]
+    public void Hybrid_SemanticOnlyAtOrAboveFloor_NoWarning()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First();
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.8)]
+        };
+
+        var response = Search(workspace, "zzznotaword", store);
+
+        response.Warnings.ShouldBeEmpty();
+        response.Matches.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void Hybrid_IdentifierFallbackHit_LowSemanticScore_NoWarning()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First();
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.2)]
+        };
+
+        var response = Search(workspace, "Add int", store);
+
+        response.Matches.ShouldNotBeEmpty();
+        response.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Hybrid_OversizedSemanticChunk_DeliversCappedPreviewWithoutTruncation()
     {
         var workspace = NewMarkdownWorkspace(out var chunks, out var repoId);
