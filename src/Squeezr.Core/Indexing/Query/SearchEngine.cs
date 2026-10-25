@@ -192,19 +192,30 @@ public sealed class SearchEngine
         var limited = query.TopK is > 0 ? files.Take(query.TopK.Value).ToList() : files.ToList();
 
         var budget = query.MaxTokens;
+        var perHit = SnippetBudget.PerHitTokens(budget, query.TopK);
         var tokensUsed = 0;
         var taken = new List<SearchMatch>();
         var truncated = false;
         foreach (var match in limited)
         {
-            if (budget is > 0 && taken.Count > 0 && tokensUsed + TokenCounter.Estimate(match.Snippet) > budget)
+            var snippet = match.Snippet;
+            var estimate = TokenCounter.Estimate(snippet);
+            var clipped = false;
+            if (perHit is { } cap && estimate > cap)
+            {
+                snippet = SnippetBudget.Clip(snippet, cap);
+                estimate = TokenCounter.Estimate(snippet);
+                clipped = true;
+            }
+
+            if (budget is > 0 && taken.Count > 0 && tokensUsed + estimate > budget)
             {
                 truncated = true;
                 break;
             }
 
-            tokensUsed += TokenCounter.Estimate(match.Snippet);
-            taken.Add(match);
+            tokensUsed += estimate;
+            taken.Add(clipped ? match with { Snippet = snippet } : match);
         }
 
         return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null) { Warnings = warnings };

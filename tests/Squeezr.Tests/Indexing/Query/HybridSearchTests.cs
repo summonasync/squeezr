@@ -21,6 +21,24 @@ public class HybridSearchTests
         }
         """;
 
+    private const string SlugMark = "slugmark";
+
+    private const string BigDoc = """
+        # Release notes
+
+        alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima
+        mike november oscar papa quebec romeo sierra tango uniform victor whiskey
+        xray yankee zulu one two three four five six seven eight nine ten twelve
+
+        the planning slug carries slugmark for this fixture line
+        alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima
+        mike november oscar papa quebec romeo sierra tango uniform victor whiskey
+
+        ## Appendix
+
+        closing filler zulu one two three four five six seven eight nine twelve
+        """;
+
     [Fact]
     public void Merge_KnownRanks_ProduceRrfScoresAndOrder()
     {
@@ -114,6 +132,71 @@ public class HybridSearchTests
         hit.Source.ShouldBe("semantic");
         hit.Path.ShouldBe("Calc.cs");
         hit.Snippet.ShouldBe(chunk.Text.Trim());
+    }
+
+    [Fact]
+    public void Hybrid_OversizedSemanticChunk_DeliversCappedPreviewWithoutTruncation()
+    {
+        var workspace = NewMarkdownWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First(c => c.Text.Contains(SlugMark));
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.9)]
+        };
+
+        var response = Search(workspace, "zznotaword", store);
+
+        var hit = response.Matches.ShouldHaveSingleItem();
+        hit.Source.ShouldBe("semantic");
+        hit.Line.ShouldBe(chunk.StartLine);
+        hit.Snippet.Length.ShouldBeLessThanOrEqualTo(SemanticSnippet.MaxChars + 1);
+        hit.Snippet.ShouldNotContain("Appendix");
+        response.Truncated.ShouldBeFalse();
+        response.TokensUsed.ShouldBe(TokenCounter.Estimate(hit.Snippet));
+    }
+
+    [Fact]
+    public void Hybrid_ManyOversizedChunks_TopKFitsTheBudgetWithoutTruncation()
+    {
+        var workspace = NewMarkdownWorkspace(out var chunks, out var repoId);
+        var store = new FakeVectorStore
+        {
+            Hits = chunks
+                .Select((c, i) => new VectorHit((ulong)(i + 1), $"h{i}", c.FileId, repoId, c.StartLine, c.EndLine, 0.9))
+                .ToList()
+        };
+
+        var response = Search(workspace, "zznotaword", store, maxTokens: 2000, topK: 8);
+
+        response.Matches.Count.ShouldBe(3);
+        response.Truncated.ShouldBeFalse();
+        response.Matches.ShouldAllBe(m => m.Snippet.Length <= SemanticSnippet.MaxChars + 1);
+        response.TokensUsed.ShouldBe(response.Matches.Sum(m => TokenCounter.Estimate(m.Snippet)));
+    }
+
+    [Fact]
+    public async Task Resolver_OversizedChunk_SnippetLeadsWithTheMatchedLine()
+    {
+        var workspace = NewMarkdownWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First(c => c.Text.Contains(SlugMark));
+
+        var hits = await SemanticHitsResolver.Resolve(
+            workspace,
+            new SearchQuery($"planning {SlugMark}", false, null, null, null, null, null, null),
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore
+            {
+                Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.9)]
+            },
+            CancellationToken.None,
+            null,
+            SecretGuardReader.Load(workspace));
+
+        var hit = hits.ShouldHaveSingleItem().Match;
+        hit.Source.ShouldBe("semantic");
+        hit.Line.ShouldBe(chunk.StartLine);
+        hit.Snippet.ShouldStartWith("the planning slug carries slugmark for this fixture line");
+        hit.Snippet.Length.ShouldBeLessThanOrEqualTo(SemanticSnippet.MaxChars + 1);
     }
 
     [Fact]
@@ -218,11 +301,12 @@ public class HybridSearchTests
 
     private static SearchResponse Search(
         string workspace, string query, FakeVectorStore store, string? repo = null,
-        string? kind = null, SemanticCoverage? coverage = null)
+        string? kind = null, SemanticCoverage? coverage = null,
+        int? maxTokens = null, int? topK = null)
     {
         var engine = new SearchEngine(workspace);
         return engine.SearchHybridAsync(
-            new SearchQuery(query, false, null, repo, null, null, null, null, null, kind),
+            new SearchQuery(query, false, null, repo, null, null, topK, maxTokens, null, kind),
             new FakeEmbeddingProvider(),
             store,
             CancellationToken.None,
@@ -241,6 +325,30 @@ public class HybridSearchTests
 
         var fullPath = Path.Combine(workspace, "repo", "Calc.cs");
         File.WriteAllText(fullPath, Source);
+
+        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        repoId = store.FindRepo("demo")!.Id;
+        chunks = store.ListFiles(repoId).SelectMany(f => store.ListChunksByFile(f.Id)).ToList();
+        chunks.ShouldNotBeEmpty();
+        return workspace;
+    }
+
+    private static string NewMarkdownWorkspace(out List<ChunkDocument> chunks, out uint repoId)
+    {
+        var workspace = TestDirs.NewTempDir();
+        Directory.CreateDirectory(Path.Combine(workspace, "repo"));
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        manager.AddRepo("repo", "demo");
+
+        foreach (var name in new[] { "release-notes.md", "design-notes.md", "meeting-notes.md" })
+        {
+            File.WriteAllText(Path.Combine(workspace, "repo", name), BigDoc);
+        }
 
         new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
 

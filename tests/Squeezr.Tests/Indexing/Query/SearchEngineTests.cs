@@ -175,6 +175,27 @@ public class SearchEngineTests
     }
 
     [Fact]
+    public void MaxTokens_ExactSnippetIsNeverBudgetClipped()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        var longLine = $"// {new string('x', 250)} {FixtureContent} {new string('y', 250)}";
+        WriteFile(workspace, "repo/a.cs", longLine + "\n");
+        manager.AddRepo("repo", "demo");
+        new WorkspaceIndexer().Index(workspace);
+
+        var engine = new SearchEngine(workspace);
+        var response = engine.Search(new SearchQuery(FixtureContent, false, null, null, null, null, 8, 100));
+        var match = response.Matches.ShouldHaveSingleItem();
+
+        match.Snippet.ShouldBe("// " + new string('x', 197) + "…");
+        response.TokensUsed.ShouldBe(TokenCounter.Estimate(match.Snippet));
+        response.Truncated.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Regex_InvalidPattern_ThrowsFriendlyError()
     {
         var workspace = NewIndexedWorkspace();

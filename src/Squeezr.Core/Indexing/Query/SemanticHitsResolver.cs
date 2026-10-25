@@ -76,7 +76,7 @@ public static class SemanticHitsResolver
 
             result.Add((
                 $"{hit.FileId}:{chunk.StartLine}",
-                new SearchMatch(repo.Name, file.Path, hit.StartLine, hit.Score, chunk.Text.Trim())
+                new SearchMatch(repo.Name, file.Path, hit.StartLine, hit.Score, SemanticSnippet.Build(chunk.Text, query.Query))
                 {
                     Source = "semantic"
                 }));
