@@ -178,9 +178,7 @@ public static class ExactSearchPlan
                     }
                 }
 
-                return filter is null
-                    ? union.ToArray()
-                    : union.Where(docId => filter.Contains(reader.GetDoc(docId).FileId)).ToArray();
+                return IntersectInput(union, filter, reader);
             })
             .ToList();
 
@@ -204,13 +202,23 @@ public static class ExactSearchPlan
                     union.UnionWith(reader.ScanDocIds(TrigramHasher.ComputeHash(trigram[0], trigram[1], trigram[2])));
                 }
 
-                return filter is null
-                    ? union.ToArray()
-                    : union.Where(docId => filter.Contains(reader.GetDoc(docId).FileId)).ToArray();
+                return IntersectInput(union, filter, reader);
             })
             .ToList();
 
         return PostingListIntersect.Intersect(lists);
+    }
+
+    // case-variant expansion unions postings of several trigram spellings per group, and the
+    // HashSet's insertion order is not docId order — IntersectPair walks two sorted lists, so an
+    // unsorted union silently drops every candidate that landed behind a smaller docId
+    private static uint[] IntersectInput(HashSet<uint> union, IReadOnlySet<uint>? filter, TrigramIndexReader reader)
+    {
+        var docIds = union.ToArray();
+        Array.Sort(docIds);
+        return filter is null
+            ? docIds
+            : docIds.Where(docId => filter.Contains(reader.GetDoc(docId).FileId)).ToArray();
     }
 
     private static string[] ExpandWithCap(string trigram, int trigramCount, ref bool exceededCap)

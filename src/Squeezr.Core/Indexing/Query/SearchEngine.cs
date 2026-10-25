@@ -60,7 +60,11 @@ public sealed class SearchEngine
             using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
             var reader = new TrigramIndexReader(indexPath);
             exact = ExactSearchPlan.Execute(_workspaceRoot, store, reader, query, trackChunkKeys: true, fileScope, guard);
-            identifierHits = IdentifierTokenLeg.Execute(_workspaceRoot, store, reader, query, fileScope, guard);
+            // a guard interception is why the phrase arm died, not a phrase that never existed:
+            // the token leg would answer a secret query with files sharing its common fragments
+            identifierHits = guard.WithheldCount > 0
+                ? []
+                : IdentifierTokenLeg.Execute(_workspaceRoot, store, reader, query, fileScope, guard);
         }
         var semantic = new List<(string Key, SearchMatch Match)>();
         var warnings = new List<string>();
