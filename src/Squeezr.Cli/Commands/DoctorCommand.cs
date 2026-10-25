@@ -50,12 +50,14 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
     private static async Task<IReadOnlyList<DoctorFinding>> ServiceFindings(CancellationToken cancellationToken)
     {
         var findings = new List<DoctorFinding>();
-        var composePath = ServicesComposeFile.ComposeFilePath;
-        if (!File.Exists(composePath))
+        var legacyPath = ServicesComposeFile.ComposeFilePath;
+        var ownedPath = OwnedComposeFile.FilePath;
+
+        if (!File.Exists(legacyPath) && !File.Exists(ownedPath))
         {
             findings.Add(new DoctorFinding(
                 "services", DoctorRunner.StateFail,
-                $"no compose file at {composePath}", DoctorRemedies.ServicesUp));
+                $"no compose file at {legacyPath}", DoctorRemedies.ServicesUp));
             return findings;
         }
 
@@ -63,23 +65,17 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
         {
             var cli = new DockerComposeCli(new ProcessRunner());
             var installation = await cli.DetectAsync(cancellationToken);
-            var result = await cli.RunCheckedAsync(
-                installation, composePath, ["ps", "--format", "json"], DockerComposeCli.StatusTimeout, cancellationToken);
-            var states = DockerComposeCli.ParseServiceStates(result.StdOut, installation.Version);
-            foreach (var state in states)
+
+            if (File.Exists(legacyPath))
             {
-                if (string.Equals(state.State, "running", StringComparison.OrdinalIgnoreCase))
-                {
-                    findings.Add(new DoctorFinding(
-                        $"service {state.Service}", DoctorRunner.StateInfo,
-                        $"running ({state.Status})", null));
-                }
-                else
-                {
-                    findings.Add(new DoctorFinding(
-                        $"service {state.Service}", DoctorRunner.StateFail,
-                        $"state: {state.State}", DoctorRemedies.ServicesUp));
-                }
+                await CollectProjectFindings(
+                    findings, cli, installation, legacyPath, ServicesComposeFile.ProjectName, "services", cancellationToken);
+            }
+
+            if (File.Exists(ownedPath))
+            {
+                await CollectProjectFindings(
+                    findings, cli, installation, ownedPath, OwnedComposeFile.ProjectName, "owned qdrant", cancellationToken);
             }
         }
         catch (ServicesException ex)
@@ -89,5 +85,35 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
         }
 
         return findings;
+    }
+
+    private static async Task CollectProjectFindings(
+        List<DoctorFinding> findings,
+        DockerComposeCli cli,
+        DockerComposeInstallation installation,
+        string composePath,
+        string projectName,
+        string label,
+        CancellationToken cancellationToken)
+    {
+        var result = await cli.RunCheckedAsync(
+            installation, composePath, ["ps", "--format", "json"], DockerComposeCli.StatusTimeout,
+            cancellationToken, projectName: projectName);
+        var states = DockerComposeCli.ParseServiceStates(result.StdOut, installation.Version);
+        foreach (var state in states)
+        {
+            if (string.Equals(state.State, "running", StringComparison.OrdinalIgnoreCase))
+            {
+                findings.Add(new DoctorFinding(
+                    $"{label} {state.Service}", DoctorRunner.StateInfo,
+                    $"running ({state.Status})", null));
+            }
+            else
+            {
+                findings.Add(new DoctorFinding(
+                    $"{label} {state.Service}", DoctorRunner.StateFail,
+                    $"state: {state.State}", DoctorRemedies.ServicesUp));
+            }
+        }
     }
 }
