@@ -95,7 +95,8 @@ public sealed class FindReferencesTool
                 tokensUsed, false, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("find_references", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }

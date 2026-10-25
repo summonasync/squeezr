@@ -90,7 +90,8 @@ public sealed class ExpandSpanTool
                 new { file, startLine, endLine, contextLines },
                 result.TokensUsed, result.Truncated, data.Span.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)

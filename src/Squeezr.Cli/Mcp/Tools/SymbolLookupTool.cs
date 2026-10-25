@@ -55,7 +55,8 @@ public sealed class SymbolLookupTool
                 QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SymbolHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                    baselineTokens: hit.Cost?.BaselineTokens);
                 return hit;
             }
 
@@ -111,7 +112,8 @@ public sealed class SymbolLookupTool
                 result.TokensUsed, result.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("symbol_lookup", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }

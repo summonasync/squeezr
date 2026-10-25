@@ -1305,7 +1305,12 @@ path either does it or journals it and reports the count.
 "But does it actually save?" — `squeezr stats` answers with numbers, not
 promises. Every navigation command (CLI: `search`/`symbol`/`refs`/`map`/
 `expand`; MCP: all six tools) appends one telemetry line to `queries.jsonl`
-in the workspace store, and stats rolls it into a summary:
+in the workspace store, and stats rolls it into a summary. MCP answers
+carry the same arithmetic in their own envelope: the additive `cost` block
+(`tokensUsed`, `baselineTokens`, `savedTokens`, `ratio`, `complete`) shows
+the whole-file price of the returned files at the moment of the call, and
+telemetry records that same per-call `baselineTokens`, so the dashboard
+and the transcript cannot disagree:
 
 ```bash
 squeezr stats           # per-tool table + savings + cache

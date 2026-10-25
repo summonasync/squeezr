@@ -72,7 +72,8 @@ public sealed class CodeSearchTool
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                    baselineTokens: hit.Cost?.BaselineTokens);
                 return hit;
             }
 
@@ -127,7 +128,8 @@ public sealed class CodeSearchTool
                 response.TokensUsed, response.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("code_search", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
