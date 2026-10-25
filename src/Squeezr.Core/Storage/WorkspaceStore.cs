@@ -129,9 +129,48 @@ public static class WorkspaceStore
         return Directory.Exists(storeDir) && !SqueezrHome.IsCentralStore(storeDir) && !SqueezrHome.LooksLikeCentralStore(storeDir);
     }
 
+    // The one deliberate-relocation surface: the caller must hold an approval to get here, and the
+    // guard still refuses a default-home or resolved-home store - centrality is absolute, approval
+    // only opens the structural-signature and ordinary-store cases.
+    public static WorkspaceMigrationResult MigrateWithApproval(string root, WorkspaceMigrationApproval approval)
+    {
+        if (!Directory.Exists(root))
+        {
+            throw new WorkspaceException($"Directory '{root}' does not exist.");
+        }
+
+        var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
+        if (WorkspaceRegistry.FindByRootPath(canonicalRoot) is not null)
+        {
+            throw new WorkspaceException($"'{canonicalRoot}' is already a registered workspace; nothing to migrate.");
+        }
+
+        var legacyStoreDir = Path.Combine(canonicalRoot, SqueezrPaths.StoreDirName);
+        if (!Directory.Exists(legacyStoreDir))
+        {
+            throw new WorkspaceException($"Nothing to migrate: '{legacyStoreDir}' does not exist.");
+        }
+
+        RefuseCentralStoreMigration(canonicalRoot, approval);
+
+        var name = ResolveLegacyName(canonicalRoot);
+        var storeKey = WorkspaceStoreKeys.Create(name, canonicalRoot);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            name,
+            canonicalRoot,
+            storeKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow));
+        MoveLegacyContent(canonicalRoot, storeKey, approval);
+
+        var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
+        var movedFiles = Directory.EnumerateFiles(storeDir, "*", SearchOption.AllDirectories).Count();
+        return new WorkspaceMigrationResult(legacyStoreDir, storeDir, storeKey, movedFiles);
+    }
+
     private static WorkspaceRegistryEntry MigrateLegacyWorkspace(string root)
     {
-        RefuseCentralStoreMigration(root);
+        RefuseCentralStoreMigration(root, approval: null);
 
         var name = ResolveLegacyName(root);
         var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
@@ -168,18 +207,23 @@ public static class WorkspaceStore
         return new DirectoryInfo(root).Name;
     }
 
-    private static void RefuseCentralStoreMigration(string root)
+    private static void RefuseCentralStoreMigration(string root, WorkspaceMigrationApproval? approval)
     {
         var storeDir = Path.Combine(root, SqueezrPaths.StoreDirName);
-        if (SqueezrHome.IsCentralStore(storeDir) || SqueezrHome.LooksLikeCentralStore(storeDir))
+        if (SqueezrHome.IsCentralStore(storeDir))
         {
             throw new WorkspaceException(CentralStoreRefusalText.Migration(storeDir));
         }
+
+        if (approval is null && SqueezrHome.LooksLikeCentralStore(storeDir))
+        {
+            throw new WorkspaceException(CentralStoreRefusalText.StructuralMigration(storeDir));
+        }
     }
 
-    private static void MoveLegacyContent(string root, string storeKey)
+    private static void MoveLegacyContent(string root, string storeKey, WorkspaceMigrationApproval? approval = null)
     {
-        RefuseCentralStoreMigration(root);
+        RefuseCentralStoreMigration(root, approval);
 
         var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
         Directory.CreateDirectory(storeDir);
