@@ -125,6 +125,37 @@ public sealed class DockerComposeCli
         }
     }
 
+    // Single-service pull for a mixed fleet: keeps the same policy-missing optimization and the
+    // resume hint as the whole-fleet pull, scoped to one service so adopted or blocked services
+    // are never dragged into the invocation.
+    public async Task PullServiceAsync(
+        DockerComposeInstallation installation,
+        string composeFile,
+        string service,
+        Action<string>? progressHandler,
+        CancellationToken cancellationToken)
+    {
+        var supportsPolicyMissing = SupportsPolicyMissing(installation);
+        var arguments = supportsPolicyMissing
+            ? new List<string> { "pull", "--policy", "missing", service }
+            : new List<string> { "pull", service };
+        if (!supportsPolicyMissing)
+        {
+            Console.Error.WriteLine(PolicyMissingFallbackNote);
+        }
+
+        var result = await RunAsync(
+            installation, composeFile, arguments, Timeout.InfiniteTimeSpan, cancellationToken, progressHandler);
+
+        if (result.ExitCode != 0)
+        {
+            throw new ServicesException(
+                $"'{DisplayCommand(installation, arguments)}' failed with exit code {result.ExitCode}: {FailureDetail(result)}. " +
+                PullResumeHint(installation, composeFile),
+                ServicesException.ComposeCommandFailedCode);
+        }
+    }
+
     public static IReadOnlyList<ComposeServiceState> ParseServiceStates(string psOutput, Version? composeVersion = null)
     {
         if (string.IsNullOrWhiteSpace(psOutput))
