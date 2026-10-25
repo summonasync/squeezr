@@ -187,6 +187,11 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
             $"Period: {rollup.Period.From:yyyy-MM-dd HH:mm} — {rollup.Period.To:yyyy-MM-dd HH:mm} " +
             $"({rollup.Totals.Records} records)");
 
+        if (rollup.Totals.Sessions is { } adoption)
+        {
+            console.MarkupLine($"[grey]{AdoptionLine(adoption).EscapeMarkup()}[/]");
+        }
+
         if (rollup.Totals.Records > RetentionHintThreshold)
         {
             console.MarkupLine(
@@ -201,6 +206,7 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
         table.AddColumn("Client");
         table.AddColumn("Version");
         table.AddColumn("Count");
+        table.AddColumn("Sessions");
         table.AddColumn("Last seen");
         foreach (var agent in rollup.Totals.Agents)
         {
@@ -208,11 +214,22 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
                 agent.Client.EscapeMarkup(),
                 (agent.ClientVersion ?? "-").EscapeMarkup(),
                 agent.Count.ToString(CultureInfo.InvariantCulture),
+                agent.Sessions.ToString(CultureInfo.InvariantCulture),
                 $"{agent.LastSeen:yyyy-MM-dd HH:mm}");
         }
 
         return table;
     }
+
+    // explicit zero sides beat silent ratios: a missing hook or a dead index each say exactly what is missing
+    public static string AdoptionLine(SessionAdoption adoption) => adoption.HookSessions switch
+    {
+        0 when adoption.McpSessions == 0 => "Adoption: no session-attributed usage recorded yet.",
+        0 => $"Adoption: {adoption.McpSessions} session(s) used MCP tools; read side unknown — 0 hook sessions recorded (install the pre-read hook).",
+        _ => adoption.McpSessions == 0
+            ? $"Adoption: 0 sessions used MCP tools; {adoption.HookSessions} session(s) read code via the hook."
+            : $"Adoption: {adoption.McpSessions} of {adoption.HookSessions} reading session(s) used MCP tools (ratio {adoption.Ratio})."
+    };
 
     private sealed class UsageLiveView
     {
