@@ -31,7 +31,7 @@ public sealed class SearchEngine
         var matches = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: false, fileScope, guard)
             .Select(hit => hit.Match)
             .ToList();
-        return Finalize(matches, query, AppendWithheld([], guard));
+        return Finalize(matches, query, AppendWithheld([], guard), matches.Count, []);
     }
 
     public async Task<SearchResponse> SearchHybridAsync(
@@ -60,9 +60,13 @@ public sealed class SearchEngine
             using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
             var reader = new TrigramIndexReader(indexPath);
             exact = ExactSearchPlan.Execute(_workspaceRoot, store, reader, query, trackChunkKeys: true, fileScope, guard);
-            identifierHits = IdentifierTokenLeg.Execute(_workspaceRoot, store, reader, query, fileScope, guard);
+            // a guard interception is why the phrase arm died, not a phrase that never existed:
+            // the token leg would answer a secret query with files sharing its common fragments
+            identifierHits = guard.WithheldCount > 0
+                ? []
+                : IdentifierTokenLeg.Execute(_workspaceRoot, store, reader, query, fileScope, guard);
         }
-        var semantic = new List<(string Key, SearchMatch Match)>();
+        var semantic = SemanticArm.Empty;
         var warnings = new List<string>();
 
         if (vectorStore is not null && embeddings is not null)
@@ -90,6 +94,15 @@ public sealed class SearchEngine
             }
         }
 
+        if (fileScope is not { Count: 0 })
+        {
+            var capped = CappedArmPolicy.Warning(semantic, query.Repo, query.Prefix, query.Kind);
+            if (capped is not null)
+            {
+                warnings.Add(capped);
+            }
+        }
+
         var phraseLocations = new HashSet<(string Path, int Line)>(
             exact.Select(hit => (hit.Match.Path, hit.Match.Line)));
         var dedupedIdentifier = identifierHits
@@ -100,8 +113,9 @@ public sealed class SearchEngine
             .Concat(dedupedIdentifier)
             .Select(hit => (hit.Key!, hit.Match))
             .ToList();
-        var merged = RrfMerger.Merge(exactRanked, semantic);
-        return Finalize(merged, query, AppendWithheld(warnings, guard));
+        var merged = RrfMerger.Merge(exactRanked, semantic.Hits);
+        var semanticScores = semantic.Hits.Select(hit => hit.Match.Score).ToList();
+        return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores);
     }
 
     private static List<string> AppendWithheld(List<string> warnings, SecretGuardReader guard)
@@ -181,28 +195,51 @@ public sealed class SearchEngine
         return $"semantic coverage: {percent}% ({coverage.PendingChunks} {noun} pending embedding)";
     }
 
-    private static SearchResponse Finalize(IReadOnlyList<SearchMatch> ranked, SearchQuery query, IReadOnlyList<string> warnings)
+    private static SearchResponse Finalize(
+        IReadOnlyList<SearchMatch> ranked,
+        SearchQuery query,
+        IReadOnlyList<string> warnings,
+        int exactArmHits,
+        IReadOnlyList<double> semanticScores)
     {
         // collapse before the cap so topK counts files, not spans of one file
         var files = FileHitCollapser.Collapse(ranked);
         var limited = query.TopK is > 0 ? files.Take(query.TopK.Value).ToList() : files.ToList();
 
         var budget = query.MaxTokens;
+        var perHit = SnippetBudget.PerHitTokens(budget, query.TopK);
         var tokensUsed = 0;
         var taken = new List<SearchMatch>();
         var truncated = false;
         foreach (var match in limited)
         {
-            if (budget is > 0 && taken.Count > 0 && tokensUsed + TokenCounter.Estimate(match.Snippet) > budget)
+            var snippet = match.Snippet;
+            var estimate = TokenCounter.Estimate(snippet);
+            var clipped = false;
+            if (perHit is { } cap && estimate > cap)
+            {
+                snippet = SnippetBudget.Clip(snippet, cap);
+                estimate = TokenCounter.Estimate(snippet);
+                clipped = true;
+            }
+
+            if (budget is > 0 && taken.Count > 0 && tokensUsed + estimate > budget)
             {
                 truncated = true;
                 break;
             }
 
-            tokensUsed += TokenCounter.Estimate(match.Snippet);
-            taken.Add(match);
+            tokensUsed += estimate;
+            taken.Add(clipped ? match with { Snippet = snippet } : match);
         }
 
-        return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null) { Warnings = warnings };
+        var weakWarning = WeakMatchPolicy.IsWeak(exactArmHits, semanticScores)
+            ? WeakMatchPolicy.Warning(taken.Count(match => match.Source == "semantic"), query.Kind)
+            : null;
+
+        return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null)
+        {
+            Warnings = weakWarning is null ? warnings : [.. warnings, weakWarning]
+        };
     }
 }

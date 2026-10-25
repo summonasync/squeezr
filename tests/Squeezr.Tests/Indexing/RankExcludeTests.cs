@@ -207,7 +207,8 @@ public class RankExcludeTests
         var engine = new SearchEngine(workspace, RankExclusion.Load(workspace));
 
         var curated = Hybrid(engine, store);
-        store.LastTopK.ShouldBe(80);
+        store.LastTopK.ShouldBe(ScopedVectorBudget.For(3, 5));
+        store.LastTopK.ShouldBe(34);
         curated.Matches.Select(m => m.Path).ShouldNotContain("audits/Note.md");
         curated.Matches.ShouldContain(m => m.Path == "src/Core/Alpha.cs");
     }
@@ -409,7 +410,7 @@ public class RankExcludeTests
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct)
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct)
         {
             LastTopK = topK;
             return Task.FromResult(Hits);
@@ -419,6 +420,12 @@ public class RankExcludeTests
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
 

@@ -30,7 +30,7 @@ public sealed class IndexStatusTool
         _identity = identity;
     }
 
-    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, semantic coverage (embedded share of chunks, 0..1; null when there is nothing to embed), Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed. When more than one workspace is registered, data.workspaces also lists them as {name, rootPath, storeKey, current, stale} (up to 12 rows, the rest counted in workspacesOmitted) — an absent workspaces key means this session's workspace is the only one the registry knows.")]
+    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, semantic coverage (embedded share of chunks, 0..1; null when there is nothing to embed), per-kind chunk counts (data.kindChunks maps \"code\" and \"docs\" to chunk totals; the values sum to the per-repo chunks counts), Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed. When more than one workspace is registered, data.workspaces also lists them as {name, rootPath, storeKey, current, stale} (up to 12 rows, the rest counted in workspacesOmitted) — an absent workspaces key means this session's workspace is the only one the registry knows.")]
     [McpServerTool(Name = "index_status", Title = "Index status")]
     public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
         _gate.RunAsync(GetCore, cancellationToken);
@@ -54,10 +54,12 @@ public sealed class IndexStatusTool
             var status = manager.GetStatus();
             QdrantStatus qdrant;
             GhostRefLag refsLag;
+            IReadOnlyDictionary<string, int> kindChunks;
             using (var metaStore = new MetaStore(SqueezrPaths.MetaDbPath(root)))
             {
                 qdrant = await QdrantStatusProbe.ProbeAsync(_vectorStore, metaStore, cancellationToken);
                 refsLag = RefLookup.MeasureLag(metaStore);
+                kindChunks = metaStore.CountChunksByKind();
             }
 
             if (qdrant.ExcessPoints is { } excess)
@@ -117,6 +119,7 @@ public sealed class IndexStatusTool
                     qdrant.PendingChunks,
                     new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio),
                 new QdrantData(qdrant.Available, qdrant.Points),
+                kindChunks,
                 BuildWorkspaceRows(siblings),
                 siblings.Omitted);
 
@@ -198,6 +201,7 @@ public sealed class IndexStatusTool
         [property: JsonPropertyName("repos")] IReadOnlyList<RepoData> Repos,
         [property: JsonPropertyName("embeddings")] EmbeddingsData Embeddings,
         [property: JsonPropertyName("qdrant")] QdrantData Qdrant,
+        [property: JsonPropertyName("kindChunks")] IReadOnlyDictionary<string, int> KindChunks,
         [property: JsonPropertyName("workspaces"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<WorkspaceData>? Workspaces = null,
         [property: JsonPropertyName("workspacesOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

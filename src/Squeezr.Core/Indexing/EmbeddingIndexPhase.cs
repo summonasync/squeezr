@@ -40,6 +40,9 @@ public static class EmbeddingIndexPhase
         }
 
         var embedded = 0;
+        var kindByFileId = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Id, DocKindDetector.Detect);
+        BackfillKindPayloads(repoDoc, kindByFileId, vectorStore, warning);
+
         var totalPending = store.CountPendingChunks(repoDoc.Id, modelKey);
         if (totalPending == 0)
         {
@@ -88,7 +91,7 @@ public static class EmbeddingIndexPhase
                 try
                 {
                     EmbedNewHashes(batch, vectorsByHash, provider);
-                    UpsertBatch(batch, vectorsByHash, vectorStore);
+                    UpsertBatch(batch, vectorsByHash, kindByFileId, vectorStore);
                     store.MarkChunksEmbedded(batch.Select(c => c.Id), modelKey);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException and not VectorDimensionMismatchException)
@@ -169,6 +172,7 @@ public static class EmbeddingIndexPhase
     private static void UpsertBatch(
         IReadOnlyList<ChunkDocument> batch,
         IReadOnlyDictionary<string, float[]> vectorsByHash,
+        IReadOnlyDictionary<uint, string> kindByFileId,
         IVectorStore vectorStore)
     {
         var pointsByHash = new Dictionary<string, VectorPoint>(StringComparer.Ordinal);
@@ -181,9 +185,34 @@ public static class EmbeddingIndexPhase
                 chunk.FileId,
                 chunk.RepoId,
                 chunk.StartLine,
-                chunk.EndLine));
+                chunk.EndLine,
+                kindByFileId.GetValueOrDefault(chunk.FileId, DocKindDetector.Docs)));
         }
 
         vectorStore.UpsertAsync(pointsByHash.Values.ToList(), CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    private static void BackfillKindPayloads(
+        RepoDocument repoDoc,
+        IReadOnlyDictionary<uint, string> kindByFileId,
+        IVectorStore vectorStore,
+        Action<string> warning)
+    {
+        try
+        {
+            var missing = vectorStore.ScrollFileIdsWithoutKindAsync(repoDoc.Id, CancellationToken.None).GetAwaiter().GetResult();
+            var gaps = missing.Where(kindByFileId.ContainsKey)
+                .ToDictionary(f => f, f => kindByFileId[f]);
+            if (gaps.Count == 0)
+            {
+                return;
+            }
+
+            vectorStore.SetKindPayloadsAsync(gaps, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
+        {
+            warning($"kind backfill skipped for repo '{repoDoc.Name}': {ex.Message}");
+        }
     }
 }

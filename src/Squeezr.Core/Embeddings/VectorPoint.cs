@@ -7,4 +7,5 @@ public sealed record VectorPoint(
     uint FileId,
     uint RepoId,
     int StartLine,
-    int EndLine);
+    int EndLine,
+    string Kind);

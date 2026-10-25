@@ -16,14 +16,15 @@ public sealed class IndexStatusWorkspacesTests : IDisposable
     private const string RepoName = "vis-repo";
     private const string RootToken = "<ROOT>";
 
-    // Captured from the pre-065/T2 build (7c5b0b8) over this exact fixture with the temp workspace
-    // root replaced by <ROOT>: R3 promises a one-workspace payload stays byte-for-byte today's output.
+    // Captured from the 057/T2 build over this exact fixture with the temp workspace root replaced
+    // by <ROOT>: 065/T2's R3 promise (one-workspace payload omits the workspaces block) still holds —
+    // 057/T2 added the kindChunks block, the pre-057 baseline lives in git history.
     private const string SingleWorkspaceDataBytes = """
-        {"workspace":"vis-payload","rootPath":"<ROOT>","repos":[{"name":"vis-repo","rootPath":"<ROOT>/repo","files":1,"symbols":3,"chunks":3}],"embeddings":{"pending":3,"coverage":0},"qdrant":{"available":false}}
+        {"workspace":"vis-payload","rootPath":"<ROOT>","repos":[{"name":"vis-repo","rootPath":"<ROOT>/repo","files":1,"symbols":3,"chunks":3}],"embeddings":{"pending":3,"coverage":0},"qdrant":{"available":false},"kindChunks":{"code":3}}
         """;
 
     private static readonly string[] BaselineDataKeys =
-        ["embeddings", "qdrant", "repos", "rootPath", "workspace"];
+        ["embeddings", "kindChunks", "qdrant", "repos", "rootPath", "workspace"];
 
     private static readonly string[] DeclaredEntryKeys =
         ["current", "name", "rootPath", "stale", "storeKey"];
