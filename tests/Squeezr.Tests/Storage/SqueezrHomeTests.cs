@@ -158,6 +158,28 @@ public sealed class SqueezrHomeTests : IDisposable
         SqueezrHome.IsDefaultHome(pinnedHome).ShouldBeFalse();
     }
 
+    [Fact]
+    public void LooksLikeCentralStore_RegistryFileInDir_IsTrueAndEmptyDirIsFalse()
+    {
+        var temp = NewTempDir();
+        var withRegistry = NewDir(temp, "registry-store");
+        File.WriteAllText(Path.Combine(withRegistry, SqueezrPaths.RegistryFileName), "[]");
+
+        SqueezrHome.LooksLikeCentralStore(withRegistry).ShouldBeTrue();
+        SqueezrHome.LooksLikeCentralStore(NewDir(temp, "empty")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void LooksLikeCentralStore_WorkspacesDirInDir_IsTrueAndPlainDirIsFalse()
+    {
+        var temp = NewTempDir();
+        var withWorkspaces = NewDir(temp, "workspaces-store");
+        Directory.CreateDirectory(Path.Combine(withWorkspaces, SqueezrPaths.WorkspacesDirName));
+
+        SqueezrHome.LooksLikeCentralStore(withWorkspaces).ShouldBeTrue();
+        SqueezrHome.LooksLikeCentralStore(NewDir(temp, "plain")).ShouldBeFalse();
+    }
+
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _previousEnv);

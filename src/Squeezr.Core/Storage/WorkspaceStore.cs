@@ -121,15 +121,8 @@ public static class WorkspaceStore
         }
 
         var storeDir = Path.Combine(directory, SqueezrPaths.StoreDirName);
-        return Directory.Exists(storeDir) && !SqueezrHome.IsCentralStore(storeDir) && !LooksLikeCentralStore(storeDir);
+        return Directory.Exists(storeDir) && !SqueezrHome.IsCentralStore(storeDir) && !SqueezrHome.LooksLikeCentralStore(storeDir);
     }
-
-    // A store dir under some other home (a foreign SQUEEZR_HOME, a stale profile) is shaped
-    // exactly like a legacy in-project store; anything carrying a registry or a workspaces
-    // dir is a central store and must never be migrated away.
-    private static bool LooksLikeCentralStore(string storeDir) =>
-        File.Exists(Path.Combine(storeDir, SqueezrPaths.RegistryFileName))
-        || Directory.Exists(Path.Combine(storeDir, SqueezrPaths.WorkspacesDirName));
 
     private static WorkspaceRegistryEntry MigrateLegacyWorkspace(string root)
     {

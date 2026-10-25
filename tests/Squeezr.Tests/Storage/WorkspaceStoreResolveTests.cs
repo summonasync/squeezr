@@ -122,6 +122,59 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
     }
 
     [Fact]
+    public void Resolve_RegisteredRowWithCentralLookingStoreDir_CompletesNothingAndKeepsTheStore()
+    {
+        // The second route into MoveLegacyContent: a registry row whose root still carries a
+        // legacy layout reaches CompleteLegacyMigration without any upward-walk classification.
+        // A root store dir shaped like the central store must stop here too.
+        var root = NewDir();
+        var decoyStore = NewDir(Path.Combine(root, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(decoyStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName), "[]");
+        var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
+        var storeKey = WorkspaceStoreKeys.Create("registered", canonicalRoot);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            "registered", canonicalRoot, storeKey, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+
+        var result = WorkspaceStore.Resolve(root);
+
+        result.IsWorkspace.ShouldBeTrue();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        result.StoreKey.ShouldBe(storeKey);
+        Directory.Exists(decoyStore).ShouldBeTrue();
+        File.Exists(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+        Directory.Exists(Path.Combine(decoyStore, SqueezrPaths.WorkspacesDirName)).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_NoEqualityWithFakedHomes_DecoyStoreIsCaughtStructurally()
+    {
+        var temp = TestDirs.NewTempDir();
+        var homeProfile = NewDir(Path.Combine(temp, "home"));
+        var pinnedHome = NewDir(Path.Combine(temp, "pinned"));
+        var foreignProfile = NewDir(Path.Combine(temp, "foreign"));
+        var decoyStore = NewDir(Path.Combine(foreignProfile, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(decoyStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName), "[]");
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, homeProfile);
+        SqueezrHome.Reset();
+
+        var canonicalDecoy = WorkspaceCanonicalPath.ResolveThroughLinks(decoyStore);
+        canonicalDecoy.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.Resolve()));
+        canonicalDecoy.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome()));
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(foreignProfile, "work")));
+
+        SqueezrHome.LooksLikeCentralStore(decoyStore).ShouldBeTrue();
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(decoyStore).ShouldBeTrue();
+        File.Exists(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [Fact]
     public void Resolve_StartUnderAForeignCentralStore_DoesNotMigrateItEither()
     {
         // Same shape, but not the store this process resolves - an old store left behind

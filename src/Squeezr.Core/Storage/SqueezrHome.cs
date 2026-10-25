@@ -43,6 +43,13 @@ public static class SqueezrHome
             PathComparison);
     }
 
+    // A store dir under some other home (a foreign SQUEEZR_HOME, a stale profile) is shaped
+    // exactly like a legacy in-project store; anything carrying a registry or a workspaces
+    // dir is a central store and must never be migrated away.
+    public static bool LooksLikeCentralStore(string directory) =>
+        File.Exists(Path.Combine(directory, SqueezrPaths.RegistryFileName)) ||
+        Directory.Exists(Path.Combine(directory, SqueezrPaths.WorkspacesDirName));
+
     public static void Reset()
     {
         lock (Sync)
