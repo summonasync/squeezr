@@ -8,7 +8,7 @@ public interface IVectorStore
 
     Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct);
 
-    Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct);
+    Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct);
 
     Task<long> CountAsync(CancellationToken ct);
 

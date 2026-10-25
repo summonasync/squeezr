@@ -138,31 +138,41 @@ public sealed class QdrantVectorStore : IVectorStore
         }
     }
 
-    public async Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct)
+    public async Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct)
     {
-        Filter? filter = null;
-        if (repoId.HasValue)
+        Filter? qdrantFilter = null;
+        if (filter.RepoId.HasValue || filter.Kind is not null)
         {
-            filter = new Filter
+            qdrantFilter = new Filter();
+            if (filter.RepoId.HasValue)
             {
-                Must =
+                qdrantFilter.Must.Add(new Condition
                 {
-                    new Condition
+                    Field = new FieldCondition
                     {
-                        Field = new FieldCondition
-                        {
-                            Key = "repoId",
-                            Match = new Match { Integer = (long)repoId.Value },
-                        },
+                        Key = "repoId",
+                        Match = new Match { Integer = (long)filter.RepoId.Value },
                     },
-                },
-            };
+                });
+            }
+
+            if (filter.Kind is not null)
+            {
+                qdrantFilter.Must.Add(new Condition
+                {
+                    Field = new FieldCondition
+                    {
+                        Key = "kind",
+                        Match = new Match { Keyword = filter.Kind },
+                    },
+                });
+            }
         }
 
         var results = await _client.QueryAsync(
             _collection,
             vector,
-            filter: filter,
+            filter: qdrantFilter,
             limit: (ulong)topK,
             payloadSelector: new WithPayloadSelector { Enable = true },
             cancellationToken: ct);

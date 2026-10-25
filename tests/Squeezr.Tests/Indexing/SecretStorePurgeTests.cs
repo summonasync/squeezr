@@ -484,7 +484,7 @@ public class SecretStorePurgeTests
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
         public Task<IReadOnlyList<VectorHit>> SearchAsync(
-            float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+            float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VectorHit>>([]);
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult(0L);
@@ -547,7 +547,7 @@ public class SecretStorePurgeTests
         }
 
         public Task<IReadOnlyList<VectorHit>> SearchAsync(
-            float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+            float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)_points.Count);

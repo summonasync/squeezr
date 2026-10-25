@@ -247,7 +247,8 @@ public static class ExactSearchPlan
 
     internal static IReadOnlySet<uint>? BuildFilter(MetaStore store, SearchQuery query, IReadOnlySet<uint>? fileScope)
     {
-        if (query.Repo is null && query.PathGlob is null && query.Language is null)
+        var kind = DocKindDetector.FilterKind(query.Kind);
+        if (query.Repo is null && query.PathGlob is null && query.Language is null && kind is null)
         {
             return fileScope;
         }
@@ -273,6 +274,11 @@ public static class ExactSearchPlan
                 }
 
                 if (query.Language is not null && !string.Equals(file.Language, query.Language, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (kind is not null && DocKindDetector.Detect(file) != kind)
                 {
                     continue;
                 }

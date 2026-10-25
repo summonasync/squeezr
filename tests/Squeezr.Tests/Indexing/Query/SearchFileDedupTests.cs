@@ -141,7 +141,7 @@ public class SearchFileDedupTests
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             Task.FromResult(Hits);
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)Hits.Count);

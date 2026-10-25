@@ -44,7 +44,7 @@ public static class SemanticHitsResolver
         var hits = await vectorStore.SearchAsync(
             vectors[0],
             fileScope is null ? VectorTopK : ScopedVectorTopK,
-            repoId,
+            new VectorSearchFilter(repoId, DocKindDetector.FilterKind(query.Kind)),
             ct);
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
 

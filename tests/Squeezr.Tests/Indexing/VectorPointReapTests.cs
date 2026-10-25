@@ -698,7 +698,7 @@ public class VectorPointReapTests
             return Task.CompletedTask;
         }
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)Points.Count);

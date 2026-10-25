@@ -615,7 +615,7 @@ public class IdentifierTokenLegTests
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VectorHit>>([]);
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult(0L);

@@ -128,8 +128,30 @@ public class HybridSearchTests
 
         var response = Search(workspace, "Add", store, repo: "demo");
 
-        store.LastRepoId.ShouldBe(repoId);
+        store.LastFilter.ShouldBe(new VectorSearchFilter(repoId, null));
         response.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Hybrid_KindFilter_PropagatesToVectorStore()
+    {
+        var workspace = NewIndexedWorkspace(out _, out _);
+        var store = new FakeVectorStore { Hits = [new VectorHit(1, "h", 999999, 1, 1, 2, 0.5)] };
+
+        Search(workspace, "Add", store, kind: DocKindDetector.Code);
+
+        store.LastFilter.ShouldBe(new VectorSearchFilter(null, DocKindDetector.Code));
+    }
+
+    [Fact]
+    public void Hybrid_DefaultKind_SendsNoKindConditionToTheStore()
+    {
+        var workspace = NewIndexedWorkspace(out _, out _);
+        var store = new FakeVectorStore { Hits = [new VectorHit(1, "h", 999999, 1, 1, 2, 0.5)] };
+
+        Search(workspace, "Add", store);
+
+        store.LastFilter.ShouldBe(new VectorSearchFilter(null, null));
     }
 
     [Fact]
@@ -195,11 +217,12 @@ public class HybridSearchTests
     }
 
     private static SearchResponse Search(
-        string workspace, string query, FakeVectorStore store, string? repo = null, SemanticCoverage? coverage = null)
+        string workspace, string query, FakeVectorStore store, string? repo = null,
+        string? kind = null, SemanticCoverage? coverage = null)
     {
         var engine = new SearchEngine(workspace);
         return engine.SearchHybridAsync(
-            new SearchQuery(query, false, null, repo, null, null, null, null),
+            new SearchQuery(query, false, null, repo, null, null, null, null, null, kind),
             new FakeEmbeddingProvider(),
             store,
             CancellationToken.None,
@@ -250,7 +273,7 @@ public class HybridSearchTests
 
         public int? LastTopK { get; private set; }
 
-        public uint? LastRepoId { get; private set; }
+        public VectorSearchFilter? LastFilter { get; private set; }
 
         public Task<bool> IsAvailableAsync(CancellationToken ct) => Task.FromResult(Available);
 
@@ -258,11 +281,11 @@ public class HybridSearchTests
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct)
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct)
         {
             SearchCalls++;
             LastTopK = topK;
-            LastRepoId = repoId;
+            LastFilter = filter;
             return Task.FromResult(Hits);
         }
 

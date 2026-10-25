@@ -36,7 +36,7 @@ public sealed class CodeSearchTool
         _identity = identity;
     }
 
-    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
+    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. kind filters what a hit can be: \"all\" (default) matches everything, \"code\" keeps program sources, \"docs\" keeps prose and config (markdown, text, json, yaml, toml, xml); the filter runs on both arms. Points without a kind payload (orphan or freshly rewritten points awaiting the backfill) match only kind=all. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,
@@ -44,9 +44,10 @@ public sealed class CodeSearchTool
         string? prefix = null,
         int? maxTokens = null,
         int? topK = null,
+        string? kind = null,
         CancellationToken cancellationToken = default) =>
         _gate.RunAsync(
-            ct => SearchCore(query, repo, prefix, maxTokens, topK, ct),
+            ct => SearchCore(query, repo, prefix, maxTokens, topK, kind, ct),
             cancellationToken);
 
     private async Task<object> SearchCore(
@@ -55,17 +56,25 @@ public sealed class CodeSearchTool
         string? prefix,
         int? maxTokens,
         int? topK,
+        string? kind,
         CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
+            if (!DocKindDetector.TryNormalizeFilter(kind, out var kindFilter))
+            {
+                throw new WorkspaceException(
+                    $"Unknown kind '{kind}' — allowed values: all, code, docs.",
+                    WorkspaceException.InvalidQueryCode);
+            }
+
             var root = _workspace.Root;
             var normalizedPrefix = PathPrefix.Normalize(prefix);
             var rankExclusion = RankExclusion.Load(root);
             var secretGuardExtra = SecretGuardReader.Load(root).ExtraPatterns;
-            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, rankExclusion, secretGuardExtra);
+            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, kindFilter, rankExclusion, secretGuardExtra);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -82,7 +91,7 @@ public sealed class CodeSearchTool
             var coverage = _embeddings is not null && _vectorStore is not null ? LoadCoverage(root) : null;
 
             var engine = new SearchEngine(root, rankExclusion);
-            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix);
+            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix, kindFilter);
             var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
 
             warnings.AddRange(response.Warnings);
@@ -143,6 +152,7 @@ public sealed class CodeSearchTool
         string? prefix,
         int? maxTokens,
         int? topK,
+        string? kind,
         RankExclusion rankExclusion,
         IReadOnlyList<string> secretGuardExtra) =>
         new
@@ -152,6 +162,7 @@ public sealed class CodeSearchTool
             prefix,
             maxTokens,
             topK,
+            kind,
             // cache generations track meta.db only, so without the patterns in the key a config
             // edit would keep being served from the pre-exclusion / pre-guard envelope
             rankExclude = rankExclusion.IsActive ? rankExclusion.Patterns : null,

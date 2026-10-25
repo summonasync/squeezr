@@ -1,4 +1,5 @@
 using LiteDB;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Storage;
@@ -283,6 +284,27 @@ public sealed class MetaStore : IDisposable
     {
         var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
         return new SemanticCoverage(chunks.Count(), chunks.Count(c => c.EmbeddingStatus != "ok"));
+    }
+
+    // Kind rides the file row; rows whose file is already reaped count toward no kind, so the
+    // counts sum to the live chunk rows exactly.
+    public IReadOnlyDictionary<string, int> CountChunksByKind()
+    {
+        var kindByFileId = _db.GetCollection<FileDocument>(FilesCollection)
+            .FindAll()
+            .ToDictionary(f => f.Id, DocKindDetector.Detect);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var fileId in _db.GetCollection(ChunksCollection).FindAll().Select(d => (uint)d["fileId"].AsInt64))
+        {
+            if (!kindByFileId.TryGetValue(fileId, out var kind))
+            {
+                continue;
+            }
+
+            counts[kind] = counts.GetValueOrDefault(kind) + 1;
+        }
+
+        return counts;
     }
 
     // Marks carried over from a previous model are a one-time re-queue, not a refill: counting them apart
