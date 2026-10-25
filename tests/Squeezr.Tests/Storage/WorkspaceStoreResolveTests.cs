@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using Shouldly;
 using Squeezr.Core.Configuration;
@@ -10,13 +11,16 @@ namespace Squeezr.Tests.Storage;
 public sealed class WorkspaceStoreResolveTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
+    private const string ProfileEnvironmentVariable = "HOME";
     private readonly string? _previousEnv;
+    private readonly string? _previousHome;
     private readonly string _home;
     private readonly List<string> _createdDirs = [];
 
     public WorkspaceStoreResolveTests()
     {
         _previousEnv = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
+        _previousHome = Environment.GetEnvironmentVariable(ProfileEnvironmentVariable);
         _home = TestDirs.NewTempDir();
         _createdDirs.Add(_home);
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _home);
@@ -70,6 +74,51 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
         result.MigratedFromLegacy.ShouldBeFalse();
         Directory.Exists(store).ShouldBeTrue();
         File.Exists(Path.Combine(store, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_OverridePinnedAway_StartUnderFakedHome_DoesNotMigrateTheDefaultHomeStore()
+    {
+        // The 2026-10-19 shape: SQUEEZR_HOME pinned elsewhere makes the profile's own store
+        // "not central" for a resolve-relative predicate, and the upward walk used to carry
+        // the default home away as a legacy in-project store. Centrality is absolute.
+        var profile = NewDir();
+        var defaultStore = NewDir(Path.Combine(profile, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(defaultStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(defaultStore, SqueezrPaths.RegistryFileName), "[]");
+        var pinnedHome = NewDir();
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, profile);
+        SqueezrHome.Reset();
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "projects", "fresh")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(defaultStore).ShouldBeTrue();
+        File.Exists(Path.Combine(defaultStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_OverridePinnedAway_BareDefaultHomeStore_IsNotLegacyOnTheWalk()
+    {
+        // A fresh or never-initialized default home holds a bare .squeezr, so the structural
+        // signal is silent; only the absolute default-home arm keeps the walk from treating
+        // it as a legacy in-project store under a pinned override.
+        var profile = NewDir();
+        var defaultStore = NewDir(Path.Combine(profile, SqueezrPaths.StoreDirName));
+        var pinnedHome = NewDir();
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, profile);
+        SqueezrHome.Reset();
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "projects", "fresh")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(defaultStore).ShouldBeTrue();
     }
 
     [Fact]
@@ -400,6 +449,7 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _previousEnv);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, _previousHome);
         SqueezrHome.Reset();
         foreach (var dir in _createdDirs)
         {

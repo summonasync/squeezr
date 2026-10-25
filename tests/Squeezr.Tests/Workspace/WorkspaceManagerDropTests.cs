@@ -4,8 +4,46 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Workspace;
 
-public class WorkspaceManagerDropTests
+[Collection("ProcessGlobals")]
+public sealed class WorkspaceManagerDropTests : IDisposable
 {
+    private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
+    private const string ProfileEnvironmentVariable = "HOME";
+    private readonly string? _previousEnv;
+    private readonly string? _previousHome;
+
+    public WorkspaceManagerDropTests()
+    {
+        _previousEnv = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
+        _previousHome = Environment.GetEnvironmentVariable(ProfileEnvironmentVariable);
+    }
+
+    [Fact]
+    public void Drop_StoreDirIsFakedDefaultHomeUnderOverride_RefusesAndKeepsHome()
+    {
+        var temp = TestDirs.NewTempDir();
+        var profile = Path.Combine(temp, "profile");
+        Directory.CreateDirectory(profile);
+        var defaultStore = Path.Combine(profile, SqueezrPaths.StoreDirName);
+        Directory.CreateDirectory(defaultStore);
+        File.WriteAllText(Path.Combine(defaultStore, "canary.txt"), "keep me");
+        var pinnedHome = Path.Combine(temp, "pinned-home");
+        Directory.CreateDirectory(pinnedHome);
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, profile);
+        SqueezrHome.Reset();
+        var root = WorkspaceCanonicalPath.Canonicalize(profile);
+
+        Should.Throw<WorkspaceException>(() => new WorkspaceManager(root).Drop())
+            .Message.ShouldContain("central squeezr store");
+
+        Directory.Exists(defaultStore).ShouldBeTrue();
+        File.ReadAllText(Path.Combine(defaultStore, "canary.txt")).ShouldBe("keep me");
+        WorkspaceRegistry.FindByRootPath(root).ShouldBeNull();
+        WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome())
+            .ShouldStartWith(WorkspaceCanonicalPath.Canonicalize(temp));
+    }
+
     [Fact]
     public void Drop_RemovesStoreDirAndRegistryEntry()
     {
@@ -98,5 +136,12 @@ public class WorkspaceManagerDropTests
         var newKey = WorkspaceRegistry.FindByRootPath(root)!.StoreKey;
         newKey.ShouldStartWith("again-");
         newKey.Split('-')[^1].ShouldBe(storeKey.Split('-')[^1]);
+    }
+
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _previousEnv);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, _previousHome);
+        SqueezrHome.Reset();
     }
 }
