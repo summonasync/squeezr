@@ -454,6 +454,64 @@ public class EmbeddingIndexPhaseTests
 
     private const string TestModelKey = "test/model/4";
 
+    [Fact]
+    public void Index_WritesKindOnEveryUpsertedPoint()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", Source);
+        WriteFile(workspace, "repo/notes.md", "# notes");
+        var vectorStore = new FakeVectorStore();
+
+        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+
+        using var store = OpenStore(workspace);
+        var repoId = store.FindRepo("demo")!.Id;
+        var kindByFileId = store.ListFiles(repoId).ToDictionary(f => f.Id, f => f.Kind);
+        kindByFileId.Values.ShouldContain(DocKindDetector.Code);
+        kindByFileId.Values.ShouldContain(DocKindDetector.Docs);
+        vectorStore.Points.Values.ShouldNotBeEmpty();
+        foreach (var point in vectorStore.Points.Values)
+        {
+            point.Kind.ShouldBe(kindByFileId[point.FileId]);
+        }
+    }
+
+    [Fact]
+    public void Run_BackfillSetsKindOnPointsLackingIt_EmbedsNothing()
+    {
+        var dbPath = NewMetaDbWithLegacyFiles(out var repoId);
+        using var store = new MetaStore(dbPath);
+        var provider = new FakeEmbeddingProvider();
+        var vectorStore = new FakeVectorStore();
+        SeedPointsWithoutKind(store, vectorStore, repoId);
+
+        EmbeddingIndexPhase.Run(store.FindRepo("demo")!, store, TestModelKey, provider, vectorStore, _ => { });
+
+        provider.EmbedCallCount.ShouldBe(0);
+        vectorStore.SetKindCallCount.ShouldBe(1);
+        var kindByFileId = store.ListFiles(repoId).ToDictionary(f => f.Id, f => DocKindDetector.Detect(f));
+        foreach (var point in vectorStore.Points.Values)
+        {
+            point.Kind.ShouldBe(kindByFileId[point.FileId]);
+        }
+    }
+
+    [Fact]
+    public void Run_SecondBackfillRun_IsNoOp()
+    {
+        var dbPath = NewMetaDbWithLegacyFiles(out var repoId);
+        using var store = new MetaStore(dbPath);
+        var provider = new FakeEmbeddingProvider();
+        var vectorStore = new FakeVectorStore();
+        SeedPointsWithoutKind(store, vectorStore, repoId);
+
+        EmbeddingIndexPhase.Run(store.FindRepo("demo")!, store, TestModelKey, provider, vectorStore, _ => { });
+        vectorStore.ResetCounters();
+        EmbeddingIndexPhase.Run(store.FindRepo("demo")!, store, TestModelKey, provider, vectorStore, _ => { });
+
+        vectorStore.SetKindCallCount.ShouldBe(0);
+    }
+
     private static string NewMetaDb(out uint repoId, int chunkCount, Func<int, string>? hashSelector = null)
     {
         var dir = TestDirs.NewTempDir();
@@ -484,6 +542,51 @@ public class EmbeddingIndexPhaseTests
 
     private static (int Total, int Pending) CountChunkStates(MetaStore store, uint repoId) =>
         (store.CountChunks(repoId), store.CountPendingChunks(repoId, TestModelKey));
+
+    private static string NewMetaDbWithLegacyFiles(out uint repoId)
+    {
+        var dir = TestDirs.NewTempDir();
+        var dbPath = Path.Combine(dir, "meta.db");
+        using (var store = new MetaStore(dbPath, createIfMissing: true))
+        {
+            var repo = new RepoDocument { Id = 1, Name = "demo", Path = Path.Combine(dir, "repo") };
+            store.AddRepo(repo);
+            store.UpsertFile(new FileDocument { Id = 1, RepoId = repo.Id, Path = "a.cs", Language = "csharp" });
+            store.UpsertFile(new FileDocument { Id = 2, RepoId = repo.Id, Path = "notes.md", Language = "markdown" });
+            store.InsertChunks(
+            [
+                new ChunkDocument
+                {
+                    Id = 1, FileId = 1, RepoId = repo.Id, StartLine = 1, EndLine = 5,
+                    Text = "class A { }", ChunkHash = "hash-a", EmbeddingStatus = "ok", ModelKey = TestModelKey
+                },
+                new ChunkDocument
+                {
+                    Id = 2, FileId = 2, RepoId = repo.Id, StartLine = 1, EndLine = 5,
+                    Text = "# notes", ChunkHash = "hash-b", EmbeddingStatus = "ok", ModelKey = TestModelKey
+                },
+            ]);
+            repoId = repo.Id;
+        }
+
+        return dbPath;
+    }
+
+    private static void SeedPointsWithoutKind(MetaStore store, FakeVectorStore vectorStore, uint repoId)
+    {
+        foreach (var chunk in store.ListFiles(repoId).SelectMany(f => store.ListChunksByFile(f.Id)))
+        {
+            vectorStore.Points[ChunkPointId.FromHash(chunk.ChunkHash)] = new VectorPoint(
+                ChunkPointId.FromHash(chunk.ChunkHash),
+                [0.1f, 0.2f, 0.3f, 0.4f],
+                chunk.ChunkHash,
+                chunk.FileId,
+                chunk.RepoId,
+                chunk.StartLine,
+                chunk.EndLine,
+                "");
+        }
+    }
 
     private static string NewWorkspace()
     {
@@ -594,13 +697,36 @@ public class EmbeddingIndexPhaseTests
             return Task.CompletedTask;
         }
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)Points.Count);
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>(Points.Keys.ToList());
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>(Points.Values
+                .Where(p => p.RepoId == repoId && p.Kind.Length == 0)
+                .Select(p => p.FileId)
+                .Distinct()
+                .ToList());
+
+        public int SetKindCallCount { get; private set; }
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct)
+        {
+            SetKindCallCount++;
+            foreach (var point in Points.Values.ToList())
+            {
+                if (kindByFileId.TryGetValue(point.FileId, out var kind))
+                {
+                    Points[point.Id] = point with { Kind = kind };
+                }
+            }
+
+            return Task.CompletedTask;
+        }
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {
@@ -642,6 +768,7 @@ public class EmbeddingIndexPhaseTests
         {
             UpsertedPointCount = 0;
             UpsertCallCount = 0;
+            SetKindCallCount = 0;
             UpsertBatchSizes.Clear();
         }
     }

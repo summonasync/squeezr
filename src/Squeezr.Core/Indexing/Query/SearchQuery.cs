@@ -9,4 +9,5 @@ public sealed record SearchQuery(
     string? Language,
     int? TopK,
     int? MaxTokens,
-    string? Prefix = null);
+    string? Prefix = null,
+    string? Kind = null);

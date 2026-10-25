@@ -484,13 +484,19 @@ public class SecretStorePurgeTests
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
         public Task<IReadOnlyList<VectorHit>> SearchAsync(
-            float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+            float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VectorHit>>([]);
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult(0L);
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {
@@ -517,7 +523,7 @@ public class SecretStorePurgeTests
             foreach (var fileId in fileIds)
             {
                 _points[_nextId] = new VectorPoint(
-                    _nextId, [0.1f, 0.2f, 0.3f, 0.4f], $"seeded-{_nextId}", fileId, 1, 1, 2);
+                    _nextId, [0.1f, 0.2f, 0.3f, 0.4f], $"seeded-{_nextId}", fileId, 1, 1, 2, DocKindDetector.Code);
                 _nextId++;
             }
         }
@@ -541,13 +547,19 @@ public class SecretStorePurgeTests
         }
 
         public Task<IReadOnlyList<VectorHit>> SearchAsync(
-            float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+            float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)_points.Count);
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([.. _points.Keys]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct)
         {

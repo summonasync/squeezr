@@ -63,7 +63,7 @@ public sealed class McpServeProcessTests
             }
             else if (id == 2)
             {
-                sawToolsList = result.GetProperty("tools").EnumerateArray().Count() == 6;
+                sawToolsList = result.GetProperty("tools").EnumerateArray().Count() == 7;
             }
         }
 

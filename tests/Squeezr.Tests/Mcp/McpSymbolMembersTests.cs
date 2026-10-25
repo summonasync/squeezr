@@ -35,7 +35,8 @@ public class McpSymbolMembersTests
 
         envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
         envelope.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!)
-            .ShouldContain("read a member with expand_span or raise maxTokens");
+            .ShouldContain(w => w.StartsWith("truncated: ")
+                && w.EndsWith("read a member with expand_span or raise maxTokens"));
     }
 
     [Fact]

@@ -8,11 +8,15 @@ public interface IVectorStore
 
     Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct);
 
-    Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct);
+    Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct);
 
     Task<long> CountAsync(CancellationToken ct);
 
     Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct);
+
+    Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct);
+
+    Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct);
 
     Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct);
 

@@ -13,7 +13,7 @@ public class SecretGuardSemanticHitsTests
         var workspace = SecretGuardFixture.NewIndexedWorkspace();
         var chunk = SecretGuardFixture.ChunkHolding(workspace, SecretGuardFixture.EnvPath, SecretGuardFixture.EnvCanary);
 
-        (await Resolve(workspace, chunk)).ShouldBeEmpty();
+        (await Resolve(workspace, chunk)).Hits.ShouldBeEmpty();
     }
 
     [Fact]
@@ -24,7 +24,7 @@ public class SecretGuardSemanticHitsTests
 
         var hits = await Resolve(workspace, chunk);
 
-        var hit = hits.ShouldHaveSingleItem();
+        var hit = hits.Hits.ShouldHaveSingleItem();
         hit.Match.Path.ShouldBe(SecretGuardFixture.AppPath);
         hit.Match.Snippet.ShouldContain(SecretGuardFixture.AppCanary);
     }
@@ -36,7 +36,7 @@ public class SecretGuardSemanticHitsTests
         var chunk = SecretGuardFixture.ChunkHolding(workspace, SecretGuardFixture.TokensPath, SecretGuardFixture.TokensCanary);
         SecretGuardFixture.SetGuardExtra(workspace, "**/tokens.txt");
 
-        (await Resolve(workspace, chunk)).ShouldBeEmpty();
+        (await Resolve(workspace, chunk)).Hits.ShouldBeEmpty();
     }
 
     [Fact]
@@ -62,10 +62,10 @@ public class SecretGuardSemanticHitsTests
             null,
             SecretGuardReader.Load(workspace));
 
-        hits.ShouldHaveSingleItem().Match.Path.ShouldBe(SecretGuardFixture.AppPath);
+        hits.Hits.ShouldHaveSingleItem().Match.Path.ShouldBe(SecretGuardFixture.AppPath);
     }
 
-    private static async Task<List<(string Key, SearchMatch Match)>> Resolve(
+    private static async Task<SemanticArm> Resolve(
         string workspace, (uint FileId, uint RepoId, int StartLine, int EndLine) chunk)
     {
         return await SemanticHitsResolver.Resolve(

@@ -162,7 +162,7 @@ plain grep/read is correct, not a violation.
   signatures, no bodies. Cheapest first contact with an unfamiliar workspace.
   Pass `prefix` (e.g. `"src/"`) to render only that subtree — directory labels
   come back relative to the prefix and `depth` keeps its structural meaning.
-- `code_search(query, repo?, prefix?, topK?, maxTokens?)` — hybrid exact + semantic search:
+- `code_search(query, repo?, prefix?, topK?, maxTokens?, kind?)` — hybrid exact + semantic search:
   paraphrases work ("validate config file") and so do exact identifiers
   ("VectorDimensionMismatchException"). Returns file:line matches with snippets,
   never full bodies. One hit = one file: the best span wins and the file's other
@@ -170,6 +170,12 @@ plain grep/read is correct, not a violation.
   `prefix` scopes both arms to one directory subtree; the
   workspace config `indexing.rankExclude` keeps whole trees out of the ranking
   while they stay indexed and readable through `expand_span`.
+  `kind` filters what a hit can be: `all` (default, unchanged results), `code`
+  (program sources) or `docs` (markdown/text/json/yaml/toml/xml prose and
+  config); it runs on both arms, and unknown values error with the allowed list
+  instead of silently meaning `all`. Points without a `kind` payload (orphans,
+  or points from pre-057 binaries until the backfill converges them) match only
+  `kind=all`.
 - `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span. When a
   type's body exceeds the token budget it returns the member list (name, kind, line)
   as a mini-map instead — each line is an expand_span coordinate. When no symbol
@@ -181,7 +187,8 @@ plain grep/read is correct, not a violation.
   edits newer than the index. Call it on coordinates from other tools.
 - `index_status()` — workspace freshness: per-repo counts, pending embeddings,
   semantic coverage (`embeddings.coverage`, embedded share of chunks 0..1),
-  Qdrant availability, and the resolved workspace `rootPath` (if it is not your
+  per-kind chunk counts (`kindChunks`: `code`/`docs`, values sum to the per-repo
+  chunks counts), Qdrant availability, and the resolved workspace `rootPath` (if it is not your
   project's root, the session serves a different workspace). Call before heavy
   querying to decide on a reindex. When ranking is curated, `warnings` lists the
   active `indexing.rankExclude` patterns — read them before trusting a

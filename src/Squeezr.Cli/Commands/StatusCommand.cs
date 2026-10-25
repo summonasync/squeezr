@@ -36,9 +36,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             }
 
             QdrantStatus qdrant;
+            IReadOnlyDictionary<string, int> kindChunks;
             using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
             {
                 qdrant = QdrantStatusProbe.ProbeAsync(vectorStore, store, cancellationToken).GetAwaiter().GetResult();
+                kindChunks = store.CountChunksByKind();
             }
 
             status = status with { Qdrant = qdrant };
@@ -47,7 +49,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             {
                 var staleFiles = StaleFileDetector.Detect(workspaceRoot);
                 var report = WorkspaceStatusReport.Create(
-                    status, staleFiles, config?.Embeddings.Provider, siblings);
+                    status, staleFiles, config?.Embeddings.Provider, siblings) with { KindChunks = kindChunks };
                 JsonOutput.Write(report);
                 foreach (var warning in report.Warnings)
                 {
@@ -85,6 +87,12 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             }
 
             AnsiConsole.Write(table);
+
+            if (kindChunks.Count > 0)
+            {
+                var byKind = string.Join(", ", kindChunks.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key} {kv.Value}"));
+                AnsiConsole.MarkupLine($"[grey]Chunks by kind: {byKind.EscapeMarkup()}[/]");
+            }
 
             if (RepoGuardReport.FromTally(status.Repos) is { } guard)
             {

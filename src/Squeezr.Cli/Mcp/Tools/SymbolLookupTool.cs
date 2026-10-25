@@ -55,7 +55,8 @@ public sealed class SymbolLookupTool
                 QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SymbolHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                    baselineTokens: hit.Cost?.BaselineTokens);
                 return hit;
             }
 
@@ -76,9 +77,12 @@ public sealed class SymbolLookupTool
                 warnings.AddRange(withheld);
             }
 
-            if (result.Hint is not null)
+            if (result.Truncated)
             {
-                warnings.Add(result.Hint.ForMcp());
+                warnings.Add(HintText.TruncationLine(
+                    result.TokensUsed,
+                    budget,
+                    result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
             }
 
             if (result.Matches.Count == 0 && result.DidYouMean is null && result.GuardWarnings is null)
@@ -93,14 +97,31 @@ public sealed class SymbolLookupTool
                     : m.Members.Select(member => new SymbolMemberData(member.Name, member.Kind, member.Line)).ToList(),
                 m.MembersOmitted)).ToList();
 
+            var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
+            var (cost, unknownBaselineFiles) = CostBaseline.Measure(
+                root, namedFiles, result.TokensUsed, !result.Truncated);
+            var fileFreshness = namedFiles.Count > 0
+                ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
+                : null;
+            if (StoreWriterNotice.For(root) is { } writerNotice)
+            {
+                warnings.Add(writerNotice);
+            }
+            if (unknownBaselineFiles > 0)
+            {
+                warnings.Add(
+                    $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
+            }
+
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale,
-                result.DidYouMean);
+                result.DidYouMean, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
                 result.TokensUsed, result.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("symbol_lookup", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }

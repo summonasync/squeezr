@@ -109,6 +109,10 @@ public sealed class SecretGuardReader
         return true;
     }
 
+    // surfaces reason about the protection boundary itself: an arm is dead by protection when this
+    // is positive, and a fuzzy rescue must not amplify around what the guard just ate
+    internal int WithheldCount => _withheld;
+
     public WorkspaceException Refusal(string relativePath) => new($"'{relativePath}' is {RefusalReason}");
 
     private string Format()

@@ -129,7 +129,8 @@ public static class McpServerHost
             .WithTools(new SymbolLookupTool(workspace, gate, cache, identity))
             .WithTools(new FindReferencesTool(workspace, gate, cache, identity))
             .WithTools(new RepoMapTool(workspace, gate, cache, identity))
-            .WithTools(new ExpandSpanTool(workspace, gate, identity));
+            .WithTools(new ExpandSpanTool(workspace, gate, identity))
+            .WithTools(new CodePackTool(workspace, gate, cache, identity));
 
         await using var provider = services.BuildServiceProvider();
         identity.Attach(provider.GetRequiredService<McpServer>());

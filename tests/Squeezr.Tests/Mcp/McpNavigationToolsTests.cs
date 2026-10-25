@@ -55,7 +55,8 @@ public class McpNavigationToolsTests
         envelope.GetRawText().ShouldNotContain("--");
         envelope.GetProperty("warnings").EnumerateArray()
             .Select(w => w.GetString()!)
-            .ShouldContain("narrow the query (repo, kind) or raise maxTokens");
+            .ShouldContain(w => w.StartsWith("truncated: ")
+                && w.EndsWith("narrow the query (repo, kind) or raise maxTokens"));
     }
 
     [Fact]
@@ -135,7 +136,7 @@ public class McpNavigationToolsTests
         text.ShouldContain("No symbol named 'Nope'");
 
         var tools = await harness.Client.ListToolsAsync(cancellationToken: CancellationToken.None);
-        tools.Count.ShouldBe(6);
+        tools.Count.ShouldBe(7);
     }
 
     [Fact]
