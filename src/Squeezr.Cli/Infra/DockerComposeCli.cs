@@ -56,11 +56,13 @@ public sealed class DockerComposeCli
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         CancellationToken cancellationToken,
-        Action<string>? progressHandler = null)
+        Action<string>? progressHandler = null,
+        string? projectName = null)
     {
+        var project = projectName ?? ServicesComposeFile.ProjectName;
         var argv = installation.Plugin
-            ? new List<string> { "compose", "-f", composeFile, "-p", ServicesComposeFile.ProjectName }
-            : new List<string> { "-f", composeFile, "-p", ServicesComposeFile.ProjectName };
+            ? new List<string> { "compose", "-f", composeFile, "-p", project }
+            : new List<string> { "-f", composeFile, "-p", project };
         argv.AddRange(arguments);
         return _runner.RunAsync(
             new ProcessInvocation(installation.Executable, argv, timeout, progressHandler), cancellationToken);
@@ -72,12 +74,13 @@ public sealed class DockerComposeCli
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         CancellationToken cancellationToken,
-        Action<string>? progressHandler = null)
+        Action<string>? progressHandler = null,
+        string? projectName = null)
     {
         ProcessRunResult result;
         try
         {
-            result = await RunAsync(installation, composeFile, arguments, timeout, cancellationToken, progressHandler);
+            result = await RunAsync(installation, composeFile, arguments, timeout, cancellationToken, progressHandler, projectName);
         }
         catch (TimeoutException ex)
         {
@@ -104,7 +107,8 @@ public sealed class DockerComposeCli
         DockerComposeInstallation installation,
         string composeFile,
         Action<string>? progressHandler,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? projectName = null)
     {
         var supportsPolicyMissing = SupportsPolicyMissing(installation);
         var arguments = supportsPolicyMissing ? PolicyMissingPullArguments : PullArguments;
@@ -114,7 +118,7 @@ public sealed class DockerComposeCli
         }
 
         var result = await RunAsync(
-            installation, composeFile, arguments, Timeout.InfiniteTimeSpan, cancellationToken, progressHandler);
+            installation, composeFile, arguments, Timeout.InfiniteTimeSpan, cancellationToken, progressHandler, projectName);
 
         if (result.ExitCode != 0)
         {

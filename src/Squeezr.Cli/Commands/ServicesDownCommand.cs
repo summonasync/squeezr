@@ -8,6 +8,8 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class ServicesDownCommand : AsyncCommand<ServicesDownCommand.Settings>
 {
+    private const string OllamaLeaveItAlone = "Ollama осталась, модели остались — разбирайся руками";
+
     public sealed class Settings : CommandSettings
     {
         [CommandOption("--json")]
@@ -16,25 +18,48 @@ public sealed class ServicesDownCommand : AsyncCommand<ServicesDownCommand.Setti
 
     protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
-        var composePath = ServicesComposeFile.ComposeFilePath;
-        if (!File.Exists(composePath))
+        var legacyPath = ServicesComposeFile.ComposeFilePath;
+        var ownedPath = OwnedComposeFile.FilePath;
+        var hasLegacy = File.Exists(legacyPath);
+        var hasOwned = File.Exists(ownedPath);
+        if (!hasLegacy && !hasOwned)
         {
-            return ReportNothingToStop(settings, composePath);
+            return ReportNothingToStop(settings, legacyPath);
         }
 
         try
         {
             var cli = new DockerComposeCli(new ProcessRunner());
             var installation = await cli.DetectAsync(cancellationToken);
-            await cli.RunCheckedAsync(installation, composePath, ["down"], DockerComposeCli.DownTimeout, cancellationToken);
+
+            // the legacy pair also holds Ollama: down targets the qdrant service only —
+            // Ollama's container and models are the user's, never squeezr's to stop
+            if (hasLegacy)
+            {
+                await cli.RunCheckedAsync(installation, legacyPath, ["down", "qdrant"], DockerComposeCli.DownTimeout, cancellationToken);
+                if (settings.Json)
+                {
+                    JsonOutput.Write(new ServicesDownReport(legacyPath, ServicesComposeFile.ProjectName, Stopped: true));
+                }
+            }
+
+            if (hasOwned)
+            {
+                await cli.RunCheckedAsync(installation, ownedPath, ["down"], DockerComposeCli.DownTimeout, cancellationToken, projectName: OwnedComposeFile.ProjectName);
+                if (settings.Json)
+                {
+                    JsonOutput.Write(new ServicesDownReport(ownedPath, OwnedComposeFile.ProjectName, Stopped: true));
+                }
+            }
 
             if (settings.Json)
             {
-                JsonOutput.Write(new ServicesDownReport(composePath, ServicesComposeFile.ProjectName, Stopped: true));
+                Console.Error.WriteLine($"note: {OllamaLeaveItAlone}");
                 return 0;
             }
 
-            AnsiConsole.MarkupLine("[green]Squeezr services are stopped[/] (Qdrant, Ollama). Data volumes are kept.");
+            AnsiConsole.MarkupLine("[green]Qdrant-side services are stopped[/]. Data volumes are kept.");
+            AnsiConsole.MarkupLine($"[grey]{OllamaLeaveItAlone.EscapeMarkup()}[/]");
             return 0;
         }
         catch (ServicesException ex)

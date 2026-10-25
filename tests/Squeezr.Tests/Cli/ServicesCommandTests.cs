@@ -14,7 +14,7 @@ public sealed class ServicesCommandTests
     private static readonly string DotNet = ResolveDotNetMuxer();
 
     [Fact]
-    public async Task Up_OutsideWorkspace_GeneratesComposeAndStartsServices()
+    public async Task Up_OwnedFlag_RaisesQdrantOnlyOwnedProject()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -26,74 +26,28 @@ public sealed class ServicesCommandTests
         var docker = FakeDocker.Install();
         var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
 
-        var result = await RunCliAsync(cwd, home, path, "services", "up");
+        var result = await RunCliAsync(cwd, home, path, "services", "up", "--owned");
 
         result.ExitCode.ShouldBe(0);
-        var composePath = Path.Combine(home, "infra", "docker-compose.yml");
+        var composePath = Path.Combine(home, "infra", "docker-compose.owned.yml");
         File.Exists(composePath).ShouldBeTrue();
-        ServicesComposeFile.IsSqueezrGenerated(composePath).ShouldBeTrue();
         var compose = File.ReadAllText(composePath);
         compose.ShouldContain("qdrant/qdrant:latest");
-        compose.ShouldContain("ollama/ollama:latest");
+        compose.ShouldContain("\"6335:6333\"");
+        compose.ShouldContain("squeezr-owned-qdrant:/qdrant/storage");
+        compose.ShouldNotContain("ollama");
         var calls = docker.ReadCalls();
         calls.Count.ShouldBe(3);
         calls[0].ShouldBe("compose version");
         calls[1].ShouldStartWith("compose -f ");
-        calls[1].ShouldContain(" -p squeezr pull");
-        calls[2].ShouldContain(" -p squeezr up -d");
-        result.StdErr.ShouldNotContain("not initialized");
-        result.StdOut.ShouldContain("Pulling images");
-        result.StdOut.ShouldContain("Starting containers");
-        result.StdOut.ShouldContain("Qdrant");
-        result.StdOut.ShouldContain("http://localhost:6334");
-        result.StdOut.ShouldContain("gRPC");
-        result.StdOut.ShouldContain("Ollama");
-        result.StdOut.ShouldContain("ROCm");
+        calls[1].ShouldContain(" -p squeezr-owned pull");
+        calls[2].ShouldContain(" -p squeezr-owned up -d");
+        result.StdOut.ShouldContain("Owned Qdrant is up");
+        result.StdOut.ShouldContain("http://localhost:6335");
     }
 
     [Fact]
-    public async Task Up_Verbose_StreamsRawPullOutputToStderr()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-        var docker = FakeDocker.Install(pullProgressLines: ["PULL-QDRANT-PROGRESS", "PULL-OLLAMA-PROGRESS"]);
-        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
-
-        var result = await RunCliAsync(cwd, home, path, "services", "up", "--verbose");
-
-        result.ExitCode.ShouldBe(0);
-        result.StdErr.ShouldContain("PULL-QDRANT-PROGRESS");
-        result.StdErr.ShouldContain("PULL-OLLAMA-PROGRESS");
-    }
-
-    [Fact]
-    public async Task Up_WithoutVerbose_KeepsRawPullOutputHidden()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-        var docker = FakeDocker.Install(pullProgressLines: ["PULL-QDRANT-PROGRESS"]);
-        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
-
-        var result = await RunCliAsync(cwd, home, path, "services", "up");
-
-        result.ExitCode.ShouldBe(0);
-        result.StdOut.ShouldNotContain("PULL-QDRANT-PROGRESS");
-        result.StdErr.ShouldNotContain("PULL-QDRANT-PROGRESS");
-        result.StdOut.ShouldContain("Pulling images");
-    }
-
-    [Fact]
-    public async Task Up_Json_OutsideWorkspace_EmitsSingleLineSummaryJson()
+    public async Task Up_NoDecision_NonTTY_FallsBackToHintWithoutRaising()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -105,24 +59,17 @@ public sealed class ServicesCommandTests
         var docker = FakeDocker.Install();
         var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
 
-        var result = await RunCliAsync(cwd, home, path, "services", "up", "--json");
+        var result = await RunCliAsync(cwd, home, path, "services", "up");
 
         result.ExitCode.ShouldBe(0);
-        result.StdErr.ShouldContain("Pulling images");
-        result.StdErr.ShouldContain("Starting containers");
-        result.StdOut.Trim().Split('\n').Length.ShouldBe(1);
-        using var json = JsonDocument.Parse(result.StdOut.Trim());
-        json.RootElement.GetProperty("composeFile").GetString().ShouldBe(Path.Combine(home, "infra", "docker-compose.yml"));
-        json.RootElement.GetProperty("project").GetString().ShouldBe("squeezr");
-        json.RootElement.GetProperty("qdrantEndpoint").GetString().ShouldBe("http://localhost:6334");
-        json.RootElement.GetProperty("qdrantRestEndpoint").GetString().ShouldBe("http://localhost:6333");
-        json.RootElement.GetProperty("ollamaEndpoint").GetString().ShouldBe("http://localhost:11434");
-        json.RootElement.GetProperty("rocm").ValueKind.ShouldBeOneOf(JsonValueKind.True, JsonValueKind.False);
-        json.RootElement.GetProperty("composeVersion").GetString().ShouldStartWith("v2.29.2");
+        result.StdErr.ShouldContain("hint:");
+        File.Exists(Path.Combine(home, "infra", "docker-compose.owned.yml")).ShouldBeFalse();
+        File.Exists(Path.Combine(home, "infra", "docker-compose.yml")).ShouldBeFalse();
+        docker.ReadCalls().ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Up_OfflineWithLocalImages_PullsOnlyMissingImagesAndStarts()
+    public async Task Up_Owned_WithoutDocker_ReportsErrorInsteadOfStackTrace()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -131,42 +78,65 @@ public sealed class ServicesCommandTests
 
         var cwd = TestDirs.NewTempDir();
         var home = TestDirs.NewTempDir();
-        var docker = FakeDocker.Install(pullFailsWithoutPolicyMissing: true);
-        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+        var noDockerDir = TestDirs.NewTempDir();
 
-        var result = await RunCliAsync(cwd, home, path, "services", "up");
+        var result = await RunCliAsync(cwd, home, noDockerDir, "services", "up", "--owned");
+
+        result.ExitCode.ShouldBe(1);
+        result.StdErr.ShouldContain("Docker");
+        result.StdErr.ShouldNotContain("at Squeezr");
+    }
+
+    [Fact]
+    public async Task Up_Owned_WhenOwnedComposeBlocked_ReportsComposeFailed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var cwd = TestDirs.NewTempDir();
+        var home = TestDirs.NewTempDir();
+        var docker = FakeDocker.Install();
+        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+        var infraDir = Path.Combine(home, "infra");
+        Directory.CreateDirectory(infraDir);
+        Directory.CreateDirectory(Path.Combine(infraDir, "docker-compose.owned.yml"));
+
+        var result = await RunCliAsync(cwd, home, path, "services", "up", "--owned");
+
+        result.ExitCode.ShouldBe(1);
+        result.StdErr.ShouldContain("Failed to write the owned compose file");
+    }
+
+    [Fact]
+    public async Task Down_LegacyPair_StopsOnlyQdrant_AndAnnouncesOllamaLeft()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var cwd = TestDirs.NewTempDir();
+        var home = TestDirs.NewTempDir();
+        var docker = FakeDocker.Install();
+        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+        var infraDir = Path.Combine(home, "infra");
+        Directory.CreateDirectory(infraDir);
+        File.WriteAllText(Path.Combine(infraDir, "docker-compose.yml"), OwnedComposeFileSeed("squeezr"));
+
+        var result = await RunCliAsync(cwd, home, path, "services", "down");
 
         result.ExitCode.ShouldBe(0);
         var calls = docker.ReadCalls();
-        calls.Count.ShouldBe(3);
-        calls[1].ShouldContain(" -p squeezr pull --policy missing");
-        calls[2].ShouldContain(" -p squeezr up -d");
+        var downCall = calls.Single(c => c.Contains(" down"));
+        downCall.ShouldContain("down qdrant");
+        downCall.ShouldNotContain("ollama");
+        result.StdOut.ShouldContain("Ollama осталась, модели остались");
     }
 
     [Fact]
-    public async Task Up_OldComposeWithoutPolicySupport_PrintsFallbackNote()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-        var docker = FakeDocker.Install(composeVersion: "v2.21.0");
-        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
-
-        var result = await RunCliAsync(cwd, home, path, "services", "up");
-
-        result.ExitCode.ShouldBe(0);
-        result.StdErr.ShouldContain("'pull --policy missing'");
-        var pullCall = docker.ReadCalls()[1];
-        pullCall.ShouldContain(" -p squeezr pull");
-        pullCall.ShouldNotContain("--policy");
-    }
-
-    [Fact]
-    public async Task Down_WithRunningServices_StopsWithoutRemovingVolumes()
+    public async Task Down_OwnedProject_PerformsFullOwnedDown()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -177,68 +147,15 @@ public sealed class ServicesCommandTests
         var home = TestDirs.NewTempDir();
         var docker = FakeDocker.Install();
         var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
-        var up = await RunCliAsync(cwd, home, path, "services", "up");
-        up.ExitCode.ShouldBe(0);
+        var infraDir = Path.Combine(home, "infra");
+        Directory.CreateDirectory(infraDir);
+        File.WriteAllText(Path.Combine(infraDir, "docker-compose.owned.yml"), OwnedComposeFileSeed("squeezr-owned"));
 
-        var down = await RunCliAsync(cwd, home, path, "services", "down");
-
-        down.ExitCode.ShouldBe(0);
-        var downCall = docker.ReadCalls().Last();
-        downCall.ShouldContain(" -p squeezr down");
-        downCall.ShouldNotContain(" -v");
-        downCall.ShouldNotContain(" -v ");
-        down.StdOut.ShouldContain("Data volumes are kept");
-    }
-
-    [Fact]
-    public async Task Status_Json_WithoutComposeFile_ReportsEmptyWithoutWorkspaceResolution()
-    {
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-
-        var result = await RunCliAsync(cwd, home, pathOverride: null, "services", "status", "--json");
+        var result = await RunCliAsync(cwd, home, path, "services", "down");
 
         result.ExitCode.ShouldBe(0);
-        result.StdErr.ShouldContain("squeezr services up");
-        result.StdErr.ShouldNotContain("not initialized");
-        using var json = JsonDocument.Parse(result.StdOut.Trim());
-        json.RootElement.GetProperty("composeFile").GetString().ShouldBe(Path.Combine(home, "infra", "docker-compose.yml"));
-        json.RootElement.GetProperty("project").GetString().ShouldBe("squeezr");
-        json.RootElement.GetProperty("services").GetArrayLength().ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task Status_Json_WithRunningServices_ParsesContainerStates()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-        const string psJson =
-            "[{\"Name\":\"squeezr-qdrant-1\",\"Service\":\"qdrant\",\"State\":\"running\",\"Status\":\"Up 2 minutes\"}," +
-            "{\"Name\":\"squeezr-ollama-1\",\"Service\":\"ollama\",\"State\":\"running\",\"Status\":\"Up 2 minutes\"}]";
-        var docker = FakeDocker.Install(psJson);
-        var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
-        var up = await RunCliAsync(cwd, home, path, "services", "up");
-        up.ExitCode.ShouldBe(0);
-
-        var status = await RunCliAsync(cwd, home, path, "services", "status", "--json");
-
-        status.ExitCode.ShouldBe(0);
-        using var json = JsonDocument.Parse(status.StdOut.Trim());
-        var services = json.RootElement.GetProperty("services");
-        services.GetArrayLength().ShouldBe(2);
-        services[0].GetProperty("service").GetString().ShouldBe("qdrant");
-        services[0].GetProperty("name").GetString().ShouldBe("squeezr-qdrant-1");
-        services[0].GetProperty("state").GetString().ShouldBe("running");
-        services[1].GetProperty("service").GetString().ShouldBe("ollama");
-        json.RootElement.GetProperty("composeVersion").GetString().ShouldBe("v2.29.2 (plugin)");
-        var composeHasDevices = File.ReadAllText(Path.Combine(home, "infra", "docker-compose.yml"))
-            .Contains("/dev/kfd", StringComparison.Ordinal);
-        json.RootElement.GetProperty("rocm").GetBoolean().ShouldBe(composeHasDevices);
+        var downCall = docker.ReadCalls().Single(c => c.Contains(" down"));
+        downCall.ShouldContain(" -p squeezr-owned down");
     }
 
     [Fact]
@@ -258,8 +175,9 @@ public sealed class ServicesCommandTests
             "\"Service\":\"ollama\",\"State\":\"running\",\"Status\":\"Up 53 minutes\"}";
         var docker = FakeDocker.Install(psJson: psNdjson, composeVersion: "v5.5.1");
         var path = docker.BinDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
-        var up = await RunCliAsync(cwd, home, path, "services", "up");
-        up.ExitCode.ShouldBe(0);
+        var infraDir = Path.Combine(home, "infra");
+        Directory.CreateDirectory(infraDir);
+        File.WriteAllText(Path.Combine(infraDir, "docker-compose.yml"), OwnedComposeFileSeed("squeezr"));
 
         var status = await RunCliAsync(cwd, home, path, "services", "status", "--json");
 
@@ -274,50 +192,26 @@ public sealed class ServicesCommandTests
         json.RootElement.GetProperty("composeVersion").GetString().ShouldBe("v5.5.1 (plugin)");
     }
 
-    [Fact]
-    public async Task Up_WithoutDocker_PrintsInstallHintInsteadOfStackTrace()
+    private static string OwnedComposeFileSeed(string project) => $"""
+        # managed by squeezr — test seed for project {project}
+        services:
+          qdrant:
+            image: qdrant/qdrant:latest
+            ports:
+              - "6333:6333"
+            volumes:
+              - seed-volume:/qdrant/storage
+            restart: unless-stopped
+          ollama:
+            image: ollama/ollama:latest
+        volumes:
+          seed-volume:
+        """;
+
+    private static string ResolveDotNetMuxer()
     {
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-
-        var result = await RunCliAsync(cwd, home, pathOverride: string.Empty, "services", "up");
-
-        result.ExitCode.ShouldBe(1);
-        result.StdOut.ShouldBe(string.Empty);
-        result.StdErr.ShouldContain("https://docs.docker.com/engine/install/");
-        result.StdErr.ShouldNotContain("not initialized");
-        result.StdErr.ShouldNotContain("   at ");
-    }
-
-    [Fact]
-    public async Task Up_WhenComposeFileBlocked_ReportsComposeFailedWithoutStackTrace()
-    {
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-        File.WriteAllText(Path.Combine(home, "infra"), "a file where the infra directory belongs");
-
-        var result = await RunCliAsync(cwd, home, pathOverride: string.Empty, "services", "up");
-
-        result.ExitCode.ShouldBe(1);
-        result.StdOut.ShouldBe(string.Empty);
-        result.StdErr.ShouldContain("Failed to write the Squeezr compose file");
-        result.StdErr.ShouldNotContain("   at ");
-    }
-
-    [Fact]
-    public async Task Up_Json_WithoutDocker_EmitsErrorEnvelopeOnStderr()
-    {
-        var cwd = TestDirs.NewTempDir();
-        var home = TestDirs.NewTempDir();
-
-        var result = await RunCliAsync(cwd, home, pathOverride: string.Empty, "services", "up", "--json");
-
-        result.ExitCode.ShouldBe(1);
-        result.StdOut.ShouldBe(string.Empty);
-        using var json = JsonDocument.Parse(result.StdErr.Trim());
-        var error = json.RootElement.GetProperty("error");
-        error.GetProperty("code").GetString().ShouldBe("docker_unavailable");
-        error.GetProperty("message").GetString()!.ShouldContain("https://docs.docker.com/engine/install/");
+        var muxer = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "dotnet");
+        return File.Exists(muxer) ? muxer : "dotnet";
     }
 
     private static async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
@@ -342,21 +236,5 @@ public sealed class ServicesCommandTests
         await process.WaitForExitAsync();
 
         return (process.ExitCode, await stdoutTask, await stderrTask);
-    }
-
-    private static string ResolveDotNetMuxer()
-    {
-        var processPath = Environment.ProcessPath;
-        if (processPath is not null &&
-            string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.Ordinal))
-        {
-            return processPath;
-        }
-
-        var onPath = Environment.GetEnvironmentVariable("PATH")?
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(directory => Path.Combine(directory, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"))
-            .FirstOrDefault(File.Exists);
-        return onPath ?? "dotnet";
     }
 }
