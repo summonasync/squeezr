@@ -94,6 +94,15 @@ public sealed class SearchEngine
             }
         }
 
+        if (fileScope is not { Count: 0 })
+        {
+            var capped = CappedArmPolicy.Warning(semantic, query.Repo, query.Prefix, query.Kind);
+            if (capped is not null)
+            {
+                warnings.Add(capped);
+            }
+        }
+
         var phraseLocations = new HashSet<(string Path, int Line)>(
             exact.Select(hit => (hit.Match.Path, hit.Match.Line)));
         var dedupedIdentifier = identifierHits
