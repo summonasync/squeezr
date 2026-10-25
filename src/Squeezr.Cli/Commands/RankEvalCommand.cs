@@ -1,7 +1,10 @@
+using System.Text.Json;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
 using Squeezr.Cli.RankEval;
+using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Serialization;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -15,6 +18,12 @@ public sealed class RankEvalCommand : Command<RankEvalCommand.Settings>
 
         [CommandOption("--workspace")]
         public string? Workspace { get; set; }
+
+        [CommandOption("--sweep")]
+        public bool Sweep { get; set; }
+
+        [CommandOption("--out")]
+        public string? Out { get; set; }
 
         [CommandOption("--json")]
         public bool Json { get; set; }
@@ -33,7 +42,14 @@ public sealed class RankEvalCommand : Command<RankEvalCommand.Settings>
                 ? WorkspaceRootResolver.RequireWorkspaceRoot()
                 : Path.GetFullPath(settings.Workspace);
             var set = GoldenQuery.Load(settings.Set);
-            var outcome = new RankEvalRunner(workspaceRoot).RunAsync(set, cancellationToken).GetAwaiter().GetResult();
+            var runner = new RankEvalRunner(workspaceRoot);
+
+            if (settings.Sweep)
+            {
+                return RunSweep(runner, set, settings, cancellationToken);
+            }
+
+            var outcome = runner.RunAsync(set, cancellationToken).GetAwaiter().GetResult();
             var rows = outcome.Rows;
 
             foreach (var warning in outcome.Warnings)
@@ -82,5 +98,56 @@ public sealed class RankEvalCommand : Command<RankEvalCommand.Settings>
         {
             return CommandError.Report(ex, settings.Json);
         }
+    }
+
+    private static int RunSweep(
+        RankEvalRunner runner, IReadOnlyList<GoldenQuery> set, Settings settings, CancellationToken cancellationToken)
+    {
+        var rows = runner.RunSweepAsync(set, cancellationToken).GetAwaiter().GetResult();
+        var baseline = rows.FirstOrDefault(r => r.K == RrfMerger.K);
+
+        if (settings.Json)
+        {
+            foreach (var row in rows)
+            {
+                JsonOutput.WriteLine(new EvalSweepLine(
+                    "eval-sweep", row.K, row.Mrr, row.P5, row.Recall, row.SemanticDegraded));
+            }
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[bold]rank-eval sweep[/] K grid: {string.Join(", ", rows.Select(r => r.K))}");
+            foreach (var row in rows)
+            {
+                var marker = row.K == RrfMerger.K ? " [bold](baseline)[/]" : string.Empty;
+                AnsiConsole.MarkupLine(
+                    $"K {row.K,4}  MRR@10 {row.Mrr:F3}  P@5 {row.P5:F3}  Recall@10 {row.Recall:F3}{marker}");
+            }
+        }
+
+        if (baseline is not null && !settings.Json)
+        {
+            foreach (var row in rows.Where(r => r.K != RrfMerger.K))
+            {
+                var dmrr = row.Mrr - baseline.Mrr;
+                var dp5 = row.P5 - baseline.P5;
+                var dr10 = row.Recall - baseline.Recall;
+                AnsiConsole.MarkupLine(
+                    $"[grey]K {row.K,4} vs baseline: dMRR {dmrr:+0.000;-0.000;0.000}  dP5 {dp5:+0.000;-0.000;0.000}  dR10 {dr10:+0.000;-0.000;0.000}[/]");
+            }
+        }
+
+        if (settings.Out is not null)
+        {
+            File.WriteAllText(
+                settings.Out,
+                JsonSerializer.Serialize(new EvalSweepOut("rank-sweep", rows), SqueezrJson.OutputOptions));
+            if (!settings.Json)
+            {
+                AnsiConsole.MarkupLine($"[grey]sweep report written to {settings.Out.EscapeMarkup()}[/]");
+            }
+        }
+
+        return 0;
     }
 }

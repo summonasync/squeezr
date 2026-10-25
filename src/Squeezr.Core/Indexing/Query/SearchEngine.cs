@@ -39,7 +39,8 @@ public sealed class SearchEngine
         IEmbeddingProvider? embeddings,
         IVectorStore? vectorStore,
         CancellationToken ct,
-        SemanticCoverage? coverage = null)
+        SemanticCoverage? coverage = null,
+        FusionTuning? tuning = null)
     {
         var guard = SecretGuardReader.Load(_workspaceRoot);
         var fileScope = ResolveFileScope(query, guard);
@@ -100,7 +101,7 @@ public sealed class SearchEngine
             .Concat(dedupedIdentifier)
             .Select(hit => (hit.Key!, hit.Match))
             .ToList();
-        var merged = RrfMerger.Merge(exactRanked, semantic);
+        var merged = RrfMerger.Merge(exactRanked, semantic, tuning);
         return Finalize(merged, query, AppendWithheld(warnings, guard));
     }
 

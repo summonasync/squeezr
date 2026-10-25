@@ -6,14 +6,18 @@ public static class RrfMerger
 
     public static IReadOnlyList<SearchMatch> Merge(
         IReadOnlyList<(string Key, SearchMatch Match)> exactRanked,
-        IReadOnlyList<(string Key, SearchMatch Match)> semanticRanked)
+        IReadOnlyList<(string Key, SearchMatch Match)> semanticRanked,
+        FusionTuning? tuning = null)
     {
+        var k = tuning?.K ?? K;
+        var exactWeight = tuning?.ExactWeight ?? 1.0;
+        var semanticWeight = tuning?.SemanticWeight ?? 1.0;
         var scores = new Dictionary<string, double>();
         var winners = new Dictionary<string, SearchMatch>();
         var sources = new Dictionary<string, int>();
 
-        Accumulate(exactRanked, bit: 1);
-        Accumulate(semanticRanked, bit: 2);
+        Accumulate(exactRanked, bit: 1, exactWeight);
+        Accumulate(semanticRanked, bit: 2, semanticWeight);
 
         return winners
             .Select(pair => pair.Value with
@@ -25,14 +29,14 @@ public static class RrfMerger
             .ThenBy(m => m.Path, StringComparer.Ordinal)
             .ToList();
 
-        void Accumulate(IReadOnlyList<(string Key, SearchMatch Match)> ranked, int bit)
+        void Accumulate(IReadOnlyList<(string Key, SearchMatch Match)> ranked, int bit, double weight)
         {
             for (var rank = 0; rank < ranked.Count; rank++)
             {
                 var (key, match) = ranked[rank];
-                if (!scores.TryAdd(key, 1.0 / (K + rank + 1)))
+                if (!scores.TryAdd(key, weight / (k + rank + 1)))
                 {
-                    scores[key] += 1.0 / (K + rank + 1);
+                    scores[key] += weight / (k + rank + 1);
                 }
 
                 if (!winners.TryAdd(key, match))
