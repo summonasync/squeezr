@@ -94,8 +94,8 @@ public class FusionRegressionPinTests
             var plain = Search(workspace, "FusionTuning", store);
             var tuned = Search(workspace, "FusionTuning", store, new FusionTuning { K = 1 });
 
-            tuned.Select(m => m.Path).ShouldBe(plain.Select(m => m.Path));
-            tuned[0].Score.ShouldNotBe(plain[0].Score);
+            tuned.Matches.Select(m => m.Path).ShouldBe(plain.Matches.Select(m => m.Path));
+            tuned.Matches[0].Score.ShouldNotBe(plain.Matches[0].Score);
         }
         finally
         {

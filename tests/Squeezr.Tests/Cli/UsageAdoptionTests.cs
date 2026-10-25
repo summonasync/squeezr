@@ -1,4 +1,5 @@
 using Shouldly;
+using Squeezr.Cli.Commands;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -32,7 +33,7 @@ public class UsageAdoptionTests
             Entry(Guid.Empty, "search", "cli"),
         };
 
-        var rollup = UsageAnalytics.Rollup([Block(entries)], [], since: null);
+        var rollup = UsageAnalytics.Rollup([Block(entries)], new HashSet<string>(), since: null);
 
         rollup.Totals.Sessions.ShouldNotBeNull();
         rollup.Totals.Sessions.McpSessions.ShouldBe(1);
@@ -51,7 +52,7 @@ public class UsageAdoptionTests
             Entry(Guid.Empty, "search", "cli"),
         };
 
-        var rollup = UsageAnalytics.Rollup([Block(entries)], [], since: null);
+        var rollup = UsageAnalytics.Rollup([Block(entries)], new HashSet<string>(), since: null);
 
         var cli = rollup.Totals.Agents.Single(a => a.Client == "cli");
         cli.Count.ShouldBe(4);
