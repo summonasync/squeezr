@@ -112,7 +112,7 @@ public class TuiConfigEditorTests
         code.ShouldBe(0);
         var saved = ConfigFile.Load(workspace).Embeddings;
         saved.Provider.ShouldBe("ollama");
-        saved.Ollama.Endpoint.ShouldBe("http://localhost:11434");
+        saved.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
         saved.Ollama.Model.ShouldBe("nomic-embed-text");
         saved.Ollama.Dimensions.ShouldBe(768);
         saved.Ollama.ModelProfile.ShouldBe("nomic-embed-text-v1.5");
