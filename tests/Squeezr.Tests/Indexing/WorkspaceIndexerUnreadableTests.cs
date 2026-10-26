@@ -343,13 +343,12 @@ public sealed class WorkspaceIndexerUnreadableTests
         Should.NotThrow(() => result = FreshnessGuard.CheckAndRefresh(
             workspace, [("demo", "swapped"), ("demo", "keep.cs")]));
 
-        result.Refreshed.ShouldContain("demo/swapped");
-        result.Refreshed.ShouldContain("demo/keep.cs");
+        result.Refreshed.ShouldBe(["demo/swapped"]);
 
         using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
         {
             store.FindFileById(FileIdOf(workspace, "keep.cs")).ShouldNotBeNull(
-                "the readable sibling must survive the same refresh untouched");
+                "the fresh sibling must survive the same refresh untouched");
         }
 
         using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
