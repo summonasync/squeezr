@@ -170,7 +170,8 @@ public class TomlMcpConfigWriterTests
     }
 
     private static string Expected(string fixtureName) =>
-        Normalize(File.ReadAllText(Path.Combine(FixturesDir, fixtureName)));
+        Normalize(File.ReadAllText(Path.Combine(FixturesDir, fixtureName)))
+            .Replace(CommandPath, Path.GetFullPath(CommandPath).Replace("\\", "\\\\"));
 
-    private static string Normalize(string content) => content.TrimEnd('\r', '\n') + "\n";
+    private static string Normalize(string content) => content.Replace("\r\n", "\n").TrimEnd('\n') + "\n";
 }

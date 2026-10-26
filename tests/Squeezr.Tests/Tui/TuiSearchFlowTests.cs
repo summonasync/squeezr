@@ -7,6 +7,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Tui;
 
+[Collection("ProcessGlobals")]
 public class TuiSearchFlowTests
 {
     [Fact]
