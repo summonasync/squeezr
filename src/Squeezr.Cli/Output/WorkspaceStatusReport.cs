@@ -18,7 +18,9 @@ public sealed record WorkspaceStatusReport(
     IReadOnlyList<string> Warnings = default!,
     IReadOnlyList<WorkspaceSiblingEntry>? Workspaces = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    int WorkspacesOmitted = 0)
+    int WorkspacesOmitted = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyDictionary<string, int>? KindChunks = null)
 {
     public static WorkspaceStatusReport Create(
         WorkspaceStatus status,

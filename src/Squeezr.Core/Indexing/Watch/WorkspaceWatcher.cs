@@ -385,6 +385,11 @@ public sealed class WorkspaceWatcher
     {
         _status?.PassStarted(batch.Count);
         var runtime = await ResolveRuntimeAsync(cancellationToken).ConfigureAwait(false);
+        if (runtime is not null)
+        {
+            _heartbeat?.SetEmbeddingExecutor(runtime.Executor, runtime.ProviderName);
+        }
+
         var storeDir = SqueezrPaths.StoreDir(_workspaceRoot);
         var passStart = DateTime.UtcNow;
         PassPhaseStampFile.Write(storeDir, new PassPhaseStamp(
@@ -470,8 +475,12 @@ public sealed class WorkspaceWatcher
         {
             try
             {
+                var heartbeat = _heartbeat;
+                var progress = heartbeat is null
+                    ? _progress
+                    : new WatchActivityProgress(heartbeat, _progress);
                 var result = _indexer.Index(
-                    _workspaceRoot, progress: _progress, onStaleTakeover: _onStaleTakeover,
+                    _workspaceRoot, progress: progress, onStaleTakeover: _onStaleTakeover,
                     changedPaths: batch, sessions: _sessions,
                     embeddings: runtime?.Provider, vectorStore: runtime?.Store,
                     embeddingProviderResolution: runtime?.Resolution,
@@ -514,6 +523,7 @@ public sealed class WorkspaceWatcher
             }
             catch (WorkspaceLockedException)
             {
+                _heartbeat?.ClearActivity();
                 _status?.RetryScheduled(backoff);
             }
             catch (VectorDimensionMismatchException ex)

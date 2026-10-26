@@ -294,6 +294,114 @@ public class IdentifierTokenLegTests
         hits.ShouldContain(hit => hit.Match.Path == "NoteVault.cs");
     }
 
+    [Fact]
+    public async Task Hybrid_PhraseLegZero_CodeTokens_AppearAsExactArm()
+    {
+        var workspace = NewReproFixture();
+        var engine = new SearchEngine(workspace);
+
+        var response = await engine.SearchHybridAsync(
+            Query("materialization feature slug planning"),
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        var code = response.Matches.Where(m => m.Path == "Planner.cs").ToList();
+        code.ShouldNotBeEmpty("a dead phrase arm must not sink the identifier leg with it");
+        code.ShouldAllBe(m => m.Source == "exact");
+    }
+
+    [Fact]
+    public async Task Hybrid_PhraseLegZero_KindFilter_NarrowsTheFallback()
+    {
+        var workspace = NewReproFixture();
+        var engine = new SearchEngine(workspace);
+        var query = Query("materialization feature slug planning");
+
+        var codeOnly = await engine.SearchHybridAsync(
+            query with { Kind = DocKindDetector.Code },
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        var code = codeOnly.Matches.ShouldHaveSingleItem();
+        code.Path.ShouldBe("Planner.cs");
+        code.Source.ShouldBe("exact");
+
+        var docsOnly = await engine.SearchHybridAsync(
+            query with { Kind = DocKindDetector.Docs },
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        docsOnly.Matches.ShouldHaveSingleItem().Path.ShouldBe("notes.md");
+    }
+
+    [Fact]
+    public void OverCapProseToken_KeepsBoundedVote_UnderReadCeilings()
+    {
+        var workspace = NewOverCapWorkspace();
+
+        var counter = new IdentifierTokenLeg.ReadCounter();
+        var hits = IdentifierTokenLeg.Execute(workspace, Query("kestrel ZephyrstoneVault"), null, counter, Guard(workspace));
+
+        counter.TokensSelected.ShouldBe(2);
+        hits.Select(hit => hit.Match.Path).ShouldBe(["Alphas.cs", "Betas.cs"]);
+        counter.CandidateReads.ShouldBeLessThanOrEqualTo(8 * 80);
+        counter.MaxReadsPerFile.ShouldBeLessThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public void ScanCandidates_CaseVariantSpellings_ReachEveryDoc()
+    {
+        var workspace = NewReproFixture();
+        var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+
+        var docIds = Enumerable.Range(0, (int)reader.DocCount)
+            .Select(docId => (DocId: (uint)docId, reader.GetDoc((uint)docId).FileId))
+            .Select(pair => (pair.DocId, Path: store.FindFileById(pair.FileId)!.Path))
+            .ToDictionary(pair => pair.Path, pair => pair.DocId);
+
+        var groups = ExactSearchPlan.LiteralGroups("slug", caseSensitive: false, out _);
+        var expected = docIds.Values.OrderBy(id => id).ToArray();
+
+        ExactSearchPlan.ResolveCandidatesByScan(reader, groups, null).ShouldBe(expected);
+        ExactSearchPlan.ResolveCandidates(reader, groups, null).ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task Hybrid_RegexQuery_OutputEqualsExactOnlyArm()
+    {
+        var workspace = NewIndexedWorkspaceWithCaseSplit();
+        var engine = new SearchEngine(workspace);
+        var query = new SearchQuery("C.lc", true, null, null, null, null, null, null);
+
+        var exactOnly = engine.Search(query);
+        var hybrid = await engine.SearchHybridAsync(
+            query, new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+
+        hybrid.Matches.ShouldNotBeEmpty();
+        Render(hybrid).ShouldBe(Render(exactOnly));
+        hybrid.Matches.ShouldAllBe(m => m.AlsoMatched == 0);
+    }
+
+    [Fact]
+    public async Task Hybrid_GuardWithholdsThePhraseMatch_TheIdentifierLegStaysSilent()
+    {
+        var workspace = NewGuardBoundaryWorkspace();
+        var engine = new SearchEngine(workspace);
+
+        var response = await engine.SearchHybridAsync(
+            Query("SS1-CANARY-ENV-VALUE"),
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        response.Matches.ShouldBeEmpty("a secret query must not be answered with files sharing its fragments");
+        response.Warnings.ShouldContain(w => w.StartsWith("secret guard:", StringComparison.Ordinal));
+    }
+
     private static bool InvokeIsCodeShaped(string token)
     {
         var method = typeof(IdentifierTokenLeg).GetMethod(
@@ -565,6 +673,68 @@ public class IdentifierTokenLegTests
         return workspace;
     }
 
+    private static string NewReproFixture()
+    {
+        var workspace = NewRepoWorkspace();
+
+        WriteFile(workspace, "repo/Planner.cs", """
+            namespace Planning;
+
+            public class MaterializationFeatureSlugPlanner
+            {
+                public void PlanFeature() { }
+            }
+            """);
+        WriteFile(workspace, "repo/notes.md",
+            "materialization notes: the feature slug for sprint planning stays materialization-free; " +
+            "planning the slug naming for the feature flag happens later.");
+
+        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        return workspace;
+    }
+
+    private static string NewOverCapWorkspace()
+    {
+        var workspace = NewRepoWorkspace();
+
+        WriteFile(workspace, "repo/Alphas.cs", """
+            namespace Vault;
+
+            public class ZephyrstoneVault
+            {
+                public string kestrel = "kestrel";
+            }
+            """);
+        WriteFile(workspace, "repo/Betas.cs", """
+            namespace Den;
+
+            public class BetaDen
+            {
+                public string kestrel = "kestrel";
+            }
+            """);
+
+        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        return workspace;
+    }
+
+    private static string NewGuardBoundaryWorkspace()
+    {
+        var workspace = NewRepoWorkspace();
+
+        WriteFile(workspace, "repo/Leak.cs", """
+            public class CanaryVault
+            {
+                public string ENV = "CANARY VALUE";
+            }
+            """);
+        WriteFile(workspace, "repo/.env", "OPENAI_API_KEY=SS1-CANARY-ENV-VALUE\n");
+
+        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        SecretGuardFixture.PlantPreGuardRows(workspace, [".env"]);
+        return workspace;
+    }
+
     private static void WriteFile(string workspace, string relativePath, string content)
     {
         var fullPath = Path.Combine(workspace, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -615,13 +785,19 @@ public class IdentifierTokenLegTests
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct) =>
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VectorHit>>([]);
 
         public Task<long> CountAsync(CancellationToken ct) => Task.FromResult(0L);
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
 

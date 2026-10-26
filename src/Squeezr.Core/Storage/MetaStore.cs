@@ -1,4 +1,5 @@
 using LiteDB;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Storage;
@@ -13,7 +14,7 @@ public sealed class MetaStore : IDisposable
     public const string IndexStateCollection = "index_state";
     public const string PendingReapsCollection = "pending_reaps";
 
-    private readonly LiteDatabase _db;
+    private LiteDatabase _db;
     private readonly string _dbPath;
 
     private static readonly object MapperWarmupLock = new();
@@ -26,7 +27,12 @@ public sealed class MetaStore : IDisposable
         }
 
         _dbPath = Path.GetFullPath(dbPath);
+        _db = OpenDatabase(_dbPath);
+        EnsureCoreIndexes();
+    }
 
+    private static LiteDatabase OpenDatabase(string dbPath)
+    {
         // LiteDB 5.0.21 exposes a half-built EntityMapper to concurrent readers (empty mapper is cached
         // before its members are populated), so first-time mapping of an entity type must be serialized.
         lock (MapperWarmupLock)
@@ -34,21 +40,27 @@ public sealed class MetaStore : IDisposable
             // Direct mode opens meta.db with FileShare.Read, so a second read-write connection (a search
             // during a background watch pass) dies with a sharing violation. Shared mode keeps writers
             // coordinated by LiteDB's own locks; single-writer discipline is enforced by IndexLock upstream.
-            _db = new LiteDatabase(new ConnectionString
+            var db = new LiteDatabase(new ConnectionString
             {
                 Filename = dbPath,
                 Connection = ConnectionType.Shared
             });
-            _db.Mapper.ToDocument(new RepoDocument());
-            _db.Mapper.ToDocument(new FileDocument());
-            _db.Mapper.ToDocument(new IndexStateDocument { Stats = new IndexStateStats() });
-            _db.Mapper.ToDocument(new SymbolDocument());
-            _db.Mapper.ToDocument(new RefDocument());
-            _db.Mapper.ToDocument(new ChunkDocument());
-            _db.Mapper.ToDocument(new PendingReapDocument());
+            db.Mapper.ToDocument(new RepoDocument());
+            db.Mapper.ToDocument(new FileDocument());
+            db.Mapper.ToDocument(new IndexStateDocument { Stats = new IndexStateStats() });
+            db.Mapper.ToDocument(new SymbolDocument());
+            db.Mapper.ToDocument(new RefDocument());
+            db.Mapper.ToDocument(new ChunkDocument());
+            db.Mapper.ToDocument(new PendingReapDocument());
+            return db;
         }
+    }
+
+    private void EnsureCoreIndexes()
+    {
         _db.GetCollection(ReposCollection).EnsureIndex("name", unique: true);
         _db.GetCollection(FilesCollection).EnsureIndex("repoId");
+        _db.GetCollection(FilesCollection).EnsureIndex("path");
         _db.GetCollection(SymbolsCollection).EnsureIndex("fileId");
         _db.GetCollection(SymbolsCollection).EnsureIndex("repoId");
         _db.GetCollection(RefsCollection).EnsureIndex("fromSymbolId");
@@ -107,11 +119,18 @@ public sealed class MetaStore : IDisposable
 
     public FileDocument? FindFileById(uint id) => _db.GetCollection<FileDocument>(FilesCollection).FindById((long)id);
 
+    public FileDocument? FindFile(uint repoId, string path) =>
+        _db.GetCollection<FileDocument>(FilesCollection)
+            .Find(f => f.Path == path)
+            .FirstOrDefault(f => f.RepoId == repoId);
+
     public void UpsertFile(FileDocument file) => _db.GetCollection<FileDocument>(FilesCollection).Upsert(file);
 
     public void DeleteFile(uint id) => _db.GetCollection<FileDocument>(FilesCollection).Delete((long)id);
 
     public int CountFiles(uint repoId) => _db.GetCollection<FileDocument>(FilesCollection).Count(f => f.RepoId == repoId);
+
+    public int CountAllFiles() => _db.GetCollection<FileDocument>(FilesCollection).Count();
 
     public uint GetNextFileId() => NextId(FilesCollection);
 
@@ -285,6 +304,27 @@ public sealed class MetaStore : IDisposable
         return new SemanticCoverage(chunks.Count(), chunks.Count(c => c.EmbeddingStatus != "ok"));
     }
 
+    // Kind rides the file row; rows whose file is already reaped count toward no kind, so the
+    // counts sum to the live chunk rows exactly.
+    public IReadOnlyDictionary<string, int> CountChunksByKind()
+    {
+        var kindByFileId = _db.GetCollection<FileDocument>(FilesCollection)
+            .FindAll()
+            .ToDictionary(f => f.Id, DocKindDetector.Detect);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var fileId in _db.GetCollection(ChunksCollection).FindAll().Select(d => (uint)d["fileId"].AsInt64))
+        {
+            if (!kindByFileId.TryGetValue(fileId, out var kind))
+            {
+                continue;
+            }
+
+            counts[kind] = counts.GetValueOrDefault(kind) + 1;
+        }
+
+        return counts;
+    }
+
     // Marks carried over from a previous model are a one-time re-queue, not a refill: counting them apart
     // from never-embedded rows is what lets a pass say "the model changed" instead of re-embedding silently.
     public int CountChunksWithOtherModelKey(uint? repoId, string modelKey)
@@ -451,6 +491,10 @@ public sealed class MetaStore : IDisposable
     // pre-rebuild file aside under a '-backup' name: a second full copy of every byte the purge just retired.
     // Those copies go with the reclaim, the ones an earlier crashed pass left behind included, and the count
     // of what stayed is part of the result so the pass can say it instead of reporting a clean store.
+    // The engine's own rebuild refuses stores past its loop guard's early calibration ("Detected loop in
+    // FindAll({0})", the placeholder unfilled — an upstream 5.0.21 quirk), which is exactly the state the
+    // secret purge needs to clean, so a refusal hands the file to the copy-out rebuilder and the result
+    // says which path carried it.
     public StoreReclaimResult Reclaim()
     {
         var sizeBefore = SizeOnDisk();
@@ -463,8 +507,60 @@ public sealed class MetaStore : IDisposable
         }
         catch (Exception ex) when (ex is LiteException or IOException or UnauthorizedAccessException)
         {
+            return ReclaimByCopyOut(sizeBefore, ex.Message);
+        }
+    }
+
+    private StoreReclaimResult ReclaimByCopyOut(long sizeBefore, string engineReason)
+    {
+        DisposeQuietly(_db);
+        var fallback = new StoreFallbackRebuilder(_dbPath).Rebuild();
+
+        try
+        {
+            _db = OpenDatabase(_dbPath);
+            EnsureCoreIndexes();
+        }
+        catch (Exception ex) when (ex is LiteException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
             return new StoreReclaimResult(
-                sizeBefore, SizeOnDisk(), Reclaimed: false, ex.Message, ClearSnapshotCopies(_dbPath));
+                sizeBefore,
+                SizeOnDisk(),
+                Reclaimed: false,
+                $"{RebuildRefusalText.FillLoopPlaceholder(engineReason, fallback.FailedCollection)} — fallback rebuild refused: {fallback.FailureReason}; store reopen failed: {ex.Message}",
+                ClearSnapshotCopies(_dbPath),
+                StoreReclaimResult.CopyOutFallbackMode);
+        }
+
+        if (fallback.Rebuilt)
+        {
+            return new StoreReclaimResult(
+                sizeBefore,
+                SizeOnDisk(),
+                Reclaimed: true,
+                SkippedReason: null,
+                ClearSnapshotCopies(_dbPath),
+                StoreReclaimResult.CopyOutFallbackMode,
+                RebuildRefusalText.FillLoopPlaceholder(engineReason, null));
+        }
+
+        return new StoreReclaimResult(
+            sizeBefore,
+            SizeOnDisk(),
+            Reclaimed: false,
+            $"{RebuildRefusalText.FillLoopPlaceholder(engineReason, fallback.FailedCollection)} — fallback rebuild refused: {fallback.FailureReason}",
+            ClearSnapshotCopies(_dbPath),
+            StoreReclaimResult.CopyOutFallbackMode);
+    }
+
+    private static void DisposeQuietly(LiteDatabase db)
+    {
+        try
+        {
+            db.Dispose();
+        }
+        catch (Exception)
+        {
         }
     }
 

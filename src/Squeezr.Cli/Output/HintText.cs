@@ -6,6 +6,8 @@ namespace Squeezr.Cli.Output;
 
 public static class HintText
 {
+    public const string RaiseMaxTokensRemedy = "raise maxTokens";
+
     private static readonly Dictionary<string, string> CliFlags = new(StringComparer.Ordinal)
     {
         ["repo"] = "--repo",
@@ -19,6 +21,9 @@ public static class HintText
     public static string ForCli(this TruncationHint hint) => hint.Render(Flag);
 
     public static string ForMcp(this TruncationHint hint) => hint.Render(static parameter => parameter);
+
+    public static string TruncationLine(int tokensUsed, int ceiling, string remedy) =>
+        $"truncated: {tokensUsed} of {ceiling} token ceiling — {remedy}";
 
     public static string? CollapseNote(this SearchMatch match) => match.AlsoMatched switch
     {

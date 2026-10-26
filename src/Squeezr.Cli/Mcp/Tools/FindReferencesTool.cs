@@ -80,14 +80,32 @@ public sealed class FindReferencesTool
                 warnings.Add(LaggingWarning(lagging));
             }
 
+            var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
+            var (cost, unknownBaselineFiles) = CostBaseline.Measure(
+                root, namedFiles, tokensUsed, true);
+            var fileFreshness = namedFiles.Count > 0
+                ? FreshnessVerdict.Classify(root, namedFiles,
+                    guardStaleKeys: MergeStale(freshness.Stale, lagging))
+                : null;
+            if (StoreWriterNotice.For(root) is { } writerNotice)
+            {
+                warnings.Add(writerNotice);
+            }
+            if (unknownBaselineFiles > 0)
+            {
+                warnings.Add(
+                    $"{unknownBaselineFiles} referenced file(s) not in the index — excluded from the whole-file baseline");
+            }
+
             var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, MergeStale(freshness.Stale, lagging),
-                definitions: definitions);
+                definitions: definitions, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                 tokensUsed, false, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("find_references", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }

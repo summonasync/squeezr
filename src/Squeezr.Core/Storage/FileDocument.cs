@@ -19,6 +19,9 @@ public sealed class FileDocument
     [BsonField("language")]
     public string Language { get; set; } = string.Empty;
 
+    [BsonField("kind")]
+    public string Kind { get; set; } = string.Empty;
+
     [BsonField("sizeBytes")]
     public long SizeBytes { get; set; }
 

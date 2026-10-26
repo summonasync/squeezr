@@ -207,6 +207,116 @@ public class QdrantVectorStoreTests
         request.VectorsConfig.Params.Size.ShouldBe(768UL);
     }
 
+    [Fact]
+    public async Task EnsureCollectionAsync_MissingCollection_CreatesKeywordPayloadIndexOnKind()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Collections/CollectionExists"] = new CollectionExistsResponse
+            {
+                Result = new CollectionExists { Exists = false }
+            },
+            ["/qdrant.Collections/Create"] = new CollectionOperationResponse { Result = true },
+        });
+        var store = StubbedStore(handler);
+
+        await store.EnsureCollectionAsync(768, CancellationToken.None);
+
+        var create = handler.Requests.Single(r => r.Path == "/qdrant.Points/CreateFieldIndex");
+        var request = CreateFieldIndexCollection.Parser.ParseFrom(create.Body.AsSpan(5));
+        request.CollectionName.ShouldBe("squeezr-test");
+        request.FieldName.ShouldBe("kind");
+        request.FieldType.ShouldBe(FieldType.Keyword);
+    }
+
+    [Fact]
+    public async Task EnsureCollectionAsync_KindIndexAlreadyPresent_DoesNotRecreatePayloadIndex()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Collections/CollectionExists"] = new CollectionExistsResponse
+            {
+                Result = new CollectionExists { Exists = true }
+            },
+            ["/qdrant.Collections/Get"] = new GetCollectionInfoResponse
+            {
+                Result = new CollectionInfo
+                {
+                    Config = new CollectionConfig
+                    {
+                        Params = new CollectionParams
+                        {
+                            VectorsConfig = new VectorsConfig { Params = new VectorParams { Size = 768 } }
+                        }
+                    },
+                    PayloadSchema = { ["kind"] = new PayloadSchemaInfo { DataType = PayloadSchemaType.Keyword } }
+                }
+            },
+        });
+        var store = StubbedStore(handler);
+
+        await store.EnsureCollectionAsync(768, CancellationToken.None);
+
+        handler.Requests.ShouldNotContain(r => r.Path == "/qdrant.Points/CreateFieldIndex");
+    }
+
+    [Fact]
+    public async Task SetKindPayloadsAsync_GroupsByKindAndFiltersByFileIds()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>());
+        var store = StubbedStore(handler);
+
+        await store.SetKindPayloadsAsync(
+            new Dictionary<uint, string> { [7] = "code", [8] = "code", [9] = "docs" },
+            CancellationToken.None);
+
+        var requests = handler.Requests
+            .Where(r => r.Path == "/qdrant.Points/SetPayload")
+            .Select(r => SetPayloadPoints.Parser.ParseFrom(r.Body.AsSpan(5)))
+            .ToList();
+        requests.Count.ShouldBe(2);
+        var code = requests.Single(r => r.Payload["kind"].StringValue == "code");
+        code.PointsSelector.Filter.Should.Single().Field.Match.Integers.Integers.ShouldBe([7L, 8L]);
+        var docs = requests.Single(r => r.Payload["kind"].StringValue == "docs");
+        docs.PointsSelector.Filter.Should.Single().Field.Match.Integers.Integers.ShouldBe([9L]);
+    }
+
+    [Fact]
+    public async Task ScrollFileIdsWithoutKindAsync_FiltersByRepoAndEmptyKind_ReturnsDistinctFileIds()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Points/Scroll"] = new ScrollResponse
+            {
+                Result =
+                {
+                    PointWithFileId(11, 1),
+                    PointWithFileId(12, 1),
+                    PointWithFileId(13, 2),
+                },
+            },
+        });
+        var store = StubbedStore(handler);
+
+        var fileIds = await store.ScrollFileIdsWithoutKindAsync(3, CancellationToken.None);
+
+        fileIds.ShouldBe([1u, 2u]);
+        var request = ScrollPoints.Parser.ParseFrom(handler.Requests.Single(r => r.Path == "/qdrant.Points/Scroll").Body.AsSpan(5));
+        request.CollectionName.ShouldBe("squeezr-test");
+        var must = request.Filter.Must.ToList();
+        must.Count.ShouldBe(2);
+        must.Single(c => c.ConditionOneOfCase == Condition.ConditionOneOfOneofCase.IsEmpty).IsEmpty.Key.ShouldBe("kind");
+        var repo = must.Single(c => c.ConditionOneOfCase == Condition.ConditionOneOfOneofCase.Field);
+        repo.Field.Key.ShouldBe("repoId");
+        repo.Field.Match.Integer.ShouldBe(3L);
+    }
+
+    private static RetrievedPoint PointWithFileId(ulong id, uint fileId) => new()
+    {
+        Id = new PointId { Num = id },
+        Payload = { ["fileId"] = (long)fileId },
+    };
+
     private static QdrantVectorStore StubbedStore(HttpMessageHandler handler)
     {
         var channel = GrpcChannel.ForAddress("http://localhost:1", new GrpcChannelOptions

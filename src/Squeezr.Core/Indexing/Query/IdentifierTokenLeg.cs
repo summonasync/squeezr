@@ -10,6 +10,7 @@ public static class IdentifierTokenLeg
     private const int MaxCandidatesPerToken = 80;
     private const double DfPercentCap = 0.05;
     private const int DfAbsoluteCap = 200;
+    private const double OverCapVoteDiscount = 0.5;
 
     internal sealed class ReadCounter
     {
@@ -118,7 +119,7 @@ public static class IdentifierTokenLeg
         var fileHits = new Dictionary<uint, FileAccumulator>();
         var contentCache = new Dictionary<uint, string>();
 
-        foreach (var (token, df, candidateDocIds) in discriminants)
+        foreach (var (token, df, candidateDocIds, overCap) in discriminants)
         {
             var taken = candidateDocIds.Length > MaxCandidatesPerToken
                 ? candidateDocIds[..MaxCandidatesPerToken]
@@ -176,7 +177,7 @@ public static class IdentifierTokenLeg
                     fileHits[fileId] = acc;
                 }
 
-                acc.AddToken(token, df);
+                acc.AddToken(token, df, overCap);
             }
         }
 
@@ -264,13 +265,13 @@ public static class IdentifierTokenLeg
         return false;
     }
 
-    private static List<(string Token, int Df, uint[] Candidates)> SelectDiscriminants(
+    private static List<(string Token, int Df, uint[] Candidates, bool OverCap)> SelectDiscriminants(
         List<string> tokens,
         TrigramIndexReader reader,
         IReadOnlySet<uint>? filter,
         int dfCap)
     {
-        var scored = new List<(string Token, int Df, uint[] Candidates, double Priority)>();
+        var scored = new List<(string Token, int Df, uint[] Candidates, bool OverCap, double Priority)>();
 
         foreach (var token in tokens)
         {
@@ -278,19 +279,29 @@ public static class IdentifierTokenLeg
             var df = candidateDocIds.Length;
 
             // a token with no candidates carries no information and would out-rank every real one
-            if (df == 0 || (df > dfCap && !IsCodeShaped(token)))
+            if (df == 0)
+            {
+                continue;
+            }
+
+            // past the percent cap a prose token keeps voting, at half weight — dropping it made
+            // docs-heavy workspaces lose every common word; the absolute cap stays a read guard:
+            // a token this universal never justifies its candidate reads
+            var codeShaped = IsCodeShaped(token);
+            var overCap = !codeShaped && df > dfCap;
+            if (overCap && df > DfAbsoluteCap)
             {
                 continue;
             }
 
             var priority = -Math.Log(1 + df) + token.Length * 0.1;
-            scored.Add((token, df, candidateDocIds, priority));
+            scored.Add((token, df, candidateDocIds, overCap, priority));
         }
 
         return scored
             .OrderByDescending(x => x.Priority)
             .Take(MaxTokens)
-            .Select(x => (x.Token, x.Df, x.Candidates))
+            .Select(x => (x.Token, x.Df, x.Candidates, x.OverCap))
             .ToList();
     }
 
@@ -331,7 +342,7 @@ public static class IdentifierTokenLeg
     private sealed class FileAccumulator
     {
         private readonly HashSet<string> _tokens = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, int> _tokenDfs = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, double> _tokenVotes = new(StringComparer.Ordinal);
 
         public FileAccumulator(FileDocument file, string repoName, int firstLine, string snippet)
         {
@@ -351,20 +362,21 @@ public static class IdentifierTokenLeg
             get
             {
                 var sum = 0.0;
-                foreach (var df in _tokenDfs.Values)
+                foreach (var vote in _tokenVotes.Values)
                 {
-                    sum += 1.0 / (1.0 + Math.Log(df));
+                    sum += vote;
                 }
                 sum += 0.5 * Math.Max(0, _tokens.Count - 1);
                 return sum;
             }
         }
 
-        public void AddToken(string token, int df)
+        public void AddToken(string token, int df, bool overCap)
         {
             if (_tokens.Add(token))
             {
-                _tokenDfs[token] = df;
+                var vote = 1.0 / (1.0 + Math.Log(df));
+                _tokenVotes[token] = overCap ? vote * OverCapVoteDiscount : vote;
             }
         }
     }
