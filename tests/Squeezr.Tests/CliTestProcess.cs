@@ -38,8 +38,16 @@ internal static partial class CliTestProcess
         string squeezrHome, string stdin, string workingDir, params string[] args) =>
         StartAsync(workingDir, args, squeezrHome, stdin);
 
+    // The BUGS/010 pin harness: the child sees a raw dangling or unset HOME. squeezrHome "" means
+    // SQUEEZR_HOME is present but empty, which the product reads as unset; childHome null leaves
+    // HOME unset entirely, a path passes it through raw. DOTNET_CLI_HOME keeps the dotnet host
+    // itself alive — it refuses to start with no home at all, and the product must see the damage.
+    public static Task<(int ExitCode, string StdOut, string StdErr)> RunWithProfileHomeAsync(
+        string? childHome, string squeezrHome, string workingDir, params string[] args) =>
+        StartAsync(workingDir, args, squeezrHome, childHome: childHome);
+
     private static async Task<(int ExitCode, string StdOut, string StdErr)> StartAsync(
-        string workingDir, string[] args, string? squeezrHome, string? stdin = null)
+        string workingDir, string[] args, string? squeezrHome, string? stdin = null, string? childHome = null)
     {
         var effectiveHome = squeezrHome ?? TestRunHome;
         var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {string.Join(" ", args)}")
@@ -56,7 +64,19 @@ internal static partial class CliTestProcess
         // here means the child inherits the developer's real store and profile. No test
         // has a reason to touch either, so isolation is the default rather than a request.
         startInfo.Environment["SQUEEZR_CLIENT_HOME"] = TestDirs.SharedClientHomeDir;
-        startInfo.Environment["HOME"] = TestDirs.SharedClientHomeDir;
+        startInfo.Environment["DOTNET_CLI_HOME"] = TestDirs.SharedClientHomeDir;
+        if (childHome is null)
+        {
+            startInfo.Environment["HOME"] = TestDirs.SharedClientHomeDir;
+        }
+        else if (childHome.Length > 0)
+        {
+            startInfo.Environment["HOME"] = childHome;
+        }
+        else
+        {
+            startInfo.Environment.Remove("HOME");
+        }
 
         using var process = Process.Start(startInfo)!;
         if (stdin is not null)

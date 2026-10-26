@@ -41,6 +41,7 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
     {
         try
         {
+            SqueezrHome.RequireHabitableProfileHome();
             if ((settings.StoreKey is null) != (settings.Root is null))
             {
                 throw new McpUsageException("--store-key and --root must be provided together.");
@@ -160,7 +161,7 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 : 0;
         }
         catch (Exception ex)
-            when (ex is WorkspaceException or McpUsageException or UnauthorizedAccessException)
+            when (ex is WorkspaceException or McpUsageException or UnauthorizedAccessException or ArgumentException)
         {
             // Same permission net as drop: a denial no phase classified would otherwise leave the CLI
             // with exit 255 and no parseable output on any channel.

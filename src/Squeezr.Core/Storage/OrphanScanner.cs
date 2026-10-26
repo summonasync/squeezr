@@ -73,10 +73,15 @@ public static class OrphanScanner
     private static bool IsHusk(string rootPath)
     {
         var root = WorkspaceCanonicalPath.Canonicalize(rootPath);
-        var userHome = WorkspaceCanonicalPath.Canonicalize(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-        return string.Equals(root, userHome, PathComparison)
-               || string.Equals(root, WorkspaceCanonicalPath.Canonicalize(SqueezrHome.Resolve()), PathComparison);
+        if (UserHome.Path is { } userHome &&
+            string.Equals(root, WorkspaceCanonicalPath.Canonicalize(userHome), PathComparison))
+        {
+            return true;
+        }
+
+        var resolvedHome = SqueezrHome.Resolve();
+        return resolvedHome.Length > 0 &&
+               string.Equals(root, WorkspaceCanonicalPath.Canonicalize(resolvedHome), PathComparison);
     }
 
     private static string[] EnumerateStoreDirs()

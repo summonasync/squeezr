@@ -29,6 +29,7 @@ public static class CommandError
         WorkspaceStoreRemovalUnverifiedException => WorkspaceException.DefaultCode,
         ServicesException services => services.Code,
         McpUsageException => "invalid_usage",
+        ArgumentException => "invalid_usage",
         InvalidDataException => "invalid_data",
         _ => "internal_error"
     };

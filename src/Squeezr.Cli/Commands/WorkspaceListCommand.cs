@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -18,9 +19,10 @@ public sealed class WorkspaceListCommand : Command<WorkspaceListCommand.Settings
         WorkspaceListingResult listing;
         try
         {
+            SqueezrHome.RequireHabitableProfileHome();
             listing = WorkspaceRootResolver.GuardRegistryIo(WorkspaceListing.Load);
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is WorkspaceException or ArgumentException)
         {
             return CommandError.Report(ex, settings.Json);
         }

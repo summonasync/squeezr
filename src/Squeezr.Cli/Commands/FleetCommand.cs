@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -19,9 +20,10 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
         IReadOnlyList<FleetEntry> fleet;
         try
         {
+            SqueezrHome.RequireHabitableProfileHome();
             fleet = WorkspaceRootResolver.GuardRegistryIo(FleetListing.Load);
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is WorkspaceException or ArgumentException)
         {
             return CommandError.Report(ex, settings.Json);
         }
