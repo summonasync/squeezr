@@ -1,5 +1,6 @@
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Embeddings;
@@ -97,9 +98,10 @@ public static class EmbeddingProviderFactory
     {
         var expanded = Environment.ExpandEnvironmentVariables(path);
         if (expanded == "~")
-            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (expanded.StartsWith("~/", StringComparison.Ordinal) || expanded.StartsWith("~\\", StringComparison.Ordinal))
-            expanded = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), expanded[2..]);
+            return UserHome.Path ?? expanded;
+        if (UserHome.Path is { } userHome &&
+            (expanded.StartsWith("~/", StringComparison.Ordinal) || expanded.StartsWith("~\\", StringComparison.Ordinal)))
+            expanded = Path.Combine(userHome, expanded[2..]);
         if (!Path.IsPathRooted(expanded))
             expanded = Path.GetFullPath(expanded, workspaceRoot);
         return expanded;

@@ -1,3 +1,5 @@
+using Squeezr.Core.Workspace;
+
 namespace Squeezr.Core.Storage;
 
 public static class SqueezrHome
@@ -23,25 +25,42 @@ public static class SqueezrHome
         }
     }
 
-    public static string DefaultHome() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), SqueezrPaths.StoreDirName);
+    public static string DefaultHome() => UserHome.Path is { } home
+        ? Path.Combine(home, SqueezrPaths.StoreDirName)
+        : string.Empty;
 
     public static string WorkspacesDir => Path.Combine(Resolve(), SqueezrPaths.WorkspacesDirName);
+
+    // A profile-anchored home whose profile directory is gone is the dangling-HOME environment
+    // error (BUGS/010): registry commands refuse with a remedy instead of answering an empty
+    // world. SQUEEZR_HOME is the user's explicit choice and never trips this.
+    public static void RequireHabitableProfileHome()
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(HomeEnvironmentVariable)))
+        {
+            return;
+        }
+
+        if (UserHome.Path is { } home && !Directory.Exists(home))
+        {
+            throw new WorkspaceException(
+                $"the user home directory '{home}' does not exist — HOME dangles; set {HomeEnvironmentVariable} to a central store or fix HOME",
+                WorkspaceException.HomeUnavailableCode);
+        }
+    }
 
     public static bool IsCentralStore(string directory)
     {
         var canonical = WorkspaceCanonicalPath.ResolveThroughLinks(directory);
-        return string.Equals(canonical, WorkspaceCanonicalPath.ResolveThroughLinks(DefaultHome()), PathComparison) ||
-               string.Equals(canonical, WorkspaceCanonicalPath.ResolveThroughLinks(Resolve()), PathComparison);
+        return Matches(canonical, DefaultHome()) || Matches(canonical, Resolve());
     }
 
-    public static bool IsDefaultHome(string directory)
-    {
-        return string.Equals(
-            WorkspaceCanonicalPath.ResolveThroughLinks(directory),
-            WorkspaceCanonicalPath.ResolveThroughLinks(DefaultHome()),
-            PathComparison);
-    }
+    public static bool IsDefaultHome(string directory) =>
+        Matches(WorkspaceCanonicalPath.ResolveThroughLinks(directory), DefaultHome());
+
+    private static bool Matches(string canonical, string other) =>
+        other.Length > 0 &&
+        string.Equals(canonical, WorkspaceCanonicalPath.ResolveThroughLinks(other), PathComparison);
 
     // A store dir under some other home (a foreign SQUEEZR_HOME, a stale profile) is shaped
     // exactly like a legacy in-project store; anything carrying a registry or a workspaces
