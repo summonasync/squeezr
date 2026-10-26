@@ -100,7 +100,8 @@ public class ConfigFileTests
         config.Embeddings.Provider.ShouldBe("onnx");
         config.Embeddings.Onnx.Dimensions.ShouldBeNull();
         config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
-        config.Embeddings.Onnx.ModelPath.ShouldBe("~/.squeezr/models/nomic-embed-text-v1.5.onnx");
+        config.Embeddings.Onnx.ModelPath.ShouldBe(
+            Path.Combine("~", ".squeezr", "models", "nomic-embed-text-v1.5.onnx"));
     }
 
     [Fact]

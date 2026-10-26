@@ -2,15 +2,13 @@ namespace Squeezr.Cli.Mcp.Onboarding;
 
 public static class StaleRegistrationNudge
 {
-    private const string RelativeLinkPath = ".local/bin/squeezr";
-
     public static void TryWrite(TextWriter stderr, string homeDir, string? processPath)
     {
         if (processPath is null) return;
 
         try
         {
-            var linkPath = Path.Combine(homeDir, RelativeLinkPath);
+            var linkPath = Path.Combine(homeDir, ".local", "bin", "squeezr");
             if (!File.Exists(linkPath)) return;
 
             var linkTarget = FinalTarget(linkPath);
