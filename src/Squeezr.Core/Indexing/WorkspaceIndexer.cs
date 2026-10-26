@@ -355,8 +355,11 @@ public sealed class WorkspaceIndexer
                     changed = [];
                     tombstones = [];
                 }
-                else if (!present)
+                else if (!present || !UnixFileType.IsRegularFile(fullPath))
                 {
+                    // a directory (or a symlink now pointing at one) that took the path is a shape swap,
+                    // not content the row could keep: nothing readable lives there — reap, exactly as
+                    // the pre-probe chain reaped it
                     if (existing is null)
                     {
                         return null;
@@ -1241,13 +1244,13 @@ public sealed class WorkspaceIndexer
                         }
                     }
 
-                    // File.Exists only lets through shapes stat can see, so this branch holds channels,
-                    // sockets, devices and zero-size proc nodes — the open below would park the whole
-                    // rebuild inside a blocking syscall. A dangling link answers false upstream and takes
-                    // the missing branch instead: stat cannot resolve it, so it reaps.
+                    // what reaches this keep: shapes stat resolves but no read can serve — channels,
+                    // sockets, devices, and directories that took a stored path (the missing probe above
+                    // answers present for them). A dangling symlink reads as ENOENT instead, so it keeps
+                    // through the read-failure catch below, not here.
                     if (!UnixFileType.IsRegularFile(fullPath))
                     {
-                        KeepUnreadableRow(file, "not a regular file (fifo, socket, device or proc node)");
+                        KeepUnreadableRow(file, "not a regular file (directory, fifo, socket or device)");
                         continue;
                     }
 

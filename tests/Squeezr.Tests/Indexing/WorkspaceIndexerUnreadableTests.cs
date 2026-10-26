@@ -322,6 +322,36 @@ public sealed class WorkspaceIndexerUnreadableTests
         Should.NotThrow(() => new WorkspaceIndexer().IndexFile(workspace, "demo", "bad\0path.cs"));
     }
 
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void FreshnessRefresh_FileReplacedByDirectory_ReapsWithoutThrowing()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/swapped", Second);
+        WriteFile(workspace, "repo/keep.cs", First);
+        new WorkspaceIndexer().Index(workspace);
+
+        var swappedId = FileIdOf(workspace, "swapped");
+        File.Delete(Path.Combine(workspace, "repo", "swapped"));
+        Directory.CreateDirectory(Path.Combine(workspace, "repo", "swapped"));
+        // premise asserted: the stored path now resolves to a directory — present for stat, but no
+        // regular file behind it, which is the shape the probe-present fallthrough has to judge
+        File.Exists(Path.Combine(workspace, "repo", "swapped")).ShouldBeFalse();
+        UnixFileType.IsRegularFile(Path.Combine(workspace, "repo", "swapped")).ShouldBeFalse();
+
+        FreshnessResult result = default;
+        Should.NotThrow(() => result = FreshnessGuard.CheckAndRefresh(
+            workspace, [("demo", "swapped"), ("demo", "keep.cs")]));
+
+        result.Refreshed.ShouldContain("demo/swapped");
+
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            store.FindFileById(swappedId).ShouldBeNull(
+                "a directory took the path: nothing readable backs the row, the swap reaps without a throw");
+        }
+    }
+
     private static string NewWorkspace()
     {
         var workspace = TestDirs.NewTempDir();
