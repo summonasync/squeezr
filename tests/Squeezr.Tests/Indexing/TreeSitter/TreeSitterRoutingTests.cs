@@ -199,6 +199,37 @@ public class TreeSitterRoutingTests
         store.ListSymbolsByFile(csFile.Id).ShouldNotBeEmpty();
     }
 
+    [Fact]
+    public void Index_NodeModuleVariants_SymbolsResolveAndCrossFileImportIsReachable()
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            var repoId = store.FindRepo("demo")!.Id;
+            var mjsFile = store.ListFiles(repoId).Single(f => f.Path == "tools/a.mjs");
+            var cjsFile = store.ListFiles(repoId).Single(f => f.Path == "tools/b.cjs");
+            var mainFile = store.ListFiles(repoId).Single(f => f.Path == "tools/main.mjs");
+
+            mjsFile.Language.ShouldBe("javascript");
+            cjsFile.Language.ShouldBe("javascript");
+            mainFile.Language.ShouldBe("javascript");
+
+            store.ListSymbolsByFile(mjsFile.Id).ShouldContain(s => s.Name == "build" && s.Kind == "function");
+            store.ListSymbolsByFile(cjsFile.Id).ShouldContain(s => s.Name == "run" && s.Kind == "function");
+            store.ListSymbolsByFile(mainFile.Id).ShouldContain(s => s.Name == "serve" && s.Kind == "function");
+        }
+
+        var build = new RefLookup(workspace).Find("build", null);
+        var buildGroup = build.Groups.ShouldHaveSingleItem();
+        buildGroup.Definitions.ShouldHaveSingleItem().File.ShouldBe("tools/a.mjs");
+        buildGroup.Refs.ShouldContain(r => r.File == "tools/main.mjs" && r.Kind == "import");
+
+        var run = new RefLookup(workspace).Find("run", null);
+        run.Groups.ShouldHaveSingleItem().Definitions.ShouldHaveSingleItem().File.ShouldBe("tools/b.cjs");
+    }
+
     private static string NewPolyglotWorkspace()
     {
         var workspace = TestDirs.NewTempDir();
@@ -235,6 +266,15 @@ public class TreeSitterRoutingTests
             }
             """);
         WriteFile(workspace, "repo/docs/notes.md", "alpha\nbeta\ngamma\n");
+        WriteFile(workspace, "repo/tools/a.mjs", "export async function build() {\n  return 'artifact';\n}\n");
+        WriteFile(workspace, "repo/tools/b.cjs", "module.exports = function run() {\n  return 'ready';\n};\n");
+        WriteFile(workspace, "repo/tools/main.mjs", """
+            import { build } from './a.mjs';
+
+            export function serve() {
+              return build();
+            }
+            """);
         return workspace;
     }
 

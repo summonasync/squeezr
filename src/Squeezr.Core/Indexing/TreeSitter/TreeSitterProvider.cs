@@ -21,7 +21,7 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
     {
         return Path.GetExtension(path).ToLowerInvariant() switch
         {
-            ".js" or ".jsx" => MatchesHint(languageHint, "javascript", "js"),
+            ".js" or ".jsx" or ".mjs" or ".cjs" => MatchesHint(languageHint, "javascript", "js"),
             ".ts" => MatchesHint(languageHint, "typescript", "ts"),
             ".tsx" => MatchesHint(languageHint, "typescript", "tsx", "ts"),
             _ => false,
@@ -68,7 +68,7 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
         {
             ".ts" => "typescript",
             ".tsx" => "tsx",
-            ".jsx" => "javascript",
+            ".jsx" or ".mjs" or ".cjs" => "javascript",
             _ => "javascript",
         };
 }
