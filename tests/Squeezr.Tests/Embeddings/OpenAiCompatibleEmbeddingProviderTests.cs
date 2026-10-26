@@ -6,6 +6,7 @@ using Squeezr.Core.Embeddings;
 
 namespace Squeezr.Tests.Embeddings;
 
+[Collection("ProcessGlobals")]
 public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
 {
     private const string ApiKeyEnv = "SQUEEZR_TESTS_EMBEDDINGS_KEY";

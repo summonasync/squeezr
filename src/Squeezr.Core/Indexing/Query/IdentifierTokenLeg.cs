@@ -93,8 +93,8 @@ public static class IdentifierTokenLeg
         ReadCounter? counter,
         SecretGuardReader guard)
     {
-        // fileScope carries prefix/rankExclude only; repo/language/pathGlob ride the query, so the
-        // leg folds them through the phrase arm's filter instead of inventing its own semantics
+        // fileScope carries every path/repo/language narrowing; the leg folds only kind through
+        // the phrase arm's filter instead of inventing its own semantics
         var filter = ExactSearchPlan.BuildFilter(store, query, fileScope);
 
         var manifest = WorkspaceManifestFile.Load(workspaceRoot);

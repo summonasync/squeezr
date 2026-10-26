@@ -74,24 +74,37 @@ public sealed record WorkspaceStatusReport(
 
     private static RepoIgnoredReport? BuildIgnoredReport(RepoStatus repo, List<string> warnings)
     {
-        if (repo.IgnoredTotal == 0 || repo.IgnoredBySource is null || repo.IgnoredBySource.Count == 0)
+        var hasIgnored = repo.IgnoredTotal > 0 && repo.IgnoredBySource is { Count: > 0 };
+        if (!hasIgnored && repo.TrackedButExcluded == 0)
             return null;
 
-        var dominant = repo.IgnoredBySource.MaxBy(kv => kv.Value);
-        if (dominant.Key is not null && dominant.Value > 0 && IgnoreSourceKey.IsKnown(dominant.Key))
-        {
-            warnings.Add(FormatIgnoreWarning(dominant.Key, dominant.Value));
-        }
-
         var bySourceData = new Dictionary<string, int>();
-        foreach (var (source, count) in repo.IgnoredBySource.OrderBy(kv => kv.Key))
+        if (hasIgnored)
         {
-            if (count > 0)
-                bySourceData[source] = count;
+            var dominant = repo.IgnoredBySource!.MaxBy(kv => kv.Value);
+            if (dominant.Key is not null && dominant.Value > 0 && IgnoreSourceKey.IsKnown(dominant.Key))
+            {
+                warnings.Add(FormatIgnoreWarning(dominant.Key, dominant.Value));
+            }
+
+            foreach (var (source, count) in repo.IgnoredBySource.OrderBy(kv => kv.Key))
+            {
+                if (count > 0)
+                    bySourceData[source] = count;
+            }
         }
 
-        return new RepoIgnoredReport(repo.IgnoredTotal, bySourceData);
+        if (repo.TrackedButExcluded > 0)
+        {
+            warnings.Add(FormatTrackedButExcludedWarning(repo.TrackedButExcluded));
+        }
+
+        return new RepoIgnoredReport(hasIgnored ? repo.IgnoredTotal : 0, bySourceData, repo.TrackedButExcluded);
     }
+
+    private static string FormatTrackedButExcludedWarning(int count) =>
+        $"last pass kept {count} file(s) that .gitignore names but git tracks — tracked files are never " +
+        "gitignore-dropped; 'git rm --cached <path>' or narrow the patterns if they should not be searched";
 
     private static string FormatIgnoreWarning(string sourceKey, int count)
     {

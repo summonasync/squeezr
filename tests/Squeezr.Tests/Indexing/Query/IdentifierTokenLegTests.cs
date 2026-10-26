@@ -206,11 +206,13 @@ public class IdentifierTokenLegTests
     public void Leg_RepoFilter_DropsForeignRepoCandidates()
     {
         var workspace = NewIndexedWorkspaceWithFilterSurfaces();
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var scope = FileScope.Resolve(store, _ => true, store.FindRepo("demo")!.Id);
 
         var hits = IdentifierTokenLeg.Execute(
             workspace,
-            Query("OrphanRegistry HuskAdoption") with { Repo = "demo" },
-            null,
+            Query("OrphanRegistry HuskAdoption"),
+            scope,
             Guard(workspace));
 
         hits.ShouldNotBeEmpty();
@@ -222,11 +224,15 @@ public class IdentifierTokenLegTests
     public void Leg_LanguageFilter_DropsForeignLanguageCandidates()
     {
         var workspace = NewIndexedWorkspaceWithFilterSurfaces();
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var scope = FileScope.Resolve(
+            store,
+            file => string.Equals(file.Language, "csharp", StringComparison.OrdinalIgnoreCase));
 
         var hits = IdentifierTokenLeg.Execute(
             workspace,
-            Query("OrphanRegistry HuskAdoption") with { Language = "csharp" },
-            null,
+            Query("OrphanRegistry HuskAdoption"),
+            scope,
             Guard(workspace));
 
         hits.ShouldNotBeEmpty();
@@ -237,11 +243,13 @@ public class IdentifierTokenLegTests
     public void Leg_PathGlobFilter_DropsForeignSubtreeCandidates()
     {
         var workspace = NewIndexedWorkspaceWithFilterSurfaces();
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var scope = FileScope.Resolve(store, file => GlobMatcher.IsMatch("**/src/**", file.Path));
 
         var hits = IdentifierTokenLeg.Execute(
             workspace,
-            Query("OrphanRegistry HuskAdoption") with { PathGlob = "**/src/**" },
-            null,
+            Query("OrphanRegistry HuskAdoption"),
+            scope,
             Guard(workspace));
 
         hits.ShouldNotBeEmpty();

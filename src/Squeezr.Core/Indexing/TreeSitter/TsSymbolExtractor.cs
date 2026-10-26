@@ -7,6 +7,7 @@ internal static class TsSymbolExtractor
     private static readonly string[] SymbolNodeTypes =
     [
         "function_declaration",
+        "function_expression",
         "method_definition",
         "class_declaration",
         "interface_declaration",
@@ -43,6 +44,14 @@ internal static class TsSymbolExtractor
         var isArrowVariable = node.Type == "variable_declarator"
                               && node.NamedChildren.Any(c => c.Type == "arrow_function");
         if (node.Type == "variable_declarator" && !isArrowVariable)
+        {
+            return false;
+        }
+
+        // only a named function expression is a binding (module.exports = function run() {}); an
+        // anonymous one has no name of its own and the identifier fallback below could pick up a
+        // parameter instead
+        if (node.Type == "function_expression" && node.GetChildForField("name") is null)
         {
             return false;
         }

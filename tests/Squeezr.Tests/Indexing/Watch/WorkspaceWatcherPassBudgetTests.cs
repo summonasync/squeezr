@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
@@ -115,6 +116,7 @@ public sealed class WorkspaceWatcherPassBudgetTests
             // wider than the debounce window (firing inside it pushes the due time and no pass ever starts,
             // measured earlier in this task) and waits against a starvation-sized deadline: under full-suite
             // load the run loop's continuations get starved, measured as zero faults inside 20s at load 25.7
+            var overrunWait = Stopwatch.StartNew();
             await UntilAsync(
                 () =>
                 {
@@ -126,17 +128,24 @@ public sealed class WorkspaceWatcherPassBudgetTests
                 DebounceReArmMs);
             recorder.BudgetOverrunsSeen.ShouldBeGreaterThan(0, "the probe measured no overrun at all");
 
+            // the escalation and snap-back legs scale with the latency the machinery just demonstrated:
+            // a starved loop that needed half the entry deadline to book the first overrun gets a
+            // proportional budget instead of a fixed 90s, an idle box keeps a tight floor and fails
+            // fast on a real wedge
+            var snapBackDeadline = SnapBackDeadline(overrunWait.Elapsed);
+
             // the fault is what the watchdog publishes when the budget expires; the ladder is armed later,
             // where the pass notices the abort. Waiting on the fault and asserting the armed budget in the
             // same breath measures the gap between two threads instead of the escalation
             await UntilAsync(
                 () => watcher.ArmedPassBudget > EscalationFloor,
-                StarvationDeadline,
+                snapBackDeadline,
                 () => $"armed={watcher.ArmedPassBudget} started={recorder.PassesStarted} " +
                       $"faults=[{string.Join(" | ", recorder.Faults)}]");
 
             await UntilAsync(
                 () => recorder.PassesCompleted >= 1,
+                snapBackDeadline,
                 () => $"faults=[{string.Join(" | ", recorder.Faults)}] armed={watcher.ArmedPassBudget}");
             recorder.ArmedAtLastCompletion.ShouldBe(EscalationFloor, "a pass that fit resets the ladder");
         }
@@ -181,9 +190,17 @@ public sealed class WorkspaceWatcherPassBudgetTests
 
     private static readonly TimeSpan EscalationFloor = TimeSpan.FromMilliseconds(2);
 
-    // sized to outlast a thread-pool starvation spike from the parallel CLI collections in a full suite run,
-    // not to make the escalation itself look slow: the mechanism answers inside a second on an idle box
+    // entry ceiling only, sized to outlast a thread-pool starvation spike from the parallel CLI
+    // collections in a full suite run — the mechanism answers inside a second on an idle box; the
+    // escalation and snap-back legs derive their budget from the latency actually observed
     private static readonly TimeSpan StarvationDeadline = TimeSpan.FromSeconds(90);
+
+    private const int SnapBackLatencyMultiple = 4;
+
+    private static readonly TimeSpan SnapBackFloor = TimeSpan.FromSeconds(20);
+
+    private static TimeSpan SnapBackDeadline(TimeSpan observedMachineryLatency) =>
+        TimeSpan.FromTicks(Math.Max(SnapBackFloor.Ticks, observedMachineryLatency.Ticks * SnapBackLatencyMultiple));
 
     private const int DebounceReArmMs = 2000;
 

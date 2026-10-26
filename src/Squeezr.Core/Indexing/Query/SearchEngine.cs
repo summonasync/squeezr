@@ -138,7 +138,7 @@ public sealed class SearchEngine
         }
 
         var excluding = _rankExclusion.IsActive;
-        if (prefix is null && !excluding)
+        if (prefix is null && !excluding && query.PathGlob is null && query.Language is null && query.Repo is null)
         {
             return null;
         }
@@ -162,23 +162,36 @@ public sealed class SearchEngine
             repoId = repo.Id;
         }
 
-        if (prefix is null)
+        bool InScope(FileDocument file)
         {
-            return FileScope.Resolve(store, path => !_rankExclusion.Matches(path), repoId);
+            if (query.PathGlob is not null && !GlobMatcher.IsMatch(query.PathGlob, file.Path))
+            {
+                return false;
+            }
+
+            if (query.Language is not null && !string.Equals(file.Language, query.Language, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (prefix is not null && !PathPrefix.Matches(prefix, file.Path))
+            {
+                return false;
+            }
+
+            return !_rankExclusion.Matches(file.Path);
         }
 
-        var scope = FileScope.Resolve(
-            store,
-            path => PathPrefix.Matches(prefix, path) && !_rankExclusion.Matches(path),
-            repoId);
-        if (scope.Count > 0)
+        var scope = FileScope.Resolve(store, InScope, repoId);
+        if (prefix is null || scope.Count > 0)
         {
             return scope;
         }
 
-        // rank-excluded files stay indexed, so a prefix whose whole subtree is excluded answers
-        // with no hits — only a prefix matching nothing at all is the "no such subtree" error
-        if (!excluding || FileScope.Resolve(store, path => PathPrefix.Matches(prefix, path), repoId).Count == 0)
+        // a glob or language emptying an existing prefix subtree is a valid zero-hit answer, and
+        // rank-excluded files stay indexed, so an excluded-away subtree answers empty too — only
+        // a prefix matching nothing at all is the "no such subtree" error
+        if (FileScope.Resolve(store, file => PathPrefix.Matches(prefix, file.Path), repoId).Count == 0)
         {
             var indexedPaths = (repoId is { } id ? store.ListFiles(id) : store.ListAllFiles())
                 .Select(f => f.Path)

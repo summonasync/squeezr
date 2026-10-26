@@ -10,6 +10,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp;
 
+[Collection("ProcessGlobals")]
 public class McpToolsTests
 {
     [Fact]

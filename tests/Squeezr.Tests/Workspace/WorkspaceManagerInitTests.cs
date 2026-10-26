@@ -87,8 +87,10 @@ public class WorkspaceManagerInitTests
         config.Embeddings.Onnx.EffectiveDimensions.ShouldBe(768);
         config.Embeddings.Onnx.EffectiveMaxSequenceLength.ShouldBe(512);
         config.Embeddings.Onnx.BatchSize.ShouldBe(32);
-        config.Embeddings.Onnx.ModelPath.ShouldBe("~/.squeezr/models/nomic-embed-text-v1.5.onnx");
-        config.Embeddings.Onnx.TokenizerPath.ShouldBe("~/.squeezr/models/nomic-embed-text-v1.5/tokenizer.json");
+        config.Embeddings.Onnx.ModelPath.ShouldBe(
+            Path.Combine("~", ".squeezr", "models", "nomic-embed-text-v1.5.onnx"));
+        config.Embeddings.Onnx.TokenizerPath.ShouldBe(
+            Path.Combine("~", ".squeezr", "models", "nomic-embed-text-v1.5", "tokenizer.json"));
         config.Embeddings.OpenAiCompatible.Endpoint.ShouldBe("https://api.openai.com/v1");
         config.Embeddings.OpenAiCompatible.ApiKeyEnv.ShouldBe("SQUEEZR_API_KEY");
         config.Embeddings.OpenAiCompatible.Model.ShouldBe("text-embedding-3-large");
