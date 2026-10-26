@@ -1,6 +1,8 @@
 using Shouldly;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing.Query;
@@ -85,6 +87,100 @@ public class SearchEngineTests
         engine.Search(baseQuery with { PathGlob = "**/lib/**" }).Matches.ShouldHaveSingleItem().Path.ShouldBe("lib/util.js");
         engine.Search(baseQuery with { Language = "markdown" }).Matches.ShouldHaveSingleItem().Path.ShouldBe("docs/notes.md");
     }
+
+    [Fact]
+    public async Task PathGlob_ExactArmStaysInsideGlob()
+    {
+        var fixture = NewGlobFixture();
+        var engine = new SearchEngine(fixture.Workspace);
+
+        var response = await engine.SearchHybridAsync(
+            GlobQuery("needle") with { PathGlob = "a/**" },
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        var hit = response.Matches.ShouldHaveSingleItem();
+        hit.Path.ShouldBe("a/x.js");
+        hit.Source.ShouldBe("exact");
+    }
+
+    [Fact]
+    public async Task PathGlob_TokenArmStaysInsideGlob()
+    {
+        var fixture = NewGlobFixture();
+        var engine = new SearchEngine(fixture.Workspace);
+
+        var response = await engine.SearchHybridAsync(
+            GlobQuery("needleLookup") with { PathGlob = "a/**" },
+            new FakeEmbeddingProvider(),
+            new FakeVectorStore(),
+            CancellationToken.None);
+
+        response.Matches.ShouldNotBeEmpty();
+        response.Matches.ShouldAllBe(m => m.Path == "a/x.js");
+    }
+
+    [Fact]
+    public async Task PathGlob_SemanticArmStaysInsideGlob_AndFillsTopK()
+    {
+        var fixture = NewGlobFixture();
+        var engine = new SearchEngine(fixture.Workspace);
+        var store = new FakeVectorStore();
+        store.Seed(GlobFixtureChunks(fixture));
+
+        var response = await engine.SearchHybridAsync(
+            GlobQuery("zzquiescent watershed") with { PathGlob = "a/**" },
+            new FakeEmbeddingProvider(),
+            store,
+            CancellationToken.None);
+
+        response.Matches.ShouldNotBeEmpty();
+        response.Matches.ShouldAllBe(m => m.Path == "a/x.js");
+        response.Matches.ShouldContain(m => m.Source == "semantic");
+        store.LastTopK.ShouldBe(ScopedVectorBudget.For(1, 2));
+        store.LastTopK!.Value.ShouldBeGreaterThan(ScopedVectorBudget.BaseTopK);
+    }
+
+    private static SearchQuery GlobQuery(string text) => new(text, false, null, null, null, null, null, null);
+
+    private static GlobFixture NewGlobFixture()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+        const string source = """
+            // lookup logic for the needle collector
+            export function needleLookup() {
+              return collector;
+            }
+            """;
+        WriteFile(workspace, "repo/a/x.js", source);
+        WriteFile(workspace, "repo/b/x.js", source);
+        manager.AddRepo("repo", "demo");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var meta = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var fileIds = meta.ListFiles(meta.FindRepo("demo")!.Id).ToDictionary(f => f.Path, f => f.Id);
+        return new GlobFixture(workspace, fileIds);
+    }
+
+    private static IReadOnlyList<VectorHit> GlobFixtureChunks(GlobFixture fixture)
+    {
+        using var meta = new MetaStore(SqueezrPaths.MetaDbPath(fixture.Workspace));
+        var repoId = meta.FindRepo("demo")!.Id;
+        return fixture.FileIdsByPath
+            .Select((entry, i) => (Entry: entry, Id: (ulong)(i + 1)))
+            .Select(pair =>
+            {
+                var chunk = meta.ListChunksByFile(pair.Entry.Value).First();
+                return new VectorHit(pair.Id, "h", pair.Entry.Value, repoId, chunk.StartLine, chunk.EndLine, 0.9 - pair.Entry.Key.Length * 0.01);
+            })
+            .ToList();
+    }
+
+    private sealed record GlobFixture(string Workspace, Dictionary<string, uint> FileIdsByPath);
 
     [Fact]
     public void Ranking_FilenameMatchBeatsBody_TestFilesAreDemoted()
@@ -252,5 +348,51 @@ public class SearchEngineTests
         var fullPath = Path.Combine(workspace, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllText(fullPath, content);
+    }
+
+    private sealed class FakeEmbeddingProvider : IEmbeddingProvider
+    {
+        public int Dimensions => 4;
+
+        public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
+            Task.FromResult(texts.Select(_ => new[] { 0.25f, 0.5f, 0.75f, 1f }).ToArray());
+    }
+
+    private sealed class FakeVectorStore : IVectorStore
+    {
+        private IReadOnlyList<VectorHit> _hits = [];
+
+        public int? LastTopK { get; private set; }
+
+        public void Seed(IReadOnlyList<VectorHit> hits) => _hits = hits;
+
+        public Task<bool> IsAvailableAsync(CancellationToken ct) => Task.FromResult(true);
+
+        public Task EnsureCollectionAsync(int dimensions, CancellationToken ct) => Task.CompletedTask;
+
+        public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct)
+        {
+            LastTopK = topK;
+            return Task.FromResult(_hits);
+        }
+
+        public Task<long> CountAsync(CancellationToken ct) => Task.FromResult((long)_hits.Count);
+
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ulong>>([]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
+
+        public Task DeleteByPointIdsAsync(IReadOnlyList<ulong> pointIds, CancellationToken ct) => Task.CompletedTask;
+
+        public Task DeleteCollectionAsync(CancellationToken ct) => Task.CompletedTask;
     }
 }

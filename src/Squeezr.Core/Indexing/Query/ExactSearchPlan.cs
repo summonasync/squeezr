@@ -256,41 +256,16 @@ public static class ExactSearchPlan
     internal static IReadOnlySet<uint>? BuildFilter(MetaStore store, SearchQuery query, IReadOnlySet<uint>? fileScope)
     {
         var kind = DocKindDetector.FilterKind(query.Kind);
-        if (query.Repo is null && query.PathGlob is null && query.Language is null && kind is null)
+        if (kind is null)
         {
             return fileScope;
         }
 
         var filter = new HashSet<uint>();
-        foreach (var repo in store.ListRepos())
+        foreach (var file in store.ListAllFiles())
         {
-            if (query.Repo is not null && !string.Equals(repo.Name, query.Repo, StringComparison.OrdinalIgnoreCase))
+            if ((fileScope is null || fileScope.Contains(file.Id)) && DocKindDetector.Detect(file) == kind)
             {
-                continue;
-            }
-
-            foreach (var file in store.ListFiles(repo.Id))
-            {
-                if (fileScope is not null && !fileScope.Contains(file.Id))
-                {
-                    continue;
-                }
-
-                if (query.PathGlob is not null && !GlobMatcher.IsMatch(query.PathGlob, file.Path))
-                {
-                    continue;
-                }
-
-                if (query.Language is not null && !string.Equals(file.Language, query.Language, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (kind is not null && DocKindDetector.Detect(file) != kind)
-                {
-                    continue;
-                }
-
                 filter.Add(file.Id);
             }
         }
