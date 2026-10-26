@@ -13,7 +13,7 @@ public class ServerEntryBuilderTests
     {
         var entry = Build(McpClientId.Claude, watch: true);
 
-        Command(entry).ShouldBe(CommandPath);
+        Command(entry).ShouldBe(Path.GetFullPath(CommandPath));
         Args(entry).ShouldBe(["serve", "--watch"]);
         entry.ContainsKey("cwd").ShouldBeFalse();
         entry.ContainsKey("versionNegotiation").ShouldBeFalse();

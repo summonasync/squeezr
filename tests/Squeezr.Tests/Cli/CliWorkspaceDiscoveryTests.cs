@@ -143,8 +143,9 @@ public sealed class CliWorkspaceDiscoveryTests
         var init = await RunCliAsync(nested, "init", "--json");
 
         init.ExitCode.ShouldBe(1);
-        init.StdErr.ShouldContain("already inside workspace");
-        init.StdErr.ShouldContain(Path.GetFullPath(root));
+        var message = ParseStdErrError(init.StdErr).GetProperty("message").GetString();
+        message.ShouldContain("already inside workspace");
+        message.ShouldContain(Path.GetFullPath(root));
         init.StdOut.ShouldBeEmpty();
     }
 

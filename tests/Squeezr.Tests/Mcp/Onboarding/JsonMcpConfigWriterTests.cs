@@ -1,5 +1,6 @@
 using Shouldly;
 using Squeezr.Cli.Mcp.Onboarding;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Squeezr.Tests.Mcp.Onboarding;
@@ -191,7 +192,8 @@ public class JsonMcpConfigWriterTests
     }
 
     private static string Expected(string fixtureName) =>
-        Normalize(File.ReadAllText(Path.Combine(FixturesDir, fixtureName)));
+        Normalize(File.ReadAllText(Path.Combine(FixturesDir, fixtureName)))
+            .Replace(CommandPath, JsonEncodedText.Encode(Path.GetFullPath(CommandPath)).Value);
 
-    private static string Normalize(string content) => content.TrimEnd('\r', '\n');
+    private static string Normalize(string content) => content.Replace("\r\n", "\n").TrimEnd('\n');
 }
