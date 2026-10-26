@@ -297,7 +297,7 @@ public class ConfigFileTests
 
         var config = ConfigFile.Load(root);
 
-        config.Embeddings.Ollama.Endpoint.ShouldBe("http://localhost:11434");
+        config.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
         config.Embeddings.Ollama.Model.ShouldBe("nomic-embed-text");
         config.Embeddings.Ollama.Dimensions.ShouldBe(768);
         config.Embeddings.Ollama.ModelProfile.ShouldBe("nomic-embed-text-v1.5");
@@ -566,7 +566,7 @@ public class ConfigFileTests
 
         config.Embeddings.Provider.ShouldBe("auto");
         config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
-        config.Embeddings.Ollama.Endpoint.ShouldBe("http://localhost:11434");
+        config.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
         config.Chunking.MaxTokensPerChunk.ShouldBe(256);
         config.Qdrant.Endpoint.ShouldBe("http://localhost:9999");
     }

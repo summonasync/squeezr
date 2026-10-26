@@ -23,6 +23,9 @@ public sealed class IndexEventWriter
     public void Completed(IndexResult result, int durationMs, int? symbols, string? provider = null) =>
         Write(IndexCompletedLine.FromResult(result, durationMs, symbols, provider));
 
+    public void Warning(string code, string message) =>
+        Write(new IndexWarningLine("warning", code, message));
+
     public void Error(string code, string message) =>
         Write(new IndexErrorLine("error", code, message));
 

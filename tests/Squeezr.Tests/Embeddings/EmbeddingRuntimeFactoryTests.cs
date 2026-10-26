@@ -127,8 +127,10 @@ public class EmbeddingRuntimeFactoryTests
         resolution.Reason.ShouldNotBeNullOrWhiteSpace();
         provider.ShouldBeNull();
         store.ShouldBeNull();
-        warnings.ShouldHaveSingleItem();
-        warnings[0].ShouldContain("Embedding model not found");
+        warnings.Count.ShouldBe(2);
+        warnings[0].ShouldStartWith("ollama probe failed");
+        warnings[0].ShouldContain(resolution.Reason);
+        warnings[1].ShouldContain("Embedding model not found");
     }
 
     [Fact]

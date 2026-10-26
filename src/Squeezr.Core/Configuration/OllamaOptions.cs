@@ -5,7 +5,7 @@ namespace Squeezr.Core.Configuration;
 
 public sealed record OllamaOptions
 {
-    public string Endpoint { get; init; } = "http://localhost:11434";
+    public string Endpoint { get; init; } = "http://127.0.0.1:11434";
 
     public string Model { get; init; } = "nomic-embed-text";
 

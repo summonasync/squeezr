@@ -53,6 +53,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        List<JsonWarningBody>? jsonWarnings = settings.Json ? [] : null;
         try
         {
             if (!DocKindDetector.TryNormalizeFilter(settings.Kind, out var kindFilter))
@@ -71,7 +72,14 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
             foreach (var warning in warnings)
             {
-                ReportWarning(warning);
+                if (jsonWarnings is not null)
+                {
+                    jsonWarnings.Add(new JsonWarningBody(JsonWarningBody.EmbeddingsUnavailable, warning));
+                }
+                else
+                {
+                    ReportWarning(warning);
+                }
             }
 
             var rankExclusion = RankExclusion.Load(workspaceRoot);
@@ -103,6 +111,10 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 if (warning == SearchEngine.VectorStoreUnavailableWarning)
                 {
                     vectorStoreUnavailable = true;
+                    if (jsonWarnings is not null)
+                    {
+                        jsonWarnings.Add(new JsonWarningBody("vector_store_unavailable", warning));
+                    }
                     continue;
                 }
 
@@ -128,6 +140,11 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     settings.MaxTokens,
                     response.Truncated,
                     response.Hint));
+                if (jsonWarnings is { Count: > 0 })
+                {
+                    JsonOutput.WriteWarnings(jsonWarnings);
+                }
+
                 return 0;
             }
 
