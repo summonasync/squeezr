@@ -45,7 +45,8 @@ public static class VectorPointReconciler
         if (!await vectorStore.IsAvailableAsync(ct))
         {
             throw new WorkspaceException(
-                $"Qdrant is unavailable — start it with '{RemedyText.ServicesUp}' and retry.");
+                $"Qdrant is unavailable — start it with '{RemedyText.ServicesUp}' and retry. " +
+                "squeezr never duplicates a live external instance.");
         }
 
         // The lock keeps an index pass from re-chunking files under the comparison: chunk rows rewritten

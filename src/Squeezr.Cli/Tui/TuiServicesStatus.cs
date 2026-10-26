@@ -5,6 +5,10 @@ namespace Squeezr.Cli.Tui;
 
 public static class TuiServicesStatus
 {
+    private const string DownHint =
+        "start it with: squeezr services up (squeezr never duplicates a live external instance; " +
+        "--managed forces ours)";
+
     public static void Render(
         IAnsiConsole console,
         QdrantStatus qdrant,
@@ -18,7 +22,7 @@ public static class TuiServicesStatus
             : "Qdrant: not available");
         if (!qdrant.Available)
         {
-            console.MarkupLine("qdrant is down — start it with: squeezr services up");
+            console.MarkupLine($"qdrant is down — {DownHint}");
         }
 
         if (IsOllamaProvider(provider))
@@ -32,7 +36,7 @@ public static class TuiServicesStatus
             else
             {
                 console.MarkupLine("Ollama: not available");
-                console.MarkupLine("ollama is down — start it with: squeezr services up");
+                console.MarkupLine($"ollama is down — {DownHint}");
             }
 
             return;

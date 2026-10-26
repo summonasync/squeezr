@@ -336,7 +336,8 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
                 HttpMethod.Get, $"{ServicesComposeFile.OllamaEndpoint}/api/tags");
             using var response = http.Send(request);
             var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            return body.Contains($"\"{AdoptModelName}", StringComparison.Ordinal)
+            return body.Contains($"\"{AdoptModelName}\"", StringComparison.Ordinal) ||
+                   body.Contains($"\"{AdoptModelName}:", StringComparison.Ordinal)
                 ? ModelTagPresence.Present
                 : ModelTagPresence.Missing;
         }

@@ -16,30 +16,57 @@ public sealed class ServicesDownCommand : AsyncCommand<ServicesDownCommand.Setti
 
     protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        try
+        {
+            return await RunCoreAsync(settings, new ProcessRunner(), null, cancellationToken);
+        }
+        catch (ServicesException ex)
+        {
+            return CommandError.Report(ex, settings.Json);
+        }
+    }
+
+    internal static async Task<int> RunCoreAsync(
+        Settings settings,
+        IProcessRunner runner,
+        ServiceLivenessProbe? livenessProbe,
+        CancellationToken cancellationToken)
+    {
         var composePath = ServicesComposeFile.ComposeFilePath;
         if (!File.Exists(composePath))
         {
             return ReportNothingToStop(settings, composePath);
         }
 
-        try
+        var cli = new DockerComposeCli(runner);
+        var installation = await cli.DetectAsync(cancellationToken);
+        await cli.RunCheckedAsync(installation, composePath, ["down"], DockerComposeCli.DownTimeout, cancellationToken);
+
+        if (settings.Json)
         {
-            var cli = new DockerComposeCli(new ProcessRunner());
-            var installation = await cli.DetectAsync(cancellationToken);
-            await cli.RunCheckedAsync(installation, composePath, ["down"], DockerComposeCli.DownTimeout, cancellationToken);
-
-            if (settings.Json)
-            {
-                JsonOutput.Write(new ServicesDownReport(composePath, ServicesComposeFile.ProjectName, Stopped: true));
-                return 0;
-            }
-
-            AnsiConsole.MarkupLine("[green]Squeezr services are stopped[/] (Qdrant, Ollama). Data volumes are kept.");
+            JsonOutput.Write(new ServicesDownReport(composePath, ServicesComposeFile.ProjectName, Stopped: true));
             return 0;
         }
-        catch (ServicesException ex)
+
+        AnsiConsole.MarkupLine("[green]Squeezr services are stopped[/] (Qdrant, Ollama). Data volumes are kept.");
+        await ReportStillAnsweringAsync(AnsiConsole.Console, livenessProbe ?? new ServiceLivenessProbe(), cancellationToken);
+        return 0;
+    }
+
+    // Down only stops our compose project. An adopted external instance keeps answering the port -
+    // staying silent about it would read as "we stopped everything" (spec 069 §5.2).
+    internal static async Task ReportStillAnsweringAsync(
+        IAnsiConsole console, ServiceLivenessProbe probe, CancellationToken cancellationToken)
+    {
+        foreach (var probeSpec in new[] { ManagedServiceProbe.Ollama, ManagedServiceProbe.Qdrant })
         {
-            return CommandError.Report(ex, settings.Json);
+            var liveness = await probe.ProbeAsync(probeSpec, cancellationToken);
+            if (liveness.Kind == ServiceLiveness.Outcome.Answered)
+            {
+                console.MarkupLine(
+                    $"[yellow]{probeSpec.ServiceName.EscapeMarkup()} is still answering on " +
+                    $"{probeSpec.Endpoint.ToString().EscapeMarkup()} — that instance was not ours, it was left untouched.[/]");
+            }
         }
     }
 
