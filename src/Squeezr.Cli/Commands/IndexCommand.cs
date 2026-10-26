@@ -43,11 +43,13 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
             EmbeddingProviderResolution? providerResolution = null;
             IEmbeddingProvider? embeddings = null;
             IVectorStore? vectorStore = null;
+            string? embeddingsUnavailable = null;
             var rootResolution = WorkspaceRootResolver.ResolveCurrentDirectory();
+            var effectiveNoSemantic = rootResolution.IsWorkspace
+                ? IndexingMode.EffectiveNoSemantic(rootResolution.RootPath, settings.NoSemantic)
+                : settings.NoSemantic;
             if (rootResolution.IsWorkspace)
             {
-                var effectiveNoSemantic = IndexingMode.EffectiveNoSemantic(
-                    rootResolution.RootPath, settings.NoSemantic);
                 if (settings.Reembed && effectiveNoSemantic)
                 {
                     Console.Error.WriteLine("warning: --reembed requires semantic indexing; ignored");
@@ -56,7 +58,7 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                 var warnings = EmbeddingRuntimeFactory.TryCreate(
                     rootResolution.RootPath, withProvider: !effectiveNoSemantic,
                     out embeddings, out vectorStore, out providerResolution);
-                var providerLine = EmbeddingProviderLogLine.Describe(providerResolution);
+                var providerLine = EmbeddingProviderLogLine.Describe(embeddings is null ? null : providerResolution);
                 if (providerLine is not null)
                 {
                     Console.Error.WriteLine(providerLine);
@@ -66,9 +68,23 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                 {
                     Console.Error.WriteLine($"warning: {warning}");
                 }
+
+                if (embeddings is null && !effectiveNoSemantic)
+                {
+                    embeddingsUnavailable = warnings.Count > 0
+                        ? $"provider unavailable: {string.Join("; ", warnings)}"
+                        : "provider unavailable";
+                }
             }
 
-            events?.Started(WorkspaceRootResolver.LaunchDirectory(), provider: providerResolution?.Provider);
+            events?.Started(
+                WorkspaceRootResolver.LaunchDirectory(),
+                provider: embeddings is null ? null : providerResolution?.Provider);
+
+            if (events is not null && embeddingsUnavailable is not null)
+            {
+                events.Warning("embeddings_unavailable", embeddingsUnavailable);
+            }
 
             var indexer = new WorkspaceIndexer();
             var workspaceRoot = rootResolution.IsWorkspace
@@ -89,7 +105,7 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                     .Start(ctx => indexer.Index(
                         workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
                         new IndexProgressRenderer(ctx), embeddings, vectorStore, settings.Reembed,
-                        StaleLockWarningSink.ToStderr, providerResolution));
+                        StaleLockWarningSink.ToStderr, providerResolution, embeddingsUnavailable));
             }
             else
             {
@@ -97,12 +113,12 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                 result = indexer.Index(
                     workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
                     renderer, embeddings, vectorStore, settings.Reembed,
-                    StaleLockWarningSink.ToStderr, providerResolution);
+                    StaleLockWarningSink.ToStderr, providerResolution, embeddingsUnavailable);
             }
 
             events?.Completed(
                 result, (int)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, renderer?.Symbols,
-                provider: providerResolution?.Provider);
+                provider: embeddings is null ? null : providerResolution?.Provider);
 
             if (settings.Json)
             {

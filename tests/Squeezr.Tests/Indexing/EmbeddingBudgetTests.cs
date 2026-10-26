@@ -72,6 +72,46 @@ public class EmbeddingBudgetTests
     }
 
     [Fact]
+    public void Index_NoProviderWithReason_ReportsFalseWithSkipReason()
+    {
+        var workspace = NewWorkspace();
+
+        var result = new WorkspaceIndexer().Index(
+            workspace, embeddingsUnavailableReason: "provider unavailable: ollama probe failed (refused)");
+
+        result.EmbeddingsCompleted.ShouldBeFalse();
+        result.EmbeddingsSkipped.ShouldBe("provider unavailable: ollama probe failed (refused)");
+        result.Repos.ShouldNotBeEmpty();
+        result.Repos.All(r => !r.EmbeddingsCompleted).ShouldBeTrue();
+        result.Repos.All(r => r.EmbeddingsSkipped == result.EmbeddingsSkipped).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Index_NoProviderWithoutReason_KeepsTheLegacyCompletedFlag()
+    {
+        var workspace = NewWorkspace();
+
+        var result = new WorkspaceIndexer().Index(workspace);
+
+        result.EmbeddingsCompleted.ShouldBeTrue();
+        result.EmbeddingsSkipped.ShouldBeNull();
+        result.Repos.All(r => r.EmbeddingsCompleted).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Index_NoSemanticWithReason_KeepsTheCompletedFlag()
+    {
+        var workspace = NewWorkspace();
+
+        var result = new WorkspaceIndexer().Index(
+            workspace, noSemantic: true,
+            embeddingsUnavailableReason: "provider unavailable: ollama probe failed (refused)");
+
+        result.EmbeddingsCompleted.ShouldBeTrue();
+        result.EmbeddingsSkipped.ShouldBeNull();
+    }
+
+    [Fact]
     public void Phase_MidDrain_StoreFailure_KeepsTheRemainderPending()
     {
         var dbPath = Path.Combine(TestDirs.NewTempDir(), "meta.db");

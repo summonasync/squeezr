@@ -55,7 +55,9 @@ public static class EmbeddingRuntimeFactory
         }
         catch (WorkspaceException ex)
         {
-            return [ex.Message];
+            return providerResolution?.Reason is { } probeReason
+                ? [$"ollama probe failed ({probeReason})", ex.Message]
+                : [ex.Message];
         }
     }
 

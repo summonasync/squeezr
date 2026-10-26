@@ -17,7 +17,9 @@ public sealed record IndexCompletedLine(
     int GuardWithheld = 0,
     int GuardDropped = 0,
     int Embedded = 0,
-    int Throttled = 0)
+    int Throttled = 0,
+    bool EmbeddingsCompleted = true,
+    string? EmbeddingsSkipped = null)
 {
     public static IndexCompletedLine FromResult(IndexResult result, int durationMs, int? symbols, string? provider = null) =>
         new(
@@ -35,5 +37,7 @@ public sealed record IndexCompletedLine(
             result.GuardWithheld,
             result.GuardDropped,
             result.Embedded,
-            result.Throttled);
+            result.Throttled,
+            result.EmbeddingsCompleted,
+            result.EmbeddingsSkipped);
 }

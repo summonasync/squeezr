@@ -14,4 +14,5 @@ public sealed record RepoIndexResult(
     int GuardDropped = 0,
     int Embedded = 0,
     bool EmbeddingsCompleted = true,
-    int Throttled = 0);
+    int Throttled = 0,
+    string? EmbeddingsSkipped = null);

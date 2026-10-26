@@ -154,7 +154,7 @@ public sealed class IndexEventsTests
     }
 
     [Fact]
-    public async Task Index_Events_AutoProviderWithDeadOllama_FallsBackToOnnxAndCarriesProvider()
+    public async Task Index_Events_AutoProviderWithDeadOllamaAndNoModel_ReportsBothFailures()
     {
         var root = TestDirs.NewTempDir();
         await InitAddAsync(root, ("a.txt", "alpha body"));
@@ -167,16 +167,30 @@ public sealed class IndexEventsTests
         using (var started = JsonDocument.Parse(lines[0]))
         {
             started.RootElement.GetProperty("type").GetString().ShouldBe("started");
-            started.RootElement.GetProperty("provider").GetString().ShouldBe("onnx");
+            started.RootElement.TryGetProperty("provider", out _).ShouldBeFalse();
+        }
+
+        using (var warning = JsonDocument.Parse(FindLine(lines, "warning")))
+        {
+            warning.RootElement.GetProperty("type").GetString().ShouldBe("warning");
+            warning.RootElement.GetProperty("code").GetString().ShouldBe("embeddings_unavailable");
+            warning.RootElement.GetProperty("message").GetString().ShouldContain("ollama probe failed");
+            warning.RootElement.GetProperty("message").GetString().ShouldContain("Embedding model not found");
         }
 
         using (var completed = JsonDocument.Parse(FindLine(lines, "completed")))
         {
             completed.RootElement.GetProperty("type").GetString().ShouldBe("completed");
-            completed.RootElement.GetProperty("provider").GetString().ShouldBe("onnx");
+            completed.RootElement.TryGetProperty("provider", out _).ShouldBeFalse();
+            completed.RootElement.GetProperty("embeddingsCompleted").GetBoolean().ShouldBeFalse();
+            completed.RootElement.GetProperty("embeddingsSkipped").GetString()
+                .ShouldStartWith("provider unavailable: ollama probe failed");
+            completed.RootElement.GetProperty("repos")[0].GetProperty("embeddingsCompleted").GetBoolean().ShouldBeFalse();
         }
 
-        index.StdErr.ShouldContain("embeddings provider: onnx (ollama unreachable:");
+        index.StdErr.ShouldNotContain("embeddings provider:");
+        index.StdErr.ShouldContain("warning: ollama probe failed");
+        index.StdErr.ShouldContain("warning: Embedding model not found");
     }
 
     [Fact]

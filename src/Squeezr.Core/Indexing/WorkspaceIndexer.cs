@@ -42,6 +42,7 @@ public sealed class WorkspaceIndexer
         bool reembed = false,
         Action<string>? onStaleTakeover = null,
         EmbeddingProviderResolution? embeddingProviderResolution = null,
+        string? embeddingsUnavailableReason = null,
         IReadOnlyList<string>? changedPaths = null,
         SemanticSessionPool? sessions = null,
         int? embedBudgetPerPass = null,
@@ -113,7 +114,7 @@ public sealed class WorkspaceIndexer
                 cancellationToken.ThrowIfCancellationRequested();
                 var work = IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings,
                     textCache, progress, embeddings, vectorStore, modelKey, embedRemaining, Pacing(sessions, changedPaths),
-                    cancellationToken);
+                    embeddingsUnavailableReason, cancellationToken);
                 if (embedRemaining is not null)
                 {
                     embedRemaining = Math.Max(0, embedRemaining.Value - work.Result.Embedded);
@@ -172,7 +173,8 @@ public sealed class WorkspaceIndexer
                 works.Sum(w => w.Result.GuardDropped),
                 works.Sum(w => w.Result.Embedded),
                 works.All(w => w.Result.EmbeddingsCompleted),
-                works.Sum(w => w.Result.Throttled));
+                works.Sum(w => w.Result.Throttled),
+                works.All(w => w.Result.EmbeddingsCompleted) ? null : embeddingsUnavailableReason);
         }
     }
 
@@ -490,6 +492,7 @@ public sealed class WorkspaceIndexer
         string? modelKey,
         int? embedBudget,
         PacedPass? pacing,
+        string? embeddingsUnavailableReason,
         CancellationToken cancellationToken)
     {
         var repoDoc = store.FindRepo(repo.Name)
@@ -667,6 +670,10 @@ public sealed class WorkspaceIndexer
                 embeddingsCompleted = phase.Completed;
             }
         }
+        else if (embeddingsUnavailableReason is not null && !noSemantic)
+        {
+            embeddingsCompleted = false;
+        }
 
         var totalFiles = store.CountFiles(repoDoc.Id);
         var ignoredBySource = walk.IgnoredBySource
@@ -696,7 +703,7 @@ public sealed class WorkspaceIndexer
             new RepoIndexResult(
                 repo.Name, added, modified, reaps.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot,
                 guard.Withheld, guard.WithheldByBuiltIns, deletedProtected, embedded, embeddingsCompleted,
-                semantic.Throttled),
+                semantic.Throttled, embeddingsCompleted ? null : embeddingsUnavailableReason),
             changed,
             reaps,
             deferredReaps);

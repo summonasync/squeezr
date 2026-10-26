@@ -95,4 +95,47 @@ public class IndexEventWriterTests
         using var doc = JsonDocument.Parse(writer.ToString());
         doc.RootElement.GetProperty("embedded").GetInt32().ShouldBe(9);
     }
+
+    [Fact]
+    public void Warning_SerializesTheStructuredWarningEvent()
+    {
+        var writer = new StringWriter();
+
+        new IndexEventWriter(writer).Warning("embeddings_unavailable", "provider unavailable: ollama probe failed");
+
+        using var doc = JsonDocument.Parse(writer.ToString());
+        doc.RootElement.GetProperty("type").GetString().ShouldBe("warning");
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("embeddings_unavailable");
+        doc.RootElement.GetProperty("message").GetString().ShouldContain("ollama probe failed");
+    }
+
+    [Fact]
+    public void Completed_WithoutAProvider_CarriesTheFalseFlagAndTheSkipReason()
+    {
+        var writer = new StringWriter();
+        var result = new IndexResult(
+            [new RepoIndexResult("demo", 1, 0, 0, 0, 1, 0, EmbeddingsCompleted: false, EmbeddingsSkipped: "provider unavailable: ollama probe failed")],
+            DateTime.UtcNow, [],
+            EmbeddingsCompleted: false,
+            EmbeddingsSkipped: "provider unavailable: ollama probe failed");
+
+        new IndexEventWriter(writer).Completed(result, 7, null);
+
+        using var doc = JsonDocument.Parse(writer.ToString());
+        doc.RootElement.GetProperty("embeddingsCompleted").GetBoolean().ShouldBeFalse();
+        doc.RootElement.GetProperty("embeddingsSkipped").GetString().ShouldStartWith("provider unavailable");
+        doc.RootElement.GetProperty("repos")[0].GetProperty("embeddingsCompleted").GetBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Completed_WithNoSkipReason_OmitsTheSkipField()
+    {
+        var writer = new StringWriter();
+
+        new IndexEventWriter(writer).Completed(new IndexResult([], DateTime.UtcNow, []), 7, null);
+
+        using var doc = JsonDocument.Parse(writer.ToString());
+        doc.RootElement.GetProperty("embeddingsCompleted").GetBoolean().ShouldBeTrue();
+        doc.RootElement.TryGetProperty("embeddingsSkipped", out _).ShouldBeFalse();
+    }
 }
