@@ -45,7 +45,7 @@ only one of them is for squeezr:
 
 - Qdrant gRPC `http://localhost:6334` — what `qdrant.endpoint` must point at
 - Qdrant REST `http://localhost:6333` — dashboard/API only, never for squeezr
-- Ollama `http://localhost:11434`
+- Ollama `http://127.0.0.1:11434`
 
 The embedding model needs no manual step: the default onnx model ships inside the
 release archive, and the ollama provider pulls its model automatically on first
