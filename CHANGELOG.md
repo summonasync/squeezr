@@ -2,7 +2,7 @@
 
 All notable changes to Squeezr. Format: [Keep a Changelog](https://keepachangelog.com), versioning: [SemVer](https://semver.org).
 
-## [Unreleased]
+## [1.0.11] — 2026-10-26
 
 The central-store relocation guard: a pinned `SQUEEZR_HOME` can no longer make the live `~/.squeezr` look like a legacy in-project store, so discovery never moves, renames or deletes it — the 2026-10-19 store-loss incident class is closed, and a regression test replays that exact weapon configuration against a fingerprinted decoy store. `services up` asks the host before touching docker, per service: it adopts a live external Ollama instead of duplicating it, refuses to start over a foreign Qdrant (interim policy until the dedicated instance lands), and reports honest per-service states on `status`, `down` and `--dry-run`.
 
