@@ -4,9 +4,6 @@ namespace Squeezr.Tests.Mcp.Onboarding;
 
 public sealed class FakeCli
 {
-    // the .argv.log line-per-argument format is load-bearing: argument-shape assertions compare
-    // captured lines against the exact argv list, so `echo %*` (which collapses args into one
-    // line) or any space-splitting capture would silently weaken them
     private static readonly UnixFileMode ExecutableMode =
         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
         UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
@@ -25,6 +22,12 @@ public sealed class FakeCli
     public IReadOnlyList<string> ReadCapturedArguments() =>
         File.Exists(CapturePath) ? File.ReadAllLines(CapturePath) : [];
 
+    // the .argv.log line-per-argument format is load-bearing: argument-shape assertions compare
+    // captured lines against the exact argv list, so `echo %*` (which collapses args into one
+    // line) or any space-splitting capture would silently weaken them. The Windows capture loop
+    // shares one caveat: an empty-string argument reads as end-of-argv and truncates the capture,
+    // where the Unix printf prints it and continues — bridge arguments are never empty today,
+    // but a future caller passing "" would silently lose the tail on Windows only
     public static FakeCli Install(
         string binDir,
         string binaryName,
@@ -34,7 +37,7 @@ public sealed class FakeCli
         string? blockingStatement = null)
     {
         Directory.CreateDirectory(binDir);
-        var binaryPath = Path.Combine(binDir, binaryName);
+        var binaryPath = Path.Combine(binDir, OperatingSystem.IsWindows() ? binaryName + ".cmd" : binaryName);
         var capturePath = Path.Combine(binDir, binaryName + ".argv.log");
         File.WriteAllText(
             binaryPath,
@@ -86,17 +89,37 @@ public sealed class FakeCli
         script.AppendLine(":args_done");
         if (blockingStatement is not null)
         {
-            script.AppendLine("timeout /t 30 /nobreak > nul");
+            // the POSIX blockingStatement is not portable, so its null-ness is the only signal the
+            // Windows branch consumes; ping is the waiter of choice because timeout silently no-ops
+            // under redirected stdin, which is exactly how test runners launch processes
+            script.AppendLine("ping -n 31 127.0.0.1 > nul");
         }
-        if (stdout.Length > 0)
-        {
-            script.AppendLine($"echo({stdout.Replace("%", "%%")}");
-        }
-        if (stderr.Length > 0)
-        {
-            script.AppendLine($"1>&2 echo({stderr.Replace("%", "%%")}");
-        }
+        AppendEchoLines(script, stdout, toStdErr: false);
+        AppendEchoLines(script, stderr, toStdErr: true);
         script.AppendLine($"exit /b {exitCode}");
         return script.ToString();
+    }
+
+    private static void AppendEchoLines(StringBuilder script, string payload, bool toStdErr)
+    {
+        var prefix = toStdErr ? "1>&2 echo(" : "echo(";
+        foreach (var line in payload.Replace("\r\n", "\n").Split('\n'))
+        {
+            script.AppendLine(prefix + EscapeBatchSpecials(line));
+        }
+    }
+
+    private static string EscapeBatchSpecials(string line)
+    {
+        var builder = new StringBuilder(line.Length);
+        foreach (var c in line)
+        {
+            if (c is '^' or '&' or '<' or '>' or '|')
+            {
+                builder.Append('^');
+            }
+            builder.Append(c);
+        }
+        return builder.ToString();
     }
 }
