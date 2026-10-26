@@ -14,4 +14,5 @@ public sealed record RepoStatusReport(
 
 public sealed record RepoIgnoredReport(
     int Files,
-    IReadOnlyDictionary<string, int> BySource);
+    IReadOnlyDictionary<string, int> BySource,
+    int TrackedButExcluded = 0);

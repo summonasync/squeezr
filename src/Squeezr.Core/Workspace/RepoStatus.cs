@@ -8,4 +8,5 @@ public sealed record RepoStatus(
     IReadOnlyDictionary<string, int>? IgnoredBySource = null,
     int GuardWithheld = 0,
     int GuardWithheldBuiltIns = 0,
-    int GuardDropped = 0);
+    int GuardDropped = 0,
+    int TrackedButExcluded = 0);
