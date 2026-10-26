@@ -83,7 +83,7 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
 
             if (events is not null && embeddingsUnavailable is not null)
             {
-                events.Warning("embeddings_unavailable", embeddingsUnavailable);
+                events.Warning(JsonWarningBody.EmbeddingsUnavailable, embeddingsUnavailable);
             }
 
             var indexer = new WorkspaceIndexer();

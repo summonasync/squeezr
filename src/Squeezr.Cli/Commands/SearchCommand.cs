@@ -72,7 +72,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             {
                 if (jsonWarnings is not null)
                 {
-                    jsonWarnings.Add(new JsonWarningBody("embeddings_unavailable", warning));
+                    jsonWarnings.Add(new JsonWarningBody(JsonWarningBody.EmbeddingsUnavailable, warning));
                 }
                 else
                 {
@@ -109,6 +109,10 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 if (warning == SearchEngine.VectorStoreUnavailableWarning)
                 {
                     vectorStoreUnavailable = true;
+                    if (jsonWarnings is not null)
+                    {
+                        jsonWarnings.Add(new JsonWarningBody("vector_store_unavailable", warning));
+                    }
                     continue;
                 }
 
