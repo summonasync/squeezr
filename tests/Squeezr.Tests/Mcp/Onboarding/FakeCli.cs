@@ -102,6 +102,11 @@ public sealed class FakeCli
 
     private static void AppendEchoLines(StringBuilder script, string payload, bool toStdErr)
     {
+        if (payload.Length == 0)
+        {
+            return;
+        }
+
         var prefix = toStdErr ? "1>&2 echo(" : "echo(";
         foreach (var line in payload.Replace("\r\n", "\n").Split('\n'))
         {
@@ -114,6 +119,12 @@ public sealed class FakeCli
         var builder = new StringBuilder(line.Length);
         foreach (var c in line)
         {
+            if (c == '%')
+            {
+                builder.Append("%%");
+                continue;
+            }
+
             if (c is '^' or '&' or '<' or '>' or '|')
             {
                 builder.Append('^');
