@@ -81,7 +81,7 @@ public class TuiIndexRunnerTests
     }
 
     [Fact]
-    public async Task Index_SemanticEnabled_ReportsResolvedProvider()
+    public async Task Index_SemanticEnabledWithDeadOllamaAndNoModel_ReportsBothFailures()
     {
         var workspace = NewWorkspaceWithRepo();
         TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(workspace);
@@ -94,7 +94,9 @@ public class TuiIndexRunnerTests
         var code = await TuiApp.RunAsync(console, workspace);
 
         code.ShouldBe(0);
-        console.Output.ShouldContain("embeddings provider: onnx (ollama unreachable:");
+        console.Output.ShouldNotContain("embeddings provider:");
+        console.Output.ShouldContain("ollama probe failed");
+        console.Output.ShouldContain("Embedding model not found");
     }
 
     [Fact]

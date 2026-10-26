@@ -154,6 +154,55 @@ public sealed class IndexEventsTests
     }
 
     [Fact]
+    public async Task Index_Events_BuiltProvider_IsNamedOnEventsAndStderr()
+    {
+        var root = TestDirs.NewTempDir();
+        await InitAddAsync(root, ("a.txt", "alpha body"));
+        const string keyEnv = "SQUEEZR_TESTS_OPENAI_KEY";
+        var previousKey = Environment.GetEnvironmentVariable(keyEnv);
+        Environment.SetEnvironmentVariable(keyEnv, "test-key");
+        try
+        {
+            var config = ConfigFile.Load(root);
+            ConfigFile.Save(root, config with
+            {
+                Embeddings = new EmbeddingsConfig
+                {
+                    Provider = "openai",
+                    OpenAiCompatible = new OpenAiCompatibleOptions
+                    {
+                        ApiKeyEnv = keyEnv,
+                        Endpoint = "http://127.0.0.1:1/v1"
+                    }
+                }
+            });
+
+            var index = await RunCliAsync(root, "index", "--events");
+
+            index.ExitCode.ShouldBe(0);
+            var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            using (var started = JsonDocument.Parse(lines[0]))
+            {
+                started.RootElement.GetProperty("type").GetString().ShouldBe("started");
+                started.RootElement.GetProperty("provider").GetString().ShouldBe("openai");
+            }
+
+            using (var completed = JsonDocument.Parse(FindLine(lines, "completed")))
+            {
+                completed.RootElement.GetProperty("provider").GetString().ShouldBe("openai");
+                completed.RootElement.GetProperty("embeddingsCompleted").GetBoolean().ShouldBeTrue();
+                completed.RootElement.TryGetProperty("embeddingsSkipped", out _).ShouldBeFalse();
+            }
+
+            index.StdErr.ShouldContain("embeddings provider: openai");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(keyEnv, previousKey);
+        }
+    }
+
+    [Fact]
     public async Task Index_Events_AutoProviderWithDeadOllamaAndNoModel_ReportsBothFailures()
     {
         var root = TestDirs.NewTempDir();

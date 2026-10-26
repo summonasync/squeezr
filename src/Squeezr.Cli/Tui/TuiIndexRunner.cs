@@ -34,7 +34,7 @@ public static class TuiIndexRunner
         var warnings = EmbeddingRuntimeFactory.TryCreate(
             workspaceRoot, withProvider: reembed || !noSemantic,
             out var embeddings, out var vectorStore, out var providerResolution);
-        var providerLine = EmbeddingProviderLogLine.Describe(providerResolution);
+        var providerLine = EmbeddingProviderLogLine.Describe(embeddings is null ? null : providerResolution);
         if (providerLine is not null)
         {
             console.MarkupLine($"[grey]{providerLine.EscapeMarkup()}[/]");
@@ -44,6 +44,12 @@ public static class TuiIndexRunner
         {
             console.MarkupLine($"[grey]{warning.EscapeMarkup()}[/]");
         }
+
+        var embeddingsUnavailable = embeddings is null && !noSemantic
+            ? warnings.Count > 0
+                ? $"provider unavailable: {string.Join("; ", warnings)}"
+                : "provider unavailable"
+            : null;
 
         var indexer = new WorkspaceIndexer();
         IndexResult result;
@@ -59,7 +65,7 @@ public static class TuiIndexRunner
                 .Start(ctx => indexer.Index(
                     workspaceRoot, null, full, false,
                     new IndexProgressRenderer(ctx), embeddings, vectorStore, reembed,
-                    StaleLockWarningSink.ToStderr, providerResolution));
+                    StaleLockWarningSink.ToStderr, providerResolution, embeddingsUnavailable));
         }
         catch (WorkspaceException ex)
         {

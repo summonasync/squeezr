@@ -165,6 +165,7 @@ public sealed class WorkspaceIndexer
                 }
             }
 
+            var embeddingsCompleted = works.All(w => w.Result.EmbeddingsCompleted);
             return new IndexResult(
                 works.Select(w => w.Result).ToList(), DateTime.UtcNow, warnings,
                 deferredReaps, store.CountPendingReaps(),
@@ -172,9 +173,9 @@ public sealed class WorkspaceIndexer
                 works.Sum(w => w.Result.GuardWithheldBuiltIns),
                 works.Sum(w => w.Result.GuardDropped),
                 works.Sum(w => w.Result.Embedded),
-                works.All(w => w.Result.EmbeddingsCompleted),
+                embeddingsCompleted,
                 works.Sum(w => w.Result.Throttled),
-                works.All(w => w.Result.EmbeddingsCompleted) ? null : embeddingsUnavailableReason);
+                embeddingsCompleted ? null : embeddingsUnavailableReason);
         }
     }
 
