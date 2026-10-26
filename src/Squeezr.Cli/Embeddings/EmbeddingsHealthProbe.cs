@@ -31,7 +31,7 @@ public static class EmbeddingsHealthProbe
                 : null;
             return new EmbeddingsHealth(resolution.Provider, resolution.Reason, modelProblem, cpu);
         }
-        catch (WorkspaceException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return EmbeddingsHealth.Silent;
         }

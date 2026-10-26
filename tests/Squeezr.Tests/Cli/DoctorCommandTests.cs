@@ -63,7 +63,7 @@ public sealed class DoctorCommandTests
 
         var run = await CliTestProcess.RunAsync(root, "doctor", "--json");
 
-        run.ExitCode.ShouldBe(1);
+        run.ExitCode.ShouldBe(1, customMessage: $"doctor stderr:{Environment.NewLine}{run.StdErr}{Environment.NewLine}doctor stdout:{Environment.NewLine}{run.StdOut}");
         using var doc = JsonDocument.Parse(run.StdOut);
         var checks = doc.RootElement.GetProperty("checks").EnumerateArray().ToList();
         checks.ShouldContain(c =>

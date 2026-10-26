@@ -76,7 +76,7 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
 
             return new WorkspaceSemanticFacts(qdrant, health);
         }
-        catch (Exception ex) when (ex is WorkspaceException or IOException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return WorkspaceSemanticFacts.Silent;
         }

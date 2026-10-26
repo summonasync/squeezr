@@ -64,7 +64,7 @@ public static class DoctorRunner
         {
             status = new WorkspaceManager(entry.RootPath).GetStatus();
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             findings.Add(new DoctorFinding(
                 $"workspace {entry.Name}", StateFail, $"status unavailable: {ex.Message}", DoctorRemedies.Index));
@@ -183,8 +183,10 @@ public static class DoctorRunner
         {
             return ConfigFile.Load(entry.RootPath).Indexing.NoSemantic;
         }
-        catch (Exception ex) when (ex is WorkspaceException or InvalidDataException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // an unreadable config means no semantic judgment; the workspace-level checks already
+            // report the broken store, and the coverage arm may add its own honest fail on top
             return false;
         }
     }
