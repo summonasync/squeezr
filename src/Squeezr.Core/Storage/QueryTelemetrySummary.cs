@@ -23,7 +23,7 @@ public sealed record CacheStats(
     DateTime? LastInvalidation = null,
     int EligibleQueries = 0);
 
-public sealed record AgentStats(string Client, string? ClientVersion, int Count, DateTime LastSeen);
+public sealed record AgentStats(string Client, string? ClientVersion, int Count, DateTime LastSeen, int Sessions = 0);
 
 public sealed record SessionStats(
     string SessionId,
@@ -90,7 +90,12 @@ public static class QueryTelemetrySummary
     public static IReadOnlyList<AgentStats> AggregateAgents(IReadOnlyList<QueryTelemetryEntry> entries) =>
         entries
             .GroupBy(e => (Client: e.Client ?? "unknown", Version: e.ClientVersion))
-            .Select(g => new AgentStats(g.Key.Client, g.Key.Version, g.Count(), g.Max(e => e.Ts)))
+            .Select(g => new AgentStats(
+                g.Key.Client,
+                g.Key.Version,
+                g.Count(),
+                g.Max(e => e.Ts),
+                g.Where(e => e.SessionId != Guid.Empty).Select(e => e.SessionId).Distinct().Count()))
             .OrderByDescending(a => a.Count)
             .ThenBy(a => a.Client, StringComparer.Ordinal)
             .ThenBy(a => a.ClientVersion, StringComparer.Ordinal)

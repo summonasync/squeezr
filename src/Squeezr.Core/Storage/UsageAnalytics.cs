@@ -7,7 +7,12 @@ public sealed record WorkspaceUsage(
     bool Stale,
     IReadOnlyList<AgentStats> Agents);
 
-public sealed record UsageTotals(int Records, IReadOnlyList<AgentStats> Agents);
+public sealed record SessionAdoption(int McpSessions, int HookSessions)
+{
+    public double? Ratio => HookSessions == 0 ? null : Math.Round((double)McpSessions / HookSessions, 2);
+}
+
+public sealed record UsageTotals(int Records, IReadOnlyList<AgentStats> Agents, SessionAdoption? Sessions = null);
 
 public sealed record UsagePeriod(DateTime? From, DateTime? To);
 
@@ -55,10 +60,29 @@ public static class UsageAnalytics
             blocks,
             new UsageTotals(
                 filteredAll.Count,
-                QueryTelemetrySummary.AggregateAgents(filteredAll)),
+                QueryTelemetrySummary.AggregateAgents(filteredAll),
+                CountSessions(filteredAll)),
             new UsagePeriod(
                 filteredAll.Count == 0 ? null : filteredAll.Min(e => e.Ts),
                 filteredAll.Count == 0 ? null : filteredAll.Max(e => e.Ts)));
+    }
+
+    // hook lines are the read-side sessions; unattributed ids join neither side, so the ratio never inflates
+    private static SessionAdoption CountSessions(IReadOnlyList<QueryTelemetryEntry> entries)
+    {
+        var mcp = entries
+            .Where(e => !string.Equals(e.Client, "hook", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.SessionId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .Count();
+        var hook = entries
+            .Where(e => string.Equals(e.Client, "hook", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.SessionId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .Count();
+        return new SessionAdoption(mcp, hook);
     }
 
     private static IReadOnlyList<QueryTelemetryEntry> Filter(
