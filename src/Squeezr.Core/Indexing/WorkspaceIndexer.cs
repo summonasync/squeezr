@@ -324,8 +324,8 @@ public sealed class WorkspaceIndexer
                 ReplayPendingReaps(vectorStore, store, warnings);
             }
 
-            List<FileDocument> changed;
-            List<(uint RepoId, uint Id)> tombstones;
+            List<FileDocument> changed = [];
+            List<(uint RepoId, uint Id)> tombstones = [];
 
             if (File.Exists(fullPath) && rules.Decision(relativePath, isDirectory: false).Excluded)
             {
@@ -338,7 +338,40 @@ public sealed class WorkspaceIndexer
                 changed = [];
                 tombstones = [(existing.RepoId, existing.Id)];
             }
-            else if (!File.Exists(fullPath) || !UnixFileType.IsRegularFile(fullPath))
+            else if (!File.Exists(fullPath))
+            {
+                // File.Exists answers the same false for a deletion and for a path a non-executable parent
+                // hides from stat; the probe's exception shape is the split — a denied stat keeps the row,
+                // a deletion reaps it, and a path that answers present again is indexed by the block below
+                var denial = ProbeMissingStat(fullPath, out var present);
+                if (denial is not null)
+                {
+                    if (existing is null)
+                    {
+                        return null;
+                    }
+
+                    warnings.Add($"keeping '{relativePath}' in the index store: unreadable ({denial.Message}); rows kept");
+                    changed = [];
+                    tombstones = [];
+                }
+                else if (!present)
+                {
+                    if (existing is null)
+                    {
+                        return null;
+                    }
+
+                    DropFile(existing, store, vectorStore, warnings, guard);
+                    changed = [];
+                    tombstones = [(existing.RepoId, existing.Id)];
+                }
+                else
+                {
+                    IndexPresentFile();
+                }
+            }
+            else if (!UnixFileType.IsRegularFile(fullPath))
             {
                 if (existing is null)
                 {
@@ -350,6 +383,11 @@ public sealed class WorkspaceIndexer
                 tombstones = [(existing.RepoId, existing.Id)];
             }
             else
+            {
+                IndexPresentFile();
+            }
+
+            void IndexPresentFile()
             {
                 byte[] bytes;
                 try
@@ -1203,11 +1241,13 @@ public sealed class WorkspaceIndexer
                         }
                     }
 
-                    // a path that stopped being a regular file after the walk is a rebuild-time race, not
-                    // a deletion: the open below would park the whole rebuild inside a blocking syscall
+                    // File.Exists only lets through shapes stat can see, so this branch holds channels,
+                    // sockets, devices and zero-size proc nodes — the open below would park the whole
+                    // rebuild inside a blocking syscall. A dangling link answers false upstream and takes
+                    // the missing branch instead: stat cannot resolve it, so it reaps.
                     if (!UnixFileType.IsRegularFile(fullPath))
                     {
-                        KeepUnreadableRow(file, "not a regular file (fifo, socket, device or dangling link)");
+                        KeepUnreadableRow(file, "not a regular file (fifo, socket, device or proc node)");
                         continue;
                     }
 
@@ -1243,7 +1283,8 @@ public sealed class WorkspaceIndexer
         Path.GetFullPath(Path.IsPathRooted(repo.Path) ? repo.Path : Path.Combine(workspaceRoot, repo.Path));
 
     // the exists-check has no shape for a parent directory that denies the stat, while GetAttributes keeps
-    // the exception: UnauthorizedAccessException is the unreadable subtree, a plain IOException is the deletion
+    // the exception: UnauthorizedAccessException is the unreadable subtree, a plain IOException is the
+    // deletion, and an ArgumentException is a path stat can never resolve — the same reap
     private static Exception? ProbeMissingStat(string fullPath, out bool present)
     {
         try
@@ -1257,7 +1298,7 @@ public sealed class WorkspaceIndexer
             present = false;
             return ex;
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
         {
             present = false;
             return null;

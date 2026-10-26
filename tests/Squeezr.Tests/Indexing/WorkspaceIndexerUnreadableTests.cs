@@ -271,6 +271,57 @@ public sealed class WorkspaceIndexerUnreadableTests
         }
     }
 
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void FreshnessRefresh_RowUnderDeniedDirectory_KeepsWhileDeletedSiblingStillReaps()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/vault/deep.cs", Second);
+        WriteFile(workspace, "repo/gone.cs", First);
+        new WorkspaceIndexer().Index(workspace);
+
+        var deepId = FileIdOf(workspace, "vault/deep.cs");
+        var goneId = FileIdOf(workspace, "gone.cs");
+        File.Delete(Path.Combine(workspace, "repo", "gone.cs"));
+        var vaultPath = Path.Combine(workspace, "repo", "vault");
+        var originalMode = File.GetUnixFileMode(vaultPath);
+        File.SetUnixFileMode(vaultPath, UnixFileMode.None);
+        try
+        {
+            // the premise is asserted, not assumed: stat into the denied subtree fails, and File.Exists
+            // answers the same false a real deletion would — that collapse is the bug's whole shape
+            Should.Throw<UnauthorizedAccessException>(() => File.GetAttributes(Path.Combine(vaultPath, "deep.cs")));
+            File.Exists(Path.Combine(vaultPath, "deep.cs")).ShouldBeFalse();
+
+            var result = FreshnessGuard.CheckAndRefresh(
+                workspace, [("demo", "vault/deep.cs"), ("demo", "gone.cs")]);
+
+            result.Refreshed.ShouldContain("demo/gone.cs");
+
+            using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+            {
+                store.FindFileById(deepId).ShouldNotBeNull(
+                    "a denied stat is not a deletion: the freshness refresh must not reap the row");
+                store.FindFileById(goneId).ShouldBeNull(
+                    "a genuine deletion still reaps on the same route");
+            }
+        }
+        finally
+        {
+            File.SetUnixFileMode(vaultPath, originalMode);
+        }
+    }
+
+    [Fact]
+    public void IndexFile_PathTheProbeCannotShape_NeverEscapesTheProbe()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/real.cs", First);
+        new WorkspaceIndexer().Index(workspace);
+
+        Should.NotThrow(() => new WorkspaceIndexer().IndexFile(workspace, "demo", "bad\0path.cs"));
+    }
+
     private static string NewWorkspace()
     {
         var workspace = TestDirs.NewTempDir();
