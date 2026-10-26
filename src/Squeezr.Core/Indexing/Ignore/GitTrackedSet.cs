@@ -94,12 +94,12 @@ public sealed class GitTrackedSet
 
             if (!process.WaitForExit(ReadTimeoutMs))
             {
-                process.Kill(entireProcessTree: true);
+                TryKill(process);
                 warn?.Invoke($"git ls-files did not finish within {ReadTimeoutMs / 1000}s in '{repoRoot}'; gitignore decides without the tracked-set guard");
                 return false;
             }
 
-            if (!Task.WaitAll([readOutput, readError], DrainJoinMs))
+            if (!TryWaitDrain([readOutput, readError]))
             {
                 warn?.Invoke($"git ls-files output in '{repoRoot}' never drained; gitignore decides without the tracked-set guard");
                 return false;
@@ -113,6 +113,29 @@ public sealed class GitTrackedSet
 
             output = Encoding.UTF8.GetString(stdout.ToArray());
             return true;
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        {
+        }
+    }
+
+    private static bool TryWaitDrain(Task[] drains)
+    {
+        try
+        {
+            return Task.WaitAll(drains, DrainJoinMs);
+        }
+        catch (AggregateException)
+        {
+            return false;
         }
     }
 }
