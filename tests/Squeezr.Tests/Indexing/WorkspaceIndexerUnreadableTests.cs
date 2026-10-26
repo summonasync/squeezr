@@ -344,6 +344,13 @@ public sealed class WorkspaceIndexerUnreadableTests
             workspace, [("demo", "swapped"), ("demo", "keep.cs")]));
 
         result.Refreshed.ShouldContain("demo/swapped");
+        result.Refreshed.ShouldContain("demo/keep.cs");
+
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            store.FindFileById(FileIdOf(workspace, "keep.cs")).ShouldNotBeNull(
+                "the readable sibling must survive the same refresh untouched");
+        }
 
         using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
         {

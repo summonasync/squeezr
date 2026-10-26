@@ -342,7 +342,8 @@ public sealed class WorkspaceIndexer
             {
                 // File.Exists answers the same false for a deletion and for a path a non-executable parent
                 // hides from stat; the probe's exception shape is the split — a denied stat keeps the row,
-                // a deletion reaps it, and a path that answers present again is indexed by the block below
+                // a deletion or a shape swap reaps it, and a present regular file falls through to the
+                // regular-file gate below and indexes normally
                 var denial = ProbeMissingStat(fullPath, out var present);
                 if (denial is not null)
                 {
