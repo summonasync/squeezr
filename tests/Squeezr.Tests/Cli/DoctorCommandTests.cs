@@ -50,4 +50,27 @@ public sealed class DoctorCommandTests
     }
 
     private const string DoctorRemedyText = "squeezr services up";
+
+    [Fact]
+    public async Task Doctor_OnIndexedWorkspaceWithDeadQdrant_ReportsSemanticFailure()
+    {
+        var root = TestDirs.NewTempDir();
+        (await CliTestProcess.RunAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        await File.WriteAllTextAsync(Path.Combine(root, "Calc.cs"), "public class Calc { }");
+        (await CliTestProcess.RunAsync(root, "add", ".")).ExitCode.ShouldBe(0);
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
+        (await CliTestProcess.RunAsync(root, "index")).ExitCode.ShouldBe(0);
+
+        var run = await CliTestProcess.RunAsync(root, "doctor", "--json");
+
+        run.ExitCode.ShouldBe(1, customMessage: $"doctor stderr:{Environment.NewLine}{run.StdErr}{Environment.NewLine}doctor stdout:{Environment.NewLine}{run.StdOut}");
+        using var doc = JsonDocument.Parse(run.StdOut);
+        var checks = doc.RootElement.GetProperty("checks").EnumerateArray().ToList();
+        checks.ShouldContain(c =>
+            c.GetProperty("name").GetString() == "semantic search" &&
+            c.GetProperty("state").GetString() == "fail");
+        checks.ShouldContain(c =>
+            c.GetProperty("name").GetString() == "embeddings provider" &&
+            (c.GetProperty("detail").GetString() ?? string.Empty).Contains("ollama unreachable"));
+    }
 }

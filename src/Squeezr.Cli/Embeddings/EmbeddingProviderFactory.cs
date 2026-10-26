@@ -40,18 +40,39 @@ public static class EmbeddingProviderFactory
 
     private static IEmbeddingProvider CreateOnnx(OnnxEmbeddingOptions options, string workspaceRoot)
     {
-        var modelPath = ResolveFile(options.ModelPath, workspaceRoot);
-        if (!File.Exists(modelPath))
-        {
-            var bundled = Path.Combine(AppContext.BaseDirectory, "Models", Path.GetFileName(options.ModelPath));
-            if (File.Exists(bundled))
-                modelPath = bundled;
-            else
-                throw new WorkspaceException($"Embedding model not found at '{modelPath}' and no bundled copy exists. Run scripts/fetch-model.sh (Linux/macOS) or scripts/fetch-model.ps1 (Windows) to download it.");
-        }
-
+        var modelPath = ResolveOnnxModelPath(options, workspaceRoot);
         var tokenizerDir = ResolveTokenizerDir(options.TokenizerPath, workspaceRoot);
         return new OnnxEmbeddingProvider(modelPath, tokenizerDir, options.ResolvedProfile, options.Dimensions, options.EffectiveMaxSequenceLength, options.BatchSize);
+    }
+
+    internal static string ResolveOnnxModelPath(OnnxEmbeddingOptions options, string workspaceRoot)
+    {
+        var modelPath = ResolveFile(options.ModelPath, workspaceRoot);
+        if (File.Exists(modelPath))
+        {
+            return modelPath;
+        }
+
+        var bundled = Path.Combine(AppContext.BaseDirectory, "Models", Path.GetFileName(options.ModelPath));
+        if (File.Exists(bundled))
+        {
+            return bundled;
+        }
+
+        throw new WorkspaceException($"Embedding model not found at '{modelPath}' and no bundled copy exists. Run scripts/fetch-model.sh (Linux/macOS) or scripts/fetch-model.ps1 (Windows) to download it.");
+    }
+
+    internal static string? DescribeOnnxModelProblem(OnnxEmbeddingOptions options, string workspaceRoot)
+    {
+        try
+        {
+            ResolveOnnxModelPath(options, workspaceRoot);
+            return null;
+        }
+        catch (WorkspaceException ex)
+        {
+            return ex.Message;
+        }
     }
 
     private static string ResolveTokenizerDir(string tokenizerPath, string workspaceRoot)
