@@ -2,11 +2,9 @@ namespace Squeezr.Cli.Mcp.Onboarding;
 
 public static class StableCommandPath
 {
-    private const string RelativeLinkPath = ".local/bin/squeezr";
-
     public static string Resolve(string homeDir, string? processPath)
     {
-        var link = Path.Combine(homeDir, RelativeLinkPath);
+        var link = Path.Combine(homeDir, ".local", "bin", "squeezr");
         if (IsUsablePath(link))
         {
             return link;

@@ -1,3 +1,4 @@
+using System.Text;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Commands;
@@ -10,6 +11,14 @@ public static class CliApplication
 {
     public static Task<int> RunAsync(string[] args, IAnsiConsole? console = null, bool? interactive = null)
     {
+        // redirected stdout inherits the host shell's legacy codepage (Git Bash pipes, CI logs),
+        // where box-drawing and em-dashes mangle; an interactive terminal manages its own
+        // encoding and stays untouched
+        if (Console.IsOutputRedirected)
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+        }
+
         if (args.Length == 0 && (interactive ?? AnsiConsole.Profile.Capabilities.Interactive))
         {
             var workspaceRoot = WorkspaceRootResolver.ResolveCurrentDirectory().RootPath;

@@ -5,11 +5,13 @@ namespace Squeezr.Core.Configuration;
 
 public sealed record OnnxEmbeddingOptions
 {
+    private static readonly string ModelsDir = Path.Combine("~", ".squeezr", "models");
+
     public string? Model { get; init; }
 
-    public string ModelPath { get; init; } = "~/.squeezr/models/nomic-embed-text-v1.5.onnx";
+    public string ModelPath { get; init; } = Path.Combine(ModelsDir, "nomic-embed-text-v1.5.onnx");
 
-    public string TokenizerPath { get; init; } = "~/.squeezr/models/nomic-embed-text-v1.5/tokenizer.json";
+    public string TokenizerPath { get; init; } = Path.Combine(ModelsDir, "nomic-embed-text-v1.5", "tokenizer.json");
 
     public int? Dimensions { get; init; }
 
