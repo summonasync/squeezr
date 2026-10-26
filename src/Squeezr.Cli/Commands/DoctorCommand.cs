@@ -1,9 +1,13 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Infra;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Health;
 using Squeezr.Core.Infra;
+using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
 
@@ -20,7 +24,11 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
     protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         var utcNow = DateTime.UtcNow;
-        var findings = new List<DoctorFinding>(DoctorRunner.CollectWorkspaceFindings(utcNow).Findings);
+        var findings = new List<DoctorFinding>(DoctorRunner
+            .CollectWorkspaceFindings(
+                utcNow,
+                semanticFacts: root => SemanticFacts(root, cancellationToken).GetAwaiter().GetResult())
+            .Findings);
         findings.AddRange(await ServiceFindings(cancellationToken));
 
         var report = DoctorRunner.Report(findings);
@@ -45,6 +53,26 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
         }
 
         return report.Healthy ? 0 : 1;
+    }
+
+    private static async Task<WorkspaceSemanticFacts> SemanticFacts(string workspaceRoot, CancellationToken cancellationToken)
+    {
+        try
+        {
+            EmbeddingRuntimeFactory.TryCreate(workspaceRoot, withProvider: false, out _, out var vectorStore);
+            QdrantStatus qdrant;
+            using (var meta = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
+            {
+                qdrant = await QdrantStatusProbe.ProbeAsync(vectorStore, meta, cancellationToken);
+            }
+
+            return new WorkspaceSemanticFacts(
+                qdrant, await EmbeddingsHealthProbe.ProbeAsync(workspaceRoot, cancellationToken));
+        }
+        catch (Exception ex) when (ex is WorkspaceException or IOException)
+        {
+            return WorkspaceSemanticFacts.Silent;
+        }
     }
 
     private static async Task<IReadOnlyList<DoctorFinding>> ServiceFindings(CancellationToken cancellationToken)

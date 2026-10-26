@@ -1353,6 +1353,22 @@ and a journal row whose id already went to another file is dropped — both
 stashes are swept exactly by `reconcile --apply`; every other point-removal
 path either does it or journals it and reports the count.
 
+## Doctor: the checkup to run before blaming search
+
+`squeezr doctor` walks every registered workspace (root gone, index missing or
+never run, repos stale), the daemon heartbeats, the services, and the embeddings
+chain itself. A workspace that indexed chunks but never embedded them does not
+read healthy anymore: `semantic coverage 0%` fails with the remedy
+`squeezr index — then check the embeddings provider line`, a down qdrant fails
+with `squeezr services up`, and a pending backlog above one watch drain pass
+(256 chunks) fails on its own. The resolved provider outcome is reported the
+same way `index` resolves it: `auto → onnx (ollama unreachable: …)` is an info
+line, a missing ONNX model is a fail, and an ollama model running CPU-only
+(`size_vram: 0` in `/api/ps`) is an info that says embeddings will be slow.
+Exit code 1 when anything failed; `--json` prints one
+`{kind, healthy, checks}` document; the run is read-only — findings carry
+remedies, nothing is ever changed.
+
 ## Stats: token savings in numbers
 
 "But does it actually save?" — `squeezr stats` answers with numbers, not

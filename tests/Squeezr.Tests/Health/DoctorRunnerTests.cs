@@ -1,4 +1,5 @@
 using Shouldly;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Health;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
@@ -113,6 +114,117 @@ public sealed class DoctorRunnerTests : IDisposable
             .Healthy.ShouldBeTrue();
         DoctorRunner.Report([new DoctorFinding("x", DoctorRunner.StateFail, "boom")])
             .Healthy.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SemanticFacts_QdrantUnavailableWithChunks_FailsWithServicesRemedy()
+    {
+        var root = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(false, null, 12, 12), EmbeddingsHealth.Silent));
+
+        report.Healthy.ShouldBeFalse();
+        var finding = report.Findings.Single(f => f.Name == "semantic search");
+        finding.State.ShouldBe(DoctorRunner.StateFail);
+        finding.Remedy.ShouldBe(DoctorRemedies.ServicesUp);
+        finding.Detail.ShouldContain("chunk(s) without vectors");
+    }
+
+    [Fact]
+    public void SemanticFacts_CoverageZero_FailsWithProviderLineRemedy()
+    {
+        var root = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 0, 4, 4), EmbeddingsHealth.Silent));
+
+        report.Healthy.ShouldBeFalse();
+        var finding = report.Findings.Single(f => f.Name == "semantic search");
+        finding.Remedy.ShouldBe(DoctorRemedies.IndexCheckProvider);
+        finding.Detail.ShouldContain("coverage 0%");
+    }
+
+    [Fact]
+    public void SemanticFacts_PendingAboveThreshold_FailsWithIndexRemedy()
+    {
+        var root = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 100, 400, 500), EmbeddingsHealth.Silent));
+
+        report.Healthy.ShouldBeFalse();
+        var finding = report.Findings.Single(f => f.Name == "semantic search");
+        finding.Remedy.ShouldBe(DoctorRemedies.Index);
+        finding.Detail.ShouldContain("pending vectors");
+        finding.Detail.ShouldContain(DoctorRunner.PendingChunksThreshold.ToString());
+    }
+
+    [Fact]
+    public void SemanticFacts_HealthyCoverageAndProvider_StayQuiet()
+    {
+        var root = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 498, 2, 500),
+                new EmbeddingsHealth("ollama", null, null, null)));
+
+        report.Healthy.ShouldBeTrue();
+        report.Findings.ShouldNotContain(f => f.Name == "semantic search" || f.Name == "embeddings provider");
+    }
+
+    [Fact]
+    public void SemanticFacts_NoSemanticConfig_StayQuiet()
+    {
+        var root = NewIndexedWorkspace();
+        var config = ConfigFile.Load(root);
+        ConfigFile.Save(root, config with { Indexing = config.Indexing with { NoSemantic = true } });
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(false, null, 12, 12), EmbeddingsHealth.Silent));
+
+        report.Findings.ShouldNotContain(f => f.Name == "semantic search" || f.Name == "embeddings provider");
+    }
+
+    [Fact]
+    public void SemanticFacts_ModelMissingWithFallback_FailPlusInfo()
+    {
+        var root = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 4, 0, 4),
+                new EmbeddingsHealth(
+                    "onnx", "Connection refused",
+                    "Embedding model not found at '/nonexistent/model.onnx' and no bundled copy exists.", null)));
+
+        report.Healthy.ShouldBeFalse();
+        var problem = report.Findings.Single(
+            f => f.Name == "embeddings provider" && f.State == DoctorRunner.StateFail);
+        problem.Detail.ShouldContain("Embedding model not found");
+        report.Findings.ShouldContain(
+            f => f.State == DoctorRunner.StateInfo && f.Detail.Contains("auto resolved to onnx"));
+    }
+
+    [Fact]
+    public void SemanticFacts_CpuOnlyEmbeddings_InfoOnlyAndHealthy()
+    {
+        var root = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 4, 0, 4),
+                new EmbeddingsHealth("ollama", null, null, "embedding model runs on CPU (size_vram: 0) — embeddings will be slow")));
+
+        report.Healthy.ShouldBeTrue();
+        var info = report.Findings.Single(f => f.Name == "embeddings provider");
+        info.State.ShouldBe(DoctorRunner.StateInfo);
+        info.Detail.ShouldContain("size_vram: 0");
     }
 
     private void SeedRegistry(params (string Name, string Root)[] entries)
