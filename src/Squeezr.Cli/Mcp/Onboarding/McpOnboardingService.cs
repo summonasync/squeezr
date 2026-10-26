@@ -187,7 +187,8 @@ public sealed class McpOnboardingService
                 ? "registered"
                 : "not registered";
         }
-        catch (Exception ex) when (ex is ClientCliException or TimeoutException or IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is ClientCliException or TimeoutException or IOException
+            or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return $"unavailable: {CollapseToOneLine(ex.Message)}";
         }
