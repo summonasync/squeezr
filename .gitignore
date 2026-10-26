@@ -490,3 +490,11 @@ src/Squeezr.Cli/Models/
 # Agent tooling local state
 .claude/
 .qwen/
+
+# Overmind board mirror — the board (DB) owns this state, materialized on disk; never in git
+BACKLOG/
+ENTRIES/
+
+# Lane workspaces (per-agent checkouts), live outside git
+.lanes/
+Squeezr.lanes/
