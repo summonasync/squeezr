@@ -8,6 +8,11 @@ public static class WorkspaceStore
 {
     private const string ClaudeProjectDirEnvironmentVariable = "CLAUDE_PROJECT_DIR";
 
+    // A writer racing the migration lands entries after the snapshot and before the tail check -
+    // the daemon-write shape that turned a move into a silent mix of both locations. The hook is
+    // that window, so a test replays the writer deterministically instead of racing the move.
+    internal static Action<string>? AfterLegacyStoreSnapshot;
+
     public static WorkspaceResolution Resolve(string startDirectory)
     {
         var start = WorkspaceCanonicalPath.Canonicalize(startDirectory);
@@ -121,19 +126,51 @@ public static class WorkspaceStore
         }
 
         var storeDir = Path.Combine(directory, SqueezrPaths.StoreDirName);
-        return Directory.Exists(storeDir) && !SqueezrHome.IsCentralStore(storeDir) && !LooksLikeCentralStore(storeDir);
+        return Directory.Exists(storeDir) && !SqueezrHome.IsCentralStore(storeDir) && !SqueezrHome.LooksLikeCentralStore(storeDir);
     }
 
-    // A store dir under some other home (a foreign SQUEEZR_HOME, a stale profile) is shaped
-    // exactly like a legacy in-project store; anything carrying a registry or a workspaces
-    // dir is a central store and must never be migrated away.
-    private static bool LooksLikeCentralStore(string storeDir) =>
-        File.Exists(Path.Combine(storeDir, SqueezrPaths.RegistryFileName))
-        || Directory.Exists(Path.Combine(storeDir, SqueezrPaths.WorkspacesDirName));
+    // The one deliberate-relocation surface: the caller must hold an approval to get here, and the
+    // guard still refuses a default-home or resolved-home store - centrality is absolute, approval
+    // only opens the structural-signature and ordinary-store cases.
+    public static WorkspaceMigrationResult MigrateWithApproval(string root, WorkspaceMigrationApproval approval)
+    {
+        if (!Directory.Exists(root))
+        {
+            throw new WorkspaceException($"Directory '{root}' does not exist.");
+        }
+
+        var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
+        if (WorkspaceRegistry.FindByRootPath(canonicalRoot) is not null)
+        {
+            throw new WorkspaceException($"'{canonicalRoot}' is already a registered workspace; nothing to migrate.");
+        }
+
+        var legacyStoreDir = Path.Combine(canonicalRoot, SqueezrPaths.StoreDirName);
+        if (!Directory.Exists(legacyStoreDir))
+        {
+            throw new WorkspaceException($"Nothing to migrate: '{legacyStoreDir}' does not exist.");
+        }
+
+        RefuseCentralStoreMigration(canonicalRoot, approval);
+
+        var name = ResolveLegacyName(canonicalRoot);
+        var storeKey = WorkspaceStoreKeys.Create(name, canonicalRoot);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            name,
+            canonicalRoot,
+            storeKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow));
+        MoveLegacyContent(canonicalRoot, storeKey, approval);
+
+        var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
+        var movedFiles = Directory.EnumerateFiles(storeDir, "*", SearchOption.AllDirectories).Count();
+        return new WorkspaceMigrationResult(legacyStoreDir, storeDir, storeKey, movedFiles);
+    }
 
     private static WorkspaceRegistryEntry MigrateLegacyWorkspace(string root)
     {
-        RefuseCentralStoreMigration(root);
+        RefuseCentralStoreMigration(root, approval: null);
 
         var name = ResolveLegacyName(root);
         var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
@@ -170,19 +207,23 @@ public static class WorkspaceStore
         return new DirectoryInfo(root).Name;
     }
 
-    private static void RefuseCentralStoreMigration(string root)
+    private static void RefuseCentralStoreMigration(string root, WorkspaceMigrationApproval? approval)
     {
         var storeDir = Path.Combine(root, SqueezrPaths.StoreDirName);
         if (SqueezrHome.IsCentralStore(storeDir))
         {
-            throw new WorkspaceException(
-                $"Refusing to migrate '{storeDir}': it is the central squeezr store, not a legacy in-project store.");
+            throw new WorkspaceException(CentralStoreRefusalText.Migration(storeDir));
+        }
+
+        if (approval is null && SqueezrHome.LooksLikeCentralStore(storeDir))
+        {
+            throw new WorkspaceException(CentralStoreRefusalText.StructuralMigration(storeDir));
         }
     }
 
-    private static void MoveLegacyContent(string root, string storeKey)
+    private static void MoveLegacyContent(string root, string storeKey, WorkspaceMigrationApproval? approval = null)
     {
-        RefuseCentralStoreMigration(root);
+        RefuseCentralStoreMigration(root, approval);
 
         var storeDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
         Directory.CreateDirectory(storeDir);
@@ -190,7 +231,11 @@ public static class WorkspaceStore
         var legacyStoreDir = Path.Combine(root, SqueezrPaths.StoreDirName);
         if (Directory.Exists(legacyStoreDir))
         {
-            foreach (var file in Directory.EnumerateFiles(legacyStoreDir))
+            var legacyFiles = Directory.EnumerateFiles(legacyStoreDir).ToList();
+            var legacyDirs = Directory.EnumerateDirectories(legacyStoreDir).ToList();
+            AfterLegacyStoreSnapshot?.Invoke(legacyStoreDir);
+
+            foreach (var file in legacyFiles)
             {
                 var fileName = Path.GetFileName(file);
                 if (string.Equals(fileName, SqueezrPaths.StateFileName, StringComparison.Ordinal))
@@ -202,12 +247,22 @@ public static class WorkspaceStore
                 File.Move(file, Path.Combine(storeDir, fileName), overwrite: true);
             }
 
-            foreach (var dir in Directory.EnumerateDirectories(legacyStoreDir))
+            foreach (var dir in legacyDirs)
             {
                 MoveDirectoryContents(dir, Path.Combine(storeDir, Path.GetFileName(dir)));
             }
 
-            Directory.Delete(legacyStoreDir, recursive: true);
+            var leftovers = CollectLeftovers(legacyStoreDir);
+            if (leftovers.Count > 0)
+            {
+                throw new WorkspaceException(
+                    $"Refusing to finish the legacy migration: '{legacyStoreDir}' holds entries the move did not " +
+                    $"carry over: {string.Join(", ", leftovers.Select(entry => $"'{entry}'"))}. " +
+                    "Nothing was deleted and the leftovers stay exactly where they are. " +
+                    "Re-run the command once the entries are accounted for; the move resumes from what is left.");
+            }
+
+            DeleteVerifiedEmptyTree(legacyStoreDir);
         }
 
         var legacyManifest = Path.Combine(root, SqueezrPaths.ManifestFileName);
@@ -267,5 +322,42 @@ public static class WorkspaceStore
         {
             MoveDirectoryContents(dir, Path.Combine(destDir, Path.GetFileName(dir)));
         }
+    }
+
+    // A leftover is a file the move left behind anywhere in the legacy tree; the recursion leaves
+    // an empty source shell at every moved directory level, and shells are the move's own debris,
+    // cleaned by the tail, never reported.
+    private static List<string> CollectLeftovers(string legacyStoreDir)
+    {
+        var leftovers = new List<string>();
+        Collect(legacyStoreDir, leftovers);
+        return leftovers;
+
+        static void Collect(string directory, List<string> leftovers)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                if (Directory.Exists(entry))
+                {
+                    Collect(entry, leftovers);
+                    continue;
+                }
+
+                leftovers.Add(entry);
+            }
+        }
+    }
+
+    // The leftover check above proved the tree holds nothing but empty shells, so every delete
+    // here is a single-level remove of a directory just verified empty; any surprise entry makes
+    // the delete throw instead of taking the surprise with it.
+    private static void DeleteVerifiedEmptyTree(string directory)
+    {
+        foreach (var child in Directory.EnumerateDirectories(directory).ToList())
+        {
+            DeleteVerifiedEmptyTree(child);
+        }
+
+        Directory.Delete(directory);
     }
 }

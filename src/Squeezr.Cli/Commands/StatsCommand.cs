@@ -18,12 +18,28 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
 
         [CommandOption("--reset")]
         public bool Reset { get; set; }
+
+        [CommandOption("--all")]
+        public bool All { get; set; }
+
+        [CommandOption("--yes")]
+        public bool Yes { get; set; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         try
         {
+            if (settings.All && !settings.Reset)
+            {
+                throw new McpUsageException("--all requires --reset.");
+            }
+
+            if (settings.Reset && settings.All)
+            {
+                return UsageCommand.Clear(settings.Json, settings.Yes);
+            }
+
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             if (settings.Reset)
             {
@@ -41,7 +57,7 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
             Render(AnsiConsole.Console, summary);
             return 0;
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is WorkspaceException or McpUsageException)
         {
             return CommandError.Report(ex, settings.Json);
         }

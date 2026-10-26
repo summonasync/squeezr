@@ -30,6 +30,12 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
         [CommandOption("--interval <SECONDS>")]
         public string? Interval { get; set; }
 
+        [CommandOption("--clear")]
+        public bool Clear { get; set; }
+
+        [CommandOption("--yes")]
+        public bool Yes { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -38,6 +44,22 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
     {
         try
         {
+            if (settings.Clear)
+            {
+                if (settings.Watch)
+                {
+                    throw new McpUsageException("--clear cannot be combined with --watch.");
+                }
+
+                if (settings.Agent is not null || settings.Workspace is not null || settings.Since is not null)
+                {
+                    throw new McpUsageException(
+                        "--clear wipes every registered workspace; --agent, --workspace and --since do not apply.");
+                }
+
+                return Clear(settings.Json, settings.Yes);
+            }
+
             if (settings.Watch && settings.Json)
             {
                 throw new McpUsageException(
@@ -110,6 +132,52 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
 
     private static UsageRollup ComputeRollup(string? agent, string? workspace, DateTime? since) =>
         WorkspaceRootResolver.GuardRegistryIo(() => UsageRollupLoader.Load(agent, workspace, since));
+
+    // Shared with stats --reset --all: the gate, the fleet core and both renderers live here so the
+    // two surfaces cannot drift.
+    internal static int Clear(bool json, bool yes)
+    {
+        if (!yes)
+        {
+            throw new McpUsageException(
+                "Refusing to clear telemetry across every registered workspace without confirmation: the absence " +
+                "of a prompt is not consent. Re-run with --yes to approve.");
+        }
+
+        var result = WorkspaceRootResolver.GuardRegistryIo(QueryTelemetryFleetClear.Clear);
+        if (result.Cleared.Count == 0 && result.Skipped.Count == 0)
+        {
+            if (json)
+            {
+                JsonOutput.Write(result);
+            }
+            else
+            {
+                Console.WriteLine("No registered workspaces to clear.");
+            }
+
+            return 0;
+        }
+
+        if (json)
+        {
+            JsonOutput.Write(result);
+            return 0;
+        }
+
+        foreach (var store in result.Cleared)
+        {
+            Console.WriteLine($"Cleared {store.RecordsRemoved} telemetry record(s) from {store.StoreKey}.");
+        }
+
+        foreach (var store in result.Skipped)
+        {
+            Console.WriteLine($"Skipped {store.StoreKey}: {store.Reason}.");
+        }
+
+        Console.WriteLine($"Total records removed: {result.TotalRemoved}.");
+        return 0;
+    }
 
     private static DateTime? ParseSince(string? value)
     {
@@ -191,7 +259,7 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
         {
             console.MarkupLine(
                 $"[grey]Telemetry holds {rollup.Totals.Records} records since {rollup.Period.From:d} — " +
-                "run 'squeezr stats --reset' per workspace to clear.[/]");
+                "run 'squeezr usage --clear --yes' to clear every workspace at once.[/]");
         }
     }
 

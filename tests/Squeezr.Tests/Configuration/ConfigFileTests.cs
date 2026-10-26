@@ -543,6 +543,154 @@ public class ConfigFileTests
         ConfigFile.Load(root).Indexing.RankExclude.ShouldBe(["audits/**", "BACKLOG/**"]);
     }
 
+    [Fact]
+    public void Load_NullEmbeddingsSection_UsesEmbeddingsDefaultsAndKeepsSiblings()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": null,
+              "chunking": {
+                "maxTokensPerChunk": 256,
+                "fallbackWindowLines": 40,
+                "fallbackOverlapLines": 10
+              },
+              "indexing": { "ignore": [], "maxFileSizeKb": 512 },
+              "qdrant": {
+                "endpoint": "http://localhost:9999"
+              }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Embeddings.Provider.ShouldBe("auto");
+        config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
+        config.Embeddings.Ollama.Endpoint.ShouldBe("http://localhost:11434");
+        config.Chunking.MaxTokensPerChunk.ShouldBe(256);
+        config.Qdrant.Endpoint.ShouldBe("http://localhost:9999");
+    }
+
+    [Fact]
+    public void Load_NullChunkingSection_UsesChunkingDefaults()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": { "provider": "onnx" },
+              "chunking": null,
+              "indexing": { "ignore": [], "maxFileSizeKb": 128 },
+              "qdrant": { "endpoint": "http://localhost:6334" }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Chunking.MaxTokensPerChunk.ShouldBe(512);
+        config.Chunking.FallbackWindowLines.ShouldBe(60);
+        config.Chunking.FallbackOverlapLines.ShouldBe(15);
+        config.Embeddings.Provider.ShouldBe("onnx");
+        config.Indexing.MaxFileSizeKb.ShouldBe(128);
+    }
+
+    [Fact]
+    public void Load_NullIndexingSection_UsesIndexingDefaults()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 256,
+                "fallbackWindowLines": 40,
+                "fallbackOverlapLines": 10
+              },
+              "indexing": null,
+              "qdrant": { "endpoint": "http://localhost:6334" }
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Indexing.Ignore.ShouldContain("**/node_modules/**");
+        config.Indexing.MaxFileSizeKb.ShouldBe(512);
+        config.Indexing.NoSemantic.ShouldBeFalse();
+        config.Chunking.MaxTokensPerChunk.ShouldBe(256);
+    }
+
+    [Fact]
+    public void Load_NullQdrantSection_UsesQdrantDefaults()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 256,
+                "fallbackWindowLines": 40,
+                "fallbackOverlapLines": 10
+              },
+              "indexing": { "ignore": [], "maxFileSizeKb": 128 },
+              "qdrant": null
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
+        config.Indexing.MaxFileSizeKb.ShouldBe(128);
+    }
+
+    [Fact]
+    public void Load_NullWatchSection_UsesWatchDefaults()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "chunking": {
+                "maxTokensPerChunk": 256,
+                "fallbackWindowLines": 40,
+                "fallbackOverlapLines": 10
+              },
+              "indexing": { "ignore": [], "maxFileSizeKb": 128 },
+              "qdrant": { "endpoint": "http://localhost:6334" },
+              "watch": null
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        config.Watch.DebounceSeconds.ShouldBe(2);
+        config.Watch.BackoffMaxSeconds.ShouldBe(30);
+        config.Watch.EmbedPending.ShouldBeTrue();
+        config.Watch.EmbedBudgetPerPass.ShouldBe(WatchConfig.DefaultEmbedBudgetPerPass);
+    }
+
+    [Fact]
+    public void Load_AllFiveSectionsNull_EverySectionDefaults()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": null,
+              "chunking": null,
+              "indexing": null,
+              "qdrant": null,
+              "watch": null
+            }
+            """);
+
+        var config = ConfigFile.Load(root);
+
+        var defaults = SqueezrConfig.CreateDefault();
+        config.Embeddings.Provider.ShouldBe(defaults.Embeddings.Provider);
+        config.Chunking.MaxTokensPerChunk.ShouldBe(defaults.Chunking.MaxTokensPerChunk);
+        config.Indexing.Ignore.ShouldBe(defaults.Indexing.Ignore);
+        config.Qdrant.Endpoint.ShouldBe(defaults.Qdrant.Endpoint);
+        config.Watch.EmbedBudgetPerPass.ShouldBe(defaults.Watch.EmbedBudgetPerPass);
+        _ = config.Embeddings.Onnx.ResolvedProfile;
+        _ = config.Embeddings.Ollama.ResolvedProfile;
+        _ = config.Embeddings.OpenAiCompatible.ResolvedProfile;
+    }
+
     private static string NewWorkspaceWithConfig(string json)
     {
         var root = TestDirs.NewTempDir();

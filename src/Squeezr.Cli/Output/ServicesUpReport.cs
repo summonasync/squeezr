@@ -7,4 +7,5 @@ public sealed record ServicesUpReport(
     string QdrantEndpoint,
     string QdrantRestEndpoint,
     string OllamaEndpoint,
-    string? ComposeVersion);
+    string? ComposeVersion,
+    IReadOnlyList<ServicesUpServiceReport>? Services = null);
