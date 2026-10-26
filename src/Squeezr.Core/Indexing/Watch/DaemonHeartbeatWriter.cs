@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Serialization;
 
 namespace Squeezr.Core.Indexing.Watch;
@@ -25,6 +26,9 @@ public sealed class DaemonHeartbeatWriter : IDisposable
     private readonly Timer _timer;
     private DateTime _startedAt;
     private DateTime _nextSweepAt;
+    private DaemonActivity? _activity;
+    private EmbeddingExecutor? _executor;
+    private string? _executorProvider;
     private bool _disposed;
 
     public DaemonHeartbeatWriter(
@@ -97,6 +101,78 @@ public sealed class DaemonHeartbeatWriter : IDisposable
         Beat();
     }
 
+    // Store-only on purpose: the verdict belongs to the embeddings phase that follows, and rewriting the
+    // beat here would double the pass's file writes for a value that changes never. The evidence itself is
+    // probed once per runtime (WatchEmbeddingRuntime memoizes), so the watcher can re-present it every pass.
+    public void SetEmbeddingExecutor(EmbeddingExecutor executor, string provider)
+    {
+        lock (_gate)
+        {
+            _executor = executor;
+            _executorProvider = provider;
+        }
+    }
+
+    // A phase change is worth one immediate write: the beat is the only thing answering "what is it doing
+    // right now", and a walk that started seconds ago may still be invisible. Item ticks never write on
+    // their own — a pass holds the store lock and must not multiply file writes — they ride the next beat.
+    public void PhaseStarted(string repoName, IndexPhase phase, int totalItems)
+    {
+        lock (_gate)
+        {
+            var embeddingPhase = phase == IndexPhase.Embeddings;
+            _activity = new DaemonActivity(
+                phase.ToString().ToLowerInvariant(), repoName, 0, totalItems, null, _utcNow(),
+                embeddingPhase ? _executor?.Device : null,
+                embeddingPhase ? _executorProvider : null);
+            Beat();
+        }
+    }
+
+    public void ItemProcessed(string repoName, string currentItem)
+    {
+        lock (_gate)
+        {
+            if (_activity is not { } activity || activity.Repo != repoName)
+            {
+                return;
+            }
+
+            _activity = activity with { DoneItems = activity.DoneItems + 1, CurrentItem = currentItem };
+        }
+    }
+
+    public void RepoCompleted(string repoName)
+    {
+        lock (_gate)
+        {
+            if (_activity is null || _activity.Repo != repoName)
+            {
+                return;
+            }
+
+            _activity = null;
+            Beat();
+        }
+    }
+
+    // A pass that dies before its first repo completes leaves its phase stamped in the slot, and the beats
+    // during the retry backoff would keep naming "files 3 of 50" as fresh work. Clearing is not tied to a
+    // repo: whichever phase was last, the honest answer while nothing runs is idle.
+    public void ClearActivity()
+    {
+        lock (_gate)
+        {
+            if (_activity is null)
+            {
+                return;
+            }
+
+            _activity = null;
+            Beat();
+        }
+    }
+
     public void Beat()
     {
         lock (_gate)
@@ -116,7 +192,7 @@ public sealed class DaemonHeartbeatWriter : IDisposable
                     _startedAt = now;
                 }
 
-                var heartbeat = new DaemonHeartbeat(_pid, _kind, _startedAt, now, _host);
+                var heartbeat = new DaemonHeartbeat(_pid, _kind, _startedAt, now, _host, _activity);
                 EnsureBeatsDir();
                 Write(beatTemp, _beatPath, heartbeat);
                 if (_publishKindHeartbeat)

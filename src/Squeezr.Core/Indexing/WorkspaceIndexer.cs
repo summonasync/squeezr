@@ -364,6 +364,7 @@ public sealed class WorkspaceIndexer
                 doc.Path = relativePath;
                 doc.Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
                 doc.Language = LanguageDetector.Detect(fullPath);
+                doc.Kind = DocKindDetector.Detect(doc.Language);
                 doc.SizeBytes = bytes.Length;
                 doc.LineCount = text.Length == 0
                     ? 0
@@ -574,6 +575,7 @@ public sealed class WorkspaceIndexer
             doc.Path = file.RelativePath;
             doc.Sha256 = file.Sha256;
             doc.Language = file.Language;
+            doc.Kind = DocKindDetector.Detect(doc.Language);
             doc.SizeBytes = file.SizeBytes;
             doc.LineCount = text.Length == 0
                 ? 0

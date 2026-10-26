@@ -44,12 +44,17 @@ public sealed class RefLookup
 
     public RefLookupResult Find(string name, string? repo)
     {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
+        return Find(name, repo, store);
+    }
+
+    public RefLookupResult Find(string name, string? repo, MetaStore store)
+    {
         var manifest = WorkspaceManifestFile.Load(_workspaceRoot);
         var guard = SecretGuardReader.Load(_workspaceRoot);
         var blocks = new List<RefBlock>();
         var lagging = new List<GhostRefDeclaration>();
 
-        using var store = new MetaStore(SqueezrPaths.MetaDbPath(_workspaceRoot));
         foreach (var entry in NavigationContext.SelectRepos(manifest, repo))
         {
             var repoDoc = store.FindRepo(entry.Name);

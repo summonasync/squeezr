@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using Shouldly;
 using Squeezr.Core.Configuration;
@@ -10,13 +11,16 @@ namespace Squeezr.Tests.Storage;
 public sealed class WorkspaceStoreResolveTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
+    private const string ProfileEnvironmentVariable = "HOME";
     private readonly string? _previousEnv;
+    private readonly string? _previousHome;
     private readonly string _home;
     private readonly List<string> _createdDirs = [];
 
     public WorkspaceStoreResolveTests()
     {
         _previousEnv = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
+        _previousHome = Environment.GetEnvironmentVariable(ProfileEnvironmentVariable);
         _home = TestDirs.NewTempDir();
         _createdDirs.Add(_home);
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _home);
@@ -70,6 +74,140 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
         result.MigratedFromLegacy.ShouldBeFalse();
         Directory.Exists(store).ShouldBeTrue();
         File.Exists(Path.Combine(store, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_OverridePinnedAway_StartUnderFakedHome_DoesNotMigrateTheDefaultHomeStore()
+    {
+        // The 2026-10-19 shape: SQUEEZR_HOME pinned elsewhere makes the profile's own store
+        // "not central" for a resolve-relative predicate, and the upward walk used to carry
+        // the default home away as a legacy in-project store. Centrality is absolute.
+        var profile = NewDir();
+        var defaultStore = NewDir(Path.Combine(profile, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(defaultStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(defaultStore, SqueezrPaths.RegistryFileName), "[]");
+        var pinnedHome = NewDir();
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, profile);
+        SqueezrHome.Reset();
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "projects", "fresh")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(defaultStore).ShouldBeTrue();
+        File.Exists(Path.Combine(defaultStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_OverridePinnedAway_BareDefaultHomeStore_IsNotLegacyOnTheWalk()
+    {
+        // A fresh or never-initialized default home holds a bare .squeezr, so the structural
+        // signal is silent; only the absolute default-home arm keeps the walk from treating
+        // it as a legacy in-project store under a pinned override.
+        var profile = NewDir();
+        var defaultStore = NewDir(Path.Combine(profile, SqueezrPaths.StoreDirName));
+        var pinnedHome = NewDir();
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, profile);
+        SqueezrHome.Reset();
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(profile, "projects", "fresh")));
+
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(defaultStore).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Resolve_LegacyMoveWithWriterBehindTheSnapshot_FailsLoudAndKeepsTheLeftover()
+    {
+        var root = NewDir();
+        CreateLegacyLayout(root, withComposeMarker: false);
+        var leftoverPath = Path.Combine(root, SqueezrPaths.StoreDirName, "daemon-wrote.txt");
+        WorkspaceStore.AfterLegacyStoreSnapshot = legacyDir =>
+            File.WriteAllText(Path.Combine(legacyDir, "daemon-wrote.txt"), "late writer");
+
+        try
+        {
+            var message = Should.Throw<WorkspaceException>(() => WorkspaceStore.Resolve(root)).Message;
+
+            message.ShouldContain(leftoverPath);
+            message.ShouldContain("Nothing was deleted");
+            File.Exists(leftoverPath).ShouldBeTrue();
+            File.ReadAllText(leftoverPath).ShouldBe("late writer");
+            File.Exists(Path.Combine(root, SqueezrPaths.ManifestFileName)).ShouldBeTrue();
+            var storeKey = WorkspaceStoreKeys.Create("legacy", WorkspaceCanonicalPath.Canonicalize(root));
+            File.Exists(Path.Combine(_home, SqueezrPaths.WorkspacesDirName, storeKey, SqueezrPaths.MetaDbFileName))
+                .ShouldBeTrue();
+            WorkspaceRegistry.FindByRootPath(WorkspaceCanonicalPath.Canonicalize(root)).ShouldNotBeNull();
+
+            var resumed = WorkspaceStore.Resolve(root);
+            resumed.IsWorkspace.ShouldBeTrue();
+            resumed.MigratedFromLegacy.ShouldBeTrue();
+            Directory.Exists(Path.Combine(root, SqueezrPaths.StoreDirName)).ShouldBeFalse();
+            File.Exists(Path.Combine(_home, SqueezrPaths.WorkspacesDirName, storeKey, "daemon-wrote.txt"))
+                .ShouldBeTrue();
+        }
+        finally
+        {
+            WorkspaceStore.AfterLegacyStoreSnapshot = null;
+        }
+    }
+
+    [Fact]
+    public void Resolve_RegisteredRowWithCentralLookingStoreDir_CompletesNothingAndKeepsTheStore()
+    {
+        // The second route into MoveLegacyContent: a registry row whose root still carries a
+        // legacy layout reaches CompleteLegacyMigration without any upward-walk classification.
+        // A root store dir shaped like the central store must stop here too.
+        var root = NewDir();
+        var decoyStore = NewDir(Path.Combine(root, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(decoyStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName), "[]");
+        var canonicalRoot = WorkspaceCanonicalPath.Canonicalize(root);
+        var storeKey = WorkspaceStoreKeys.Create("registered", canonicalRoot);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            "registered", canonicalRoot, storeKey, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+
+        var result = WorkspaceStore.Resolve(root);
+
+        result.IsWorkspace.ShouldBeTrue();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        result.StoreKey.ShouldBe(storeKey);
+        Directory.Exists(decoyStore).ShouldBeTrue();
+        File.Exists(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
+        Directory.Exists(Path.Combine(decoyStore, SqueezrPaths.WorkspacesDirName)).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Resolve_NoEqualityWithFakedHomes_DecoyStoreIsCaughtStructurally()
+    {
+        var temp = TestDirs.NewTempDir();
+        var homeProfile = NewDir(Path.Combine(temp, "home"));
+        var pinnedHome = NewDir(Path.Combine(temp, "pinned"));
+        var foreignProfile = NewDir(Path.Combine(temp, "foreign"));
+        var decoyStore = NewDir(Path.Combine(foreignProfile, SqueezrPaths.StoreDirName));
+        Directory.CreateDirectory(Path.Combine(decoyStore, SqueezrPaths.WorkspacesDirName));
+        File.WriteAllText(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName), "[]");
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, pinnedHome);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, homeProfile);
+        SqueezrHome.Reset();
+
+        var canonicalDecoy = WorkspaceCanonicalPath.ResolveThroughLinks(decoyStore);
+        canonicalDecoy.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.Resolve()));
+        canonicalDecoy.ShouldNotBe(WorkspaceCanonicalPath.ResolveThroughLinks(SqueezrHome.DefaultHome()));
+
+        var result = WorkspaceStore.Resolve(NewDir(Path.Combine(foreignProfile, "work")));
+
+        SqueezrHome.LooksLikeCentralStore(decoyStore).ShouldBeTrue();
+        result.IsWorkspace.ShouldBeFalse();
+        result.MigratedFromLegacy.ShouldBeFalse();
+        Directory.Exists(decoyStore).ShouldBeTrue();
+        File.Exists(Path.Combine(decoyStore, SqueezrPaths.RegistryFileName)).ShouldBeTrue();
     }
 
     [Fact]
@@ -400,6 +538,7 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _previousEnv);
+        Environment.SetEnvironmentVariable(ProfileEnvironmentVariable, _previousHome);
         SqueezrHome.Reset();
         foreach (var dir in _createdDirs)
         {

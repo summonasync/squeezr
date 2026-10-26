@@ -5,7 +5,7 @@ using Squeezr.Core.Embeddings;
 
 namespace Squeezr.Cli.Embeddings;
 
-public sealed class OnnxEmbeddingProvider : IEmbeddingProvider
+public sealed class OnnxEmbeddingProvider : IEmbeddingProvider, IEmbeddingExecutorEvidence
 {
     private readonly int _maxSequenceLength;
     private readonly int _batchSize;
@@ -49,6 +49,18 @@ public sealed class OnnxEmbeddingProvider : IEmbeddingProvider
         _maxSequenceLength = maxSequenceLength;
         _batchSize = Math.Max(1, batchSize);
         _runtime = new Lazy<(IOnnxSession, IEmbeddingTextEncoder)>(() => (session, encoder));
+    }
+
+    public EmbeddingExecutor ProbeExecutor()
+    {
+        try
+        {
+            return OnnxExecutorEvidence.Derive(OrtEnv.Instance().GetAvailableProviders());
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            return new EmbeddingExecutor("unknown", $"onnxruntime provider query failed: {ex.Message}");
+        }
     }
 
     public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage = EmbeddingUsage.Document, CancellationToken ct = default)

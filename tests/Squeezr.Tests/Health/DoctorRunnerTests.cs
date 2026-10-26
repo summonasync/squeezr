@@ -15,10 +15,12 @@ public sealed class DoctorRunnerTests : IDisposable
     private const string Source = "public class Calc { public int Add(int a, int b) => a + b; }";
 
     private readonly string _home = TestDirs.NewTempDir();
+    private readonly string? _previousEnv;
     private readonly List<string> _created = [];
 
     public DoctorRunnerTests()
     {
+        _previousEnv = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _home);
         SqueezrHome.Reset();
         File.WriteAllText(WorkspaceRegistry.FilePath, "[]");
@@ -26,6 +28,7 @@ public sealed class DoctorRunnerTests : IDisposable
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _previousEnv);
         SqueezrHome.Reset();
         foreach (var dir in _created)
         {

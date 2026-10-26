@@ -303,7 +303,7 @@ public sealed class UsageCommandTests
         result.ExitCode.ShouldBe(0);
         var flattened = Regex.Replace(result.StdOut, @"\s+", " ");
         flattened.ShouldContain("Telemetry holds 50001 records");
-        flattened.ShouldContain("squeezr stats --reset");
+        flattened.ShouldContain("squeezr usage --clear --yes");
     }
 
     [Fact]

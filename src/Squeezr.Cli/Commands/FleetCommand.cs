@@ -48,6 +48,7 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
         table.AddColumn("Store key");
         table.AddColumn("WATCH");
         table.AddColumn("SERVE-WATCH");
+        table.AddColumn("Activity");
         table.AddColumn("Pending");
         table.AddColumn("Last indexed");
         table.AddColumn("Status");
@@ -61,6 +62,7 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
                 entry.StoreKey.EscapeMarkup(),
                 FormatDaemons(entry.Daemons, DaemonHeartbeat.DefaultKind),
                 FormatDaemons(entry.Daemons, DaemonHeartbeat.ServeWatchKind),
+                FormatActivity(entry.Daemons),
                 entry.PendingChunks?.ToString() ?? "n/a",
                 entry.LastIndexedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "n/a",
                 entry.Stale ? "[yellow]stale[/]" : "[green]ok[/]");
@@ -107,6 +109,49 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
             _ => "—"
         };
     }
+
+    // One line per live process, roster order; the executor tail repeats what the beat's evidence named and is
+    // never upgraded into a verdict of its own. A live process between passes answers idle, and a roster with
+    // nothing alive answers idle? — the question mark is the honesty: a beat that aged out or a pid that is gone
+    // is no evidence of work, and this cell never renders one.
+    internal static string FormatActivity(IReadOnlyList<FleetDaemonProcess> daemons)
+    {
+        var lines = daemons.Where(daemon => daemon.IsAlive).Select(FormatActivityRow).ToList();
+        return lines.Count > 0
+            ? string.Join(Environment.NewLine, lines)
+            : daemons.Count > 0 ? "idle?" : "—";
+    }
+
+    private static string FormatActivityRow(FleetDaemonProcess daemon) =>
+        daemon.Phase is not { } phase ? "idle" : FormatWork(daemon, phase);
+
+    private static string FormatWork(FleetDaemonProcess daemon, string phase)
+    {
+        var counter = daemon.TotalItems is { } total && total > 0 && daemon.DoneItems is { } done
+            ? $" · {FormatCounter(phase, done, total)}"
+            : string.Empty;
+        var executor = daemon.Executor is not { } device
+            ? string.Empty
+            : daemon.Provider is { } provider
+                ? $" · {provider.EscapeMarkup()} · {device.EscapeMarkup()}"
+                : $" · {device.EscapeMarkup()}";
+        return $"{FormatPhase(phase)} {(daemon.Repo ?? "unknown").EscapeMarkup()}{counter}{executor}";
+    }
+
+    private static string FormatPhase(string phase) => phase switch
+    {
+        "walk" => "walking",
+        "files" => "indexing",
+        "embeddings" => "embedding",
+        _ => phase.EscapeMarkup(),
+    };
+
+    private static string FormatCounter(string phase, int done, int total) => phase switch
+    {
+        "files" => $"files {done}/{total}",
+        "embeddings" => $"chunks {done}/{total}",
+        _ => $"{done}/{total}",
+    };
 
     private static string FormatUptime(long totalSeconds)
     {

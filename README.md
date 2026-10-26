@@ -113,6 +113,7 @@ squeezr services up
 squeezr index          # live progress by phase; --reembed for a full re-embed
 squeezr search "WorkspaceManager"            # hybrid: exact + semantic (RRF)
 squeezr search "w.rkspace" --regex --max-tokens 200
+squeezr search "debounce" --kind code        # code/docs filter, applies to both arms
 squeezr refs Slugify                          # who calls a symbol (C#)
 squeezr status                                # includes Qdrant state
 squeezr map --depth 2                         # repo map: signatures, no bodies
@@ -254,7 +255,8 @@ the central store:
 │   │                                # by an observer) — kind `watch`, the terminal daemon
 │   ├── serve-watch.heartbeat        # ...or `serve --watch` from an MCP client, when it is the owner
 │   ├── beats/                       # per-pid beats of every live watch-role process: {kind}.{pid}.beat, same
-│   │                                # JSON {pid, kind, startedAt, lastBeatAt, host}; the roster fleet enumerates
+│   │                                # JSON {pid, kind, startedAt, lastBeatAt, host} plus an additive activity
+│   │                                # member while a pass runs; the roster fleet enumerates
 │   ├── queries.jsonl                # query telemetry for `stats` (local; drop removes it)
 │   └── queries.lock                 # serializes writers to queries.jsonl: appends, scrub on compact and
 │                                    # stats --reset (writers wait for the budget; reset refuses while busy,
@@ -343,6 +345,21 @@ name is taken.
 - Per-repo filtering: the `repo` parameter of `repo_map` / `code_search` /
   `symbol_lookup` / `find_references` (CLI twins: `--repo` on `search` and
   `map`).
+- Kind filtering: the `kind` parameter of `code_search` (CLI twin: `--kind` on
+  `search`) selects what a hit can be — `all` (default, unchanged behavior),
+  `code` (program sources) or `docs` (markdown/text/json/yaml/toml/xml prose
+  and config). The filter runs on both hybrid arms: a Qdrant payload filter on
+  the indexed `kind` field on the semantic side, a meta.db file-kind join on
+  the trigram/exact side. Unknown values are rejected with the allowed list,
+  never silently treated as `all`. Points without a `kind` payload (orphans,
+  or points written by pre-057 binaries until the backfill converges them)
+  match only `kind=all`.
+- Weak-match honesty: when a hybrid query gets no exact-arm support (neither
+  the phrase arm nor the identifier leg) and the top semantic score sits below
+  the embedding model's relevance band, `code_search` and `search` still return
+  the hits but the envelope carries a warning naming the narrowing moves —
+  `narrow with kind=code or prefix` — so low-confidence prose matches never
+  pose as a confident answer. Strong answers stay warning-free.
 - Subtree scoping: the `prefix` parameter of `repo_map` / `code_search` (CLI
   twins: `--prefix` on `map` and `search`) answers only inside a directory
   subtree, matched against stored relative paths. An empty subtree is an error
@@ -925,14 +942,30 @@ project — `.claude/settings.json`):
 | Tool | Parameters (defaults) | Returns |
 |---|---|---|
 | `repo_map` | `repo?`, `prefix?`, `depth?` (2), `maxTokens?` (4000) | the repo tree: directories → files → members with signatures. No bodies, a map for navigation only. `prefix` (e.g. `"src/"`) narrows the output to a subtree — directory names render relative to the prefix, `depth` keeps its structural meaning (1 = directories, 2 = files, 3 = members) |
-| `code_search` | `query` (required), `repo?`, `prefix?`, `topK?`, `maxTokens?` (2000) | hybrid matches `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; bodies are never returned. One hit = one file: the best span wins, the file's other spans collapse into `alsoMatched` (the field appears only when ≥1), so `topK` bounds distinct files, not spans. `prefix` filters both arms (exact and semantic) by a directory subtree. Ranking honors the `indexing.rankExclude` config: excluded trees never surface but stay indexed. The hybrid branch gained an identifier-exact arm: multi-token queries with code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens (df ≤ 5% of docs) take a separate branch with `source=exact` — more precise than phrase-literal for compound names. The `repo`/`language`/`pathGlob`/`prefix`/rankExclude filters narrow that branch too — through the same `BuildFilter` as the phrase arm. Branch limitation: trigram case-expansion is capped (`CaseVariantCap = 64` divided across the token's trigrams, 8 variants per trigram), so a lowercase token longer than ~10 chars cannot reach a spelling that exists only in PascalCase and silently drops out of the discriminants — a quiet recall loss (the phrase arm in the same case goes to a FullScan over disk; single literals never lose). The cure is case-folded trigrams in the index: an index-format change with a rebuild, no backlog feature for it yet |
+| `code_search` | `query` (required), `repo?`, `prefix?`, `topK?`, `maxTokens?` (2000), `kind?` (`all`/`code`/`docs`, default `all`) | hybrid matches `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; snippets are capped previews — the matched-ish line plus a bounded window, ≤ ~200 chars, so one hit can no longer spend the whole `maxTokens` (`expand_span` reveals the body); bodies are never returned. One hit = one file: the best span wins, the file's other spans collapse into `alsoMatched` (the field appears only when ≥1), so `topK` bounds distinct files, not spans. `prefix` filters both arms (exact and semantic) by a directory subtree. Ranking honors the `indexing.rankExclude` config: excluded trees never surface but stay indexed. The hybrid branch gained an identifier-exact arm: multi-token queries with code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens (df ≤ 5% of docs) take a separate branch with `source=exact` — more precise than phrase-literal for compound names. The `repo`/`language`/`pathGlob`/`prefix`/rankExclude filters narrow that branch too — through the same `BuildFilter` as the phrase arm. Branch limitation: trigram case-expansion is capped (`CaseVariantCap = 64` divided across the token's trigrams, 8 variants per trigram), so a lowercase token longer than ~10 chars cannot reach a spelling that exists only in PascalCase and silently drops out of the discriminants — a quiet recall loss (the phrase arm in the same case goes to a FullScan over disk; single literals never lose). The cure is case-folded trigrams in the index: an index-format change with a rebuild, no backlog feature for it yet. `kind` filters what a hit can be: `all` (default) matches everything, `code` keeps program sources, `docs` keeps prose and config (markdown/text/json/yaml/toml/xml); it applies to both hybrid arms — Qdrant payload filter on the indexed `kind` field, meta.db file-kind join on the exact side — and unknown values are rejected with the allowed list instead of silently meaning `all`. Points without a `kind` payload (orphans, or points written by pre-057 binaries until the backfill converges them) match only `kind=all` |
 | `symbol_lookup` | `name` (required), `kind?`, `repo?`, `maxTokens?` (300) | the symbol's definition: signature, doc comment, `span`, body — if it fits the budget. When a type's body does not fit → `members` (name, kind, line) in the same budget + a `membersOmitted` counter: every line is a ready coordinate for `expand_span`, no more dead ends. Symbol not found → empty `data` + `didYouMean` (top-3 candidates by trigram-Jaccard, threshold 0.34), not an error |
 | `find_references` | `symbol` (required), `repo?` | every call site `{repo, file, line, kind, enclosingSymbol}` — `repo` on each row distinguishes byte-identical paths from different repositories (a checkout plus its worktree). Same-name definitions sharing one call list yield one row set, and the envelope carries additive `definitions` — `{repo, kind, file, startLine, endLine}` per declaration behind the collapsed rows (the same fields as `refs --json`). The field appears in exactly two cases: two or more same-name declarations share one call list, or the symbol has no calls at all (otherwise an empty `data` would say nothing about declarations); in other answers the field is absent and the envelope stays six-keyed. `definitions` is metadata of the collapsed rows: it does not count into `tokensUsed`, same as the CLI. enclosingSymbol is captured by Roslyn at index time (exact, partial classes included); for indexes built before capture the value is inferred from symbol spans (a fallback inference). Symbol not found → tool error (like `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (required), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | the span's lines + context from the live file on disk (sees edits made after indexing). The only tool that returns source lines |
-| `index_status` | — | freshness: index age, per-repo file/symbol/chunk counters, the `ignored: { files, bySource }` block per repo (excluded files broken down by source: defaults/config/squeezrignore/gitignore; zero-count sources absent), pending embeddings and `embeddings.coverage` (the embedded share of chunks, 0..1; `null` when there is nothing to embed), Qdrant availability, the workspace `rootPath` (if it is not your project's root, this session is looking into a foreign workspace). When exclusions exist, `warnings` name the dominant source and how to turn it off. When ranking is curated, `warnings` list the active `indexing.rankExclude` patterns. **Additive (035 contract):** if the registry holds two or more workspaces, `data` carries `workspaces` — an array of `{ name, rootPath, storeKey, current, stale }` (at most 12 rows, the current session's row first; the rest counted in `workspacesOmitted`). With one workspace neither key exists, and the `data` output matches the old one byte for byte — existing fields are neither renamed nor removed |
+| `code_pack` | `name` (required), `repo?`, `kind?`, `maxTokens?` (2000) | the task-shaped front door: one call answers "what is this symbol and who touches it" — definition (signature, doc comment, `span`), the defining member's body (`bodyLines`, or the `members` mode for oversized types), every caller as `{repo, file, line, kind, enclosingSymbol}`, trust signals (`guardWarnings`, `laggingDeclarations`, `additionalMatches`), and the per-file `cost` block. Budget order: definition and body spend first, callers truncate — `withheldCallers` counts what did not fit, `complete:false` names it. Measured live on a 2.6k-file store: ~2.3× faster than the equivalent `symbol_lookup` → `expand_span` → `find_references` chain (one store session instead of three; the ratio narrows on bigger stores — the saved overhead is constant). Prefer the per-tool calls when you need only one of the three answers — the pack buys breadth, not depth |
+| `index_status` | — | freshness: index age, per-repo file/symbol/chunk counters, the `kindChunks` block (chunk counts per kind: `code`/`docs`; the values sum to the per-repo chunks counts), the `ignored: { files, bySource }` block per repo (excluded files broken down by source: defaults/config/squeezrignore/gitignore; zero-count sources absent), pending embeddings and `embeddings.coverage` (the embedded share of chunks, 0..1; `null` when there is nothing to embed), Qdrant availability, the workspace `rootPath` (if it is not your project's root, this session is looking into a foreign workspace). When exclusions exist, `warnings` name the dominant source and how to turn it off. When ranking is curated, `warnings` list the active `indexing.rankExclude` patterns. **Additive (035 contract):** if the registry holds two or more workspaces, `data` carries `workspaces` — an array of `{ name, rootPath, storeKey, current, stale }` (at most 12 rows, the current session's row first; the rest counted in `workspacesOmitted`). With one workspace neither key exists, and the `data` output matches the old one byte for byte — existing fields are neither renamed nor removed |
 
 All tools have a default token budget (see the table); on `truncated: true`
 narrow the query (`repo`, `kind`) or raise `maxTokens` explicitly.
+
+### Freshness
+
+Tools that name files answer with a per-file verdict, not a gut feeling: the
+additive `fileFreshness` block carries `{repo, path, verdict, lagSeconds?}` —
+`fresh` (the index knows the file's current state), `lagging` (the disk has
+moved past the index; the lag is named where the clock shows it), `unknown`
+(the read path never classified it). The projection is a stat against the
+indexed stamp (~6 ms per answer on the largest store), while the freshness
+guard stays the content-exact authority — a file it refreshed inline reads
+`fresh` afterwards, and one whose inline refresh failed stays `lagging` even
+when its mtime reads young. A live watcher on the store is named in the same
+answer (`active writer on this store: pid N, watch beat Ns old`) so a verdict
+about to flip is never mistaken for a settled one; `index_status` and
+`repo_map` aggregate rather than name files and say so in `warnings`.
 
 ### Navigation flow
 
@@ -1154,9 +1187,9 @@ squeezr fleet --json  # NDJSON, one object per workspace (the 035 contract)
 ```
 
 ```
-Name      Root path            Store key  WATCH                 SERVE-WATCH    Pending  Last indexed      Status
-squeezr   /home/dev/squeezr    squeezr    pid 4217, up 2h 14m   —              0        2026-09-16 10:31  ok
-old-proj  /home/dev/old-proj   old-proj   dead (pid 9021)       —              n/a      n/a               stale
+Name      Root path            Store key  WATCH                 SERVE-WATCH    Activity                       Pending  Last indexed      Status
+squeezr   /home/dev/squeezr    squeezr    pid 4217, up 2h 14m   —              indexing docs · files 12/40    0        2026-09-16 10:31  ok
+old-proj  /home/dev/old-proj   old-proj   dead (pid 9021)       —              idle?                          n/a      n/a               stale
 ```
 
 The `WATCH` / `SERVE-WATCH` columns are the live processes of two kinds:
@@ -1175,17 +1208,37 @@ with a vanished rootPath are marked `stale` and emit a stderr warning with a
 ordering (a store with a live daemon on top) is unchanged: a store counts as
 live when at least one of its bits is alive.
 
+The `Activity` column is what the live processes are doing right now, one
+line per live pid in the roster's own order: `indexing <repo> · files 12/40`,
+`embedding <repo> · chunks 3/9 · ollama · gpu`, `walking <repo>`, `semantic
+<repo> · 5/20`. A live process between passes answers `idle`; a store whose
+every beat aged out or whose pids are gone answers `idle?` — the question
+mark is the honesty: an absence of evidence never renders as work. The
+executor tail repeats what the daemon's own beat measured (`ollama · gpu`,
+`onnx · cpu`); fleet names no hardware the beat did not name first. A store
+with no roster at all answers `—` in this column.
+
 The same roster reaches `fleet --json` as a per-store `daemons[]` array (`kind`, `pid`, `status`,
 `uptimeSeconds`, `owner`, `host`, plus `isAlive` — the same derived member the sibling `watch`/`serveWatch`
 objects already carry): every process the store's beats name, empty when the store names nobody, with exactly
-the claim holder flagged `owner: true`. Additive per 035 — `watch`, `serveWatch`, `stale`, `pendingChunks` and
-`lastIndexedAt` keep their names, their meanings and their order among themselves; the array simply sits
-between `serveWatch` and `stale`.
+the claim holder flagged `owner: true`. Each live row also carries what that process is doing and what it costs,
+additive per 035: `phase` (`walk|files|semantic|embeddings|trigram`), `repo`, `doneItems`, `totalItems`,
+`phaseSeconds`, `provider` and `executor` — the beat's own evidence, null between passes — plus `cpuPercent`
+and `rssBytes`, measured by fleet itself over every live pid of every store in one shared 300 ms
+sampling window per pass (null where a pid is gone or unreadable — never 0 standing in for an
+unmeasured row). Machine values stay
+machine: numbers and enum-like strings, human phrasing lives only in the table. A row that is not alive carries
+none of it — a stale beat or a dead pid never publishes activity, and a daemon that has never started a pass
+reads `phase: null` (`idle` in the table), not an empty cell. Otherwise additive per 035 — `watch`,
+`serveWatch`, `stale`, `pendingChunks` and `lastIndexedAt` keep their names, their meanings and their order
+among themselves; the array simply sits between `serveWatch` and `stale`.
 
 How a daemon declares itself: every live watch-role process writes a per-pid
 beat into the store dir — `~/.squeezr/workspaces/<storeKey>/beats/<kind>.<pid>.beat`,
 kind = `watch` or `serve-watch`. Inside: JSON
-`{pid, kind, startedAt, lastBeatAt, host}`; a beat every 5 s and after every
+`{pid, kind, startedAt, lastBeatAt, host}` — plus an additive `activity`
+member while a pass runs (phase, repo, item counters, phase start, provider,
+executor), absent again between passes; a beat every 5 s and after every
 successful pass, the write is atomic (tmp + move), a clean exit removes the
 file; the `beats/` directory itself is created by the writer and only inside
 an existing store — a daemon whose store was carried away does not resurrect
@@ -1305,7 +1358,12 @@ path either does it or journals it and reports the count.
 "But does it actually save?" — `squeezr stats` answers with numbers, not
 promises. Every navigation command (CLI: `search`/`symbol`/`refs`/`map`/
 `expand`; MCP: all six tools) appends one telemetry line to `queries.jsonl`
-in the workspace store, and stats rolls it into a summary:
+in the workspace store, and stats rolls it into a summary. MCP answers
+carry the same arithmetic in their own envelope: the additive `cost` block
+(`tokensUsed`, `baselineTokens`, `savedTokens`, `ratio`, `complete`) shows
+the whole-file price of the returned files at the moment of the call, and
+telemetry records that same per-call `baselineTokens`, so the dashboard
+and the transcript cannot disagree:
 
 ```bash
 squeezr stats           # per-tool table + savings + cache

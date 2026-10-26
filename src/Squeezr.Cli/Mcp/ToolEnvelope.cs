@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Cli.Mcp;
@@ -13,7 +14,10 @@ public sealed record ToolEnvelope(
     [property: JsonPropertyName("didYouMean"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? DidYouMean = null,
     [property: JsonPropertyName("definitions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<RefDefinitionData>? Definitions = null)
+    IReadOnlyList<RefDefinitionData>? Definitions = null,
+    [property: JsonPropertyName("cost")] AnswerCost? Cost = null,
+    [property: JsonPropertyName("fileFreshness"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<FileFreshness>? FileFreshness = null)
 {
     public static ToolEnvelope Wrap(
         object? data,
@@ -23,9 +27,14 @@ public sealed record ToolEnvelope(
         string? workspaceRoot = null,
         IReadOnlyList<string>? staleFiles = null,
         IReadOnlyList<string>? didYouMean = null,
-        IReadOnlyList<RefDefinitionData>? definitions = null) =>
-        new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [], didYouMean,
-            definitions);
+        IReadOnlyList<RefDefinitionData>? definitions = null,
+        AnswerCost? cost = null,
+        IReadOnlyList<FileFreshness>? fileFreshness = null)
+    {
+        var resolved = cost ?? AnswerCost.Unknown(tokensUsed, !truncated);
+        return new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [],
+            didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = !truncated }, fileFreshness);
+    }
 
     public ToolEnvelope WithWarning(string? warning) =>
         warning is null ? this : this with { Warnings = [.. Warnings, warning] };

@@ -5,13 +5,14 @@ using Squeezr.Core.Embeddings;
 
 namespace Squeezr.Cli.Embeddings;
 
-public sealed class OllamaEmbeddingProvider : IEmbeddingProvider
+public sealed class OllamaEmbeddingProvider : IEmbeddingProvider, IEmbeddingExecutorEvidence
 {
     private const int MaxAttempts = 3;
     private const int BaseDelayMs = 200;
     private const int MaxBatchSize = 32;
 
     private readonly OllamaOptions _options;
+    private readonly HttpMessageHandler? _handler;
     private readonly HttpClient _http;
 
     public int Dimensions => _options.Dimensions;
@@ -19,9 +20,13 @@ public sealed class OllamaEmbeddingProvider : IEmbeddingProvider
     public OllamaEmbeddingProvider(OllamaOptions options, HttpMessageHandler? handler = null)
     {
         _options = options;
+        _handler = handler;
         _http = handler is null ? new HttpClient() : new HttpClient(handler);
         _http.BaseAddress = new Uri(options.Endpoint.TrimEnd('/') + "/");
     }
+
+    public EmbeddingExecutor ProbeExecutor() =>
+        OllamaExecutorProbe.ProbeAsync(_options, CancellationToken.None, _handler).GetAwaiter().GetResult();
 
     public async Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage = EmbeddingUsage.Document, CancellationToken ct = default)
     {

@@ -5,30 +5,18 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Cli;
 
+// SQUEEZR_HOME stays untouched: the ambient env at CliTestProcess first-touch time becomes the
+// run-wide central store for every spawned child, so a ctor-scoped temp home here (deleted on
+// dispose) would poison that snapshot for every test class running later in the run.
 [Collection("ProcessGlobals")]
-public sealed class DoctorCommandTests : IDisposable
+public sealed class DoctorCommandTests
 {
-    private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
-
     private readonly string _home = TestDirs.NewTempDir();
 
     public DoctorCommandTests()
     {
-        Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _home);
-        SqueezrHome.Reset();
-        File.WriteAllText(WorkspaceRegistry.FilePath, "[]");
-    }
-
-    public void Dispose()
-    {
-        SqueezrHome.Reset();
-        try
-        {
-            Directory.Delete(_home, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
+        Directory.CreateDirectory(_home);
+        File.WriteAllText(Path.Combine(_home, SqueezrPaths.RegistryFileName), "[]");
     }
 
     [Fact]

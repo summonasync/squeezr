@@ -191,7 +191,9 @@ public sealed class FleetDaemonsTests : IAsyncLifetime
         var keys = SingleEntry(result, name).GetProperty("daemons").EnumerateArray().ShouldHaveSingleItem()
             .EnumerateObject().Select(property => property.Name)
             .OrderBy(key => key, StringComparer.Ordinal).ToArray();
-        keys.ShouldBe(["host", "isAlive", "kind", "owner", "pid", "status", "uptimeSeconds"]);
+        keys.ShouldBe([
+            "cpuPercent", "doneItems", "executor", "host", "isAlive", "kind", "owner", "phase",
+            "phaseSeconds", "pid", "provider", "repo", "rssBytes", "status", "totalItems", "uptimeSeconds"]);
     }
 
     private static string UniqueName(string prefix) => $"{prefix}-{Guid.NewGuid():N}";

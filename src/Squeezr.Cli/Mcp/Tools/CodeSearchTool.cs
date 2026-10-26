@@ -36,7 +36,7 @@ public sealed class CodeSearchTool
         _identity = identity;
     }
 
-    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
+    [Description("Hybrid exact/semantic search over the indexed workspace: matches exact identifiers and paraphrased or domain-worded queries alike (\"VectorDimensionMismatchException\" or \"validate config file\"). Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope both the exact and the semantic arm to one directory subtree. kind filters what a hit can be: \"all\" (default) matches everything, \"code\" keeps program sources, \"docs\" keeps prose and config (markdown, text, json, yaml, toml, xml); the filter runs on both arms. Points without a kind payload (orphan or freshly rewritten points awaiting the backfill) match only kind=all. Results are refreshed on read: modified files are reindexed inline or reported in staleFiles.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,
@@ -44,9 +44,10 @@ public sealed class CodeSearchTool
         string? prefix = null,
         int? maxTokens = null,
         int? topK = null,
+        string? kind = null,
         CancellationToken cancellationToken = default) =>
         _gate.RunAsync(
-            ct => SearchCore(query, repo, prefix, maxTokens, topK, ct),
+            ct => SearchCore(query, repo, prefix, maxTokens, topK, kind, ct),
             cancellationToken);
 
     private async Task<object> SearchCore(
@@ -55,24 +56,33 @@ public sealed class CodeSearchTool
         string? prefix,
         int? maxTokens,
         int? topK,
+        string? kind,
         CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
         {
             _workspace.RequireWorkspace();
+            if (!DocKindDetector.TryNormalizeFilter(kind, out var kindFilter))
+            {
+                throw new WorkspaceException(
+                    $"Unknown kind '{kind}' — allowed values: all, code, docs.",
+                    WorkspaceException.InvalidQueryCode);
+            }
+
             var root = _workspace.Root;
             var normalizedPrefix = PathPrefix.Normalize(prefix);
             var rankExclusion = RankExclusion.Load(root);
             var secretGuardExtra = SecretGuardReader.Load(root).ExtraPatterns;
-            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, rankExclusion, secretGuardExtra);
+            var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, kindFilter, rankExclusion, secretGuardExtra);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+                    baselineTokens: hit.Cost?.BaselineTokens);
                 return hit;
             }
 
@@ -82,7 +92,7 @@ public sealed class CodeSearchTool
             var coverage = _embeddings is not null && _vectorStore is not null ? LoadCoverage(root) : null;
 
             var engine = new SearchEngine(root, rankExclusion);
-            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix);
+            var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix, kindFilter);
             var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
 
             warnings.AddRange(response.Warnings);
@@ -100,22 +110,43 @@ public sealed class CodeSearchTool
                 }
             }
 
-            if (response.Hint is not null)
+            if (response.Truncated)
             {
-                warnings.Add(response.Hint.ForMcp());
+                warnings.Add(HintText.TruncationLine(
+                    response.TokensUsed,
+                    maxTokens ?? DefaultMaxTokens,
+                    response.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
             }
 
             var data = response.Matches.Select(m => new SearchHitData(
                 m.Repo, m.Path, m.Line, m.Score, m.Source, m.Snippet,
                 m.AlsoMatched == 0 ? null : m.AlsoMatched)).ToList();
 
-            var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root, freshness.Stale);
+            var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
+            var (cost, unknownBaselineFiles) = CostBaseline.Measure(
+                root, namedFiles, response.TokensUsed, !response.Truncated);
+            var fileFreshness = namedFiles.Count > 0
+                ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
+                : null;
+            if (StoreWriterNotice.For(root) is { } writerNotice)
+            {
+                warnings.Add(writerNotice);
+            }
+            if (unknownBaselineFiles > 0)
+            {
+                warnings.Add(
+                    $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
+                freshness.Stale, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 response.TokensUsed, response.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null,
+                baselineTokens: envelope.Cost?.BaselineTokens);
             _cache?.Put("code_search", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
@@ -143,6 +174,7 @@ public sealed class CodeSearchTool
         string? prefix,
         int? maxTokens,
         int? topK,
+        string? kind,
         RankExclusion rankExclusion,
         IReadOnlyList<string> secretGuardExtra) =>
         new
@@ -152,6 +184,7 @@ public sealed class CodeSearchTool
             prefix,
             maxTokens,
             topK,
+            kind,
             // cache generations track meta.db only, so without the patterns in the key a config
             // edit would keep being served from the pre-exclusion / pre-guard envelope
             rankExclude = rankExclusion.IsActive ? rankExclusion.Patterns : null,

@@ -85,6 +85,8 @@ public static class CliApplication
                     .WithDescription("List registered workspaces");
                 workspace.AddCommand<WorkspaceRepairCommand>("repair")
                     .WithDescription("Adopt orphaned workspace stores back into the registry, prune stale rows after confirmation (--dry-run lists, --yes confirms)");
+                workspace.AddCommand<WorkspaceMigrateCommand>("migrate")
+                    .WithDescription("Relocate a legacy in-project store into the central store on purpose; the move reports source, destination and file count (--yes confirms)");
             });
             config.AddBranch("vectors", vectors =>
             {

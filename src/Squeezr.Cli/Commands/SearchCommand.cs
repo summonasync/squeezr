@@ -4,6 +4,7 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -41,6 +42,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         [CommandOption("--max-tokens")]
         public int? MaxTokens { get; set; }
 
+        [CommandOption("--kind")]
+        public string? Kind { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -49,6 +53,15 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
     {
         try
         {
+            if (!DocKindDetector.TryNormalizeFilter(settings.Kind, out var kindFilter))
+            {
+                return CommandError.Report(
+                    new WorkspaceException(
+                        $"Unknown kind '{settings.Kind}' — allowed values: all, code, docs.",
+                        WorkspaceException.InvalidQueryCode),
+                    settings.Json);
+            }
+
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             var sw = Stopwatch.StartNew();
 
@@ -76,7 +89,8 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     settings.Language,
                     settings.TopK,
                     settings.MaxTokens,
-                    settings.Prefix),
+                    settings.Prefix,
+                    kindFilter),
                 embeddings,
                 vectorStore,
                 cancellationToken).GetAwaiter().GetResult();
@@ -94,7 +108,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             }
 
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "search",
-                new { query = settings.Query, repo = settings.Repo, prefix = settings.Prefix, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK },
+                new { query = settings.Query, repo = settings.Repo, prefix = settings.Prefix, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK, kind = kindFilter },
                 response.TokensUsed, response.Truncated, response.Matches.Count,
                 sw.ElapsedMilliseconds, indexAge: ResolveIndexAge(workspaceRoot));
 

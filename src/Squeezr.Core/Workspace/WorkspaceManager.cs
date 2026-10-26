@@ -29,10 +29,10 @@ public sealed class WorkspaceManager
             throw new WorkspaceException($"Workspace is already initialized at '{_root}'.");
         }
 
-        if (SqueezrHome.IsCentralStore(Path.Combine(_root, SqueezrPaths.StoreDirName)))
+        var candidateStoreDir = Path.Combine(_root, SqueezrPaths.StoreDirName);
+        if (SqueezrHome.IsCentralStore(candidateStoreDir) || SqueezrHome.LooksLikeCentralStore(candidateStoreDir))
         {
-            throw new WorkspaceException(
-                $"Cannot initialize a workspace at '{_root}': the directory holds the central squeezr store ('{SqueezrHome.Resolve()}').");
+            throw new WorkspaceException(CentralStoreRefusalText.InitAt(_root));
         }
 
         var workspaceName = string.IsNullOrWhiteSpace(name)
@@ -161,10 +161,9 @@ public sealed class WorkspaceManager
     {
         var wasRegistered = WorkspaceRegistry.TryGetStoreDir(_root, out _);
         var storeDir = SqueezrPaths.StoreDir(_root);
-        if (SqueezrHome.IsCentralStore(storeDir))
+        if (SqueezrHome.IsCentralStore(storeDir) || SqueezrHome.LooksLikeCentralStore(storeDir))
         {
-            throw new WorkspaceException(
-                $"Refusing to drop '{_root}': '{storeDir}' is the central squeezr store, not a workspace store.");
+            throw new WorkspaceException(CentralStoreRefusalText.Drop(_root, storeDir));
         }
 
         if (!Directory.Exists(storeDir))

@@ -220,7 +220,8 @@ public class PrefixScopeTests
         var engine = new SearchEngine(workspace);
 
         var scoped = Hybrid(engine, store, "src/");
-        store.LastTopK.ShouldBe(80);
+        store.LastTopK.ShouldBe(ScopedVectorBudget.For(2, 4));
+        store.LastTopK.ShouldBe(40);
         scoped.Matches.ShouldHaveSingleItem().Path.ShouldBe("src/Core/Alpha.cs");
 
         var unscoped = Hybrid(engine, store, null);
@@ -387,7 +388,7 @@ public class PrefixScopeTests
 
         public Task UpsertAsync(IReadOnlyList<VectorPoint> points, CancellationToken ct) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, uint? repoId, CancellationToken ct)
+        public Task<IReadOnlyList<VectorHit>> SearchAsync(float[] vector, int topK, VectorSearchFilter filter, CancellationToken ct)
         {
             LastTopK = topK;
             return Task.FromResult(Hits);
@@ -397,6 +398,12 @@ public class PrefixScopeTests
 
         public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ulong>>([]);
+
+        public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<uint>>([]);
+
+        public Task SetKindPayloadsAsync(IReadOnlyDictionary<uint, string> kindByFileId, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task DeleteByFileIdsAsync(IReadOnlyList<uint> fileIds, CancellationToken ct) => Task.CompletedTask;
 

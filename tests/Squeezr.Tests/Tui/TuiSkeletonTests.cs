@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Shouldly;
 using Spectre.Console.Testing;
 using Squeezr.Cli;
@@ -61,9 +62,11 @@ public class TuiSkeletonTests
 
         await TuiDashboard.RenderAsync(console, workspace);
 
-        console.Output.ShouldContain("Qdrant: not available");
-        console.Output.ShouldContain("qdrant is down — start it with: squeezr services up");
-        console.Output.ShouldNotContain("docker compose");
+        var normalized = Regex.Replace(console.Output, @"\s+", " ");
+        normalized.ShouldContain("Qdrant: not available");
+        normalized.ShouldContain("qdrant is down — start it with: squeezr services up");
+        normalized.ShouldContain("never duplicates a live external instance; --managed forces ours");
+        normalized.ShouldNotContain("docker compose");
     }
 
     [Fact]

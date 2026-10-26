@@ -22,6 +22,8 @@ public static class ConfigFile
             throw new WorkspaceException($"Config file at '{path}' is not valid JSON: {ex.Message}");
         }
 
+        config = NormalizeNullSections(config);
+
         try
         {
             _ = config.Embeddings.Onnx.ResolvedProfile;
@@ -41,5 +43,22 @@ public static class ConfigFile
         Directory.CreateDirectory(SqueezrPaths.StoreDir(root));
         var json = JsonSerializer.Serialize(config, SqueezrJson.FileOptions);
         File.WriteAllText(SqueezrPaths.ConfigPath(root), json);
+    }
+
+    // A section set to literal null is configuration data, not a corrupt file: whoever wrote it
+    // discarded that section wholesale, so Load substitutes the default section instance per
+    // section. No field-level merging; a truncated file with absent required sections still
+    // fails as invalid JSON above.
+    private static SqueezrConfig NormalizeNullSections(SqueezrConfig config)
+    {
+        var defaults = SqueezrConfig.CreateDefault();
+        return new SqueezrConfig
+        {
+            Embeddings = config.Embeddings ?? defaults.Embeddings,
+            Chunking = config.Chunking ?? defaults.Chunking,
+            Indexing = config.Indexing ?? defaults.Indexing,
+            Qdrant = config.Qdrant ?? defaults.Qdrant,
+            Watch = config.Watch ?? defaults.Watch
+        };
     }
 }
