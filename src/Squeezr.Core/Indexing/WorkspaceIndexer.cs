@@ -427,7 +427,8 @@ public sealed class WorkspaceIndexer
                     IgnoredBySource = priorState?.Stats.IgnoredBySource,
                     GuardWithheld = priorState?.Stats.GuardWithheld ?? 0,
                     GuardWithheldBuiltIns = priorState?.Stats.GuardWithheldBuiltIns ?? 0,
-                    GuardDropped = priorState?.Stats.GuardDropped ?? 0
+                    GuardDropped = priorState?.Stats.GuardDropped ?? 0,
+                    TrackedButExcluded = priorState?.Stats.TrackedButExcluded ?? 0
                 }
             });
             repoDoc.LastIndexedAt = now;
@@ -468,7 +469,8 @@ public sealed class WorkspaceIndexer
                 IgnoredBySource = prior?.Stats.IgnoredBySource,
                 GuardWithheld = (prior?.Stats.GuardWithheld ?? 0) + guard.Withheld,
                 GuardWithheldBuiltIns = (prior?.Stats.GuardWithheldBuiltIns ?? 0) + guard.WithheldByBuiltIns,
-                GuardDropped = (prior?.Stats.GuardDropped ?? 0) + (rowDropped ? 1 : 0)
+                GuardDropped = (prior?.Stats.GuardDropped ?? 0) + (rowDropped ? 1 : 0),
+                TrackedButExcluded = prior?.Stats.TrackedButExcluded ?? 0
             }
         });
         repoDoc.LastIndexedAt = now;
@@ -686,7 +688,8 @@ public sealed class WorkspaceIndexer
                 IgnoredBySource = ignoredSnapshot,
                 GuardWithheld = guard.Withheld,
                 GuardWithheldBuiltIns = guard.WithheldByBuiltIns,
-                GuardDropped = deletedProtected
+                GuardDropped = deletedProtected,
+                TrackedButExcluded = walk.TrackedButExcluded
             }
         });
         repoDoc.LastIndexedAt = now;

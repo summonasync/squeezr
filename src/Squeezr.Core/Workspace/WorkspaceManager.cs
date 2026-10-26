@@ -144,7 +144,8 @@ public sealed class WorkspaceManager
                     state?.Stats.IgnoredBySource,
                     state?.Stats.GuardWithheld ?? 0,
                     state?.Stats.GuardWithheldBuiltIns ?? 0,
-                    state?.Stats.GuardDropped ?? 0);
+                    state?.Stats.GuardDropped ?? 0,
+                    state?.Stats.TrackedButExcluded ?? 0);
             })
             .ToList();
 

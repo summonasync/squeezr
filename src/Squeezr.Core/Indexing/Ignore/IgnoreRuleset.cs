@@ -7,6 +7,7 @@ public sealed record IgnoreDecision
     public required bool Excluded { get; init; }
     public required IgnoreSource? Source { get; init; }
     public required string? Pattern { get; init; }
+    public bool TrackedButExcluded { get; init; }
 }
 
 public sealed class IgnoreRuleset
@@ -15,12 +16,14 @@ public sealed class IgnoreRuleset
     private static readonly IgnoreDecision Kept = new() { Excluded = false, Source = null, Pattern = null };
 
     private readonly IgnoreRule[] _rules;
+    private readonly GitTrackedSet? _tracked;
 
-    private IgnoreRuleset(List<IgnorePattern> patterns, bool respectsGitignore)
+    private IgnoreRuleset(List<IgnorePattern> patterns, bool respectsGitignore, GitTrackedSet? tracked)
     {
         Patterns = [.. patterns];
         _rules = [.. patterns.Select(pattern => new IgnoreRule(pattern))];
         RespectsGitignore = respectsGitignore;
+        _tracked = tracked;
     }
 
     public bool RespectsGitignore { get; }
@@ -30,10 +33,11 @@ public sealed class IgnoreRuleset
     public static IgnoreRuleset For(string repoRoot, SqueezrConfig config, Action<string>? warn = null)
     {
         var patterns = LoadConfiguredPatterns(repoRoot, config, warn);
-        if (config.Indexing.RespectGitignore)
-            CollectGitignorePatterns(repoRoot, repoRoot, patterns, warn);
+        if (!config.Indexing.RespectGitignore)
+            return new IgnoreRuleset(patterns, false, null);
 
-        return new IgnoreRuleset(patterns, config.Indexing.RespectGitignore);
+        CollectGitignorePatterns(repoRoot, repoRoot, patterns, warn);
+        return new IgnoreRuleset(patterns, true, GitTrackedSet.Load(repoRoot, warn));
     }
 
     // A .gitignore only ever applies below its own directory, so for one known path the cascade is the
@@ -42,10 +46,11 @@ public sealed class IgnoreRuleset
         string repoRoot, SqueezrConfig config, string relativeFilePath, Action<string>? warn = null)
     {
         var patterns = LoadConfiguredPatterns(repoRoot, config, warn);
-        if (config.Indexing.RespectGitignore)
-            CollectGitignoreAncestors(repoRoot, relativeFilePath, patterns, warn);
+        if (!config.Indexing.RespectGitignore)
+            return new IgnoreRuleset(patterns, false, null);
 
-        return new IgnoreRuleset(patterns, config.Indexing.RespectGitignore);
+        CollectGitignoreAncestors(repoRoot, relativeFilePath, patterns, warn);
+        return new IgnoreRuleset(patterns, true, GitTrackedSet.Load(repoRoot, warn));
     }
 
     public IgnoreDecision Decision(string relativePath, bool isDirectory)
@@ -96,7 +101,16 @@ public sealed class IgnoreRuleset
             }
         }
 
-        return lastMatch ?? Kept;
+        var decision = lastMatch ?? Kept;
+        if (decision.Excluded
+            && decision.Source == IgnoreSource.Gitignore
+            && _tracked is not null
+            && (_tracked.ContainsDirectory(normalizedPath) || _tracked.ContainsFile(normalizedPath)))
+        {
+            return decision with { Excluded = false, TrackedButExcluded = true };
+        }
+
+        return decision;
     }
 
     private static IgnoreDecision Unexclude(IgnoreRule rule) => new()

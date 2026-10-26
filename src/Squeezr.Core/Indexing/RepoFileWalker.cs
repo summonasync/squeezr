@@ -10,7 +10,8 @@ public sealed record FileWalkResult(
     int Ignored,
     IReadOnlyDictionary<IgnoreSource, int> IgnoredBySource,
     IReadOnlyList<string> UnreadableFiles,
-    IReadOnlyList<string> UnreadableDirs)
+    IReadOnlyList<string> UnreadableDirs,
+    int TrackedButExcluded = 0)
 {
     // An unreadable path is not a deleted one: the deleted-file reconciliation checks this before
     // reaping, so a chmod or a failed read keeps its rows until the path reads again or really disappears.
@@ -49,6 +50,7 @@ public static class RepoFileWalker
         var files = new List<SourceFile>();
         var skipped = 0;
         var ignored = 0;
+        var trackedButExcluded = 0;
         var ignoredBySource = new Dictionary<IgnoreSource, int>();
         var unreadableFiles = new List<string>();
         var unreadableDirs = new List<string>();
@@ -128,6 +130,11 @@ public static class RepoFileWalker
                     continue;
                 }
 
+                if (fileDecision.TrackedButExcluded)
+                {
+                    trackedButExcluded++;
+                }
+
                 // the guard decides before anything touches the file: an unreadable secret would otherwise
                 // take the reconciliation branches below and name itself in a warning
                 if (guard.Deny(relativePath))
@@ -191,7 +198,8 @@ public static class RepoFileWalker
         }
 
         files.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
-        return new FileWalkResult(files, skipped, ignored, ignoredBySource, unreadableFiles, unreadableDirs);
+        return new FileWalkResult(
+            files, skipped, ignored, ignoredBySource, unreadableFiles, unreadableDirs, trackedButExcluded);
     }
 
     private static void LedgerUnreadableDirectory(

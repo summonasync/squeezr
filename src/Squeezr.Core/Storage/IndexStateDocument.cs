@@ -42,4 +42,7 @@ public sealed class IndexStateStats
 
     [BsonField("guardDropped")]
     public int GuardDropped { get; set; }
+
+    [BsonField("trackedButExcluded")]
+    public int TrackedButExcluded { get; set; }
 }
