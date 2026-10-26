@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -28,6 +29,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         public string? Repo { get; set; }
 
         [CommandOption("--path-glob")]
+        [Description("Filter every search arm (exact, identifier, semantic) to paths matching the glob, e.g. \"src/**\"")]
         public string? PathGlob { get; set; }
 
         [CommandOption("--prefix")]

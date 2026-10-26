@@ -125,7 +125,7 @@ public class SemanticHitsResolverScopeTests
 
         var scoped = Hybrid(engine, store, "src/");
 
-        var expectedScope = FileScope.Resolve(meta, path => PathPrefix.Matches(PathPrefix.Normalize("src/")!, path));
+        var expectedScope = FileScope.Resolve(meta, file => PathPrefix.Matches(PathPrefix.Normalize("src/")!, file.Path));
         var survivors = scoped.Matches.Where(m => m.Source == "semantic").ToList();
         survivors.Select(m => m.Path).ShouldBe(srcHits.Select(s => s.Key).ToList());
         survivors.ShouldNotBeEmpty();
