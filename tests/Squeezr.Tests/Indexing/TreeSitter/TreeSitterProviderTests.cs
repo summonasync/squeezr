@@ -40,6 +40,14 @@ public class TreeSitterProviderTests
     }
 
     [Fact]
+    public void AnonymousFunctionExpression_YieldsNoSymbol()
+    {
+        var result = Parse("handler.js", "fn(function (item) {\n  return item;\n});\n");
+
+        result.Symbols.ShouldBe([]);
+    }
+
+    [Fact]
     public void JavaScript_Symbols_FunctionArrowClassMethod_ExtractedWithSpansAndContainers()
     {
         var result = Parse("app.js", """
