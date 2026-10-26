@@ -17,12 +17,26 @@ public class TreeSitterProviderTests
 
         provider.CanHandle("app.js", null).ShouldBeTrue();
         provider.CanHandle("app.jsx", null).ShouldBeTrue();
+        provider.CanHandle("app.mjs", null).ShouldBeTrue();
+        provider.CanHandle("app.cjs", null).ShouldBeTrue();
+        provider.CanHandle("app.mjs", "js").ShouldBeTrue();
+        provider.CanHandle("app.mjs", "python").ShouldBeFalse();
         provider.CanHandle("app.ts", null).ShouldBeTrue();
         provider.CanHandle("app.tsx", null).ShouldBeTrue();
         provider.CanHandle("app.tsx", "typescript").ShouldBeTrue();
         provider.CanHandle("app.cs", null).ShouldBeFalse();
         provider.CanHandle("notes.md", null).ShouldBeFalse();
         provider.CanHandle("app.ts", "python").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void CommonJsAssignment_NamedFunctionExpression_ExtractedAsFunction()
+    {
+        var result = Parse("module.cjs", "module.exports = function run() {\n  return 'ready';\n};\n");
+
+        result.Language.ShouldBe("javascript");
+        result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([("run", SymbolKind.Function)]);
+        result.Symbols[0].Signature.ShouldBe("function run()");
     }
 
     [Fact]
