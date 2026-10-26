@@ -8,6 +8,7 @@ using Squeezr.Cli.Infra;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -16,6 +17,9 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
 {
     private const string PullingStage = "Pulling images (first run may download ~3.6 GB)…";
     private const string StartingStage = "Starting containers…";
+    private const string StandardQdrantEndpoint = "http://localhost:6333";
+    private const string OllamaInstallHint =
+        "docker run -d --name ollama -v ollama:/root/.ollama -p 11434:11434 ollama/ollama";
     private const string AdoptModelName = "nomic-embed-text";
     private const string QdrantInterimHint =
         "squeezr is moving to its own dedicated Qdrant instance (078); meanwhile remove the foreign " +
@@ -28,6 +32,9 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
 
         [CommandOption("--verbose")]
         public bool Verbose { get; set; }
+
+        [CommandOption("--owned")]
+        public bool Owned { get; set; }
 
         [Description("Start our containers over whatever the probe found; a port clash fails loudly")]
         [CommandOption("--managed")]
@@ -47,6 +54,17 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
         {
             var runner = new ProcessRunner();
             var cli = new DockerComposeCli(runner);
+
+            if (settings.Owned || QdrantOwnedDecision.AnyWorkspaceWantsOwned())
+            {
+                return await RunOwnedCoreAsync(settings, cli, cancellationToken);
+            }
+
+            if (AnsiConsole.Profile.Capabilities.Interactive)
+            {
+                return await DecideUseOrOwnAsync(settings, cli, cancellationToken);
+            }
+
             return await RunCoreAsync(
                 settings, cli, runner, ensureHandler: null, versionProbe: null, livenessProbe: null,
                 cancellationToken);
@@ -54,6 +72,142 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
         catch (ServicesException ex)
         {
             return CommandError.Report(ex, settings.Json);
+        }
+    }
+
+    internal static async Task<int> RunOwnedCoreAsync(
+        Settings settings,
+        DockerComposeCli cli,
+        CancellationToken cancellationToken)
+    {
+        var (restPort, grpcPort) = QdrantOwnedDecision.OwnedPorts();
+        string composePath;
+        try
+        {
+            composePath = OwnedComposeFile.Write(restPort, grpcPort);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ServicesException(
+                $"Failed to write the owned compose file: {ex.Message}",
+                ServicesException.ComposeCommandFailedCode);
+        }
+
+        var installation = await cli.DetectAsync(cancellationToken);
+        WriteStage(PullingStage, settings.Json);
+        await cli.PullAsync(installation, composePath, ProgressHandler(settings), cancellationToken, OwnedComposeFile.ProjectName);
+        WriteStage(StartingStage, settings.Json);
+        await cli.RunCheckedAsync(
+            installation, composePath, ["up", "-d"], DockerComposeCli.UpTimeout, cancellationToken,
+            projectName: OwnedComposeFile.ProjectName);
+
+        var grpc = $"http://localhost:{grpcPort}";
+        var rest = $"http://localhost:{restPort}";
+        if (settings.Json)
+        {
+            JsonOutput.Write(new ServicesUpReport(
+                composePath,
+                OwnedComposeFile.ProjectName,
+                false,
+                grpc,
+                rest,
+                string.Empty,
+                installation.Version is null ? null : $"v{installation.Version}",
+                [new ServicesUpServiceReport("qdrant", "running", OwnedComposeFile.ProjectName, "pulled and started")]));
+            return 0;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[green]Owned Qdrant is up[/] — gRPC: {grpc} (leave qdrant.endpoint empty with qdrant.owned), REST: {rest}");
+        AnsiConsole.MarkupLine($"Compose file: {composePath.EscapeMarkup()}");
+        return 0;
+    }
+
+    private async Task<int> DecideUseOrOwnAsync(
+        Settings settings,
+        DockerComposeCli cli,
+        CancellationToken cancellationToken)
+    {
+        await AnnounceOllamaAsync(settings, cancellationToken);
+
+        if (!await ProbeStandardQdrantAsync(cancellationToken))
+        {
+            AnsiConsole.MarkupLine("[grey]No external Qdrant found — raising the squeezr-owned instance.[/]");
+            PersistOwnedDecision(true, null);
+            return await RunOwnedCoreAsync(settings, cli, cancellationToken);
+        }
+
+        var choice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Live Qdrant found on the standard port — use it, or raise a dedicated squeezr-owned instance?")
+                .AddChoices("Use the running Qdrant", "Raise a squeezr-owned instance"));
+
+        if (choice.StartsWith("Use", StringComparison.Ordinal))
+        {
+            PersistOwnedDecision(false, StandardQdrantEndpoint);
+            AnsiConsole.MarkupLine($"[green]Using the external Qdrant[/] at {StandardQdrantEndpoint} — recorded in config.");
+            return 0;
+        }
+
+        PersistOwnedDecision(true, null);
+        return await RunOwnedCoreAsync(settings, cli, cancellationToken);
+    }
+
+    private static void PersistOwnedDecision(bool owned, string? endpoint)
+    {
+        foreach (var entry in WorkspaceRegistry.Load())
+        {
+            try
+            {
+                var config = ConfigFile.Load(entry.RootPath);
+                if (config.Qdrant.Owned == owned &&
+                    (owned || config.Qdrant.Endpoint.Length > 0))
+                {
+                    continue;
+                }
+
+                config = config with
+                {
+                    Qdrant = owned
+                        ? config.Qdrant with { Owned = true }
+                        : config.Qdrant with { Owned = false, Endpoint = endpoint ?? config.Qdrant.Endpoint },
+                };
+                ConfigFile.Save(entry.RootPath, config);
+            }
+            catch (Exception ex) when (ex is WorkspaceException or InvalidDataException or IOException)
+            {
+                // an unreadable workspace cannot record the decision but must not break the raise
+            }
+        }
+    }
+
+    private static async Task AnnounceOllamaAsync(Settings settings, CancellationToken cancellationToken)
+    {
+        var status = await OllamaStatusProbe.ProbeAsync(new OllamaOptions(), cancellationToken);
+        var message = status.Available
+            ? "[grey]Ollama: using the running instance (squeezr never raises Ollama).[/]"
+            : $"[grey]Ollama not found — squeezr never raises it. Install yourself:[/] {OllamaInstallHint}";
+
+        if (settings.Json)
+        {
+            Console.Error.WriteLine(message.Replace("[grey]", string.Empty).Replace("[/]", string.Empty));
+            return;
+        }
+
+        AnsiConsole.MarkupLine(message);
+    }
+
+    private static async Task<bool> ProbeStandardQdrantAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var response = await http.GetAsync(StandardQdrantEndpoint + "/readyz", cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return false;
         }
     }
 

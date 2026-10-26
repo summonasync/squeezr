@@ -443,10 +443,162 @@ public sealed class ServicesCommandTests : IDisposable
         json.RootElement.GetProperty("composeVersion").GetString().ShouldBe("v5.5.1 (plugin)");
     }
 
+    [Fact]
+    public async Task Up_OwnedCore_RaisesQdrantOnlyOwnedProject()
+    {
+        var invocations = new List<ProcessInvocation>();
+        var runner = new ScriptedRunner(invocations, invocation => invocation.Arguments.Contains("version")
+            ? new ProcessRunResult(0, VersionOutput, string.Empty)
+            : new ProcessRunResult(0, string.Empty, string.Empty));
+
+        var (exit, stdout, stderr) = await RunOwnedAsync(new ServicesUpCommand.Settings { Json = true }, runner);
+
+        exit.ShouldBe(0);
+        stderr.ToString().ShouldContain("Pulling images");
+        stderr.ToString().ShouldContain("Starting containers");
+        var composePath = Path.Combine(_home, "infra", "docker-compose.owned.yml");
+        var compose = File.ReadAllText(composePath);
+        compose.ShouldContain("\"6335:6333\"");
+        compose.ShouldContain("squeezr-owned-qdrant:/qdrant/storage");
+        compose.ShouldNotContain("ollama");
+        var pull = invocations.Single(i => i.Arguments.Contains("pull"));
+        pull.Arguments.ShouldContain("-p");
+        pull.Arguments.ShouldContain("squeezr-owned");
+        var up = invocations.Single(i => i.Arguments.Contains("up"));
+        up.Arguments.ShouldContain("-p");
+        up.Arguments.ShouldContain("squeezr-owned");
+        up.Arguments[^1].ShouldBe("-d");
+        using var document = JsonDocument.Parse(stdout.ToString().Trim());
+        var payload = document.RootElement;
+        payload.GetProperty("composeFile").GetString().ShouldBe(composePath);
+        payload.GetProperty("project").GetString().ShouldBe("squeezr-owned");
+        payload.GetProperty("qdrantEndpoint").GetString().ShouldBe("http://localhost:6336");
+        payload.GetProperty("qdrantRestEndpoint").GetString().ShouldBe("http://localhost:6335");
+        payload.GetProperty("ollamaEndpoint").GetString().ShouldBe(string.Empty);
+        payload.GetProperty("services").GetArrayLength().ShouldBe(1);
+        payload.GetProperty("services")[0].GetProperty("service").GetString().ShouldBe("qdrant");
+        payload.GetProperty("services")[0].GetProperty("state").GetString().ShouldBe("running");
+    }
+
+    [Fact]
+    public async Task Up_OwnedCore_WithoutDocker_ThrowsDockerUnavailable()
+    {
+        var runner = new ScriptedRunner([], _ => new ProcessRunResult(127, string.Empty, string.Empty));
+
+        var exception = await Should.ThrowAsync<ServicesException>(
+            () => ServicesUpCommand.RunOwnedCoreAsync(
+                new ServicesUpCommand.Settings { Json = true }, new DockerComposeCli(runner), CancellationToken.None));
+
+        exception.Code.ShouldBe(ServicesException.DockerUnavailableCode);
+    }
+
+    [Fact]
+    public async Task Up_OwnedCore_WhenOwnedComposeBlocked_ThrowsComposeFailed()
+    {
+        var ownedPath = OwnedComposeFile.FilePath;
+        Directory.CreateDirectory(Path.GetDirectoryName(ownedPath)!);
+        Directory.CreateDirectory(ownedPath);
+        var runner = new ScriptedRunner([], invocation => invocation.Arguments.Contains("version")
+            ? new ProcessRunResult(0, VersionOutput, string.Empty)
+            : new ProcessRunResult(0, string.Empty, string.Empty));
+
+        var exception = await Should.ThrowAsync<ServicesException>(
+            () => ServicesUpCommand.RunOwnedCoreAsync(
+                new ServicesUpCommand.Settings { Json = true }, new DockerComposeCli(runner), CancellationToken.None));
+
+        exception.Message.ShouldContain("Failed to write the owned compose file");
+    }
+
+    [Fact]
+    public async Task Down_LegacyPair_StopsOnlyQdrant_AndAnnouncesOllamaLeft()
+    {
+        ServicesComposeFile.Write(false);
+        var invocations = new List<ProcessInvocation>();
+        var runner = new ScriptedRunner(invocations, invocation => invocation.Arguments.Contains("version")
+            ? new ProcessRunResult(0, VersionOutput, string.Empty)
+            : new ProcessRunResult(0, string.Empty, string.Empty));
+
+        var (exit, stdout, stderr) = await RunDownAsync(
+            new ServicesDownCommand.Settings { Json = true }, runner, RefuseEverything());
+
+        exit.ShouldBe(0);
+        var down = invocations.Single(i => i.Arguments.Contains("down"));
+        down.Arguments.ShouldContain("-p");
+        down.Arguments.ShouldContain("squeezr");
+        down.Arguments.ShouldContain("qdrant");
+        down.Arguments.ShouldNotContain("ollama");
+        stderr.ToString().ShouldContain("Ollama осталась");
+        using var json = JsonDocument.Parse(stdout.ToString().Trim());
+        json.RootElement.GetProperty("project").GetString().ShouldBe("squeezr");
+        json.RootElement.GetProperty("stopped").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Down_OwnedProject_PerformsFullOwnedDown()
+    {
+        OwnedComposeFile.Write();
+        var invocations = new List<ProcessInvocation>();
+        var runner = new ScriptedRunner(invocations, invocation => invocation.Arguments.Contains("version")
+            ? new ProcessRunResult(0, VersionOutput, string.Empty)
+            : new ProcessRunResult(0, string.Empty, string.Empty));
+
+        var (exit, stdout, _) = await RunDownAsync(
+            new ServicesDownCommand.Settings(), runner, RefuseEverything());
+
+        exit.ShouldBe(0);
+        var down = invocations.Single(i => i.Arguments.Contains("down"));
+        down.Arguments.ShouldContain("-p");
+        down.Arguments.ShouldContain("squeezr-owned");
+        down.Arguments[^1].ShouldBe("down");
+        stdout.ToString().ShouldContain("Qdrant-side services are stopped");
+        stdout.ToString().ShouldContain("Ollama осталась");
+    }
+
+    [Fact]
+    public async Task Down_BothComposeFiles_StopsLegacyQdrantSideAndFullOwned()
+    {
+        ServicesComposeFile.Write(false);
+        OwnedComposeFile.Write();
+        var invocations = new List<ProcessInvocation>();
+        var runner = new ScriptedRunner(invocations, invocation => invocation.Arguments.Contains("version")
+            ? new ProcessRunResult(0, VersionOutput, string.Empty)
+            : new ProcessRunResult(0, string.Empty, string.Empty));
+
+        var (exit, stdout, _) = await RunDownAsync(
+            new ServicesDownCommand.Settings(), runner, RefuseEverything());
+
+        exit.ShouldBe(0);
+        var downs = invocations.Where(i => i.Arguments.Contains("down")).ToList();
+        downs.Count.ShouldBe(2);
+        var legacy = downs.Single(i => ProjectOf(i) == "squeezr");
+        legacy.Arguments.ShouldContain("qdrant");
+        legacy.Arguments.ShouldNotContain("ollama");
+        var owned = downs.Single(i => ProjectOf(i) == "squeezr-owned");
+        owned.Arguments[^1].ShouldBe("down");
+        stdout.ToString().ShouldContain("Ollama осталась");
+    }
+
+    private static string ProjectOf(ProcessInvocation invocation)
+    {
+        for (var i = 0; i < invocation.Arguments.Count - 1; i++)
+        {
+            if (invocation.Arguments[i] == "-p")
+            {
+                return invocation.Arguments[i + 1];
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static Task<(int Exit, StringWriter StdOut, StringWriter StdErr)> RunUpAsync(
         ServicesUpCommand.Settings settings, IProcessRunner runner, ServiceLivenessProbe liveness) =>
         RunUnitAsync(ct => ServicesUpCommand.RunCoreAsync(
             settings, new DockerComposeCli(runner), runner, null, null, liveness, ct));
+
+    private static Task<(int Exit, StringWriter StdOut, StringWriter StdErr)> RunOwnedAsync(
+        ServicesUpCommand.Settings settings, IProcessRunner runner) =>
+        RunUnitAsync(ct => ServicesUpCommand.RunOwnedCoreAsync(settings, new DockerComposeCli(runner), ct));
 
     private static Task<(int Exit, StringWriter StdOut, StringWriter StdErr)> RunDownAsync(
         ServicesDownCommand.Settings settings, IProcessRunner runner, ServiceLivenessProbe liveness) =>

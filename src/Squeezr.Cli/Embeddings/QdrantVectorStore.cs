@@ -24,14 +24,15 @@ public sealed class QdrantVectorStore : IVectorStore
 
     private static QdrantClient CreateClient(QdrantConfig config)
     {
+        var endpointText = config.ResolvedEndpoint;
         Uri endpoint;
         try
         {
-            endpoint = new Uri(config.Endpoint);
+            endpoint = new Uri(endpointText);
         }
         catch (UriFormatException ex)
         {
-            throw new WorkspaceException($"Invalid Qdrant endpoint '{config.Endpoint}': {ex.Message}");
+            throw new WorkspaceException($"Invalid Qdrant endpoint '{endpointText}': {ex.Message}");
         }
 
         return new QdrantClient(endpoint);

@@ -3,7 +3,10 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Commands;
@@ -51,6 +54,11 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
             var report = await VectorPointReconciler.ReconcileAsync(
                 workspaceRoot, vectorStore, settings.Apply, StaleLockWarningSink.ToStderr, cancellationToken);
 
+            if (settings.Apply)
+            {
+                await TryDropLegacyCollectionsAsync(workspaceRoot, vectorStore, settings, cancellationToken);
+            }
+
             if (settings.Json)
             {
                 JsonOutput.Write(report);
@@ -63,6 +71,43 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
         catch (Exception ex) when (ex is WorkspaceException or McpUsageException)
         {
             return CommandError.Report(ex, settings.Json);
+        }
+    }
+
+    // the 078 auto-drop: owned workspace just reconciled into the fresh collection — the squeezr-named
+    // collections on the standard-port endpoint (where the pre-owned instance lived) are now redundant.
+    // Health precondition first: the owned endpoint must answer, or the legacy data is not redundant yet.
+    private static async Task TryDropLegacyCollectionsAsync(
+        string workspaceRoot, IVectorStore? vectorStore, Settings settings, CancellationToken cancellationToken)
+    {
+        if (!ConfigFile.Load(workspaceRoot).Qdrant.Owned)
+        {
+            return;
+        }
+
+        if (vectorStore is null || !await vectorStore.IsAvailableAsync(cancellationToken))
+        {
+            return;
+        }
+
+        var allowed = WorkspaceRegistry.Load().Select(entry => entry.StoreKey).ToList();
+        if (allowed.Count == 0)
+        {
+            return;
+        }
+
+        var reap = await LegacyCollectionReaper.DropAsync("http://localhost:6333", allowed, cancellationToken);
+        if (reap.Dropped.Count > 0)
+        {
+            var line = $"Auto-dropped {reap.Dropped.Count} legacy collection(s): {string.Join(", ", reap.Dropped)}";
+            if (settings.Json)
+            {
+                Console.Error.WriteLine(line);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[grey]{line.EscapeMarkup()}[/]");
+            }
         }
     }
 

@@ -20,15 +20,19 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        var payload = ReadStdin();
+
         HookPreReadAdvice? advice = null;
         try
         {
-            advice = Evaluate(ReadStdin());
+            advice = Evaluate(payload);
         }
         catch (Exception)
         {
             // fail-open: the hook observes reads, it must never break one
         }
+
+        RecordTelemetry(payload);
 
         if (advice is not null)
         {
@@ -36,6 +40,44 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
         }
 
         return 0;
+    }
+
+    private static void RecordTelemetry(string payload)
+    {
+        try
+        {
+            var input = JsonSerializer.Deserialize<HookPreReadInput>(payload);
+            if (input is null || !string.Equals(input.ToolName, ReadToolName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var filePath = input.ToolInput?.FilePath;
+            if (string.IsNullOrWhiteSpace(filePath) ||
+                WorkspaceRegistry.FindContainingPath(filePath) is not { } workspace)
+            {
+                return;
+            }
+
+            var redacted = HookSecretPaths.IsGuarded(Path.GetFullPath(filePath), workspace)
+                ? QueryTelemetry.RedactedPlaceholder
+                : filePath;
+            QueryTelemetry.Record(
+                workspace.RootPath,
+                Guid.TryParse(input.SessionId, out var sessionId) ? sessionId : Guid.Empty,
+                "pre-read",
+                new { tool = input.ToolName, file = redacted },
+                tokensUsed: 0,
+                truncated: false,
+                hits: 0,
+                durationMs: 0,
+                client: "hook",
+                clientVersion: AppVersion.Current);
+        }
+        catch
+        {
+            // fail-open: the adoption signal is worth a line, never a broken hook
+        }
     }
 
     private static string ReadStdin()
