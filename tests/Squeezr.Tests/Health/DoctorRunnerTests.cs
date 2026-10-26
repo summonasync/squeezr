@@ -119,7 +119,7 @@ public sealed class DoctorRunnerTests : IDisposable
     [Fact]
     public void SemanticFacts_QdrantUnavailableWithChunks_FailsWithServicesRemedy()
     {
-        var root = NewIndexedWorkspace();
+        _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
@@ -135,7 +135,7 @@ public sealed class DoctorRunnerTests : IDisposable
     [Fact]
     public void SemanticFacts_CoverageZero_FailsWithProviderLineRemedy()
     {
-        var root = NewIndexedWorkspace();
+        _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
@@ -150,7 +150,7 @@ public sealed class DoctorRunnerTests : IDisposable
     [Fact]
     public void SemanticFacts_PendingAboveThreshold_FailsWithIndexRemedy()
     {
-        var root = NewIndexedWorkspace();
+        _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
@@ -166,7 +166,7 @@ public sealed class DoctorRunnerTests : IDisposable
     [Fact]
     public void SemanticFacts_HealthyCoverageAndProvider_StayQuiet()
     {
-        var root = NewIndexedWorkspace();
+        _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
@@ -175,6 +175,21 @@ public sealed class DoctorRunnerTests : IDisposable
 
         report.Healthy.ShouldBeTrue();
         report.Findings.ShouldNotContain(f => f.Name == "semantic search" || f.Name == "embeddings provider");
+    }
+
+    [Fact]
+    public void SemanticFacts_UnavailableReason_InfoInsteadOfQdrantArms()
+    {
+        _ = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                null, EmbeddingsHealth.Silent, "qdrant endpoint is not a valid uri"));
+
+        var finding = report.Findings.Single(f => f.Name == "semantic search");
+        finding.State.ShouldBe(DoctorRunner.StateInfo);
+        finding.Detail.ShouldContain("facts unavailable");
+        finding.Detail.ShouldContain("not a valid uri");
     }
 
     [Fact]
@@ -194,7 +209,7 @@ public sealed class DoctorRunnerTests : IDisposable
     [Fact]
     public void SemanticFacts_ModelMissingWithFallback_FailPlusInfo()
     {
-        var root = NewIndexedWorkspace();
+        _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
@@ -214,17 +229,17 @@ public sealed class DoctorRunnerTests : IDisposable
     [Fact]
     public void SemanticFacts_CpuOnlyEmbeddings_InfoOnlyAndHealthy()
     {
-        var root = NewIndexedWorkspace();
+        _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 4, 0, 4),
-                new EmbeddingsHealth("ollama", null, null, "embedding model runs on CPU (size_vram: 0) — embeddings will be slow")));
+                new EmbeddingsHealth("ollama", null, null, "embedding model runs on CPU — embeddings will be slow")));
 
         report.Healthy.ShouldBeTrue();
         var info = report.Findings.Single(f => f.Name == "embeddings provider");
         info.State.ShouldBe(DoctorRunner.StateInfo);
-        info.Detail.ShouldContain("size_vram: 0");
+        info.Detail.ShouldContain("runs on CPU");
     }
 
     private void SeedRegistry(params (string Name, string Root)[] entries)

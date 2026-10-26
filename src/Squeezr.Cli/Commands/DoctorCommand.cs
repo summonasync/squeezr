@@ -59,15 +59,22 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
     {
         try
         {
-            EmbeddingRuntimeFactory.TryCreate(workspaceRoot, withProvider: false, out _, out var vectorStore);
+            var warnings = EmbeddingRuntimeFactory.TryCreate(
+                workspaceRoot, withProvider: false, out _, out var vectorStore);
+            var health = await EmbeddingsHealthProbe.ProbeAsync(workspaceRoot, cancellationToken);
+            if (vectorStore is null)
+            {
+                return new WorkspaceSemanticFacts(
+                    null, health, warnings.Count > 0 ? string.Join("; ", warnings) : "vector store unavailable");
+            }
+
             QdrantStatus qdrant;
             using (var meta = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
             {
                 qdrant = await QdrantStatusProbe.ProbeAsync(vectorStore, meta, cancellationToken);
             }
 
-            return new WorkspaceSemanticFacts(
-                qdrant, await EmbeddingsHealthProbe.ProbeAsync(workspaceRoot, cancellationToken));
+            return new WorkspaceSemanticFacts(qdrant, health);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException)
         {

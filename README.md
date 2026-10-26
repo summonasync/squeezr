@@ -1363,8 +1363,8 @@ read healthy anymore: `semantic coverage 0%` fails with the remedy
 with `squeezr services up`, and a pending backlog above one watch drain pass
 (256 chunks) fails on its own. The resolved provider outcome is reported the
 same way `index` resolves it: `auto → onnx (ollama unreachable: …)` is an info
-line, a missing ONNX model is a fail, and an ollama model running CPU-only
-(`size_vram: 0` in `/api/ps`) is an info that says embeddings will be slow.
+line, a missing ONNX model is a fail, and an ollama model running CPU-only is
+an info that says embeddings will be slow.
 Exit code 1 when anything failed; `--json` prints one
 `{kind, healthy, checks}` document; the run is read-only — findings carry
 remedies, nothing is ever changed.

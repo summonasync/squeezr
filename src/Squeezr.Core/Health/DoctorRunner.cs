@@ -25,7 +25,7 @@ public static class DoctorRunner
     public static readonly TimeSpan StaleIndexThreshold = TimeSpan.FromDays(30);
 
     // one watch drain pass moves at most watch.embedBudgetPerPass (default 256) chunks, so a backlog
-    // above this line has already outlived a full drain pass and is not transient catch-up work
+    // at or above this line has already outlived a full drain pass and is not transient catch-up work
     public const int PendingChunksThreshold = 256;
 
     // findings carry only problems and info; "ok" is the absence of a line, and Healthy is no fail among them
@@ -119,6 +119,12 @@ public static class DoctorRunner
         var chunks = status.Repos.Sum(r => r.Chunks);
         if (noSemantic || chunks == 0)
         {
+            yield break;
+        }
+
+        if (facts.UnavailableReason is { } unavailable)
+        {
+            yield return new DoctorFinding("semantic search", StateInfo, $"facts unavailable: {unavailable}", null);
             yield break;
         }
 

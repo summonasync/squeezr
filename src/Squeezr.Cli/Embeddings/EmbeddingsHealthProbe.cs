@@ -41,7 +41,7 @@ public static class EmbeddingsHealthProbe
     {
         var executor = await OllamaExecutorProbe.ProbeAsync(options, ct, handler);
         return executor.Device == "cpu"
-            ? "embedding model runs on CPU (size_vram: 0) — embeddings will be slow"
+            ? "embedding model runs on CPU — embeddings will be slow"
             : null;
     }
 }

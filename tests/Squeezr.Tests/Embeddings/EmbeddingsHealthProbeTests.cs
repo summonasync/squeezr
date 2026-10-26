@@ -9,6 +9,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Embeddings;
 
+[Collection("ProcessGlobals")]
 public sealed class EmbeddingsHealthProbeTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
@@ -69,7 +70,7 @@ public sealed class EmbeddingsHealthProbeTests : IDisposable
         var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None, handler);
 
         health.Provider.ShouldBe("ollama");
-        health.CpuOnly.ShouldNotBeNull().ShouldContain("size_vram: 0");
+        health.CpuOnly.ShouldNotBeNull().ShouldContain("runs on CPU");
     }
 
     [Fact]
