@@ -271,6 +271,93 @@ public sealed class WorkspaceIndexerUnreadableTests
         }
     }
 
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void FreshnessRefresh_RowUnderDeniedDirectory_KeepsWhileDeletedSiblingStillReaps()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/vault/deep.cs", Second);
+        WriteFile(workspace, "repo/gone.cs", First);
+        new WorkspaceIndexer().Index(workspace);
+
+        var deepId = FileIdOf(workspace, "vault/deep.cs");
+        var goneId = FileIdOf(workspace, "gone.cs");
+        File.Delete(Path.Combine(workspace, "repo", "gone.cs"));
+        var vaultPath = Path.Combine(workspace, "repo", "vault");
+        var originalMode = File.GetUnixFileMode(vaultPath);
+        File.SetUnixFileMode(vaultPath, UnixFileMode.None);
+        try
+        {
+            // the premise is asserted, not assumed: stat into the denied subtree fails, and File.Exists
+            // answers the same false a real deletion would — that collapse is the bug's whole shape
+            Should.Throw<UnauthorizedAccessException>(() => File.GetAttributes(Path.Combine(vaultPath, "deep.cs")));
+            File.Exists(Path.Combine(vaultPath, "deep.cs")).ShouldBeFalse();
+
+            var result = FreshnessGuard.CheckAndRefresh(
+                workspace, [("demo", "vault/deep.cs"), ("demo", "gone.cs")]);
+
+            result.Refreshed.ShouldContain("demo/gone.cs");
+
+            using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+            {
+                store.FindFileById(deepId).ShouldNotBeNull(
+                    "a denied stat is not a deletion: the freshness refresh must not reap the row");
+                store.FindFileById(goneId).ShouldBeNull(
+                    "a genuine deletion still reaps on the same route");
+            }
+        }
+        finally
+        {
+            File.SetUnixFileMode(vaultPath, originalMode);
+        }
+    }
+
+    [Fact]
+    public void IndexFile_PathTheProbeCannotShape_NeverEscapesTheProbe()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/real.cs", First);
+        new WorkspaceIndexer().Index(workspace);
+
+        Should.NotThrow(() => new WorkspaceIndexer().IndexFile(workspace, "demo", "bad\0path.cs"));
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void FreshnessRefresh_FileReplacedByDirectory_ReapsWithoutThrowing()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/swapped", Second);
+        WriteFile(workspace, "repo/keep.cs", First);
+        new WorkspaceIndexer().Index(workspace);
+
+        var swappedId = FileIdOf(workspace, "swapped");
+        File.Delete(Path.Combine(workspace, "repo", "swapped"));
+        Directory.CreateDirectory(Path.Combine(workspace, "repo", "swapped"));
+        // premise asserted: the stored path now resolves to a directory — present for stat, but no
+        // regular file behind it, which is the shape the probe-present fallthrough has to judge
+        File.Exists(Path.Combine(workspace, "repo", "swapped")).ShouldBeFalse();
+        UnixFileType.IsRegularFile(Path.Combine(workspace, "repo", "swapped")).ShouldBeFalse();
+
+        FreshnessResult result = default;
+        Should.NotThrow(() => result = FreshnessGuard.CheckAndRefresh(
+            workspace, [("demo", "swapped"), ("demo", "keep.cs")]));
+
+        result.Refreshed.ShouldBe(["demo/swapped"]);
+
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            store.FindFileById(FileIdOf(workspace, "keep.cs")).ShouldNotBeNull(
+                "the fresh sibling must survive the same refresh untouched");
+        }
+
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            store.FindFileById(swappedId).ShouldBeNull(
+                "a directory took the path: nothing readable backs the row, the swap reaps without a throw");
+        }
+    }
+
     private static string NewWorkspace()
     {
         var workspace = TestDirs.NewTempDir();
