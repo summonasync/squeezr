@@ -6,7 +6,8 @@ namespace Squeezr.Tests.Cli;
 [Collection("ProcessGlobals")]
 public sealed class DanglingHomePinTests
 {
-    private const string DanglingHome = "/tmp/squeezr-tests/missing-home-082";
+    private static readonly string DanglingHome =
+        Path.Combine(Path.GetTempPath(), "squeezr-tests", "missing-home-082");
 
     [Fact]
     public async Task WorkspaceList_DanglingHome_FailsWithParseableEnvelope()

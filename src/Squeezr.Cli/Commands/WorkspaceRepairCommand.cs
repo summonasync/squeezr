@@ -165,7 +165,7 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         {
             // Same permission net as drop: a denial no phase classified would otherwise leave the CLI
             // with exit 255 and no parseable output on any channel.
-            var reported = ex is UnauthorizedAccessException or ArgumentException
+            var reported = ex is UnauthorizedAccessException
                 ? new WorkspaceException(ex.Message, WorkspaceException.DefaultCode, ex)
                 : ex;
             return CommandError.Report(reported, settings.Json);

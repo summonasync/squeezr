@@ -33,7 +33,9 @@ public static class SqueezrHome
 
     // A profile-anchored home whose profile directory is gone is the dangling-HOME environment
     // error (BUGS/010): registry commands refuse with a remedy instead of answering an empty
-    // world. SQUEEZR_HOME is the user's explicit choice and never trips this.
+    // world. SQUEEZR_HOME is the user's explicit choice and never trips this. No profile at all
+    // (HOME unset and no passwd entry) refuses the same way — pre-fix that corner silently
+    // anchored the central store to the process working directory.
     public static void RequireHabitableProfileHome()
     {
         if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(HomeEnvironmentVariable)))
@@ -41,10 +43,17 @@ public static class SqueezrHome
             return;
         }
 
-        if (UserHome.Path is { } home && !Directory.Exists(home))
+        if (UserHome.Path is not { } home)
         {
             throw new WorkspaceException(
-                $"the user home directory '{home}' does not exist — HOME dangles; set {HomeEnvironmentVariable} to a central store or fix HOME",
+                $"no user home directory could be resolved — set {HomeEnvironmentVariable} to a central store or fix HOME",
+                WorkspaceException.HomeUnavailableCode);
+        }
+
+        if (!Directory.Exists(home))
+        {
+            throw new WorkspaceException(
+                $"the user home directory '{home}' is not a usable directory — HOME dangles; set {HomeEnvironmentVariable} to a central store or fix HOME",
                 WorkspaceException.HomeUnavailableCode);
         }
     }
