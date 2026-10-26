@@ -187,9 +187,10 @@ public sealed class SearchEngine
             return scope;
         }
 
-        // rank-excluded files stay indexed, so a prefix whose whole subtree is excluded answers
-        // with no hits — only a prefix matching nothing at all is the "no such subtree" error
-        if (!excluding || FileScope.Resolve(store, file => PathPrefix.Matches(prefix, file.Path), repoId).Count == 0)
+        // a glob or language emptying an existing prefix subtree is a valid zero-hit answer, and
+        // rank-excluded files stay indexed, so an excluded-away subtree answers empty too — only
+        // a prefix matching nothing at all is the "no such subtree" error
+        if (FileScope.Resolve(store, file => PathPrefix.Matches(prefix, file.Path), repoId).Count == 0)
         {
             var indexedPaths = (repoId is { } id ? store.ListFiles(id) : store.ListAllFiles())
                 .Select(f => f.Path)

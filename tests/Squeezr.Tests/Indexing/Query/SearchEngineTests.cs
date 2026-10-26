@@ -112,13 +112,36 @@ public class SearchEngineTests
         var engine = new SearchEngine(fixture.Workspace);
 
         var response = await engine.SearchHybridAsync(
-            GlobQuery("needleLookup") with { PathGlob = "a/**" },
+            GlobQuery("collector lookup") with { PathGlob = "a/**" },
             new FakeEmbeddingProvider(),
             new FakeVectorStore(),
             CancellationToken.None);
 
         response.Matches.ShouldNotBeEmpty();
         response.Matches.ShouldAllBe(m => m.Path == "a/x.js");
+    }
+
+    [Fact]
+    public void PathGlob_EmptyingPrefixSubtree_AnswersEmptyWithoutSubtreeError()
+    {
+        var fixture = NewGlobFixture();
+        var engine = new SearchEngine(fixture.Workspace);
+
+        var response = engine.Search(GlobQuery("needle") with { Prefix = "a/", PathGlob = "**/*.nosuch" });
+
+        response.Matches.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Search_UnknownPrefix_StillThrowsSubtreeError()
+    {
+        var fixture = NewGlobFixture();
+        var engine = new SearchEngine(fixture.Workspace);
+
+        var ex = Should.Throw<WorkspaceException>(() =>
+            engine.Search(GlobQuery("needle") with { Prefix = "missing/" }));
+
+        ex.Message.ShouldContain("No indexed files under prefix");
     }
 
     [Fact]
