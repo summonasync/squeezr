@@ -1,0 +1,165 @@
+using Shouldly;
+using Squeezr.Core.Indexing;
+
+namespace Squeezr.Tests.Indexing;
+
+public class SecretSnippetRedactorTests
+{
+    private const string AppSettings = """
+        {
+          "ConnectionStrings": {
+            "Default": "Server=localhost;Database=orders;Password=SC1-CANARY-CONN-VALUE"
+          },
+          "ApiKey": "SC2-CANARY-KEY-VALUE",
+          "Logging": {
+            "LogLevel": {
+              "Default": "Information"
+            }
+          },
+          "Vault": "address=https://vault.internal;token=SC3-CANARY-VAULT-VALUE",
+          "AllowedHosts": "*",
+          "Port": "8080"
+        }
+        """;
+
+    [Fact]
+    public void Redact_CertainSecretKeys_LoseTheirValueToTheCertainMarker()
+    {
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", AppSettings);
+
+        masked.ShouldContain("\"ApiKey\": \"[redacted]\"");
+        masked.ShouldNotContain("SC2-CANARY-KEY-VALUE");
+    }
+
+    [Fact]
+    public void Redact_ValueCarryingASecretAssignment_LosesItsValueToTheDoubtMarker()
+    {
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", AppSettings);
+
+        masked.ShouldContain("\"Default\": \"[redacted?]\"");
+        masked.ShouldContain("\"Vault\": \"[redacted?]\"");
+        masked.ShouldNotContain("SC1-CANARY-CONN-VALUE");
+        masked.ShouldNotContain("SC3-CANARY-VAULT-VALUE");
+    }
+
+    [Fact]
+    public void Redact_KeepsStructureAndPlainValuesSearchable()
+    {
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", AppSettings);
+
+        masked.ShouldContain("\"ConnectionStrings\": {");
+        masked.ShouldContain("\"Default\": \"Information\"");
+        masked.ShouldContain("\"Port\": \"8080\"");
+        masked.ShouldContain("\"AllowedHosts\": \"*\"");
+    }
+
+    [Fact]
+    public void Redact_MovesNoLineBoundary()
+    {
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", AppSettings);
+
+        masked.Count(c => c == '\n').ShouldBe(AppSettings.Count(c => c == '\n'));
+    }
+
+    [Fact]
+    public void Redact_BothMarkersLandOnTheirOwnLines_AndStayDistinct()
+    {
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", AppSettings);
+
+        Occurrences(masked, "[redacted?]").ShouldBe(2);
+        Occurrences(masked, "[redacted]").ShouldBe(1);
+    }
+
+    private static int Occurrences(string text, string needle) =>
+        (text.Length - text.Replace(needle, string.Empty, StringComparison.Ordinal).Length) / needle.Length;
+
+    [Fact]
+    public void Redact_EnvTemplate_MasksSecretValuesAndKeepsPlainOnes()
+    {
+        var masked = SecretSnippetRedactor.Redact(
+            ".env.example", "OPENAI_API_KEY=sk-live-canary-1\nRETENTION_DAYS=30\nLOG_LEVEL=debug\n");
+
+        masked.ShouldContain("OPENAI_API_KEY=[redacted]");
+        masked.ShouldContain("RETENTION_DAYS=30");
+        masked.ShouldContain("LOG_LEVEL=debug");
+        masked.ShouldNotContain("sk-live-canary-1");
+    }
+
+    [Fact]
+    public void Redact_DockerCompose_MasksSecretEnvironmentEntries()
+    {
+        const string compose = """
+            services:
+              db:
+                image: postgres:16
+                environment:
+                  - POSTGRES_PASSWORD=hunter2-canary
+                  - POSTGRES_PORT=5432
+            """;
+
+        var masked = SecretSnippetRedactor.Redact("docker-compose.yml", compose);
+
+        masked.ShouldContain("- POSTGRES_PASSWORD=[redacted]");
+        masked.ShouldContain("- POSTGRES_PORT=5432");
+        masked.ShouldContain("image: postgres:16");
+        masked.ShouldNotContain("hunter2-canary");
+    }
+
+    [Fact]
+    public void Redact_XmlConfig_MasksKeyValuePairsAndNamedAttributes()
+    {
+        const string appConfig = """
+            <configuration>
+              <appSettings>
+                <add key="ClientSecret" value="cs-canary-1" />
+                <add key="Timeout" value="30" />
+              </appSettings>
+              <password>pw-canary-1</password>
+              <identity password="pw-canary-2" />
+            </configuration>
+            """;
+
+        var masked = SecretSnippetRedactor.Redact("myapp.config", appConfig);
+
+        masked.ShouldContain("<add key=\"ClientSecret\" value=\"[redacted]\" />");
+        masked.ShouldContain("<add key=\"Timeout\" value=\"30\" />");
+        masked.ShouldContain("<password>[redacted]</password>");
+        masked.ShouldContain("<identity password=\"[redacted]\" />");
+        masked.ShouldNotContain("cs-canary-1");
+        masked.ShouldNotContain("pw-canary-1");
+        masked.ShouldNotContain("pw-canary-2");
+    }
+
+    [Fact]
+    public void Redact_UncoveredPath_ReturnsTheTextUnchanged()
+    {
+        var masked = SecretSnippetRedactor.Redact("src/App.cs", AppSettings);
+
+        masked.ShouldBe(AppSettings);
+    }
+
+    [Fact]
+    public void Redact_CompactSingleLineJson_MasksEachSecretPairAndKeepsTheRest()
+    {
+        const string compact = """{ "ApiKey": "sc-canary-1", "Port": "9090", "Vault": "address=x;token=sc-canary-2" }""";
+
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", compact);
+
+        masked.ShouldContain("\"ApiKey\": \"[redacted]\"");
+        masked.ShouldContain("\"Port\": \"9090\"");
+        masked.ShouldContain("\"Vault\": \"[redacted?]\"");
+        masked.ShouldNotContain("sc-canary-1");
+        masked.ShouldNotContain("sc-canary-2");
+    }
+
+    [Fact]
+    public void Redact_EmptyAndStructuralValues_StayUntouched()
+    {
+        const string shaped = "{\n  \"ConnectionStrings\": {\n    \"Default\": \"\"\n  }\n}";
+
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", shaped);
+
+        masked.ShouldContain("\"ConnectionStrings\": {");
+        masked.ShouldContain("\"Default\": \"\"");
+    }
+}

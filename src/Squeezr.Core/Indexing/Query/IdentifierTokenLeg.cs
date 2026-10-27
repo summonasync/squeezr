@@ -149,7 +149,7 @@ public static class IdentifierTokenLeg
 
                     try
                     {
-                        content = File.ReadAllText(fullPath);
+                        content = SecretSnippetRedactor.Redact(file.Path, File.ReadAllText(fullPath));
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {

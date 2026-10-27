@@ -403,7 +403,7 @@ public sealed class WorkspaceIndexer
                     throw new WorkspaceException($"File '{relativePath}' is unreadable: {ex.Message}");
                 }
 
-                var text = DecodeUtf8(bytes);
+                var text = SecretSnippetRedactor.Redact(relativePath, DecodeUtf8(bytes));
 
                 var doc = existing ?? new FileDocument { Id = store.GetNextFileId(), RepoId = repoDoc.Id };
                 doc.Path = relativePath;
@@ -597,7 +597,8 @@ public sealed class WorkspaceIndexer
             string text;
             try
             {
-                text = File.ReadAllText(file.FullPath);
+                text = SecretSnippetRedactor.Redact(
+                    file.RelativePath, File.ReadAllText(file.FullPath));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -1257,7 +1258,7 @@ public sealed class WorkspaceIndexer
 
                     try
                     {
-                        text = File.ReadAllText(fullPath);
+                        text = SecretSnippetRedactor.Redact(file.Path, File.ReadAllText(fullPath));
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
