@@ -7,7 +7,7 @@ public static class CappedArmPolicy
         && arm.StoreCandidates >= arm.RequestedTopK
         && arm.Hits.Count < ScopedVectorBudget.BaseTopK;
 
-    public static string? Warning(SemanticArm arm, string? repo, string? prefix, string? kind, string? pathGlob = null)
+    public static string? Warning(SemanticArm arm, string? repo, string? prefix, string? kind, string? pathGlob)
     {
         if (!IsCapped(arm))
         {

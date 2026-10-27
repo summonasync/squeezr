@@ -104,6 +104,25 @@ public class HybridSearchTests
     }
 
     [Fact]
+    public void Search_BothSourceHit_CountsIntoExactLeg()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var fileId = chunks.First().FileId;
+        var chunk = ChunkContaining(chunks, 3);
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", fileId, repoId, chunk.StartLine, chunk.EndLine, 0.95)]
+        };
+
+        var response = Search(workspace, "Add", store);
+
+        response.Matches.ShouldContain(m => m.Source == "both");
+        var usage = response.LegUsage.ShouldNotBeNull();
+        usage.SemanticTokens.ShouldBe(0);
+        (usage.ExactTokens + usage.SemanticTokens).ShouldBe(response.TokensUsed);
+    }
+
+    [Fact]
     public void Search_WithoutMatches_LegUsageStaysNull()
     {
         var workspace = NewIndexedWorkspace(out _, out _);
