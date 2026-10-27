@@ -20,13 +20,16 @@ public sealed record WorkspaceStatusReport(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     int WorkspacesOmitted = 0,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyDictionary<string, int>? KindChunks = null)
+    IReadOnlyDictionary<string, int>? KindChunks = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    FleetWatchAdoption? WatchAdoption = null)
 {
     public static WorkspaceStatusReport Create(
         WorkspaceStatus status,
         IReadOnlyList<string> staleFiles,
         string? embeddingsProvider = null,
-        WorkspaceSiblingSnapshot? siblings = null)
+        WorkspaceSiblingSnapshot? siblings = null,
+        FleetWatchAdoption? watchAdoption = null)
     {
         var warnings = new List<string>();
         var repos = status.Repos
@@ -66,7 +69,8 @@ public sealed record WorkspaceStatusReport(
             embeddingsProvider,
             warnings,
             ListedWorkspaces(siblings),
-            siblings?.Omitted ?? 0);
+            siblings?.Omitted ?? 0,
+            WatchAdoption: watchAdoption);
     }
 
     private static IReadOnlyList<WorkspaceSiblingEntry>? ListedWorkspaces(WorkspaceSiblingSnapshot? siblings) =>
