@@ -54,7 +54,7 @@ public sealed class WorkspaceWatcher
 
     private List<FileSystemWatcher> _watchers = [];
     private SemanticSessionPool? _sessions;
-    private WatchEventFilter? _filter;
+    private volatile WatchEventFilter? _filter;
     private CancellationTokenSource? _stopping;
     private Task _runTask = Task.CompletedTask;
     private DaemonHeartbeatWriter? _heartbeat;
@@ -68,6 +68,7 @@ public sealed class WorkspaceWatcher
     private bool _runtimeResolved;
     private int _embedBudget = WatchConfig.DefaultEmbedBudgetPerPass;
     private bool _forcePass;
+    private bool _trackedDirty;
     private bool _running;
 
     public WorkspaceWatcher(
@@ -108,9 +109,7 @@ public sealed class WorkspaceWatcher
         _debounceWindow = TimeSpan.FromSeconds(config.Watch.DebounceSeconds);
         _backoffCap = TimeSpan.FromSeconds(config.Watch.BackoffMaxSeconds);
         _embedBudget = config.Watch.EmbedBudgetPerPass;
-        var repoRoots = ResolveRepoRoots(_workspaceRoot);
-        var rulesByRepo = BuildRulesets(repoRoots, config);
-        _filter = new WatchEventFilter(_workspaceRoot, repoRoots, rulesByRepo);
+        _filter = BuildFilter();
 
         var storeDir = SqueezrPaths.StoreDir(_workspaceRoot);
         // a leftover stamp naming a writer that is gone means that pass never finished: erase the record and
@@ -211,6 +210,12 @@ public sealed class WorkspaceWatcher
         return result;
     }
 
+    private WatchEventFilter BuildFilter()
+    {
+        var repoRoots = ResolveRepoRoots(_workspaceRoot);
+        return new WatchEventFilter(_workspaceRoot, repoRoots, BuildRulesets(repoRoots, LoadConfig(_workspaceRoot)));
+    }
+
     private List<FileSystemWatcher> CreateWatchers()
     {
         var watchers = new List<FileSystemWatcher>();
@@ -260,6 +265,17 @@ public sealed class WorkspaceWatcher
             return;
         }
 
+        if (WatchEventFilter.IsGitInternalChange(fullPath))
+        {
+            lock (_gate)
+            {
+                _trackedDirty = true;
+                _forcePass = true;
+                _lastEventAt = DateTime.UtcNow;
+            }
+            return;
+        }
+
         if (!_filter!.ShouldTrack(fullPath, pathMayBeGone))
         {
             return;
@@ -290,6 +306,11 @@ public sealed class WorkspaceWatcher
                 if (!RefreshClaim())
                 {
                     return;
+                }
+
+                if (TakeTrackedDirty())
+                {
+                    RefreshFilter();
                 }
 
                 var batch = CollectDueBatch();
@@ -346,6 +367,37 @@ public sealed class WorkspaceWatcher
             }
 
             return batch;
+        }
+    }
+
+    // git writes land inside .git (index, refs, logs), never on the watched sources themselves, so a
+    // mid-watch commit reaches this loop only through this flag: the next pass walks with a ruleset
+    // rebuilt on a fresh tracked set, and the filter stops judging new events by the stale snapshot.
+    private bool TakeTrackedDirty()
+    {
+        lock (_gate)
+        {
+            if (!_trackedDirty)
+            {
+                return false;
+            }
+
+            _trackedDirty = false;
+            return true;
+        }
+    }
+
+    private void RefreshFilter()
+    {
+        try
+        {
+            _filter = BuildFilter();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException
+            and not StackOverflowException
+            and not OperationCanceledException)
+        {
+            _status?.Faulted($"watch filter refresh failed, events keep judging by the previous rules: {ex.Message}");
         }
     }
 

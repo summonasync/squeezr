@@ -20,6 +20,11 @@ internal static class TestGitRepo
         }
     }
 
+    public static void Commit(string root, string message)
+    {
+        Run(root, "commit", "-m", message);
+    }
+
     private static void Run(string root, params string[] args)
     {
         var start = new ProcessStartInfo

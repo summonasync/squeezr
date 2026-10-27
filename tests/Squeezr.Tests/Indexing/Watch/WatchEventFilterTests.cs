@@ -103,6 +103,27 @@ public class WatchEventFilterTests
         WatchEventFilter.IsIgnoreFileChange("/repo/src/Program.cs").ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData("/repo/.git/index")]
+    [InlineData("/repo/.git/index.lock")]
+    [InlineData("/repo/.git/logs/HEAD")]
+    [InlineData("/repo/.git/refs/heads/main")]
+    [InlineData("C:\\repo\\.git\\index")]
+    public void IsGitInternalChange_GitHousekeepingPath_ReturnsTrue(string fullPath)
+    {
+        WatchEventFilter.IsGitInternalChange(fullPath).ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("/repo/src/Program.cs")]
+    [InlineData("/repo/.github/workflows/ci.yml")]
+    [InlineData("/repo/gitignore")]
+    [InlineData("/myrepo/x")]
+    public void IsGitInternalChange_RegularPath_ReturnsFalse(string fullPath)
+    {
+        WatchEventFilter.IsGitInternalChange(fullPath).ShouldBeFalse();
+    }
+
     [Fact]
     public void ShouldTrack_ResidualGitignorePattern_KeepsTrackingTheFile()
     {
