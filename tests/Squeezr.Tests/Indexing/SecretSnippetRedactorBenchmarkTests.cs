@@ -7,7 +7,7 @@ namespace Squeezr.Tests.Indexing;
 // Regression belt for the 098 pathology: a covered config line carrying a 20k+ word-run used to
 // burn the full two-second RegexMatchTimeout belt (the scans resumed at every position of the run)
 // before the line failed closed. The committed fixtures below reproduce that shape family; the
-// threshold is an order of magnitude under the old belt-fire cost, so a backtracking regression
+// threshold sits fourfold under the measured belt-fire cost, so a backtracking regression
 // cannot slip through while the suite stays stable on loaded CI machines.
 public class SecretSnippetRedactorBenchmarkTests
 {
