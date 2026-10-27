@@ -128,10 +128,11 @@ public sealed class WatchOwnerClaim
         {
             // A refused reap has two faces: the marker changed hands between the evaluation and the delete
             // (someone live won it — evaluate the fresh read, recursion is bounded because every further
-            // round needs a changed marker), or it still names our dead owner but the file refuses to go
-            // (an undeletable store is not ours to take — hold instead of looping on the same marker).
+            // round needs a Present marker naming somebody new), or the file refuses to hand over our
+            // displaced marker (or any marker at all — unreadable counts): an undeletable store is not
+            // ours to take, so hold and say so instead of looping.
             var fresh = WatchOwnerMarkerFile.Read(_markerPath);
-            if (fresh.State == WatchOwnerMarkerState.Present && fresh.Marker == displaced)
+            if (fresh.State != WatchOwnerMarkerState.Present || fresh.Marker == displaced)
             {
                 _onWarning?.Invoke("stale owner marker could not be removed");
                 return WatchOwnerOutcome.Held(WatchOwnerStatus.StoreUnavailable, fresh.Marker);

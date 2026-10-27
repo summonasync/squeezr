@@ -82,6 +82,20 @@ public sealed class WatchOwnerClaimAdoptionTests : IDisposable
     }
 
     [Fact]
+    public void TryAcquire_UnreadableAndUndeletableMarker_HoldsInsteadOfLoopingOnIt()
+    {
+        WriteGarbageMarker(age: DaemonHeartbeat.StaleThreshold + TimeSpan.FromSeconds(15));
+
+        var outcome = CreateClaimWithRealClock(markerReap: _ => false).TryAcquire();
+
+        outcome.Status.ShouldBe(WatchOwnerStatus.StoreUnavailable);
+        outcome.IsOwner.ShouldBeFalse();
+        ReadMarkerFile().ShouldBeNull();
+        WatchAdoptionEventFile.TryRead(_storeDir).ShouldBeNull();
+        _warnings.ShouldHaveSingleItem().ShouldContain("stale owner marker could not be removed");
+    }
+
+    [Fact]
     public void TryAcquire_MarkerReplacedByLiveOwnerWhileWeReaped_NeverStealsTheLiveClaim()
     {
         WriteMarker(MarkerOwnedBy(
@@ -148,8 +162,10 @@ public sealed class WatchOwnerClaimAdoptionTests : IDisposable
             _storeDir, DaemonHeartbeat.DefaultKind, () => _now, IsPidMarkedAlive, _warnings.Enqueue, pid,
             markerCreate, markerReap);
 
-    private WatchOwnerClaim CreateClaimWithRealClock(int? pid = null) =>
-        new(_storeDir, DaemonHeartbeat.DefaultKind, null, IsPidMarkedAlive, _warnings.Enqueue, pid);
+    private WatchOwnerClaim CreateClaimWithRealClock(
+        int? pid = null,
+        Func<WatchOwnerMarker?, bool>? markerReap = null) =>
+        new(_storeDir, DaemonHeartbeat.DefaultKind, null, IsPidMarkedAlive, _warnings.Enqueue, pid, null, markerReap);
 
     private bool IsPidMarkedAlive(int pid) => _alivePids.Contains(pid);
 
