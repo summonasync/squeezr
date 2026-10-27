@@ -39,6 +39,20 @@ public sealed class HintTextTests
         MapHint.ForCli().ShouldBe("lower --depth or raise --max-tokens");
 
     [Fact]
+    public void TruncationLine_WithoutLegs_KeepsTheDialect()
+    {
+        HintText.TruncationLine(550, 600, "raise --max-tokens")
+            .ShouldBe("truncated: 550 of 600 token ceiling — raise --max-tokens");
+    }
+
+    [Fact]
+    public void TruncationLine_WithLegs_AppendsPerLegNumbersAfterTheRemedy()
+    {
+        HintText.TruncationLine(550, 600, "raise --max-tokens", "exact 210, semantic 340")
+            .ShouldBe("truncated: 550 of 600 token ceiling — raise --max-tokens (exact 210, semantic 340)");
+    }
+
+    [Fact]
     public void ForMcp_MapHint_KeepsTheParameterWording() =>
         MapHint.ForMcp().ShouldBe("lower depth or raise maxTokens");
 

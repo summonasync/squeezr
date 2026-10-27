@@ -68,7 +68,7 @@ public class CappedArmPolicyTests
         var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, null);
 
         warning.ShouldBe(
-            "semantic arm capped at 160 examined candidates; 3 in scope, 2 delivered — narrow with kind=code, prefix or repo scope");
+            "semantic arm capped at 160 examined candidates; 3 in scope, 2 delivered — narrow with --path-glob, kind=code, prefix or repo scope");
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class CappedArmPolicyTests
         var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), null, "src/", DocKindDetector.Code);
 
         warning.ShouldNotBeNull().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with narrower prefix or repo scope");
+            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with --path-glob, narrower prefix or repo scope");
         warning.ShouldNotContain("kind=");
     }
 
@@ -94,7 +94,7 @@ public class CappedArmPolicyTests
     {
         var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), null, null, DocKindDetector.Docs);
 
-        warning.ShouldNotBeNull().ShouldContain("narrow with prefix or repo scope");
+        warning.ShouldNotBeNull().ShouldContain("narrow with --path-glob, prefix or repo scope");
         warning.ShouldNotContain("kind=");
     }
 
@@ -104,7 +104,7 @@ public class CappedArmPolicyTests
         var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), "demo", null, null);
 
         warning.ShouldNotBeNull().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with kind=code or prefix");
+            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with --path-glob, kind=code or prefix");
         warning.ShouldNotContain("repo scope");
     }
 
@@ -114,7 +114,25 @@ public class CappedArmPolicyTests
         var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), "demo", "src/", DocKindDetector.Code);
 
         warning.ShouldNotBeNull().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with narrower prefix");
+            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with --path-glob or narrower prefix");
+    }
+
+    [Fact]
+    public void Warning_GlobNarrowableUniverse_NamesPathGlob()
+    {
+        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, null, pathGlob: null);
+
+        warning.ShouldNotBeNull().ShouldContain("narrow with --path-glob");
+    }
+
+    [Fact]
+    public void Warning_AlreadyGlobNarrowed_StaysQuietAboutGlob()
+    {
+        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, null, pathGlob: "*.cs");
+
+        warning.ShouldNotBeNull().ShouldNotContain("--path-glob");
+        warning.ShouldBe(
+            "semantic arm capped at 160 examined candidates; 3 in scope, 2 delivered — narrow with kind=code, prefix or repo scope");
     }
 
     [Fact]

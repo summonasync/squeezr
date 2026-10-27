@@ -139,7 +139,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     response.TokensUsed,
                     settings.MaxTokens,
                     response.Truncated,
-                    response.Hint));
+                    response.Hint,
+                    response.LegUsage?.ExactTokens,
+                    response.LegUsage?.SemanticTokens));
                 if (jsonWarnings is { Count: > 0 })
                 {
                     JsonOutput.WriteWarnings(jsonWarnings);
@@ -163,7 +165,10 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
             if (response.Truncated && response.Hint is { } truncationHint)
             {
-                AnsiConsole.MarkupLine($"[grey]truncated: {truncationHint.ForCli()}[/]");
+                var legs = response.LegUsage is { } usage
+                    ? $"exact {usage.ExactTokens} tok, semantic {usage.SemanticTokens} tok"
+                    : null;
+                AnsiConsole.MarkupLine($"[grey]truncated: {truncationHint.ForCli()}{(legs is null ? string.Empty : $" ({legs})")}[/]");
             }
 
             if (vectorStoreUnavailable)

@@ -7,7 +7,7 @@ public static class CappedArmPolicy
         && arm.StoreCandidates >= arm.RequestedTopK
         && arm.Hits.Count < ScopedVectorBudget.BaseTopK;
 
-    public static string? Warning(SemanticArm arm, string? repo, string? prefix, string? kind)
+    public static string? Warning(SemanticArm arm, string? repo, string? prefix, string? kind, string? pathGlob = null)
     {
         if (!IsCapped(arm))
         {
@@ -15,6 +15,11 @@ public static class CappedArmPolicy
         }
 
         var moves = new List<string>();
+        if (string.IsNullOrWhiteSpace(pathGlob))
+        {
+            moves.Add("--path-glob");
+        }
+
         if (DocKindDetector.FilterKind(kind) is null)
         {
             moves.Add($"kind={DocKindDetector.Code}");

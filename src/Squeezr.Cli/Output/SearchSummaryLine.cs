@@ -8,4 +8,6 @@ public sealed record SearchSummaryLine(
     int TokensUsed,
     int? MaxTokens,
     bool Truncated,
-    TruncationHint? Hint = null);
+    TruncationHint? Hint = null,
+    int? ExactTokens = null,
+    int? SemanticTokens = null);
