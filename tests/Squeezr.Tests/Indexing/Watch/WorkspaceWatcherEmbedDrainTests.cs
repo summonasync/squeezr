@@ -12,10 +12,12 @@ namespace Squeezr.Tests.Indexing.Watch;
 public class WorkspaceWatcherEmbedDrainTests
 {
     // Every wait below spans an edit-propagation chain: FSW delivery, one debounce window, a full pass.
-    // The chain idles at 2-6s but crossed 30s on this box under multi-lane suite load — 102's serial run
-    // flaked this class, and 104's own repro run 1 caught the ServeWatchClaim sibling dying at 60s while
-    // load spiked to 44. The budget rides the 087-T3 load-tolerant shape at the same three-minute size
-    // the SaturatedBudget fix picked for the seven-window chain; a failure now reads as a real stall.
+    // The chain idles in low single-digit seconds, but this class flaked once under suite load (102's
+    // serial run, class-level attribution only) and the same chain shape killed sibling classes on their
+    // 60s budgets during 104's own runs (ServeWatchClaim at load 44, ServeEmbedDrain at load 109) while
+    // this class — the only one on a three-minute budget — passed under the same conditions. The budget
+    // rides the 087-T3 load-tolerant shape at the size the SaturatedBudget fix picked for the
+    // seven-window chain: roughly 30-90x the idle chain, and a failure now reads as a real stall.
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan QuietSettle = TimeSpan.FromSeconds(3);
 
