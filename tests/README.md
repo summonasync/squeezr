@@ -22,6 +22,12 @@ Rule: any test fixture that writes-then-spawns an executable (scripts, fake CLIs
 
 Rule: assert the invariant the producer guarantees (parse the value, bound it by the documented threshold), plus the race-free parts (pid, line presence, format). Exact quantized values ("0s", "5s") are flake bait.
 
+### 4. Waits crossing an edit-propagation chain get a measured multiple; a stop wait sits outside the machinery's own join window
+
+The 100 fix covered the drain family's saturated member, but the class's other members kept a shared 30s budget over a chain of FSW delivery + one debounce window + a full pass — and `ServeWatchClaimTests.TwoParticipants_OnOneStore_OwnerIndexes_ObserverAnswers` died at 60s the same day (104's repro run 1, load spiked to 44 on the multi-lane box): the chain idles at 2-6s isolated but stretches an order of magnitude when other lanes load the host. The budget is a multiple of the observed chain latency (087-T3 shape), documented at the assert site — 100 picked three minutes for the seven-window chain, 104 moved the one-window members onto the same size. Related margin rule: a test-side stop wait must exceed the machinery's internal join window (`WorkspaceWatcher.PassJoinTimeout` = 5s), never match it — matching gives a loaded box zero margin and fails the test on a stop that was still working.
+
+Rule: size wait budgets from measured chain latency under load and name the multiple; a test that joins or stops machinery with its own timeout must budget strictly more than the machinery's internal join.
+
 ## The gate
 
 Load flake evidence is only valid from a full serial suite run (`dotnet test --no-build -m:1`) on the loaded box — isolated runs are green by definition here. A fix is accepted after three consecutive clean serial runs. Precedent for load-tolerant deadlines: 087-T3 (measured multiple of observed latency, no fixed floor). Bare `Skip` is not a fix; a tolerance must name the invariant it keeps.
