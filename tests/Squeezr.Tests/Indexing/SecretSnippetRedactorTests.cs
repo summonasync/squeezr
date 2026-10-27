@@ -153,6 +153,51 @@ public class SecretSnippetRedactorTests
     }
 
     [Fact]
+    public void Redact_UrlWithEmbeddedCredentials_LosesItsValueToTheDoubtMarker()
+    {
+        const string appSettings = """{ "MongoUri": "mongodb://svc:uri-canary-1@db.internal:27017", "Endpoint": "https://vault.internal:8200" }""";
+
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", appSettings);
+
+        masked.ShouldContain("\"MongoUri\": \"[redacted?]\"");
+        masked.ShouldContain("\"Endpoint\": \"https://vault.internal:8200\"");
+        masked.ShouldNotContain("uri-canary-1");
+    }
+
+    [Fact]
+    public void Redact_YamlFlowMap_MasksSecretEntriesInsideAndKeepsPlainOnes()
+    {
+        const string compose = """
+            services:
+              db:
+                image: postgres:16
+                environment: {POSTGRES_PASSWORD: flow-canary-1, POSTGRES_PORT: 5432}
+            """;
+
+        var masked = SecretSnippetRedactor.Redact("docker-compose.yml", compose);
+
+        masked.ShouldContain("environment: {POSTGRES_PASSWORD: [redacted], POSTGRES_PORT: 5432}");
+        masked.ShouldNotContain("flow-canary-1");
+    }
+
+    [Fact]
+    public void Redact_XmlNamedValuePairs_MasksSecretHoldingNames()
+    {
+        const string appConfig = """
+            <configuration>
+              <variable name="SmtpPassword" value="name-canary-1" />
+              <variable name="LogDir" value="logs" />
+            </configuration>
+            """;
+
+        var masked = SecretSnippetRedactor.Redact("myapp.config", appConfig);
+
+        masked.ShouldContain("<variable name=\"SmtpPassword\" value=\"[redacted]\" />");
+        masked.ShouldContain("<variable name=\"LogDir\" value=\"logs\" />");
+        masked.ShouldNotContain("name-canary-1");
+    }
+
+    [Fact]
     public void Redact_EmptyAndStructuralValues_StayUntouched()
     {
         const string shaped = "{\n  \"ConnectionStrings\": {\n    \"Default\": \"\"\n  }\n}";

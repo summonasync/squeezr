@@ -42,11 +42,15 @@ internal static class SecretSnippetRedactor
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex XmlKeyValueAttrs = new(
-        @"\bkey\s*=\s*""(?<key>[^""]*)""[^>]*?\bvalue\s*=\s*""(?<val>[^""]*)""",
+        @"(?:key|name)\s*=\s*""(?<key>[^""]*)""[^>]*?\bvalue\s*=\s*""(?<val>[^""]*)""",
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex InlinePair = new(
         @"""(?<key>[^""]+)""\s*:\s*""(?<val>[^""]*)""",
+        RegexOptions.Compiled, RegexTimeout);
+
+    private static readonly Regex FlowPair = new(
+        """(?<key>[\w.\-]+)\s*[:=]\s*(?<val>[^,}\]\n]+)""",
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex XmlAttribute = new(
@@ -54,7 +58,7 @@ internal static class SecretSnippetRedactor
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex EmbeddedAssignment = new(
-        """\b(password|passwd|pwd|secret|api[_\- ]?key|token|credential|private[_\- ]?key|connection[_\- ]?string)\b\s*[=:]\s*\S""",
+        """(password|passwd|pwd|secret|api[_\- ]?key|token|credential|private[_\- ]?key|connection[_\- ]?string)\s*[=:]\s*\S|\w+://[^\s:/@]+:[^\s@/]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----""",
         RegexOptions.Compiled | RegexOptions.IgnoreCase, RegexTimeout);
 
     internal static string Redact(string relativePath, string text) =>
@@ -117,9 +121,14 @@ internal static class SecretSnippetRedactor
 
         var value = match.Groups["val"];
         var trimmed = value.Value.Trim();
-        if (trimmed.Length == 0 || trimmed.StartsWith('{') || trimmed.StartsWith('['))
+        if (trimmed.Length == 0)
         {
             return null;
+        }
+
+        if (trimmed.StartsWith('{') || trimmed.StartsWith('['))
+        {
+            return RedactStructuralValue(value, line);
         }
 
         var masked = IsSecretKey(match.Groups["key"].Value) ? Masked
@@ -128,6 +137,29 @@ internal static class SecretSnippetRedactor
         return masked is null
             ? null
             : Splice(line, value.Index, value.Length, masked);
+    }
+
+    private static string? RedactStructuralValue(Group value, string line)
+    {
+        var span = value.Value;
+        var matches = FlowPair.Matches(span);
+        var changed = false;
+        for (var i = matches.Count - 1; i >= 0; i--)
+        {
+            var entry = matches[i];
+            var masked = IsSecretKey(entry.Groups["key"].Value) ? Masked
+                : EmbeddedAssignment.IsMatch(entry.Groups["val"].Value) ? MaskedUncertain
+                : null;
+            if (masked is null)
+            {
+                continue;
+            }
+
+            span = Splice(span, entry.Groups["val"].Index, entry.Groups["val"].Length, masked);
+            changed = true;
+        }
+
+        return changed ? Splice(line, value.Index, value.Length, span) : null;
     }
 
     private static string RedactXmlAttributes(string line)

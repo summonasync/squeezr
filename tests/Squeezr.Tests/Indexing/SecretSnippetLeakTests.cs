@@ -18,8 +18,10 @@ public class SecretSnippetLeakTests
     private const string ApiKeyCanary = "SC2-CANARY-KEY-VALUE";
     private const string VaultCanary = "SC3-CANARY-VAULT-VALUE";
     private const string CustomCanary = "SC4-CANARY-CUSTOM-VALUE";
+    private const string UriCanary = "SC6-CANARY-URI-VALUE";
 
-    private static readonly string[] Canaries = [ConnStringCanary, ApiKeyCanary, VaultCanary];
+    private static readonly string[] Canaries =
+        [ConnStringCanary, ApiKeyCanary, VaultCanary, UriCanary];
 
     [Fact]
     public void Index_FullPass_NeverStoresAConfigSecretValueOnAnySurface()
@@ -167,6 +169,7 @@ public class SecretSnippetLeakTests
                 }
               },
               "Vault": "address=https://vault.internal;token=SC3-CANARY-VAULT-VALUE",
+              "MongoUri": "mongodb://svc:SC6-CANARY-URI-VALUE@db.internal:27017",
               "AllowedHosts": "*",
               "Port": "8080"
             }
