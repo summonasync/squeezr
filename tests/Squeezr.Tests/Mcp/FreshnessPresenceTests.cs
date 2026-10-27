@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using Shouldly;
@@ -66,7 +67,13 @@ public class FreshnessPresenceTests
             .Select(w => w.GetString()!)
             .Single(w => w.StartsWith("active writer on this store:"));
         writerLine.ShouldContain($"pid {Environment.ProcessId}");
-        writerLine.ShouldContain("watch beat 0s old");
+        // the age is wall-clock between the marker write and the tool call, floor-quantized to seconds —
+        // an exact "0s" flaked under full-suite load (092). The notice only prints for a writer the probe
+        // deems alive, so the printed age staying inside the stale bound is the invariant worth asserting.
+        var beatAge = Regex.Match(writerLine, @"watch beat (\d+)s old");
+        beatAge.Success.ShouldBeTrue(writerLine);
+        int.Parse(beatAge.Groups[1].Value)
+            .ShouldBeLessThanOrEqualTo((int)DaemonHeartbeat.StaleThreshold.TotalSeconds, writerLine);
     }
 
     [Fact]

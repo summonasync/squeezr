@@ -61,6 +61,7 @@ public class WorkspaceWatcherEmbedDrainTests
         new WorkspaceIndexer().Index(workspace);
         var pendingBefore = PendingCount(workspace);
         pendingBefore.ShouldBeGreaterThanOrEqualTo(9, "fixture must need more than two budgeted passes");
+        (pendingBefore % 3).ShouldBe(0, "the quiescence wait below expects the drain to end in a saturated pass, whose re-arm produces the empty tail record");
 
         var provider = new CountingEmbeddingProvider();
         var recorder = new DrainRecorder();
@@ -69,7 +70,17 @@ public class WorkspaceWatcherEmbedDrainTests
         await watcher.StartAsync(workspace, cts.Token);
         try
         {
-            await UntilAsync(() => PendingCount(workspace) == 0);
+            // the counter drops to zero the moment the last MarkChunksEmbedded lands, while that pass is
+            // still trigramming and saving state — asserting from the counter alone races the final
+            // PassCompleted record (review-070-05: "Sum should be 18 but was 15"). The saturated loop
+            // always ends with one debounced empty pass that re-arms nothing, so its record is the only
+            // quiescent signal; the fixture must keep pendingBefore a multiple of the budget. The whole
+            // saturated drain paces itself through seven debounce windows here, so the wait rides the
+            // 087-T3 load-tolerant shape instead of the 30s edit-propagation knife.
+            await UntilAsync(
+                () => PendingCount(workspace) == 0 && recorder.Completed is [.., { Embedded: 0 }],
+                TimeSpan.FromMinutes(3),
+                "the drain must end with the debounced empty pass after the counter reached zero");
 
             var drains = recorder.Completed.Where(r => r.Embedded > 0).ToList();
             drains.Count.ShouldBeGreaterThanOrEqualTo(2, "a saturated budget must spread the catch-up over passes");
@@ -235,9 +246,12 @@ public class WorkspaceWatcherEmbedDrainTests
         Task.FromResult<WatchEmbeddingRuntime?>(
             new WatchEmbeddingRuntime(provider, store, new EmbeddingProviderResolution("onnx", null)));
 
-    private static async Task UntilAsync(Func<bool> condition, string? what = null)
+    private static async Task UntilAsync(Func<bool> condition, string? what = null) =>
+        await UntilAsync(condition, WaitTimeout, what);
+
+    private static async Task UntilAsync(Func<bool> condition, TimeSpan timeout, string? what = null)
     {
-        var deadline = DateTime.UtcNow + WaitTimeout;
+        var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
         {
             if (condition())
@@ -248,7 +262,7 @@ public class WorkspaceWatcherEmbedDrainTests
             await Task.Delay(100);
         }
 
-        condition().ShouldBeTrue($"condition not met within {WaitTimeout.TotalSeconds}s" +
+        condition().ShouldBeTrue($"condition not met within {timeout.TotalSeconds}s" +
                                  (what is null ? "" : $": {what}"));
     }
 
