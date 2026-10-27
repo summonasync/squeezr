@@ -221,25 +221,9 @@ public sealed class WorkspaceWatcher
         var watchers = new List<FileSystemWatcher>();
         try
         {
-            foreach (var root in _filter!.RepoRoots)
+            foreach (var path in WatchPaths())
             {
-                var watcher = new FileSystemWatcher(root)
-                {
-                    IncludeSubdirectories = true,
-                    InternalBufferSize = EventBufferBytes,
-                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName
-                };
-                watcher.Created += (_, e) => OnEvent(e.FullPath, pathMayBeGone: false);
-                watcher.Changed += (_, e) => OnEvent(e.FullPath, pathMayBeGone: false);
-                watcher.Deleted += (_, e) => OnEvent(e.FullPath, pathMayBeGone: true);
-                watcher.Renamed += (_, e) =>
-                {
-                    OnEvent(e.OldFullPath, pathMayBeGone: true);
-                    OnEvent(e.FullPath, pathMayBeGone: false);
-                };
-                watcher.Error += OnWatcherError;
-                watcher.EnableRaisingEvents = true;
-                watchers.Add(watcher);
+                watchers.Add(CreateWatcher(path));
             }
         }
         catch
@@ -251,6 +235,47 @@ public sealed class WorkspaceWatcher
             throw;
         }
         return watchers;
+    }
+
+    // a linked worktree's git writes land in its real gitdir, outside the watched root (GitDirLink):
+    // with no watcher there a mid-watch commit never trips the tracked-dirty flag
+    private List<string> WatchPaths()
+    {
+        var roots = _filter!.RepoRoots;
+        var paths = roots.ToList();
+        foreach (var root in roots)
+        {
+            var gitdir = GitDirLink.Resolve(root);
+            if (gitdir is null || paths.Any(added => WatchEventFilter.IsUnderPath(gitdir, added)))
+            {
+                continue;
+            }
+
+            paths.Add(gitdir);
+        }
+
+        return paths;
+    }
+
+    private FileSystemWatcher CreateWatcher(string path)
+    {
+        var watcher = new FileSystemWatcher(path)
+        {
+            IncludeSubdirectories = true,
+            InternalBufferSize = EventBufferBytes,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName
+        };
+        watcher.Created += (_, e) => OnEvent(e.FullPath, pathMayBeGone: false);
+        watcher.Changed += (_, e) => OnEvent(e.FullPath, pathMayBeGone: false);
+        watcher.Deleted += (_, e) => OnEvent(e.FullPath, pathMayBeGone: true);
+        watcher.Renamed += (_, e) =>
+        {
+            OnEvent(e.OldFullPath, pathMayBeGone: true);
+            OnEvent(e.FullPath, pathMayBeGone: false);
+        };
+        watcher.Error += OnWatcherError;
+        watcher.EnableRaisingEvents = true;
+        return watcher;
     }
 
     internal void OnEvent(string fullPath, bool pathMayBeGone)
