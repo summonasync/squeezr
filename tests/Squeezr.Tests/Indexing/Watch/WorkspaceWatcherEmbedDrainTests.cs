@@ -61,6 +61,7 @@ public class WorkspaceWatcherEmbedDrainTests
         new WorkspaceIndexer().Index(workspace);
         var pendingBefore = PendingCount(workspace);
         pendingBefore.ShouldBeGreaterThanOrEqualTo(9, "fixture must need more than two budgeted passes");
+        (pendingBefore % 3).ShouldBe(0, "the quiescence wait below expects the drain to end in a saturated pass, whose re-arm produces the empty tail record");
 
         var provider = new CountingEmbeddingProvider();
         var recorder = new DrainRecorder();

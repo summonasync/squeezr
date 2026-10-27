@@ -90,11 +90,16 @@ public sealed class StatefulFakeCli
         script.AppendLine("        ;;");
         script.AppendLine("esac");
 
-        File.WriteAllText(binaryPath, script.ToString());
+        // same write-then-exec race as FakeCli: the move hands execve an inode nobody ever held open
+        // for writing (tests/README.md pattern 2)
+        var pendingPath = binaryPath + ".installing";
+        File.WriteAllText(pendingPath, script.ToString());
         if (!OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(binaryPath, ExecutableMode);
+            File.SetUnixFileMode(pendingPath, ExecutableMode);
         }
+
+        File.Move(pendingPath, binaryPath, overwrite: true);
         return new StatefulFakeCli(binaryPath, capturePath);
     }
 }

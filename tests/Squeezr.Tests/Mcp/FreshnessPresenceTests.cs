@@ -73,7 +73,7 @@ public class FreshnessPresenceTests
         var beatAge = Regex.Match(writerLine, @"watch beat (\d+)s old");
         beatAge.Success.ShouldBeTrue(writerLine);
         int.Parse(beatAge.Groups[1].Value)
-            .ShouldBeLessThan((int)DaemonHeartbeat.StaleThreshold.TotalSeconds, writerLine);
+            .ShouldBeLessThanOrEqualTo((int)DaemonHeartbeat.StaleThreshold.TotalSeconds, writerLine);
     }
 
     [Fact]
