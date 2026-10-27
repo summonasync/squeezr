@@ -35,7 +35,7 @@ public sealed class StorageCorruptionEnvelopeTests
         var run = await CliTestProcess.RunPipedAsync(home, "", root, "status", "--json");
 
         run.ExitCode.ShouldBe(1, Describe(run));
-        ErrorEnvelope(run).GetProperty("code").GetString().ShouldNotBeNull();
+        ErrorEnvelope(run).GetProperty("code").GetString().ShouldBe("storage_unavailable");
     }
 
     [Fact]
