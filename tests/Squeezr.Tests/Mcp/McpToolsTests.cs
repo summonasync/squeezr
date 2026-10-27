@@ -28,10 +28,13 @@ public class McpToolsTests
 
         var symbol = tools.Single(t => t.Name == "symbol_lookup");
         symbol.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldContain("name");
-        symbol.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()).ShouldContain("name");
+        symbol.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldContain("symbol");
+        symbol.JsonSchema.TryGetProperty("required", out var symbolRequired).ShouldBeFalse();
 
         var refs = tools.Single(t => t.Name == "find_references");
-        refs.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()).ShouldContain("symbol");
+        refs.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldContain("symbol");
+        refs.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldContain("name");
+        refs.JsonSchema.TryGetProperty("required", out var refsRequired).ShouldBeFalse();
 
         var map = tools.Single(t => t.Name == "repo_map");
         map.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldContain("depth");

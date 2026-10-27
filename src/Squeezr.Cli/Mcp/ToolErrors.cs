@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
+using Squeezr.Cli.Commands;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Workspace;
@@ -22,7 +23,12 @@ public static class ToolErrors
     internal static ToolErrorPayload PayloadFor(Exception ex, McpWorkspace workspace)
     {
         var code = CommandError.CodeFor(ex);
-        var message = ex is WorkspaceException ? ex.Message : $"Internal error: {ex.Message}";
+
+        // a client-fault code (invalid_usage) must not read as retryable: only unknown failures
+        // carry the internal prefix, usage errors speak for themselves
+        var message = ex is WorkspaceException or McpUsageException
+            ? ex.Message
+            : $"Internal error: {ex.Message}";
         var (cause, nextSteps) = RemedyFor(code, workspace);
         return nextSteps is null
             ? new ToolErrorPayload(code, message)

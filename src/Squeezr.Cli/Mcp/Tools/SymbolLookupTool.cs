@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Commands;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
@@ -28,17 +29,19 @@ public sealed class SymbolLookupTool
         _identity = identity;
     }
 
-    [Description("Look up an exact symbol by name across the indexed workspace: signature, doc comment, file:span, and body within the token budget (maxTokens, default 300) — the method you named, not the whole file. When a type's body does not fit the budget, the hit carries its member list (name, kind, line) plus membersOmitted instead, so the next call is expand_span on the member you want. Not-found returns an empty result, not an error; expand_span widens the context around a hit.")]
+    [Description("Look up an exact symbol by name across the indexed workspace: signature, doc comment, file:span, and body within the token budget (maxTokens, default 300) — the method you named, not the whole file. When a type's body does not fit the budget, the hit carries its member list (name, kind, line) plus membersOmitted instead, so the next call is expand_span on the member you want. Not-found returns an empty result, not an error; expand_span widens the context around a hit. Pass the symbol as 'name' or its alias 'symbol' — both are accepted, a wrong-param error names both.")]
     [McpServerTool(Name = "symbol_lookup", Title = "Look up symbol")]
     public object Find(
-        string name,
+        string? name = null,
         string? kind = null,
         string? repo = null,
-        int? maxTokens = null) =>
-        _gate.Run(() => FindCore(name, kind, repo, maxTokens));
+        int? maxTokens = null,
+        string? symbol = null) =>
+        _gate.Run(() => FindCore(name, symbol, kind, repo, maxTokens));
 
     private object FindCore(
-        string name,
+        string? name,
+        string? symbol,
         string? kind,
         string? repo,
         int? maxTokens)
@@ -46,9 +49,10 @@ public sealed class SymbolLookupTool
         var sw = Stopwatch.StartNew();
         try
         {
+            var symbolName = SymbolParamAlias.Resolve("symbol_lookup", name, symbol, "name", "symbol");
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(name, kind, repo, SecretGuardReader.Load(root).ExtraPatterns);
+            var parameters = Params(symbolName, kind, repo, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("symbol_lookup", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -64,12 +68,12 @@ public sealed class SymbolLookupTool
             var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
             var lookup = new SymbolLookup(root);
 
-            var result = lookup.Find(name, repo, kind, budget, body: true);
+            var result = lookup.Find(symbolName, repo, kind, budget, body: true);
 
             var freshness = Guard(root, result);
             if (freshness.Refreshed.Count > 0)
             {
-                result = lookup.Find(name, repo, kind, budget, body: true);
+                result = lookup.Find(symbolName, repo, kind, budget, body: true);
             }
 
             if (result.GuardWarnings is { } withheld)
@@ -125,7 +129,7 @@ public sealed class SymbolLookupTool
             _cache?.Put("symbol_lookup", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
-        catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is WorkspaceException or McpUsageException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
             return ToolErrors.From(ex, _workspace);
         }
