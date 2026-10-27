@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Cli.Commands;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
@@ -30,19 +31,20 @@ public sealed class FindReferencesTool
         _identity = identity;
     }
 
-    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. A row set belongs to the declaring file's last parse, so a caller indexed after it can leave a removed callsite listed here and hide one it added: the row-visible part of that lag is reported, not silently served (a brand-new callsite into a declaring the caller never had a row in leaves nothing to mark — only a full index catches it) — the declaring files appear in staleFiles with a warning naming them, a watch pass re-parses them under a per-pass budget, and 'squeezr index' reconciles every caller now. Returns a tool error if the symbol is not indexed. Pair with symbol_lookup to jump from a match to its usages.")]
+    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. A row set belongs to the declaring file's last parse, so a caller indexed after it can leave a removed callsite listed here and hide one it added: the row-visible part of that lag is reported, not silently served (a brand-new callsite into a declaring the caller never had a row in leaves nothing to mark — only a full index catches it) — the declaring files appear in staleFiles with a warning naming them, a watch pass re-parses them under a per-pass budget, and 'squeezr index' reconciles every caller now. Returns a tool error if the symbol is not indexed. Pass the symbol as 'symbol' or its alias 'name' — both are accepted, a wrong-param error names both. Pair with symbol_lookup to jump from a match to its usages.")]
     [McpServerTool(Name = "find_references", Title = "Find references")]
-    public object Find(string symbol, string? repo = null) =>
-        _gate.Run(() => FindCore(symbol, repo));
+    public object Find(string? symbol = null, string? repo = null, string? name = null) =>
+        _gate.Run(() => FindCore(symbol, name, repo));
 
-    private object FindCore(string symbol, string? repo)
+    private object FindCore(string? symbol, string? name, string? repo)
     {
         var sw = Stopwatch.StartNew();
         try
         {
+            var symbolName = SymbolParamAlias.Resolve("find_references", symbol, name, "symbol", "name");
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(symbol, repo, SecretGuardReader.Load(root).ExtraPatterns);
+            var parameters = Params(symbolName, repo, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("find_references", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -56,12 +58,12 @@ public sealed class FindReferencesTool
             var warnings = new List<string>();
             var lookup = new RefLookup(root);
 
-            var result = lookup.Find(symbol, repo);
+            var result = lookup.Find(symbolName, repo);
 
             var freshness = Guard(root, result);
             if (freshness.Refreshed.Count > 0)
             {
-                result = lookup.Find(symbol, repo);
+                result = lookup.Find(symbolName, repo);
             }
 
             var data = BuildData(root, result);
@@ -109,7 +111,7 @@ public sealed class FindReferencesTool
             _cache?.Put("find_references", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
-        catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is WorkspaceException or McpUsageException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
             return ToolErrors.From(ex, _workspace);
         }
