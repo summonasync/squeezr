@@ -48,19 +48,19 @@ internal static class SecretSnippetRedactor
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex InlinePair = new(
-        """(?<key>[^"]+)"\s*:\s*(?:"(?<val>[^"]*)"|(?<struct>\[[^\]\n]*\]|\{[^\}\n]*\}))""",
+        """(?<key>(?>[^"]+))"\s*:\s*(?:"(?<val>[^"]*)"|(?<struct>\[[^\]\n]*\]|\{[^\}\n]*\}))""",
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex FlowPair = new(
-        """(?<key>[\w.\-]+)\s*[:=]\s*(?<val>"[^"]*"|'[^']*'|[^,}\]\n]+)""",
+        """(?<key>(?>[\w.\-]+))\s*[:=]\s*(?<val>"[^"]*"|'[^']*'|[^,}\]\n]+)""",
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex XmlAttribute = new(
-        """(?<head>(?<name>[\w.\-:]+)\s*=\s*")(?<val>[^"]*)(")""",
+        """(?<head>(?<name>(?>[\w.\-:]+))\s*=\s*")(?<val>[^"]*)(")""",
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex EmbeddedAssignment = new(
-        """(password|passwd|pwd|secret|api[_\- ]?key|token|credential|private[_\- ]?key|connection[_\- ]?string)\s*[=:]\s*\S|(?<![\w.])\w+://[^\s:/@]+:[^\s@/]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----""",
+        """(password|passwd|pwd|secret|api[_\- ]?key|token|credential|private[_\- ]?key|connection[_\- ]?string)\s*[=:]\s*\S|(?<![\w.])(?>\w+)://(?>[^\s:/@]+):(?>[^\s@/]+)@|-----BEGIN [A-Z ]*PRIVATE KEY-----""",
         RegexOptions.Compiled | RegexOptions.IgnoreCase, RegexTimeout);
 
     internal static string Redact(string relativePath, string text) =>
@@ -88,6 +88,9 @@ internal static class SecretSnippetRedactor
         return string.Join('\n', lines);
     }
 
+    // every scanner below first demands the one character its pattern cannot exist without, so a
+    // huge line that carries none of them never reaches the regex and the per-position rescan cost
+    // that used to trip the timeout belt stays off the hot path
     private static string RedactLine(string line)
     {
         return RedactInlinePairs(line, depth: 0) is { } inlined ? inlined
@@ -99,6 +102,11 @@ internal static class SecretSnippetRedactor
 
     private static string? RedactInlinePairs(string line, int depth)
     {
+        if (!line.Contains('"'))
+        {
+            return null;
+        }
+
         var matches = InlinePair.Matches(line);
         if (matches.Count == 0)
         {
@@ -198,6 +206,11 @@ internal static class SecretSnippetRedactor
     private static string? RedactStructuralValue(Group value, string line)
     {
         var span = value.Value;
+        if (!span.Contains(':') && !span.Contains('='))
+        {
+            return null;
+        }
+
         var matches = FlowPair.Matches(span);
         var changed = false;
         for (var i = matches.Count - 1; i >= 0; i--)
@@ -218,6 +231,11 @@ internal static class SecretSnippetRedactor
 
     private static string RedactXmlAttributes(string line)
     {
+        if (!line.Contains('=') || !line.Contains('"'))
+        {
+            return line;
+        }
+
         var pair = XmlKeyValueAttrs.Match(line);
         if (pair.Success && IsSecretKey(pair.Groups["key"].Value))
         {
