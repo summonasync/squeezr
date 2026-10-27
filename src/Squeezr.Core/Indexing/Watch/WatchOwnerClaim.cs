@@ -11,6 +11,9 @@ namespace Squeezr.Core.Indexing.Watch;
 /// owner is an adoption: the event lands on the store so fleet and status can say who unblocked the
 /// deferred-embeddings queue, and the reap is an atomic compare-and-rename, so a session racing another
 /// adopter can never delete the winner's fresh marker — two live sessions always end with exactly one owner.
+/// A process that dies between the reap's rename and its delete leaves a .reap reservation behind; the next
+/// successful claim sweeps those remnants and, when the reservation is all that is left of the displaced
+/// owner, records the adoption the crashed reaper never got to write.
 /// </summary>
 public sealed class WatchOwnerClaim
 {
@@ -159,6 +162,11 @@ public sealed class WatchOwnerClaim
             if (reaping && displaced is { } dead)
             {
                 RecordAdoption(claim, dead);
+                WatchReapReservations.Sweep(_markerPath, _onWarning);
+            }
+            else
+            {
+                NameSweptRemnant(claim);
             }
 
             return WatchOwnerOutcome.Acquired(claim, displaced);
@@ -166,7 +174,17 @@ public sealed class WatchOwnerClaim
 
         if (reaping)
         {
-            return WatchOwnerOutcome.Held(WatchOwnerStatus.RaceLost, ReadOwner());
+            var winner = ReadOwner();
+            if (displaced is { } dead && winner is { } taker && !taker.IsOwnedBy(_pid, _host))
+            {
+                // The reap landed but the gap it opened went to another session; the taker is the adopter
+                // as far as fleet and status are concerned, so leave the event here instead of letting the
+                // displaced owner vanish from the story.
+                RecordAdoption(taker, dead);
+            }
+
+            WatchReapReservations.Sweep(_markerPath, _onWarning);
+            return WatchOwnerOutcome.Held(WatchOwnerStatus.RaceLost, winner);
         }
 
         return Evaluate(WatchOwnerMarkerFile.Read(_markerPath), now);
@@ -184,6 +202,23 @@ public sealed class WatchOwnerClaim
         return displaced is { } dead
             ? WatchOwnerMarkerFile.TryDeleteIf(_markerPath, dead)
             : WatchOwnerMarkerFile.TryDelete(_markerPath);
+    }
+
+    private void NameSweptRemnant(WatchOwnerMarker claim)
+    {
+        var swept = WatchReapReservations.Sweep(_markerPath, _onWarning);
+        if (swept.Count == 0)
+        {
+            return;
+        }
+
+        var displaced = swept
+            .OrderByDescending(remnant => remnant.LastBeatAt)
+            .FirstOrDefault(remnant => !remnant.IsOwnedBy(_pid, _host));
+        if (displaced is { } dead)
+        {
+            RecordAdoption(claim, dead);
+        }
     }
 
     private void RecordAdoption(WatchOwnerMarker claim, WatchOwnerMarker dead)
