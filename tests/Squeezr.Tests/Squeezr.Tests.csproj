@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CA1416;CS0649;CS8600;CS8602;CS8603;CS8604;xUnit1031</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

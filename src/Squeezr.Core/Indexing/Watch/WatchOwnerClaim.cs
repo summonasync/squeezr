@@ -25,7 +25,7 @@ public sealed class WatchOwnerClaim
     private readonly Func<DateTime> _utcNow;
     private readonly Func<int, bool> _isProcessAlive;
     private readonly Func<WatchOwnerMarker, bool>? _markerCreate;
-    private readonly Func<WatchOwnerMarker, bool>? _markerReap;
+    private readonly Func<WatchOwnerMarker?, bool>? _markerReap;
     private readonly Action<string>? _onWarning;
 
     public WatchOwnerClaim(
@@ -50,7 +50,7 @@ public sealed class WatchOwnerClaim
         Action<string>? onWarning,
         int? pid,
         Func<WatchOwnerMarker, bool>? markerCreate = null,
-        Func<WatchOwnerMarker, bool>? markerReap = null)
+        Func<WatchOwnerMarker?, bool>? markerReap = null)
     {
         _markerPath = WatchOwnerMarker.PathFor(storeDir);
         _storeDir = storeDir;
