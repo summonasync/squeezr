@@ -65,6 +65,23 @@ public sealed class WatchOwnerClaimAdoptionTests : IDisposable
     }
 
     [Fact]
+    public void TryAcquire_UndeletableDeadMarker_HoldsInsteadOfLoopingOnIt()
+    {
+        var dead = MarkerOwnedBy(
+            DeadPid, Environment.MachineName, beatAge: DaemonHeartbeat.StaleThreshold + TimeSpan.FromSeconds(10));
+        WriteMarker(dead);
+
+        var outcome = CreateClaim(markerReap: _ => false).TryAcquire();
+
+        outcome.Status.ShouldBe(WatchOwnerStatus.StoreUnavailable);
+        outcome.IsOwner.ShouldBeFalse();
+        outcome.Owner!.Pid.ShouldBe(DeadPid);
+        ReadMarkerFile().ShouldBe(dead);
+        WatchAdoptionEventFile.TryRead(_storeDir).ShouldBeNull();
+        _warnings.ShouldHaveSingleItem().ShouldContain("stale owner marker could not be removed");
+    }
+
+    [Fact]
     public void TryAcquire_MarkerReplacedByLiveOwnerWhileWeReaped_NeverStealsTheLiveClaim()
     {
         WriteMarker(MarkerOwnedBy(
@@ -105,11 +122,22 @@ public sealed class WatchOwnerClaimAdoptionTests : IDisposable
         var outcomes = await Task.WhenAll(contenders);
 
         var winners = outcomes.Where(outcome => outcome.IsOwner).ToList();
-        winners.Count.ShouldBe(1, "two live sessions meeting one dead claim must end with one adopter");
-        winners[0].TookOverFrom!.Pid.ShouldBe(DeadPid);
-        var adopted = WatchAdoptionEventFile.TryRead(_storeDir).ShouldNotBeNull();
-        adopted.AdopterPid.ShouldBe(winners[0].Owner!.Pid);
-        ReadMarkerFile()!.Pid.ShouldBe(winners[0].Owner.Pid);
+        winners.Count.ShouldBe(1, "two live sessions meeting one dead claim must end with one owner");
+        var winner = winners[0];
+        if (winner.TookOverFrom is { } dead)
+        {
+            dead.Pid.ShouldBe(DeadPid);
+            var adopted = WatchAdoptionEventFile.TryRead(_storeDir).ShouldNotBeNull();
+            adopted.AdopterPid.ShouldBe(winner.Owner!.Pid);
+        }
+        else
+        {
+            winner.Owner!.Pid.ShouldBeOneOf(contenderPids);
+            WatchAdoptionEventFile.TryRead(_storeDir).ShouldBeNull(
+                "winning the free gap between the other contender's reap and create is a fresh claim, not an adoption");
+        }
+
+        ReadMarkerFile()!.Pid.ShouldBe(winner.Owner.Pid);
     }
 
     private WatchOwnerClaim CreateClaim(

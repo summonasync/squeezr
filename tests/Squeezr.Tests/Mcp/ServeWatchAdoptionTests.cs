@@ -79,6 +79,48 @@ public sealed class ServeWatchAdoptionTests
             StaleOwnerPid(), "the live owner's marker must survive the observer's adoption polls");
     }
 
+    [Fact]
+    public async Task OwnerReleasedBetweenPolls_ObserverTakesOverFreeStore_WithoutAdoptionProvenance()
+    {
+        var workspace = NewEmbedFreeIndexedWorkspace();
+        var storeDir = SqueezrPaths.StoreDir(workspace);
+        var stderr = new LineCapture();
+        var held = new WatchOwnerClaim(storeDir, DaemonHeartbeat.ServeWatchKind);
+        held.TryAcquire().IsOwner.ShouldBeTrue();
+
+        var harness = await McpTestHarness.StartAsync(
+            workspace, watch: true,
+            claimOverride: FreeStoreClaim(storeDir),
+            embeddingRuntime: Runtime(new CountingEmbeddingProvider()),
+            stderr: stderr);
+        try
+        {
+            await stderr.AwaitFor("owns this store", StartupLineTimeout);
+
+            held.Release();
+
+            await WaitForEngineArmedAsync(workspace);
+            var takeoverLine = await stderr.AwaitFor("claim taken over", StartupLineTimeout);
+            takeoverLine.ShouldContain("no owner");
+            WatchAdoptionEventFile.TryRead(storeDir).ShouldBeNull(
+                "claiming a store whose owner left gracefully is a fresh claim, not an adoption");
+        }
+        finally
+        {
+            await harness.DisposeAsync();
+        }
+    }
+
+    private static WatchOwnerClaim FreeStoreClaim(string storeDir) => new(
+        storeDir,
+        DaemonHeartbeat.ServeWatchKind,
+        null,
+        null,
+        null,
+        ForeignPid());
+
+    private static int ForeignPid() => Environment.ProcessId ^ 0x3FFF;
+
     private static WatchOwnerClaim WedgedOwnerClaim(string storeDir, OwnerProbe probe)
     {
         var marker = new WatchOwnerMarker(

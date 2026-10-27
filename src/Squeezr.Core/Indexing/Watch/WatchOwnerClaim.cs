@@ -9,8 +9,8 @@ namespace Squeezr.Core.Indexing.Watch;
 /// the liveness of whoever is already in the file is decided by the same staleness rules the heartbeat uses,
 /// and takeover needs the beat past the window *and* the owning pid gone. A takeover of an identified dead
 /// owner is an adoption: the event lands on the store so fleet and status can say who unblocked the
-/// deferred-embeddings queue, and the reap refuses to delete a marker that changed hands under it, so two
-/// adopting sessions still end with exactly one owner.
+/// deferred-embeddings queue, and the reap is an atomic compare-and-rename, so a session racing another
+/// adopter can never delete the winner's fresh marker — two live sessions always end with exactly one owner.
 /// </summary>
 public sealed class WatchOwnerClaim
 {
@@ -126,10 +126,18 @@ public sealed class WatchOwnerClaim
     {
         if (reaping && !Reap(displaced))
         {
-            // the marker stopped naming the dead owner between the evaluation and this delete, so the
-            // process that won it in between is live: creating here would steal a live claim, the one
-            // thing a takeover may never do
-            return Evaluate(WatchOwnerMarkerFile.Read(_markerPath), now);
+            // A refused reap has two faces: the marker changed hands between the evaluation and the delete
+            // (someone live won it — evaluate the fresh read, recursion is bounded because every further
+            // round needs a changed marker), or it still names our dead owner but the file refuses to go
+            // (an undeletable store is not ours to take — hold instead of looping on the same marker).
+            var fresh = WatchOwnerMarkerFile.Read(_markerPath);
+            if (fresh.State == WatchOwnerMarkerState.Present && fresh.Marker == displaced)
+            {
+                _onWarning?.Invoke("stale owner marker could not be removed");
+                return WatchOwnerOutcome.Held(WatchOwnerStatus.StoreUnavailable, fresh.Marker);
+            }
+
+            return Evaluate(fresh, now);
         }
 
         bool created;

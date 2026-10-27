@@ -54,7 +54,7 @@ public sealed class FleetWatchAdoptionDisplayTests
 
         var human = await RunCliAsync(root, "status");
         human.ExitCode.ShouldBe(0);
-        human.StdOut.ShouldContain("Watch claim adopted by pid 5200");
+        human.StdOut.ShouldContain("Watch claim last adopted by pid 5200");
         human.StdOut.ShouldContain("dead pid 4242");
     }
 

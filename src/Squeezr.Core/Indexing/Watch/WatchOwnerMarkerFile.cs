@@ -87,18 +87,46 @@ internal static class WatchOwnerMarkerFile
 
     /// <summary>
     /// Reaps a marker only while it still names the owner the caller evaluated: a takeover may never
-    /// delete a claim that changed hands in between, because the process that won it is live. An absent
-    /// file answers true — there is nothing left to protect and the caller's create still arbitrates.
+    /// delete a claim that changed hands in between, because the process that won it is live. The
+    /// compare-and-delete rides an atomic rename — the marker is moved to a reservation first, so a
+    /// racing reaper can never delete a fresh marker it did not evaluate, and the caller's CreateNew
+    /// stays the final arbiter. An absent file answers true — nothing left to protect.
     /// </summary>
     public static bool TryDeleteIf(string path, WatchOwnerMarker expected)
     {
-        var (state, marker) = Read(path);
-        if (state == WatchOwnerMarkerState.Absent)
+        var reservationPath = $"{path}.{Guid.NewGuid():N}.reap";
+        if (!TryRename(path, reservationPath))
         {
+            return !File.Exists(path);
+        }
+
+        var (state, marker) = Read(reservationPath);
+        if (state == WatchOwnerMarkerState.Present && marker == expected)
+        {
+            TryDelete(reservationPath);
             return true;
         }
 
-        return marker == expected && TryDelete(path);
+        if (TryRename(reservationPath, path))
+        {
+            return false;
+        }
+
+        TryDelete(reservationPath);
+        return false;
+    }
+
+    private static bool TryRename(string from, string to)
+    {
+        try
+        {
+            File.Move(from, to, overwrite: false);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     public static DateTime? TryLastWrittenUtc(string path)

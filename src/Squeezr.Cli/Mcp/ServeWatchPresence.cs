@@ -47,7 +47,8 @@ internal sealed class ServeWatchPresence : IAsyncDisposable
     }
 
     // Called from the adoption loop the moment its claim attempt won: the watcher already owns the claim and
-    // runs, the presence only moves its disposal half from the observer beat to the engine. False means serve
+    // runs, the presence only moves its disposal half from the observer beat to the engine. The adopter stays
+    // registered (its loop has finished by contract) so DisposeAsync still reaps its CTS. False means serve
     // began shutting down while the adoption was arming — the engine is then the armer's to stop.
     public bool Promote(WorkspaceWatcher engine)
     {
@@ -60,7 +61,6 @@ internal sealed class ServeWatchPresence : IAsyncDisposable
             }
 
             _engine = engine;
-            _adoption = null;
             beat = _observerBeat;
             _observerBeat = null;
         }

@@ -116,7 +116,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             if (FleetWatchAdoption.FromStore(workspaceRoot) is { } adoption)
             {
                 AnsiConsole.MarkupLine(
-                    $"[grey]Watch claim adopted by pid {adoption.AdopterPid} ({adoption.AdopterHost.EscapeMarkup()}) " +
+                    $"[grey]Watch claim last adopted by pid {adoption.AdopterPid} ({adoption.AdopterHost.EscapeMarkup()}) " +
                     $"at {adoption.AdoptedAt.ToLocalTime():yyyy-MM-dd HH:mm}, taking over from dead pid {adoption.DisplacedPid}[/]");
             }
 

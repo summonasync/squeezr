@@ -231,8 +231,8 @@ public static class McpServerHost
                         workspace, claim, announcer, ct, events, embedDrainReason, embeddingRuntime, stderr,
                         outcome, watcher => presence.Promote(watcher)),
                     onWarning: message => stderr.WriteLine($"warning: serve watch: {message}"));
-                adopter.Start();
                 presence.AdoptClaimsThrough(adopter);
+                adopter.Start();
                 return presence;
             }
 
@@ -328,7 +328,9 @@ public static class McpServerHost
 
         workspace.WatchNotice = null;
         stderr.WriteLine(
-            $"squeezr serve: watch engine running (claim adopted from dead pid {outcome.TookOverFrom!.Pid})");
+            outcome.TookOverFrom is { } dead
+                ? $"squeezr serve: watch engine running (claim adopted from dead pid {dead.Pid})"
+                : "squeezr serve: watch engine running (claim taken over, store had no owner)");
         announcer.Announce(ServeWatchRole.FromOutcome(outcome));
     }
 
