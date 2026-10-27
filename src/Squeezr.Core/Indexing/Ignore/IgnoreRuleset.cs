@@ -30,6 +30,8 @@ public sealed class IgnoreRuleset
 
     internal IReadOnlyList<IgnorePattern> Patterns { get; }
 
+    internal GitTrackedSet? Tracked => _tracked;
+
     public static IgnoreRuleset For(string repoRoot, SqueezrConfig config, Action<string>? warn = null)
     {
         var patterns = LoadConfiguredPatterns(repoRoot, config, warn);
@@ -50,7 +52,10 @@ public sealed class IgnoreRuleset
             return new IgnoreRuleset(patterns, false, null);
 
         CollectGitignoreAncestors(repoRoot, relativeFilePath, patterns, warn);
-        return new IgnoreRuleset(patterns, true, GitTrackedSet.Load(repoRoot, warn));
+        // ForFile is the per-event route (freshness refreshes one stale file at a time); the memo keeps a
+        // burst of reads at one git spawn instead of one per file, with a short TTL so a mid-watch commit
+        // still lands. The walk route (For) keeps its own direct load — a pass wants the freshest set.
+        return new IgnoreRuleset(patterns, true, TrackedSetMemo.Shared.For(repoRoot, warn));
     }
 
     public IgnoreDecision Decision(string relativePath, bool isDirectory)
