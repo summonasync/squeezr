@@ -212,7 +212,13 @@ public sealed class WatchOwnerClaim
             return;
         }
 
-        RecordAdoption(claim, swept.OrderByDescending(remnant => remnant.LastBeatAt).First());
+        var displaced = swept
+            .OrderByDescending(remnant => remnant.LastBeatAt)
+            .FirstOrDefault(remnant => !remnant.IsOwnedBy(_pid, _host));
+        if (displaced is { } dead)
+        {
+            RecordAdoption(claim, dead);
+        }
     }
 
     private void RecordAdoption(WatchOwnerMarker claim, WatchOwnerMarker dead)

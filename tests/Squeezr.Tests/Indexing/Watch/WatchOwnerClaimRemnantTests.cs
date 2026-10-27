@@ -119,6 +119,21 @@ public sealed class WatchOwnerClaimRemnantTests : IDisposable
     }
 
     [Fact]
+    public void TryAcquire_ReservationStillFreshFromALiveReaper_IsLeftForItsOwnCycleToFinish()
+    {
+        WriteReservation(
+            MarkerOwnedBy(DeadPid, beatAge: DaemonHeartbeat.StaleThreshold + TimeSpan.FromSeconds(10)),
+            age: TimeSpan.Zero);
+
+        var outcome = CreateClaim(pid: 5200).TryAcquire();
+
+        outcome.IsOwner.ShouldBeTrue();
+        Reservations().ShouldHaveSingleItem("a reservation this fresh may belong to a live peer's reap in flight");
+        WatchAdoptionEventFile.TryRead(_storeDir).ShouldBeNull();
+        _warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void TryAcquire_RemnantsFromRepeatedCrashes_RecordsTheMostRecentlyBeatenOwner()
     {
         WriteReservation(MarkerOwnedBy(DeadPid - 1, beatAge: TimeSpan.FromHours(2)));
@@ -132,6 +147,21 @@ public sealed class WatchOwnerClaimRemnantTests : IDisposable
         var adopted = WatchAdoptionEventFile.TryRead(_storeDir).ShouldNotBeNull();
         adopted.DisplacedPid.ShouldBe(DeadPid);
         adopted.DisplacedLastBeatAt.ShouldBe(recent.LastBeatAt);
+    }
+
+    [Fact]
+    public void TryAcquire_RemnantNamesThisProcessAsDisplaced_SkipsSelfAndNamesAnOlderOwner()
+    {
+        WriteReservation(MarkerOwnedBy(5200, beatAge: TimeSpan.FromSeconds(5)));
+        var older = MarkerOwnedBy(DeadPid, beatAge: TimeSpan.FromHours(1));
+        WriteReservation(older);
+
+        var outcome = CreateClaim(pid: 5200).TryAcquire();
+
+        outcome.IsOwner.ShouldBeTrue();
+        Reservations().ShouldBeEmpty();
+        WatchAdoptionEventFile.TryRead(_storeDir)!.DisplacedPid.ShouldBe(
+            DeadPid, "a reused pid must not end up adopting itself in the fleet view");
     }
 
     private WatchOwnerClaim CreateClaim(
@@ -152,10 +182,12 @@ public sealed class WatchOwnerClaimRemnantTests : IDisposable
     private static WatchOwnerMarker MarkerOwnedBy(int pid, TimeSpan beatAge) =>
         new(pid, Environment.MachineName, DaemonHeartbeat.DefaultKind, T0 - beatAge, T0 - beatAge);
 
-    private void WriteReservation(WatchOwnerMarker marker)
+    private void WriteReservation(WatchOwnerMarker marker, TimeSpan? age = null)
     {
         var path = $"{WatchOwnerMarker.PathFor(_storeDir)}.{Guid.NewGuid():N}.reap";
         File.WriteAllText(path, JsonSerializer.Serialize(marker, SqueezrJson.FileOptions));
+        File.SetLastWriteTimeUtc(
+            path, DateTime.UtcNow - (age ?? DaemonHeartbeat.StaleThreshold + TimeSpan.FromSeconds(10)));
     }
 
     private string[] Reservations() =>

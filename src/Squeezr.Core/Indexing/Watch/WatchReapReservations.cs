@@ -6,9 +6,11 @@ internal static class WatchReapReservations
     /// Deletes every reap reservation a crashed process left between renaming the marker aside and deleting
     /// or restoring it. Reservations only ever exist under the .reap suffix and only ever hold a marker that
     /// was already evaluated as reapable, so sweeping can neither resurrect a claim nor reach the live
-    /// marker — deleting is the only thing a sweep ever does to a file. The swept markers come back so the
-    /// caller can still name who the store was taken from when the reservation is all that remains of the
-    /// displaced owner.
+    /// marker — deleting is the only thing a sweep ever does to a file. Reservations younger than the stale
+    /// window are left alone: they may belong to a live peer's reap still in flight, and that peer deletes
+    /// its own reservation microseconds after creating it. The swept markers come back so the caller can
+    /// still name who the store was taken from when the reservation is all that remains of the displaced
+    /// owner.
     /// </summary>
     public static IReadOnlyList<WatchOwnerMarker> Sweep(string markerPath, Action<string>? onWarning)
     {
@@ -32,6 +34,11 @@ internal static class WatchReapReservations
 
         foreach (var reservation in reservations)
         {
+            if (WrittenWithinStaleWindow(reservation))
+            {
+                continue;
+            }
+
             var (state, marker) = WatchOwnerMarkerFile.Read(reservation);
             if (state == WatchOwnerMarkerState.Present && marker is { } remnant)
             {
@@ -45,5 +52,17 @@ internal static class WatchReapReservations
         }
 
         return swept;
+    }
+
+    private static bool WrittenWithinStaleWindow(string reservation)
+    {
+        try
+        {
+            return DateTime.UtcNow - File.GetLastWriteTimeUtc(reservation) <= DaemonHeartbeat.StaleThreshold;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }
