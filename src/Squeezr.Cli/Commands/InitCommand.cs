@@ -56,7 +56,7 @@ public sealed class InitCommand : Command<InitCommand.Settings>
             AnsiConsole.MarkupLine("Next: [bold]squeezr add <path> --name <repo>[/]");
             return 0;
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
         {
             return CommandError.Report(ex, settings.Json);
         }

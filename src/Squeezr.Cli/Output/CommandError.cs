@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Squeezr.Cli.Commands;
 using Squeezr.Cli.Infra;
 using Squeezr.Cli.Mcp;
@@ -31,6 +32,7 @@ public static class CommandError
         McpUsageException => "invalid_usage",
         ArgumentException => "invalid_usage",
         InvalidDataException => "invalid_data",
+        IOException or UnauthorizedAccessException or JsonException => WorkspaceException.StorageUnavailableCode,
         _ => "internal_error"
     };
 

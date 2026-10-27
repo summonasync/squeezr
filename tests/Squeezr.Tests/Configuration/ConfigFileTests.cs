@@ -692,6 +692,28 @@ public class ConfigFileTests
         _ = config.Embeddings.OpenAiCompatible.ResolvedProfile;
     }
 
+    [Fact]
+    public void Load_MissingConfig_ThrowsWorkspaceExceptionWithStorageCode()
+    {
+        var root = TestDirs.NewTempDir();
+
+        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+
+        error.Code.ShouldBe(WorkspaceException.StorageUnavailableCode);
+        error.Message.ShouldContain("could not be read");
+    }
+
+    [Fact]
+    public void Load_UnreadableConfig_ThrowsWorkspaceExceptionWithStorageCode()
+    {
+        var root = NewWorkspaceWithConfig("{}");
+        File.SetUnixFileMode(SqueezrPaths.ConfigPath(root), UnixFileMode.None);
+
+        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+
+        error.Code.ShouldBe(WorkspaceException.StorageUnavailableCode);
+    }
+
     private static string NewWorkspaceWithConfig(string json)
     {
         var root = TestDirs.NewTempDir();

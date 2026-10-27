@@ -10,7 +10,19 @@ public static class ConfigFile
     public static SqueezrConfig Load(string root)
     {
         var path = SqueezrPaths.ConfigPath(root);
-        var json = File.ReadAllText(path);
+        string json;
+        try
+        {
+            json = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new WorkspaceException(
+                $"Config file at '{path}' could not be read: {ex.Message}",
+                WorkspaceException.StorageUnavailableCode,
+                ex);
+        }
+
         SqueezrConfig config;
         try
         {
