@@ -28,13 +28,16 @@ public class SecretGuardExactSearchPlanTests
     }
 
     [Fact]
-    public void Execute_KeepsServingTheEnvCarveOut()
+    public void Execute_KeepsServingTheEnvCarveOut_WithTheSecretValueMasked()
     {
         var workspace = SecretGuardFixture.NewIndexedWorkspace();
 
-        Run(workspace, SecretGuardFixture.ExampleCanary)
-            .Select(h => h.Match.Path)
-            .ShouldContain(SecretGuardFixture.ExamplePath);
+        var hits = Run(workspace, "OPENAI_API_KEY");
+
+        hits.ShouldContain(h => h.Match.Path == SecretGuardFixture.ExamplePath);
+        var hit = hits.First(h => h.Match.Path == SecretGuardFixture.ExamplePath);
+        hit.Match.Snippet.ShouldContain(SecretSnippetRedactor.Masked);
+        hit.Match.Snippet.ShouldNotContain(SecretGuardFixture.ExampleCanary);
     }
 
     [Fact]

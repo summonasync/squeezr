@@ -85,7 +85,7 @@ public static class ExactSearchPlan
             string content;
             try
             {
-                content = File.ReadAllText(fullPath);
+                content = SecretSnippetRedactor.Redact(file.Path, File.ReadAllText(fullPath));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

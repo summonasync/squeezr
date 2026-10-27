@@ -1,5 +1,6 @@
 using Shouldly;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
 
@@ -55,14 +56,16 @@ public class SecretGuardSearchEngineTests
     }
 
     [Fact]
-    public void Search_StillServesTheEnvCarveOut()
+    public void Search_StillServesTheEnvCarveOut_WithTheSecretValueMasked()
     {
         var workspace = SecretGuardFixture.NewIndexedWorkspace();
 
-        var response = new SearchEngine(workspace).Search(Literal(SecretGuardFixture.ExampleCanary));
+        var response = new SearchEngine(workspace).Search(Literal("OPENAI_API_KEY"));
 
-        response.Matches.Select(m => m.Path).ShouldContain(SecretGuardFixture.ExamplePath);
-        Withheld(response.Warnings).ShouldBeNull();
+        var match = response.Matches.First(m => m.Path == SecretGuardFixture.ExamplePath);
+        match.Snippet.ShouldContain(SecretSnippetRedactor.Masked);
+        match.Snippet.ShouldNotContain(SecretGuardFixture.ExampleCanary);
+        Withheld(response.Warnings)!.ShouldContain("'.env' matches built-in patterns");
     }
 
     [Fact]
