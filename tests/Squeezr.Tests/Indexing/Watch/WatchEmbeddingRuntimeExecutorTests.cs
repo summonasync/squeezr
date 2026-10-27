@@ -6,6 +6,7 @@ using Squeezr.Core.Indexing.Watch;
 
 namespace Squeezr.Tests.Indexing.Watch;
 
+[Collection("ProcessGlobals")]
 public class WatchEmbeddingRuntimeExecutorTests : IDisposable
 {
     private const string ApiKeyEnv = "SQUEEZR_TESTS_EXECUTOR_KEY";

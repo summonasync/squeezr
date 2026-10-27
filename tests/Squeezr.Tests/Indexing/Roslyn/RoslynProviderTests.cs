@@ -7,6 +7,7 @@ using Squeezr.Core.Indexing.Roslyn;
 
 namespace Squeezr.Tests.Indexing.Roslyn;
 
+[Collection("ProcessGlobals")]
 public class RoslynProviderTests : IDisposable
 {
     private readonly List<string> _tempDirs = [];

@@ -4,6 +4,7 @@ using Shouldly;
 
 namespace Squeezr.Tests.Infra;
 
+[Collection("ProcessGlobals")]
 public sealed partial class ScratchHomeGuardTests
 {
     private static string ScriptsDir => Path.Combine(FindRepoRoot(), "scripts");
