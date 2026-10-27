@@ -174,7 +174,8 @@ public class McpToolsTests
         envelope.GetProperty("warnings").EnumerateArray()
             .Select(w => w.GetString()!)
             .ShouldContain(w => w.StartsWith("truncated: ")
-                && w.EndsWith("raise maxTokens or narrow (repo, prefix)"));
+                && w.Contains("raise maxTokens or narrow (repo, prefix) (exact ")
+                && w.EndsWith("semantic 0)"));
     }
 
     [Fact]

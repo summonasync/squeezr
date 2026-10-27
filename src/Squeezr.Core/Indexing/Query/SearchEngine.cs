@@ -97,7 +97,7 @@ public sealed class SearchEngine
 
         if (fileScope is not { Count: 0 })
         {
-            var capped = CappedArmPolicy.Warning(semantic, query.Repo, query.Prefix, query.Kind);
+            var capped = CappedArmPolicy.Warning(semantic, query.Repo, query.Prefix, query.Kind, query.PathGlob);
             if (capped is not null)
             {
                 warnings.Add(capped);
@@ -223,6 +223,8 @@ public sealed class SearchEngine
         var budget = query.MaxTokens;
         var perHit = SnippetBudget.PerHitTokens(budget, query.TopK);
         var tokensUsed = 0;
+        var exactTokens = 0;
+        var semanticTokens = 0;
         var taken = new List<SearchMatch>();
         var truncated = false;
         foreach (var match in limited)
@@ -244,6 +246,15 @@ public sealed class SearchEngine
             }
 
             tokensUsed += estimate;
+            if (match.Source == "semantic")
+            {
+                semanticTokens += estimate;
+            }
+            else
+            {
+                exactTokens += estimate;
+            }
+
             taken.Add(clipped ? match with { Snippet = snippet } : match);
         }
 
@@ -253,7 +264,8 @@ public sealed class SearchEngine
 
         return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null)
         {
-            Warnings = weakWarning is null ? warnings : [.. warnings, weakWarning]
+            Warnings = weakWarning is null ? warnings : [.. warnings, weakWarning],
+            LegUsage = taken.Count == 0 ? null : new SearchLegUsage(exactTokens, semanticTokens)
         };
     }
 }

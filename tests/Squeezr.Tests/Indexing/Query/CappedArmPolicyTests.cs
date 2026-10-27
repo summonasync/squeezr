@@ -59,22 +59,22 @@ public class CappedArmPolicyTests
     [Fact]
     public void Warning_NotCapped_ReturnsNull()
     {
-        CappedArmPolicy.Warning(Arm(20, 20, 4, 3), null, null, null).ShouldBeNull();
+        CappedArmPolicy.Warning(Arm(20, 20, 4, 3), null, null, null, pathGlob: null).ShouldBeNull();
     }
 
     [Fact]
     public void Warning_KindlessQuery_OffersKindPrefixAndRepo()
     {
-        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, null);
+        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, null, pathGlob: null);
 
         warning.ShouldBe(
-            "semantic arm capped at 160 examined candidates; 3 in scope, 2 delivered — narrow with kind=code, prefix or repo scope");
+            "semantic arm capped at 160 examined candidates; 3 in scope, 2 delivered — narrow with --path-glob, kind=code, prefix or repo scope");
     }
 
     [Fact]
     public void Warning_ExplicitAllKind_StillOffersTheKindMove()
     {
-        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, DocKindDetector.All);
+        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, DocKindDetector.All, pathGlob: null);
 
         warning.ShouldNotBeNull().ShouldContain("kind=code");
     }
@@ -82,45 +82,63 @@ public class CappedArmPolicyTests
     [Fact]
     public void Warning_CodeNarrowedQuery_SwitchesToPrefixAndRepo()
     {
-        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), null, "src/", DocKindDetector.Code);
+        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), null, "src/", DocKindDetector.Code, pathGlob: null);
 
         warning.ShouldNotBeNull().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with narrower prefix or repo scope");
+            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with --path-glob, narrower prefix or repo scope");
         warning.ShouldNotContain("kind=");
     }
 
     [Fact]
     public void Warning_DocsKind_NeverSuggestsSwitchingKind()
     {
-        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), null, null, DocKindDetector.Docs);
+        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), null, null, DocKindDetector.Docs, pathGlob: null);
 
-        warning.ShouldNotBeNull().ShouldContain("narrow with prefix or repo scope");
+        warning.ShouldNotBeNull().ShouldContain("narrow with --path-glob, prefix or repo scope");
         warning.ShouldNotContain("kind=");
     }
 
     [Fact]
     public void Warning_RepoSet_DropsTheRepoMove()
     {
-        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), "demo", null, null);
+        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), "demo", null, null, pathGlob: null);
 
         warning.ShouldNotBeNull().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with kind=code or prefix");
+            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with --path-glob, kind=code or prefix");
         warning.ShouldNotContain("repo scope");
     }
 
     [Fact]
     public void Warning_FullyNarrowedQuery_AlwaysKeepsAPrefixMove()
     {
-        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), "demo", "src/", DocKindDetector.Code);
+        var warning = CappedArmPolicy.Warning(Arm(50, 50, 2, 1), "demo", "src/", DocKindDetector.Code, pathGlob: null);
 
         warning.ShouldNotBeNull().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with narrower prefix");
+            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with --path-glob or narrower prefix");
+    }
+
+    [Fact]
+    public void Warning_GlobNarrowableUniverse_NamesPathGlob()
+    {
+        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, null, pathGlob: null);
+
+        warning.ShouldNotBeNull().ShouldContain("narrow with --path-glob");
+    }
+
+    [Fact]
+    public void Warning_AlreadyGlobNarrowed_StaysQuietAboutGlob()
+    {
+        var warning = CappedArmPolicy.Warning(Arm(160, 160, 3, 2), null, null, null, pathGlob: "*.cs");
+
+        warning.ShouldNotBeNull().ShouldNotContain("--path-glob");
+        warning.ShouldBe(
+            "semantic arm capped at 160 examined candidates; 3 in scope, 2 delivered — narrow with kind=code, prefix or repo scope");
     }
 
     [Fact]
     public void Warning_SingleInScopeAndDelivered_ReportsBothCounts()
     {
-        var warning = CappedArmPolicy.Warning(Arm(160, 160, 1, 1), null, null, null);
+        var warning = CappedArmPolicy.Warning(Arm(160, 160, 1, 1), null, null, null, pathGlob: null);
 
         warning.ShouldNotBeNull().ShouldContain("1 in scope, 1 delivered");
     }

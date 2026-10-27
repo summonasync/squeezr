@@ -9,4 +9,6 @@ public sealed record SearchResponse(
     TruncationHint? Hint = null)
 {
     public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    public SearchLegUsage? LegUsage { get; init; }
 }

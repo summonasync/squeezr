@@ -44,7 +44,7 @@ public class CappedArmEngineTests
         store.LastTopK.ShouldBe(50);
         response.Matches.ShouldContain(m => m.Path == "src/Core/Alpha.cs");
         response.Warnings.ShouldHaveSingleItem().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 1 in scope, 1 delivered — narrow with kind=code, narrower prefix or repo scope");
+            "semantic arm capped at 50 examined candidates; 1 in scope, 1 delivered — narrow with --path-glob, kind=code, narrower prefix or repo scope");
     }
 
     [Fact]
