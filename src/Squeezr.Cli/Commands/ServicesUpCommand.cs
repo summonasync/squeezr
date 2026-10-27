@@ -244,7 +244,6 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
         var composePath = ServicesComposeFile.ComposeFilePath;
         var rocm = toStart.Count > 0 && new RocmDeviceProbe().AreAvailable();
         DockerComposeInstallation installation;
-        var startPhaseFailed = false;
         try
         {
             if (toStart.Count > 0)

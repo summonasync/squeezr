@@ -83,15 +83,15 @@ public sealed record WorkspaceStatusReport(
             return null;
 
         var bySourceData = new Dictionary<string, int>();
-        if (hasIgnored)
+        if (hasIgnored && repo.IgnoredBySource is { } ignoredBySource)
         {
-            var dominant = repo.IgnoredBySource!.MaxBy(kv => kv.Value);
+            var dominant = ignoredBySource.MaxBy(kv => kv.Value);
             if (dominant.Key is not null && dominant.Value > 0 && IgnoreSourceKey.IsKnown(dominant.Key))
             {
                 warnings.Add(FormatIgnoreWarning(dominant.Key, dominant.Value));
             }
 
-            foreach (var (source, count) in repo.IgnoredBySource.OrderBy(kv => kv.Key))
+            foreach (var (source, count) in ignoredBySource.OrderBy(kv => kv.Key))
             {
                 if (count > 0)
                     bySourceData[source] = count;
