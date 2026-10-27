@@ -39,15 +39,21 @@ public sealed class FakeCli
         Directory.CreateDirectory(binDir);
         var binaryPath = Path.Combine(binDir, OperatingSystem.IsWindows() ? binaryName + ".cmd" : binaryName);
         var capturePath = Path.Combine(binDir, binaryName + ".argv.log");
+        // execve refuses a path another handle still holds for writing (ETXTBSY, 092 full runs), and a
+        // script written straight onto its final name hands the spawner exactly that race. The move gives
+        // execve a fresh inode nobody ever opened for writing; the mode travels with the inode.
+        var pendingPath = binaryPath + ".installing";
         File.WriteAllText(
-            binaryPath,
+            pendingPath,
             OperatingSystem.IsWindows()
                 ? WindowsScript(capturePath, stdout, stderr, exitCode, blockingStatement)
                 : UnixScript(capturePath, stdout, stderr, exitCode, blockingStatement));
         if (!OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(binaryPath, ExecutableMode);
+            File.SetUnixFileMode(pendingPath, ExecutableMode);
         }
+
+        File.Move(pendingPath, binaryPath, overwrite: true);
         return new FakeCli(binaryPath, capturePath);
     }
 

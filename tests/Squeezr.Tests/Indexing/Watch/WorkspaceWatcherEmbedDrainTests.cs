@@ -69,7 +69,14 @@ public class WorkspaceWatcherEmbedDrainTests
         await watcher.StartAsync(workspace, cts.Token);
         try
         {
-            await UntilAsync(() => PendingCount(workspace) == 0);
+            // the counter drops to zero the moment the last MarkChunksEmbedded lands, while that pass is
+            // still trigramming and saving state — asserting from the counter alone races the final
+            // PassCompleted record (review-070-05: "Sum should be 18 but was 15"). The saturated loop
+            // always ends with one debounced empty pass that re-arms nothing, so its record is the only
+            // quiescent signal; the fixture must keep pendingBefore a multiple of the budget.
+            await UntilAsync(
+                () => PendingCount(workspace) == 0 && recorder.Completed is [.., { Embedded: 0 }],
+                "the drain must end with the debounced empty pass after the counter reached zero");
 
             var drains = recorder.Completed.Where(r => r.Embedded > 0).ToList();
             drains.Count.ShouldBeGreaterThanOrEqualTo(2, "a saturated budget must spread the catch-up over passes");
