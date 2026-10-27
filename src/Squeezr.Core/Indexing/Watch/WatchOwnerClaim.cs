@@ -7,17 +7,22 @@ namespace Squeezr.Core.Indexing.Watch;
 /// IndexLock answers "who is indexing right now", this answers "who is allowed to index at all".
 /// Exclusivity comes from a FileMode.CreateNew write, so concurrent acquirers cannot both believe they won;
 /// the liveness of whoever is already in the file is decided by the same staleness rules the heartbeat uses,
-/// and takeover needs the beat past the window *and* the owning pid gone.
+/// and takeover needs the beat past the window *and* the owning pid gone. A takeover of an identified dead
+/// owner is an adoption: the event lands on the store so fleet and status can say who unblocked the
+/// deferred-embeddings queue, and the reap refuses to delete a marker that changed hands under it, so two
+/// adopting sessions still end with exactly one owner.
 /// </summary>
 public sealed class WatchOwnerClaim
 {
     private readonly string _markerPath;
+    private readonly string _storeDir;
     private readonly string _kind;
     private readonly string _host;
     private readonly int _pid;
     private readonly Func<DateTime> _utcNow;
     private readonly Func<int, bool> _isProcessAlive;
     private readonly Func<WatchOwnerMarker, bool>? _markerCreate;
+    private readonly Func<WatchOwnerMarker, bool>? _markerReap;
     private readonly Action<string>? _onWarning;
 
     public WatchOwnerClaim(
@@ -29,9 +34,10 @@ public sealed class WatchOwnerClaim
     }
 
     /// <summary>
-    /// Seam-only shape: the clock, the pid probe, the pid this instance claims and the create step itself, so several
-    /// claimants can be played against one store inside one process. Kept off the public surface deliberately — a
-    /// caller must not be able to hand in a permissive liveness predicate and win somebody else's store.
+    /// Seam-only shape: the clock, the pid probe, the pid this instance claims, the create step itself and the
+    /// reap step itself, so several claimants can be played against one store inside one process. Kept off the
+    /// public surface deliberately — a caller must not be able to hand in a permissive liveness predicate and
+    /// win somebody else's store.
     /// </summary>
     internal WatchOwnerClaim(
         string storeDir,
@@ -40,15 +46,18 @@ public sealed class WatchOwnerClaim
         Func<int, bool>? isProcessAlive,
         Action<string>? onWarning,
         int? pid,
-        Func<WatchOwnerMarker, bool>? markerCreate = null)
+        Func<WatchOwnerMarker, bool>? markerCreate = null,
+        Func<WatchOwnerMarker, bool>? markerReap = null)
     {
         _markerPath = WatchOwnerMarker.PathFor(storeDir);
+        _storeDir = storeDir;
         _kind = kind;
         _host = Environment.MachineName;
         _pid = pid ?? Environment.ProcessId;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
         _isProcessAlive = isProcessAlive ?? IsProcessAlive;
         _markerCreate = markerCreate;
+        _markerReap = markerReap;
         _onWarning = onWarning;
     }
 
@@ -115,9 +124,12 @@ public sealed class WatchOwnerClaim
         DateTime now,
         bool reaping)
     {
-        if (reaping && !WatchOwnerMarkerFile.TryDelete(_markerPath))
+        if (reaping && !Reap(displaced))
         {
-            _onWarning?.Invoke("stale owner marker could not be removed");
+            // the marker stopped naming the dead owner between the evaluation and this delete, so the
+            // process that won it in between is live: creating here would steal a live claim, the one
+            // thing a takeover may never do
+            return Evaluate(WatchOwnerMarkerFile.Read(_markerPath), now);
         }
 
         bool created;
@@ -135,6 +147,11 @@ public sealed class WatchOwnerClaim
 
         if (created)
         {
+            if (reaping && displaced is { } dead)
+            {
+                RecordAdoption(claim, dead);
+            }
+
             return WatchOwnerOutcome.Acquired(claim, displaced);
         }
 
@@ -144,6 +161,40 @@ public sealed class WatchOwnerClaim
         }
 
         return Evaluate(WatchOwnerMarkerFile.Read(_markerPath), now);
+    }
+
+    // A stale-and-gone owner is reaped only while the file still names exactly the marker that was evaluated;
+    // a takeover whose displaced marker is unknown (unreadable reap) keeps the unconditional delete.
+    private bool Reap(WatchOwnerMarker? displaced)
+    {
+        if (_markerReap is { } reap)
+        {
+            return reap(displaced);
+        }
+
+        return displaced is { } dead
+            ? WatchOwnerMarkerFile.TryDeleteIf(_markerPath, dead)
+            : WatchOwnerMarkerFile.TryDelete(_markerPath);
+    }
+
+    private void RecordAdoption(WatchOwnerMarker claim, WatchOwnerMarker dead)
+    {
+        try
+        {
+            WatchAdoptionEventFile.Write(_storeDir, new WatchAdoptionEvent(
+                claim.Pid,
+                claim.Host,
+                claim.Kind,
+                claim.StartedAt,
+                dead.Pid,
+                dead.Host,
+                dead.StartedAt,
+                dead.LastBeatAt));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _onWarning?.Invoke($"watch adoption could not be recorded: {ex.Message}");
+        }
     }
 
     private WatchOwnerOutcome Evaluate(

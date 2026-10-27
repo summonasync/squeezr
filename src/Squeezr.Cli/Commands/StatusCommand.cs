@@ -49,7 +49,9 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             {
                 var staleFiles = StaleFileDetector.Detect(workspaceRoot);
                 var report = WorkspaceStatusReport.Create(
-                    status, staleFiles, config?.Embeddings.Provider, siblings) with { KindChunks = kindChunks };
+                    status, staleFiles, config?.Embeddings.Provider, siblings,
+                    FleetWatchAdoption.FromStore(workspaceRoot)) with
+                { KindChunks = kindChunks };
                 JsonOutput.Write(report);
                 foreach (var warning in report.Warnings)
                 {
@@ -109,6 +111,13 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                     AnsiConsole.MarkupLine(
                         $"[grey]Rank exclude: {patterns.Count} pattern(s) — {string.Join(", ", patterns).EscapeMarkup()}[/]");
                 }
+            }
+
+            if (FleetWatchAdoption.FromStore(workspaceRoot) is { } adoption)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[grey]Watch claim adopted by pid {adoption.AdopterPid} ({adoption.AdopterHost.EscapeMarkup()}) " +
+                    $"at {adoption.AdoptedAt.ToLocalTime():yyyy-MM-dd HH:mm}, taking over from dead pid {adoption.DisplacedPid}[/]");
             }
 
             if (qdrant.Available)

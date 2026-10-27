@@ -221,33 +221,23 @@ public static class McpServerHost
                     onWarning: announcer.Fault,
                     publishKindHeartbeat: false);
                 observerBeat.Start();
-                return ServeWatchPresence.Observing(observerBeat);
+                // The observer keeps asking for the claim while it serves: when the recorded owner dies, the next
+                // acquire takes the store through the same stale rules every start obeys, and the pending
+                // deferred embeddings move again without a manual 'squeezr fleet stop'.
+                var presence = ServeWatchPresence.Observing(observerBeat);
+                var adopter = new WatchClaimAdopter(
+                    claim,
+                    outcome => ArmAdoptedEngineAsync(
+                        workspace, claim, announcer, ct, events, embedDrainReason, embeddingRuntime, stderr,
+                        outcome, watcher => presence.Promote(watcher)),
+                    onWarning: message => stderr.WriteLine($"warning: serve watch: {message}"));
+                adopter.Start();
+                presence.AdoptClaimsThrough(adopter);
+                return presence;
             }
 
-            var runtimeTask = embedDrainReason is null
-                ? embeddingRuntime ?? Task.Run(
-                    () => CreateWatchEmbeddingRuntime(workspace.Root, stderr), CancellationToken.None)
-                : null;
-            if (embedDrainReason is not null)
-            {
-                stderr.WriteLine($"squeezr serve: watch embed drain off ({embedDrainReason})");
-            }
-
-            WorkspaceWatcher watcher;
-            if (events)
-            {
-                var writer = new IndexEventWriter(stderr);
-                var renderer = new IndexEventsRenderer(writer);
-                watcher = new WorkspaceWatcher(
-                    new WatchEventsStatus(writer, workspace.Root, renderer), renderer,
-                    StaleLockWarningSink.ToStderr, claim, runtimeTask);
-            }
-            else
-            {
-                watcher = new WorkspaceWatcher(
-                    new ServeWatchStatus(stderr), onStaleTakeover: StaleLockWarningSink.ToStderr, claim: claim,
-                    embeddings: runtimeTask);
-            }
+            var runtimeTask = ResolveEmbeddingRuntime(embedDrainReason, embeddingRuntime, workspace.Root, stderr);
+            var watcher = BuildWatcher(workspace.Root, events, stderr, claim, runtimeTask);
 
             try
             {
@@ -268,6 +258,78 @@ public static class McpServerHost
             stderr.WriteLine($"warning: watch engine failed to start: {ex.Message}");
             return null;
         }
+    }
+
+    private static WorkspaceWatcher BuildWatcher(
+        string workspaceRoot, bool events, TextWriter stderr, WatchOwnerClaim claim,
+        Task<WatchEmbeddingRuntime?>? runtimeTask)
+    {
+        if (events)
+        {
+            var writer = new IndexEventWriter(stderr);
+            var renderer = new IndexEventsRenderer(writer);
+            return new WorkspaceWatcher(
+                new WatchEventsStatus(writer, workspaceRoot, renderer), renderer,
+                StaleLockWarningSink.ToStderr, claim, runtimeTask);
+        }
+
+        return new WorkspaceWatcher(
+            new ServeWatchStatus(stderr), onStaleTakeover: StaleLockWarningSink.ToStderr, claim: claim,
+            embeddings: runtimeTask);
+    }
+
+    private static Task<WatchEmbeddingRuntime?>? ResolveEmbeddingRuntime(
+        string? embedDrainReason, Task<WatchEmbeddingRuntime?>? embeddingRuntime, string workspaceRoot,
+        TextWriter stderr)
+    {
+        if (embedDrainReason is not null)
+        {
+            stderr.WriteLine($"squeezr serve: watch embed drain off ({embedDrainReason})");
+            return null;
+        }
+
+        return embeddingRuntime ?? Task.Run(
+            () => CreateWatchEmbeddingRuntime(workspaceRoot, stderr), CancellationToken.None);
+    }
+
+    // The observer's adoption paying off: the claim already moved, so this is the owner path again — resolve the
+    // runtime, arm the engine, and only then hand it to the presence. A promote refused by a shutting-down serve
+    // leaves the engine nobody's, so it stops here and the claim goes back for the next contender.
+    private static async Task ArmAdoptedEngineAsync(
+        McpWorkspace workspace,
+        WatchOwnerClaim claim,
+        ServeWatchAnnouncer announcer,
+        CancellationToken ct,
+        bool events,
+        string? embedDrainReason,
+        Task<WatchEmbeddingRuntime?>? embeddingRuntime,
+        TextWriter stderr,
+        WatchOwnerOutcome outcome,
+        Func<WorkspaceWatcher, bool> promote)
+    {
+        var runtimeTask = ResolveEmbeddingRuntime(embedDrainReason, embeddingRuntime, workspace.Root, stderr);
+        var watcher = BuildWatcher(workspace.Root, events, stderr, claim, runtimeTask);
+        try
+        {
+            await watcher.StartAsync(workspace.Root, ct, daemonKind: DaemonHeartbeat.ServeWatchKind);
+        }
+        catch
+        {
+            claim.Release();
+            throw;
+        }
+
+        if (!promote(watcher))
+        {
+            await watcher.StopAsync();
+            claim.Release();
+            return;
+        }
+
+        workspace.WatchNotice = null;
+        stderr.WriteLine(
+            $"squeezr serve: watch engine running (claim adopted from dead pid {outcome.TookOverFrom!.Pid})");
+        announcer.Announce(ServeWatchRole.FromOutcome(outcome));
     }
 
     private static string? ResolveEmbedDrainReason(bool embedWatch, bool? embedPendingInConfig) =>

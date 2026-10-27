@@ -54,6 +54,7 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
         table.AddColumn("Pending");
         table.AddColumn("Last indexed");
         table.AddColumn("Status");
+        table.AddColumn("Adopted");
         foreach (var entry in fleet)
         {
             table.AddRow(
@@ -67,7 +68,8 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
                 FormatActivity(entry.Daemons),
                 entry.PendingChunks?.ToString() ?? "n/a",
                 entry.LastIndexedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "n/a",
-                entry.Stale ? "[yellow]stale[/]" : "[green]ok[/]");
+                entry.Stale ? "[yellow]stale[/]" : "[green]ok[/]",
+                FormatAdoption(entry.Adoption));
         }
 
         AnsiConsole.Write(table);
@@ -154,6 +156,13 @@ public sealed class FleetCommand : Command<FleetCommand.Settings>
         "embeddings" => $"chunks {done}/{total}",
         _ => $"{done}/{total}",
     };
+
+    // The store's last claim adoption, who/when only — the full displaced-owner identity is the --json
+    // record's. A store adopted nobody answers the same dash an empty cell always answered.
+    private static string FormatAdoption(FleetWatchAdoption? adoption) =>
+        adoption is null
+            ? "—"
+            : $"pid {adoption.AdopterPid} · {adoption.AdoptedAt.ToLocalTime():yyyy-MM-dd HH:mm}";
 
     private static string FormatUptime(long totalSeconds)
     {

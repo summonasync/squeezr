@@ -85,6 +85,22 @@ internal static class WatchOwnerMarkerFile
         }
     }
 
+    /// <summary>
+    /// Reaps a marker only while it still names the owner the caller evaluated: a takeover may never
+    /// delete a claim that changed hands in between, because the process that won it is live. An absent
+    /// file answers true — there is nothing left to protect and the caller's create still arbitrates.
+    /// </summary>
+    public static bool TryDeleteIf(string path, WatchOwnerMarker expected)
+    {
+        var (state, marker) = Read(path);
+        if (state == WatchOwnerMarkerState.Absent)
+        {
+            return true;
+        }
+
+        return marker == expected && TryDelete(path);
+    }
+
     public static DateTime? TryLastWrittenUtc(string path)
     {
         try

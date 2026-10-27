@@ -97,7 +97,8 @@ public static class FleetListing
             Stale: staleKeys.Contains(entry.StoreKey),
             PendingChunks: meta?.CountPendingChunks(null),
             LastIndexedAt: meta?.GetLatestFullIndexAt(),
-            NameCollision: nameCollision ? true : null);
+            NameCollision: nameCollision ? true : null,
+            Adoption: FleetWatchAdoption.FromStore(entry.RootPath));
     }
 
     private static FleetDaemonState ProbeDaemon(string storeDir, string kind, DateTime now)
