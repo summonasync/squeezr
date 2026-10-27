@@ -71,9 +71,9 @@ public class EmbeddingProviderResolverTests
     }
 
     [Fact]
-    public void DefaultProbeTimeout_IsAtLeastWindowsSynRefusalWindow()
+    public void ProbeBudget_IsAtLeastWindowsSynRefusalWindow()
     {
-        EmbeddingProviderResolver.DefaultProbeTimeout.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds(3));
+        OllamaProbe.Budget.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds(3));
     }
 
     [Theory]

@@ -160,7 +160,41 @@ public sealed class DoctorRunnerTests : IDisposable
         var finding = report.Findings.Single(f => f.Name == "semantic search");
         finding.Remedy.ShouldBe(DoctorRemedies.Index);
         finding.Detail.ShouldContain("pending vectors");
-        finding.Detail.ShouldContain(DoctorRunner.PendingChunksThreshold.ToString());
+        finding.Detail.ShouldContain(WatchConfig.DefaultEmbedBudgetPerPass.ToString());
+        finding.Detail.ShouldNotContain("watch.embedBudgetPerPass");
+    }
+
+    [Fact]
+    public void SemanticFacts_LoweredEmbedBudget_FailsAtFewerPending()
+    {
+        var root = NewIndexedWorkspace();
+        var config = ConfigFile.Load(root);
+        ConfigFile.Save(root, config with { Watch = config.Watch with { EmbedBudgetPerPass = 8 } });
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 2, 10, 12), EmbeddingsHealth.Silent));
+
+        report.Healthy.ShouldBeFalse();
+        var finding = report.Findings.Single(f => f.Name == "semantic search");
+        finding.Remedy.ShouldBe(DoctorRemedies.Index);
+        finding.Detail.ShouldContain("threshold 8");
+        finding.Detail.ShouldContain("watch.embedBudgetPerPass");
+    }
+
+    [Fact]
+    public void SemanticFacts_BrokenConfig_FallsBackToDefaultThreshold()
+    {
+        var root = NewIndexedWorkspace();
+        File.WriteAllText(SqueezrPaths.ConfigPath(root), "{ not json");
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 2, 300, 312), EmbeddingsHealth.Silent));
+
+        var finding = report.Findings.SingleOrDefault(f => f.Name == "semantic search" && f.State == DoctorRunner.StateFail);
+        finding.ShouldNotBeNull();
+        finding.Detail.ShouldContain(WatchConfig.DefaultEmbedBudgetPerPass.ToString());
     }
 
     [Fact]

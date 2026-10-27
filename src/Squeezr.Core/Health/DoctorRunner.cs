@@ -24,10 +24,6 @@ public static class DoctorRunner
     public const string StateInfo = "info";
     public static readonly TimeSpan StaleIndexThreshold = TimeSpan.FromDays(30);
 
-    // one watch drain pass moves at most watch.embedBudgetPerPass (default 256) chunks, so a backlog
-    // at or above this line has already outlived a full drain pass and is not transient catch-up work
-    public const int PendingChunksThreshold = 256;
-
     // findings carry only problems and info; "ok" is the absence of a line, and Healthy is no fail among them
     public static DoctorReport CollectWorkspaceFindings(
         DateTime utcNow,
@@ -115,9 +111,9 @@ public static class DoctorRunner
             yield break;
         }
 
-        var noSemantic = NoSemantic(entry);
+        var config = TryLoadConfig(entry);
         var chunks = status.Repos.Sum(r => r.Chunks);
-        if (noSemantic || chunks == 0)
+        if (config?.Indexing.NoSemantic == true || chunks == 0)
         {
             yield break;
         }
@@ -168,26 +164,32 @@ public static class DoctorRunner
             yield break;
         }
 
-        if (qdrant.PendingChunks >= PendingChunksThreshold)
+        // one watch drain pass moves at most watch.embedBudgetPerPass chunks, so a backlog at or
+        // above that line has already outlived a full drain pass and is not transient catch-up work
+        var pendingThreshold = config?.Watch.EmbedBudgetPerPass ?? WatchConfig.DefaultEmbedBudgetPerPass;
+        if (qdrant.PendingChunks >= pendingThreshold)
         {
             yield return new DoctorFinding(
                 "semantic search", StateFail,
-                $"{qdrant.PendingChunks} chunk(s) pending vectors (threshold {PendingChunksThreshold})",
+                $"{qdrant.PendingChunks} chunk(s) pending vectors (threshold {pendingThreshold}{ThresholdOrigin(pendingThreshold)})",
                 DoctorRemedies.Index);
         }
     }
 
-    private static bool NoSemantic(WorkspaceRegistryEntry entry)
+    private static string ThresholdOrigin(int pendingThreshold)
+        => pendingThreshold == WatchConfig.DefaultEmbedBudgetPerPass ? string.Empty : ", watch.embedBudgetPerPass";
+
+    private static SqueezrConfig? TryLoadConfig(WorkspaceRegistryEntry entry)
     {
         try
         {
-            return ConfigFile.Load(entry.RootPath).Indexing.NoSemantic;
+            return ConfigFile.Load(entry.RootPath);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // an unreadable config means no semantic judgment; the workspace-level checks already
             // report the broken store, and the coverage arm may add its own honest fail on top
-            return false;
+            return null;
         }
     }
 
