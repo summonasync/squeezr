@@ -8,6 +8,35 @@ namespace Squeezr.Tests.Indexing.Ignore;
 public class IgnoreRulesetTests
 {
     [Fact]
+    public void Decision_MinifiedEsmModules_AreDefaultIgnored()
+    {
+        var root = TestDirs.NewTempDir();
+        var ruleset = IgnoreRuleset.For(root, SqueezrConfig.CreateDefault());
+
+        ruleset.Decision("a.min.mjs", isDirectory: false).Excluded.ShouldBeTrue();
+        ruleset.Decision("a.min.mjs", isDirectory: false).Source.ShouldBe(IgnoreSource.Defaults);
+        ruleset.Decision("lib/b.min.cjs", isDirectory: false).Excluded.ShouldBeTrue();
+        ruleset.Decision("b.min.cjs", isDirectory: false).Source.ShouldBe(IgnoreSource.Defaults);
+    }
+
+    [Fact]
+    public void Decision_MinifiedEsmModules_ConfigCanOverride()
+    {
+        var root = TestDirs.NewTempDir();
+        var config = SqueezrConfig.CreateDefault() with
+        {
+            Indexing = SqueezrConfig.CreateDefault().Indexing with
+            {
+                Ignore = ["!**/*.min.mjs"]
+            }
+        };
+        var ruleset = IgnoreRuleset.For(root, config);
+
+        ruleset.Decision("a.min.mjs", isDirectory: false).Excluded.ShouldBeFalse();
+        ruleset.Decision("b.min.cjs", isDirectory: false).Excluded.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Cascade_NestedGitignore_ExcludesFileInSubdir()
     {
         var root = TestDirs.NewTempDir();

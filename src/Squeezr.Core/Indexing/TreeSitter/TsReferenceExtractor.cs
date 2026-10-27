@@ -146,6 +146,7 @@ internal static class TsReferenceExtractor
             {
                 "class_declaration" or "interface_declaration" or "function_declaration"
                     or "method_definition" or "type_alias_declaration" => SymbolName(current),
+                "function_expression" when current.GetChildForField("name") is not null => SymbolName(current),
                 "variable_declarator" when current.NamedChildren.Any(c => c.Type == "arrow_function") =>
                     SymbolName(current),
                 _ => null,

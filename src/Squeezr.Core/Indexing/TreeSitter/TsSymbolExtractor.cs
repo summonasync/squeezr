@@ -138,6 +138,7 @@ internal static class TsSymbolExtractor
     {
         "class_declaration" or "interface_declaration" or "function_declaration"
             or "method_definition" or "type_alias_declaration" => NameOf(node),
+        "function_expression" when node.GetChildForField("name") is not null => NameOf(node),
         "variable_declarator" when node.NamedChildren.Any(c => c.Type == "arrow_function") => NameOf(node),
         _ => null,
     };
