@@ -9,10 +9,11 @@ namespace Squeezr.Tests.Cli;
 public sealed class IndexEventsTests
 {
     [Fact]
-    public async Task Index_Events_FirstRun_EmitsStartedFilesCompletedWithPhaseProgress()
+    public async Task Index_Events_FirstRun_EmitsStartedWarningFilesCompletedWithPhaseProgress()
     {
         var root = TestDirs.NewTempDir();
         await InitAddAsync(root, ("a.cs", "class Alpha { }"));
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
 
         var index = await RunCliAsync(root, "index", "--events");
         index.ExitCode.ShouldBe(0);
@@ -20,7 +21,7 @@ public sealed class IndexEventsTests
         var types = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(ParseType)
             .ToList();
-        types.ShouldBe(["started", "fileIndexed", "progress", "progress", "completed"]);
+        types.ShouldBe(["started", "warning", "fileIndexed", "progress", "progress", "completed"]);
 
         var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         using (var started = JsonDocument.Parse(lines[0]))
@@ -28,20 +29,26 @@ public sealed class IndexEventsTests
             started.RootElement.GetProperty("workspace").GetString().ShouldBe(Path.GetFullPath(root));
         }
 
-        using (var file = JsonDocument.Parse(lines[1]))
+        using (var warning = JsonDocument.Parse(lines[1]))
+        {
+            warning.RootElement.GetProperty("type").GetString().ShouldBe("warning");
+            warning.RootElement.GetProperty("code").GetString().ShouldBe("embeddings_unavailable");
+        }
+
+        using (var file = JsonDocument.Parse(lines[2]))
         {
             file.RootElement.GetProperty("repo").GetString().ShouldBe("code");
             file.RootElement.GetProperty("path").GetString().ShouldBe("a.cs");
             file.RootElement.GetProperty("files").GetInt32().ShouldBe(1);
         }
 
-        using (var semantic = JsonDocument.Parse(lines[2]))
+        using (var semantic = JsonDocument.Parse(lines[3]))
         {
             semantic.RootElement.GetProperty("phase").GetString().ShouldBe("semantic");
             semantic.RootElement.GetProperty("total").GetInt32().ShouldBe(1);
         }
 
-        using (var completed = JsonDocument.Parse(lines[4]))
+        using (var completed = JsonDocument.Parse(lines[5]))
         {
             completed.RootElement.GetProperty("files").GetInt32().ShouldBe(1);
             completed.RootElement.GetProperty("added").GetInt32().ShouldBe(1);
@@ -51,30 +58,37 @@ public sealed class IndexEventsTests
     }
 
     [Fact]
-    public async Task Index_Events_QuietIncrementalRun_EmitsExactlyStartedFilesCompleted()
+    public async Task Index_Events_QuietIncrementalRun_EmitsExactlyStartedWarningFilesCompleted()
     {
         var root = TestDirs.NewTempDir();
         await InitAddAsync(root,
             ("a.txt", "alpha body"),
             ("b.txt", "beta body"),
             ("c.txt", "gamma body"));
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
         (await RunCliAsync(root, "index")).ExitCode.ShouldBe(0);
 
         var index = await RunCliAsync(root, "index", "--events");
         index.ExitCode.ShouldBe(0);
 
         var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        lines.Length.ShouldBe(5);
+        lines.Length.ShouldBe(6);
 
         using (var started = JsonDocument.Parse(lines[0]))
         {
             started.RootElement.GetProperty("type").GetString().ShouldBe("started");
         }
 
+        using (var warning = JsonDocument.Parse(lines[1]))
+        {
+            warning.RootElement.GetProperty("type").GetString().ShouldBe("warning");
+            warning.RootElement.GetProperty("code").GetString().ShouldBe("embeddings_unavailable");
+        }
+
         var expectedPaths = new[] { "a.txt", "b.txt", "c.txt" };
         for (var i = 0; i < expectedPaths.Length; i++)
         {
-            using var doc = JsonDocument.Parse(lines[1 + i]);
+            using var doc = JsonDocument.Parse(lines[2 + i]);
             var e = doc.RootElement;
             e.GetProperty("type").GetString().ShouldBe("fileIndexed");
             e.GetProperty("repo").GetString().ShouldBe("code");
@@ -82,7 +96,7 @@ public sealed class IndexEventsTests
             e.GetProperty("files").GetInt32().ShouldBe(i + 1);
         }
 
-        using (var completed = JsonDocument.Parse(lines[4]))
+        using (var completed = JsonDocument.Parse(lines[5]))
         {
             var e = completed.RootElement;
             e.GetProperty("type").GetString().ShouldBe("completed");
@@ -99,18 +113,20 @@ public sealed class IndexEventsTests
     {
         var root = TestDirs.NewTempDir();
         await InitAddAsync(root, ("a.txt", "alpha body"));
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
         (await RunCliAsync(root, "index")).ExitCode.ShouldBe(0);
 
         var index = await RunCliAsync(root, "index", "--events", "--json");
         index.ExitCode.ShouldBe(0);
 
         var lines = index.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        lines.Length.ShouldBe(4);
+        lines.Length.ShouldBe(5);
         ParseType(lines[0]).ShouldBe("started");
-        ParseType(lines[1]).ShouldBe("fileIndexed");
-        ParseType(lines[2]).ShouldBe("completed");
+        ParseType(lines[1]).ShouldBe("warning");
+        ParseType(lines[2]).ShouldBe("fileIndexed");
+        ParseType(lines[3]).ShouldBe("completed");
 
-        using var final = JsonDocument.Parse(lines[3]);
+        using var final = JsonDocument.Parse(lines[4]);
         final.RootElement.TryGetProperty("type", out _).ShouldBeFalse();
         final.RootElement.GetProperty("repos")[0].GetProperty("files").GetInt32().ShouldBe(1);
     }
