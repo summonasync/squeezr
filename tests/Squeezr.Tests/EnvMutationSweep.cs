@@ -35,7 +35,8 @@ internal static class EnvMutationSweep
     private static bool IsBuildOutput(string path) =>
         path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") ||
         path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
-        path.Contains($"{Path.DirectorySeparatorChar}TestResults{Path.DirectorySeparatorChar}");
+        path.Contains($"{Path.DirectorySeparatorChar}TestResults{Path.DirectorySeparatorChar}") ||
+        path.Contains($"{Path.DirectorySeparatorChar}Fixtures{Path.DirectorySeparatorChar}");
 
     private static void ScanFile(
         string path,
@@ -61,7 +62,6 @@ internal static class EnvMutationSweep
             {
                 pendingCollection = collectionName.Groups[1].Value;
                 pendingDepth = depth;
-                continue;
             }
 
             var declaration = ClassDeclaration.Match(line);
@@ -69,7 +69,10 @@ internal static class EnvMutationSweep
             if (declaration.Success && !bodyless)
             {
                 var parentSerialized = stack.Count > 0 && stack.Peek().EffectivelySerialized;
-                stack.Push(new Region(declaration.Groups[1].Value, depth, pendingCollection, parentSerialized, serializedCollections));
+                var region = new Region(declaration.Groups[1].Value, depth, pendingCollection, parentSerialized, serializedCollections);
+                if (line.Contains('{'))
+                    region.Entered = true;
+                stack.Push(region);
                 pendingCollection = null;
             }
 
@@ -85,15 +88,15 @@ internal static class EnvMutationSweep
             depth += line.Count(c => c == '{');
             depth -= line.Count(c => c == '}');
 
+            if (stack.Count > 0 && depth > stack.Peek().OpenDepth)
+                stack.Peek().Entered = true;
+
             while (stack.Count > 0 && stack.Peek().Entered && stack.Peek().OpenDepth >= depth)
             {
                 var region = stack.Pop();
                 if (region.HasTests && region.Evidence.Count > 0 && !region.EffectivelySerialized)
                     offenders.Add(new Offender(region.Name, relativePath, [.. region.Evidence.Distinct()]));
             }
-
-            if (stack.Count > 0 && depth > stack.Peek().OpenDepth)
-                stack.Peek().Entered = true;
 
             if (pendingDepth > depth)
             {

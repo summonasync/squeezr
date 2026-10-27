@@ -6,7 +6,7 @@ namespace Squeezr.Tests;
 public class EnvMutationSweepTests
 {
     private static readonly Regex SerializedDefinition =
-        new(@"\[CollectionDefinition\(""(?<name>[^""]+)""(?<body>[^\)]*)\)\]", RegexOptions.Compiled);
+        new(@"\[CollectionDefinition\(""(?<name>[^""]+)""(?<body>.*?)\)\]", RegexOptions.Compiled | RegexOptions.Singleline);
 
     [Fact]
     public void TestTree_ClassesTouchingProcessEnvOrProcesses_AllSitInSerializedCollections()
@@ -105,6 +105,32 @@ public class EnvMutationSweepTests
     }
 
     [Fact]
+    public void Scan_CollectionAttributeAndClassOnOneLine_LeakToNextClassIsStillReported()
+    {
+        using var scratch = new ScratchDir();
+        scratch.Write("Mixed.cs",
+            """
+            [Collection("ProcessGlobals")] public class Covered { }
+
+            [Collection("ProcessGlobals")] public class CoveredWithBody
+            {
+                public void Helper() { }
+            }
+
+            public class SneakyTests
+            {
+                [Fact]
+                public void Do_Thing()
+                {
+                    Environment.SetEnvironmentVariable("SQUEEZR_HOME", null);
+                }
+            }
+            """);
+
+        offenders(scratch).Select(o => o.ClassName).ShouldBe(["SneakyTests"]);
+    }
+
+    [Fact]
     public void Scan_ProcessSpawningHelperWithoutTests_IsIgnored()
     {
         using var scratch = new ScratchDir();
@@ -135,14 +161,18 @@ public class EnvMutationSweepTests
         return Path.Combine(dir!.FullName, "tests");
     }
 
-    private static IReadOnlyList<string> SerializedCollections(string testsRoot)
-    {
-        var text = File.ReadAllText(Path.Combine(testsRoot, "Squeezr.Tests", "CollectionDefinitions.cs"));
-        return SerializedDefinition.Matches(text)
+    private static IReadOnlyList<string> SerializedCollections(string testsRoot) =>
+        Directory.EnumerateFiles(testsRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(IsSourceFile)
+            .Select(File.ReadAllText)
+            .SelectMany(text => SerializedDefinition.Matches(text))
             .Where(match => match.Groups["body"].Value.Contains("DisableParallelization = true"))
             .Select(match => match.Groups["name"].Value)
             .ToList();
-    }
+
+    private static bool IsSourceFile(string path) =>
+        !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") &&
+        !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}");
 
     private sealed class ScratchDir : IDisposable
     {
