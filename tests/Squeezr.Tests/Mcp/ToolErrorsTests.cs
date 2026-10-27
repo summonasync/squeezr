@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using Shouldly;
+using Squeezr.Cli.Commands;
 using Squeezr.Cli.Mcp;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
@@ -309,6 +310,19 @@ public class ToolErrorsTests
         payload.NextSteps.ShouldBeNull();
         result.Content.ShouldHaveSingleItem()
             .ShouldBeOfType<TextContentBlock>().Text.ShouldBe("Internal error: kaboom");
+    }
+
+    [Fact]
+    public void From_UsageError_SpeaksForItselfWithoutInternalPrefix()
+    {
+        var result = ToolErrors.From(
+            new McpUsageException("no symbol given — symbol_lookup accepts 'name' or its alias 'symbol'"),
+            WorkspaceAtRoot());
+
+        var payload = Payload(result);
+        payload.Code.ShouldBe("invalid_usage");
+        payload.Message.ShouldBe("no symbol given — symbol_lookup accepts 'name' or its alias 'symbol'");
+        payload.Message.ShouldNotStartWith("Internal error:");
     }
 
     [Fact]
