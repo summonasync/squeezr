@@ -57,12 +57,16 @@ public class WorkspaceWatcherLinkedWorktreeTests
     }
 
     [Fact]
-    public void GitDirLink_PlainRepoOrDanglingPointer_ResolvesToNull()
+    public void GitDirLink_PlainRepo_ResolvesToNull()
     {
         var plain = TestDirs.NewTempDir();
         TestGitRepo.Init(plain);
         GitDirLink.Resolve(plain).ShouldBeNull("a normal repo keeps git state inside .git, nothing to link");
+    }
 
+    [Fact]
+    public void GitDirLink_DanglingPointer_ResolvesToNull()
+    {
         var husk = TestDirs.NewTempDir();
         var repoRoot = Path.Combine(husk, "repo");
         Directory.CreateDirectory(repoRoot);

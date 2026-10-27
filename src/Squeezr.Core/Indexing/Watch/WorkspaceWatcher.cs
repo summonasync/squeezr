@@ -246,9 +246,7 @@ public sealed class WorkspaceWatcher
         foreach (var root in roots)
         {
             var gitdir = GitDirLink.Resolve(root);
-            if (gitdir is null
-                || roots.Any(covered => WatchEventFilter.IsUnderPath(gitdir, covered))
-                || paths.Any(added => WatchEventFilter.IsUnderPath(gitdir, added)))
+            if (gitdir is null || paths.Any(added => WatchEventFilter.IsUnderPath(gitdir, added)))
             {
                 continue;
             }
