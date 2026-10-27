@@ -5,17 +5,12 @@ namespace Squeezr.Core.Embeddings;
 public sealed class EmbeddingProviderResolver
 {
     private const string ProbePath = "api/tags";
-    private const string Ipv4LoopbackHost = "127.0.0.1";
-
-    // Windows keeps retrying the refused IPv6 SYN for ~3s before falling through to IPv4;
-    // anything shorter kills the probe before the stack ever reaches the IPv4 listener.
-    internal static readonly TimeSpan DefaultProbeTimeout = TimeSpan.FromSeconds(3);
 
     private readonly HttpClient _http;
     private readonly TimeSpan _probeTimeout;
 
     public EmbeddingProviderResolver(HttpClient http)
-        : this(http, DefaultProbeTimeout)
+        : this(http, OllamaProbe.Budget)
     {
     }
 
@@ -65,11 +60,5 @@ public sealed class EmbeddingProviderResolver
 
     private static EmbeddingProviderResolution FallbackToOnnx(string reason) => new("onnx", reason);
 
-    private static Uri ProbeUri(string ollamaEndpoint)
-    {
-        var builder = new UriBuilder(ollamaEndpoint.TrimEnd('/') + "/" + ProbePath);
-        if (builder.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-            builder.Host = Ipv4LoopbackHost;
-        return builder.Uri;
-    }
+    private static Uri ProbeUri(string ollamaEndpoint) => OllamaProbe.ProbeUri(ollamaEndpoint, ProbePath);
 }

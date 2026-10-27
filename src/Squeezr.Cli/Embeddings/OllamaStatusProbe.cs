@@ -2,27 +2,42 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Embeddings;
 
 public static class OllamaStatusProbe
 {
-    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
+    private const string TagsPath = "api/tags";
 
     public static async Task<OllamaStatus> ProbeAsync(
         OllamaOptions options,
         CancellationToken ct,
         HttpMessageHandler? handler = null)
+        => await ProbeAsync(options, OllamaProbe.Budget, ct, handler);
+
+    internal static async Task<OllamaStatus> ProbeAsync(
+        OllamaOptions options,
+        TimeSpan budget,
+        CancellationToken ct,
+        HttpMessageHandler? handler)
     {
         using var http = handler is null ? new HttpClient() : new HttpClient(handler);
-        http.BaseAddress = new Uri(options.Endpoint.TrimEnd('/') + "/");
-        http.Timeout = ProbeTimeout;
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        probeCts.CancelAfter(budget);
 
         TagsResponse? tags;
         try
         {
-            tags = await http.GetFromJsonAsync<TagsResponse>("api/tags", ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, OllamaProbe.ProbeUri(options.Endpoint, TagsPath));
+            using var response = await http.SendAsync(request, probeCts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new OllamaStatus(false, false);
+            }
+
+            tags = await response.Content.ReadFromJsonAsync<TagsResponse>(probeCts.Token);
         }
         catch (HttpRequestException)
         {
