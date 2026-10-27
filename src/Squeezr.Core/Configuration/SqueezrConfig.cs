@@ -37,6 +37,8 @@ public sealed record SqueezrConfig
                     "**/.mindlash/worktrees/**",
                     "**/.qwen/worktrees/**",
                     "**/*.min.js",
+                    "**/*.min.mjs",
+                    "**/*.min.cjs",
                     "**/*.tsbuildinfo",
                     "**/web/out/**",
                     "**/.qwen/tmp/**",

@@ -48,6 +48,43 @@ public class TreeSitterProviderTests
     }
 
     [Fact]
+    public void JavaScript_Symbols_InsideNamedFunctionExpression_ContainerIsTheFunctionName()
+    {
+        var result = Parse("app.js", """
+            const bootstrap = function run() {
+              function inner() {
+                return 1;
+              }
+            };
+            """);
+
+        result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([
+            ("run", SymbolKind.Function),
+            ("inner", SymbolKind.Function),
+        ]);
+
+        var run = result.Symbols[0];
+        run.ContainerName.ShouldBeNull();
+
+        var inner = result.Symbols[1];
+        inner.ContainerName.ShouldBe("run");
+    }
+
+    [Fact]
+    public void JavaScript_Refs_InsideNamedFunctionExpression_EnclosingIsTheFunctionName()
+    {
+        var result = Parse("app.js", """
+            const bootstrap = function run() {
+              helper();
+            };
+            """);
+
+        var callRef = result.Refs.Single(r => r.Kind == RefKind.Call);
+        callRef.ToName.ShouldBe("helper");
+        callRef.EnclosingName.ShouldBe("run");
+    }
+
+    [Fact]
     public void JavaScript_Symbols_FunctionArrowClassMethod_ExtractedWithSpansAndContainers()
     {
         var result = Parse("app.js", """
