@@ -22,6 +22,12 @@ Rule: any test fixture that writes-then-spawns an executable (scripts, fake CLIs
 
 Rule: assert the invariant the producer guarantees (parse the value, bound it by the documented threshold), plus the race-free parts (pid, line presence, format). Exact quantized values ("0s", "5s") are flake bait.
 
+### 4. Waits crossing an edit-propagation chain get a measured multiple; a stop wait sits outside the machinery's own join window
+
+The 100 fix covered the drain family's saturated member, but the class's other members kept a shared 30s budget over a chain of FSW delivery + one debounce window + a full pass. That chain idles in low single-digit seconds (1-6s whole-test isolated at load ~31 during 104), yet the same shape killed sibling classes on their 60s budgets the same day — `ServeWatchClaimTests.TwoParticipants_OnOneStore_OwnerIndexes_ObserverAnswers` at load 44 (104's repro run 1) and `ServeEmbedDrainTests.NoEmbedWatch_PassIndexesEditsButPendingStays` at load 109 (104's gate 3, first attempt) — while the one class on a three-minute budget passed under identical conditions. Name the multiple at the assert site: 104's budget is roughly 30-90x the idle chain, the same size 100 picked for the seven-window chain. The cost is stated too: a machinery regression that used to die at 30s now hides until the budget expires — a wait failure at this size means a real stall, and the suite pays that stall in full. Related margin rule: a test-side stop wait must exceed the machinery's internal join window (`WorkspaceWatcher.PassJoinTimeout` = 5s), never match it — matching gives a loaded box zero margin and fails the test on a stop that was still working.
+
+Rule: size wait budgets from measured chain latency under load, state the multiple and the blind-window cost next to the budget; a test that joins or stops machinery with its own timeout must budget strictly more than the machinery's internal join.
+
 ## The gate
 
 Load flake evidence is only valid from a full serial suite run (`dotnet test --no-build -m:1`) on the loaded box — isolated runs are green by definition here. A fix is accepted after three consecutive clean serial runs. Precedent for load-tolerant deadlines: 087-T3 (measured multiple of observed latency, no fixed floor). Bare `Skip` is not a fix; a tolerance must name the invariant it keeps.

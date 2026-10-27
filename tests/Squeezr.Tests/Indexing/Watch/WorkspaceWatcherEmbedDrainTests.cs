@@ -11,7 +11,14 @@ namespace Squeezr.Tests.Indexing.Watch;
 
 public class WorkspaceWatcherEmbedDrainTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
+    // Every wait below spans an edit-propagation chain: FSW delivery, one debounce window, a full pass.
+    // The chain idles in low single-digit seconds, but this class flaked once under suite load (102's
+    // serial run, class-level attribution only) and the same chain shape killed sibling classes on their
+    // 60s budgets during 104's own runs (ServeWatchClaim at load 44, ServeEmbedDrain at load 109) while
+    // this class — the only one on a three-minute budget — passed under the same conditions. The budget
+    // rides the 087-T3 load-tolerant shape at the size the SaturatedBudget fix picked for the
+    // seven-window chain: roughly 30-90x the idle chain, and a failure now reads as a real stall.
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan QuietSettle = TimeSpan.FromSeconds(3);
 
     [Fact]
@@ -270,13 +277,15 @@ public class WorkspaceWatcherEmbedDrainTests
     {
         await cts.CancelAsync();
         var stop = watcher.StopAsync();
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        // the watcher's internal stop join already gives a pass 5s to answer cancellation; sitting on the
+        // same number gives a loaded box zero margin and fails the test on a stop that was still working
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
         while (!stop.IsCompleted && DateTime.UtcNow < deadline)
         {
             await Task.Delay(50);
         }
 
-        stop.IsCompleted.ShouldBeTrue("watcher did not stop within 5s");
+        stop.IsCompleted.ShouldBeTrue("watcher did not stop within 30s");
     }
 
     private static SearchQuery Query(string text) => new(text, false, null, null, null, null, null, null);
