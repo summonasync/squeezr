@@ -46,11 +46,11 @@ internal static class SecretSnippetRedactor
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex InlinePair = new(
-        @"""(?<key>[^""]+)""\s*:\s*""(?<val>[^""]*)""",
+        """(?<key>[^"]+)"\s*:\s*(?:"(?<val>[^"]*)"|(?<struct>\[[^\]\n]*\]|\{[^\}\n]*\}))""",
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex FlowPair = new(
-        """(?<key>[\w.\-]+)\s*[:=]\s*(?<val>[^,}\]\n]+)""",
+        """(?<key>[\w.\-]+)\s*[:=]\s*(?<val>"[^"]*"|'[^']*'|[^,}\]\n]+)""",
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex XmlAttribute = new(
@@ -58,7 +58,7 @@ internal static class SecretSnippetRedactor
         RegexOptions.Compiled, RegexTimeout);
 
     private static readonly Regex EmbeddedAssignment = new(
-        """(password|passwd|pwd|secret|api[_\- ]?key|token|credential|private[_\- ]?key|connection[_\- ]?string)\s*[=:]\s*\S|\w+://[^\s:/@]+:[^\s@/]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----""",
+        """(password|passwd|pwd|secret|api[_\- ]?key|token|credential|private[_\- ]?key|connection[_\- ]?string)\s*[=:]\s*\S|(?<![\w.])\w+://[^\s:/@]+:[^\s@/]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----""",
         RegexOptions.Compiled | RegexOptions.IgnoreCase, RegexTimeout);
 
     internal static string Redact(string relativePath, string text) =>
@@ -70,7 +70,17 @@ internal static class SecretSnippetRedactor
         for (var i = 0; i < lines.Length; i++)
         {
             var carriage = lines[i].EndsWith('\r') ? "\r" : string.Empty;
-            lines[i] = RedactLine(lines[i].TrimEnd('\r')) + carriage;
+            string safe;
+            try
+            {
+                safe = RedactLine(lines[i].TrimEnd('\r'));
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                safe = MaskedUncertain;
+            }
+
+            lines[i] = safe + carriage;
         }
 
         return string.Join('\n', lines);
@@ -96,20 +106,37 @@ internal static class SecretSnippetRedactor
         var changed = false;
         for (var i = matches.Count - 1; i >= 0; i--)
         {
-            var value = matches[i].Groups["val"];
-            var masked = IsSecretKey(matches[i].Groups["key"].Value) ? Masked
-                : EmbeddedAssignment.IsMatch(value.Value) ? MaskedUncertain
-                : null;
-            if (masked is null)
+            var match = matches[i];
+            var masked = MaskForPair(match.Groups["key"].Value, match.Groups["val"]);
+            if (masked is null && !match.Groups["struct"].Success)
             {
                 continue;
             }
 
-            line = Splice(line, value.Index, value.Length, masked);
+            if (match.Groups["struct"].Success)
+            {
+                if (IsSecretKey(match.Groups["key"].Value))
+                {
+                    var whole = match.Groups["struct"];
+                    line = Splice(line, whole.Index, whole.Length, Masked);
+                    changed = true;
+                }
+
+                continue;
+            }
+
+            line = Splice(line, match.Groups["val"].Index, match.Groups["val"].Length, masked!);
             changed = true;
         }
 
         return changed ? line : null;
+    }
+
+    private static string? MaskForPair(string key, Group value)
+    {
+        return IsSecretKey(key) ? Masked
+            : EmbeddedAssignment.IsMatch(value.Value) ? MaskedUncertain
+            : null;
     }
 
     private static string? TryPair(Match match, string line)
@@ -128,7 +155,14 @@ internal static class SecretSnippetRedactor
 
         if (trimmed.StartsWith('{') || trimmed.StartsWith('['))
         {
-            return RedactStructuralValue(value, line);
+            if (trimmed.Length <= 1)
+            {
+                return null;
+            }
+
+            return IsSecretKey(match.Groups["key"].Value)
+                ? Splice(line, value.Index, value.Length, Masked)
+                : RedactStructuralValue(value, line);
         }
 
         var masked = IsSecretKey(match.Groups["key"].Value) ? Masked
@@ -147,9 +181,7 @@ internal static class SecretSnippetRedactor
         for (var i = matches.Count - 1; i >= 0; i--)
         {
             var entry = matches[i];
-            var masked = IsSecretKey(entry.Groups["key"].Value) ? Masked
-                : EmbeddedAssignment.IsMatch(entry.Groups["val"].Value) ? MaskedUncertain
-                : null;
+            var masked = MaskForPair(entry.Groups["key"].Value, entry.Groups["val"]);
             if (masked is null)
             {
                 continue;

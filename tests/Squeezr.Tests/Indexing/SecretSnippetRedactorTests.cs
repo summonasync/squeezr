@@ -198,6 +198,53 @@ public class SecretSnippetRedactorTests
     }
 
     [Fact]
+    public void Redact_QuotedFlowValueWithComma_MasksTheWholeValue()
+    {
+        const string compose = "services:\n  db:\n    environment: {POSTGRES_PASSWORD: \"hunter2,extra9\"}\n";
+
+        var masked = SecretSnippetRedactor.Redact("docker-compose.yml", compose);
+
+        masked.ShouldContain("environment: {POSTGRES_PASSWORD: [redacted]}");
+        masked.ShouldNotContain("hunter2");
+        masked.ShouldNotContain("extra9");
+    }
+
+    [Fact]
+    public void Redact_StructuralValueUnderFamilyKey_MasksTheWholeValue()
+    {
+        const string compose = "vault:\n  apikeys: [sk-abc-1, sk-def-2]\n  retries: 3\n";
+
+        var masked = SecretSnippetRedactor.Redact("docker-compose.yml", compose);
+
+        masked.ShouldContain("apikeys: [redacted]");
+        masked.ShouldContain("retries: 3");
+        masked.ShouldNotContain("sk-abc-1");
+        masked.ShouldNotContain("sk-def-2");
+    }
+
+    [Fact]
+    public void Redact_CompactJsonArrayUnderFamilyKey_MasksTheWholeArray()
+    {
+        var masked = SecretSnippetRedactor.Redact(
+            "appsettings.json", """{ "Secrets": ["aaa-1", "bbb-2"], "Tags": ["one"] }""");
+
+        masked.ShouldContain("\"Secrets\": [redacted]");
+        masked.ShouldContain("\"Tags\": [\"one\"]");
+        masked.ShouldNotContain("aaa-1");
+        masked.ShouldNotContain("bbb-2");
+    }
+
+    [Fact]
+    public void Redact_HostileLongWordRun_CompletesWithoutFailingTheLine()
+    {
+        var line = "{ \"Data\": \"" + new string('a', 30_000) + "\" }";
+
+        string masked = null!;
+        Should.NotThrow(() => masked = SecretSnippetRedactor.Redact("appsettings.json", line));
+        masked.Count(c => c == '\n').ShouldBe(0);
+    }
+
+    [Fact]
     public void Redact_EmptyAndStructuralValues_StayUntouched()
     {
         const string shaped = "{\n  \"ConnectionStrings\": {\n    \"Default\": \"\"\n  }\n}";
