@@ -141,16 +141,12 @@ public sealed class WatchOwnerClaimAdoptionTests : IDisposable
         if (winner.TookOverFrom is { } dead)
         {
             dead.Pid.ShouldBe(DeadPid);
-            var adopted = WatchAdoptionEventFile.TryRead(_storeDir).ShouldNotBeNull();
-            adopted.AdopterPid.ShouldBe(winner.Owner!.Pid);
-        }
-        else
-        {
-            winner.Owner!.Pid.ShouldBeOneOf(contenderPids);
-            WatchAdoptionEventFile.TryRead(_storeDir).ShouldBeNull(
-                "winning the free gap between the other contender's reap and create is a fresh claim, not an adoption");
         }
 
+        var adopted = WatchAdoptionEventFile.TryRead(_storeDir).ShouldNotBeNull(
+            "the displaced owner must surface even when the winner took the free gap left by the other contender's reap");
+        adopted.AdopterPid.ShouldBe(winner.Owner!.Pid);
+        adopted.DisplacedPid.ShouldBe(DeadPid);
         ReadMarkerFile()!.Pid.ShouldBe(winner.Owner.Pid);
     }
 
