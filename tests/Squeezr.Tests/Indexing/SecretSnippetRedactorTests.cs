@@ -269,6 +269,19 @@ public class SecretSnippetRedactorTests
     }
 
     [Fact]
+    public void Redact_DeeplyNestedCompactJson_FailsClosedWithoutCrashing()
+    {
+        var line = string.Concat(Enumerable.Repeat("{ \"Key\": ", 5_000))
+                  + "1"
+                  + string.Concat(Enumerable.Repeat(" }", 5_000));
+
+        string masked = null!;
+        Should.NotThrow(() => masked = SecretSnippetRedactor.Redact("appsettings.json", line));
+        masked.Count(c => c == '\n').ShouldBe(0);
+        masked.ShouldContain("[redacted?]");
+    }
+
+    [Fact]
     public void Redact_EmptyAndStructuralValues_StayUntouched()
     {
         const string shaped = "{\n  \"ConnectionStrings\": {\n    \"Default\": \"\"\n  }\n}";

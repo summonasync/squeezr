@@ -11,6 +11,8 @@ namespace Squeezr.Core.Indexing;
 // store.
 internal static class SecretSnippetRedactor
 {
+    private const int MaxInlineDepth = 128;
+
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
 
     internal const string Masked = "[redacted]";
@@ -88,14 +90,14 @@ internal static class SecretSnippetRedactor
 
     private static string RedactLine(string line)
     {
-        return RedactInlinePairs(line) is { } inlined ? inlined
+        return RedactInlinePairs(line, depth: 0) is { } inlined ? inlined
             : TryPair(JsonPair.Match(line), line)
             ?? TryPair(EnvYamlPair.Match(line), line)
             ?? TryPair(XmlElement.Match(line), line)
             ?? RedactXmlAttributes(line);
     }
 
-    private static string? RedactInlinePairs(string line)
+    private static string? RedactInlinePairs(string line, int depth)
     {
         var matches = InlinePair.Matches(line);
         if (matches.Count == 0)
@@ -124,7 +126,14 @@ internal static class SecretSnippetRedactor
                 }
 
                 var span = match.Groups["struct"];
-                if (RedactInlinePairs(span.Value) is { } maskedSpan)
+                if (depth >= MaxInlineDepth)
+                {
+                    line = Splice(line, span.Index, span.Length, MaskedUncertain);
+                    changed = true;
+                    continue;
+                }
+
+                if (RedactInlinePairs(span.Value, depth + 1) is { } maskedSpan)
                 {
                     line = Splice(line, span.Index, span.Length, maskedSpan);
                     changed = true;
