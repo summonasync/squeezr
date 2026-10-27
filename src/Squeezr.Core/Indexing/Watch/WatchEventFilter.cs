@@ -33,6 +33,10 @@ public sealed class WatchEventFilter
     public static bool IsGitInternalChange(string fullPath) =>
         fullPath.Split('/', '\\').Contains(".git", StringComparer.OrdinalIgnoreCase);
 
+    internal static bool IsUnderPath(string fullPath, string root) =>
+        fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison)
+        || string.Equals(fullPath, root, PathComparison);
+
     // routing by the layout role, exact extension only: the catalog labels content, this list decides
     // what must wake the watcher, and the two were drifting apart when .slnx/.props/.targets edits went silent
     private static bool IsProjectLayoutFile(string fullPath) =>
@@ -68,14 +72,10 @@ public sealed class WatchEventFilter
             || LanguageDetector.Detect(fullPath) != "unknown";
     }
 
-    private bool IsInsideStore(string fullPath) =>
-        fullPath.StartsWith(_storeDir + Path.DirectorySeparatorChar, PathComparison)
-        || string.Equals(fullPath, _storeDir, PathComparison);
+    private bool IsInsideStore(string fullPath) => IsUnderPath(fullPath, _storeDir);
 
     private string? FindRepoRoot(string fullPath) =>
-        _repoRoots.FirstOrDefault(root =>
-            fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison)
-            || string.Equals(fullPath, root, PathComparison));
+        _repoRoots.FirstOrDefault(root => IsUnderPath(fullPath, root));
 
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

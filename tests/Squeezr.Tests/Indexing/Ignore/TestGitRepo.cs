@@ -25,6 +25,11 @@ internal static class TestGitRepo
         Run(root, "commit", "-m", message);
     }
 
+    public static void AddWorktree(string mainRoot, string worktreePath, string branch)
+    {
+        Run(mainRoot, "worktree", "add", worktreePath, "-b", branch);
+    }
+
     private static void Run(string root, params string[] args)
     {
         var start = new ProcessStartInfo
