@@ -120,6 +120,19 @@ internal static class SecretSnippetRedactor
                     var whole = match.Groups["struct"];
                     line = Splice(line, whole.Index, whole.Length, Masked);
                     changed = true;
+                    continue;
+                }
+
+                var span = match.Groups["struct"];
+                if (RedactInlinePairs(span.Value) is { } maskedSpan)
+                {
+                    line = Splice(line, span.Index, span.Length, maskedSpan);
+                    changed = true;
+                }
+                else if (RedactStructuralValue(span, line) is { } flowed)
+                {
+                    line = flowed;
+                    changed = true;
                 }
 
                 continue;
@@ -223,6 +236,7 @@ internal static class SecretSnippetRedactor
 
     private static bool IsSecretKey(string key)
     {
+        // stripping non-alphanumerics is what makes "{"ApiKey" and POSTGRES_PASSWORD read as one key
         var normalized = new string(key.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
         return KeyWords.Any(normalized.Contains);
     }

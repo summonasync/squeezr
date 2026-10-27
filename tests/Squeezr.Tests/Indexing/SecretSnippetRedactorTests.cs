@@ -245,6 +245,30 @@ public class SecretSnippetRedactorTests
     }
 
     [Fact]
+    public void Redact_CompactNestedObjectUnderPlainKey_MasksInnerSecretPairs()
+    {
+        const string compact = """{ "Db": {"Password": "pw-inner-1"}, "Name": "app" }""";
+
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", compact);
+
+        masked.ShouldContain("\"Password\": \"[redacted]\"");
+        masked.ShouldContain("\"Name\": \"app\"");
+        masked.ShouldNotContain("pw-inner-1");
+    }
+
+    [Fact]
+    public void Redact_CompactNestedObjectWithCredentialUrl_MasksTheInnerValue()
+    {
+        const string compact = """{ "Data": {"Uri": "mongodb://u:SuperSecret7@h"}, "Id": "7" }""";
+
+        var masked = SecretSnippetRedactor.Redact("appsettings.json", compact);
+
+        masked.ShouldContain("\"Uri\": \"[redacted?]\"");
+        masked.ShouldContain("\"Id\": \"7\"");
+        masked.ShouldNotContain("SuperSecret7");
+    }
+
+    [Fact]
     public void Redact_EmptyAndStructuralValues_StayUntouched()
     {
         const string shaped = "{\n  \"ConnectionStrings\": {\n    \"Default\": \"\"\n  }\n}";
