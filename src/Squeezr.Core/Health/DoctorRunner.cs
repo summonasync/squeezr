@@ -1,3 +1,4 @@
+using System.Globalization;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
@@ -37,6 +38,7 @@ public static class DoctorRunner
         }
 
         findings.AddRange(OrphanFindings());
+        findings.Add(FixtureFinding(utcNow));
         return Report(findings);
     }
 
@@ -245,6 +247,71 @@ public static class DoctorRunner
     }
 
     private static string Names(IEnumerable<string> names) => string.Join(", ", names);
+
+    // The residue line is intentionally read-only and always informational: a tmpfs full of test
+    // fixtures is worth seeing before it eats the box, but doctor itself must not clean or fail.
+    public static DoctorFinding FixtureFinding(DateTime utcNow, string? fixtureRoot = null)
+    {
+        var root = fixtureRoot ?? Path.Combine(Path.GetTempPath(), "squeezr-tests");
+        if (!Directory.Exists(root))
+        {
+            return new DoctorFinding("test fixtures", StateInfo, $"no fixture root at {root}", null);
+        }
+
+        try
+        {
+            var leaves = Directory.GetDirectories(root);
+            if (leaves.Length == 0)
+            {
+                return new DoctorFinding("test fixtures", StateInfo, $"no fixture dirs under {root}", null);
+            }
+
+            long totalBytes = 0;
+            var oldest = utcNow;
+            foreach (var leaf in leaves)
+            {
+                totalBytes += LeafBytes(leaf);
+                var modified = Directory.GetLastWriteTimeUtc(leaf);
+                if (modified < oldest)
+                {
+                    oldest = modified;
+                }
+            }
+
+            return new DoctorFinding(
+                "test fixtures", StateInfo,
+                $"{leaves.Length} fixture dir(s) under {root}, {FormatBytes(totalBytes)} total, " +
+                $"oldest leaf {Math.Max(0, (int)(utcNow - oldest).TotalHours)}h old",
+                null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new DoctorFinding("test fixtures", StateInfo, $"fixture scan incomplete: {ex.Message}", null);
+        }
+    }
+
+    private static long LeafBytes(string leaf) =>
+        Directory.EnumerateFiles(leaf, "*", new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+        }).Sum(file => new FileInfo(file).Length);
+
+    private static string FormatBytes(long bytes)
+    {
+        var value = (double)bytes;
+        var unit = 0;
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return unit == 0
+            ? $"{bytes.ToString(CultureInfo.InvariantCulture)} B"
+            : value.ToString("0.0", CultureInfo.InvariantCulture) + " " + units[unit];
+    }
 
     public static DoctorReport Report(IReadOnlyList<DoctorFinding> findings) =>
         new(findings.All(f => f.State != StateFail), findings);

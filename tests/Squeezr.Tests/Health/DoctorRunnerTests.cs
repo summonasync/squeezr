@@ -276,6 +276,53 @@ public sealed class DoctorRunnerTests : IDisposable
         info.Detail.ShouldContain("runs on CPU");
     }
 
+    [Fact]
+    public void FixtureFinding_PlantedTree_ReportsDirsSizeAndOldestAge()
+    {
+        var now = DateTime.UtcNow;
+        var root = NewTempDir();
+        PlantFixtureLeaf(root, "stale", now - TimeSpan.FromHours(5), ("meta.db", 10));
+        PlantFixtureLeaf(root, "fresh", now - TimeSpan.FromHours(2), ("a.bin", 1024), ("nested/b.bin", 2560));
+
+        var finding = DoctorRunner.FixtureFinding(now, root);
+
+        finding.Name.ShouldBe("test fixtures");
+        finding.State.ShouldBe(DoctorRunner.StateInfo);
+        finding.Remedy.ShouldBeNull();
+        finding.Detail.ShouldContain("2 fixture dir(s)");
+        finding.Detail.ShouldContain("3.5 KB");
+        finding.Detail.ShouldContain("5h old");
+        finding.Detail.ShouldContain(root);
+    }
+
+    [Fact]
+    public void FixtureFinding_MissingRoot_IsGracefulInfoAndNeverFails()
+    {
+        var root = NewTempDir();
+        Directory.Delete(root);
+
+        var finding = DoctorRunner.FixtureFinding(DateTime.UtcNow, root);
+
+        finding.State.ShouldBe(DoctorRunner.StateInfo);
+        finding.Detail.ShouldContain("no fixture root");
+        finding.Detail.ShouldContain(root);
+        DoctorRunner.Report([finding]).Healthy.ShouldBeTrue();
+    }
+
+    private static void PlantFixtureLeaf(
+        string root, string name, DateTime modified, params (string Relative, int Bytes)[] files)
+    {
+        var leaf = Directory.CreateDirectory(Path.Combine(root, name));
+        foreach (var (relative, bytes) in files)
+        {
+            var target = Path.Combine(leaf.FullName, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.WriteAllText(target, new string('x', bytes));
+        }
+
+        Directory.SetLastWriteTimeUtc(leaf.FullName, modified);
+    }
+
     private void SeedRegistry(params (string Name, string Root)[] entries)
     {
         var rows = entries.Select(e => new
