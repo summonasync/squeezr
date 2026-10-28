@@ -14,9 +14,9 @@ public sealed class ServeEmbedDrainTests
     // Every wait below spans FSW delivery, one debounce window and a full pass (plus, in the drain
     // test, the embedding batch on top). The chain idles at a couple of seconds (whole test ~2-4s
     // isolated), but this class died at load 109 on the 60s budget after surviving 1m03s (104's gate
-    // attempt) while the drain class on a three-minute budget passed under identical conditions — so
-    // the budget rides the same size 104 and 100 picked: roughly 30-90x the idle chain. A failure now
-    // reads as a real stall and the suite pays that stall in full.
+    // attempt) while WorkspaceWatcherEmbedDrainTests — then the only class on a three-minute budget —
+    // passed under identical conditions. The budget rides the size 104 and 100 picked: roughly 30-90x
+    // the idle chain. A failure now reads as a real stall and the suite pays that stall in full.
     private static readonly TimeSpan EngineTimeout = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan EngineArmTimeout = TimeSpan.FromSeconds(20);
 
