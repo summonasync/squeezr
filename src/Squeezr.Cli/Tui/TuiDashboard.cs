@@ -1,3 +1,4 @@
+using System.Reflection;
 using Spectre.Console;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
@@ -27,6 +28,8 @@ public static class TuiDashboard
 
         var ollama = await OllamaStatusProbe.ProbeAsync(ollamaOptions, cancellationToken);
 
+        var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev";
+        console.MarkupLine($"[bold]squeezr {version.EscapeMarkup()}[/]");
         console.MarkupLine($"[bold]Workspace:[/] {status.Name.EscapeMarkup()}");
         foreach (var repo in status.Repos)
         {
