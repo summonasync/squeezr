@@ -28,6 +28,18 @@ The 100 fix covered the drain family's saturated member, but the class's other m
 
 Rule: size wait budgets from measured chain latency under load, state the multiple and the blind-window cost next to the budget; a test that joins or stops machinery with its own timeout must budget strictly more than the machinery's internal join.
 
+### 5. The suite leaks /tmp workspaces; on a tmpfs /tmp that kills the whole box, not one run
+
+Fixtures built workspaces under `/tmp/squeezr-tests/<guid>` and nothing removed them until 079's sweep landed (per-run registration, teardown on exit, stale-leaf sweep); the lesson stands for any fixture root that skips that registration. `/tmp` on this box is a tmpfs, so its inode table is finite just like its space: 106's first serial gate died 501/3397 in an ENOSPC cascade the moment two concurrent suite runs pushed the cumulative day-long leak past the 1048576-inode ceiling — and the blast radius was not the suite but the box: every agent shell on it keeps per-call scratch in /tmp, so tooling itself went down with the mount.
+
+Rule: a run failing at scale (hundreds at once, not one knife) is a box symptom first — check `df -i /tmp` before reading stack traces; and no wait-budget widening can paper over resource hygiene, because knives keep tests honest only while the machine underneath them is alive.
+
+### 6. A full-budget expiry on a just-booted box is a boot-storm transient until reproduced warm
+
+106's first post-reboot serial run expired `ServeEmbedDrainTests.NoEmbedWatch_PassIndexesEditsButPendingStays`'s full three-minute budget — the wait never saw its condition arrive — while the whole run was wall-clock-slow at low CPU load (watch tests 3-5x their warm durations), and `FleetDaemonsTests.Json_OldSingleFileBeat_StillAnswersAsOneProcess` failed beside it at 778ms; both were green on isolated reruns within minutes, no source change involved. A cold boot storms the disk and kernel resource pools, and a chain can freeze for its entire budget, which no multiple covers.
+
+Rule: a knife failing at its FULL budget with load low and the rest of the run slow is reproduced warm (isolated, a few times) before the budget or the code is touched — the budget comment's own contract ("a failure now reads as a real stall") stays true, and the stall's cause decides the fix, not the number.
+
 ## The gate
 
 Load flake evidence is only valid from a full serial suite run (`dotnet test --no-build -m:1`) on the loaded box — isolated runs are green by definition here. A fix is accepted after three consecutive clean serial runs. Precedent for load-tolerant deadlines: 087-T3 (measured multiple of observed latency, no fixed floor). Bare `Skip` is not a fix; a tolerance must name the invariant it keeps.

@@ -11,7 +11,14 @@ namespace Squeezr.Tests.Mcp;
 
 public sealed class ServeWatchClaimTests
 {
-    private static readonly TimeSpan EngineTimeout = TimeSpan.FromSeconds(60);
+    // The wait below spans the edit-propagation chain in full: FSW delivery on the owner, one debounce
+    // window, a complete indexing pass, then the observer answering from the shared store. The chain
+    // idles at a couple of seconds (whole test ~3s isolated), but it died at load 44 on this class's
+    // 60s budget (104's serial run 1) while WorkspaceWatcherEmbedDrainTests — then the only class on a
+    // three-minute budget — passed under the same conditions. The budget rides the size 104 and 100
+    // picked: roughly 30-90x the idle chain. A failure now reads as a real stall and the suite pays
+    // that stall in full.
+    private static readonly TimeSpan EngineTimeout = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan EngineQuietPeriod = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan EngineArmTimeout = TimeSpan.FromSeconds(20);
 
