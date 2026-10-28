@@ -45,7 +45,7 @@ public class SemanticSessionPoolTests : IDisposable
     [Fact]
     public void Acquire_WhenCreateThrows_ThrottlesTheNextAttemptToo()
     {
-        var root = NewDir("dead-project");
+        var root = NewDir();
         WriteRepoFile(root, "broken.csproj", "<this is not a project file");
 
         using var pool = new SemanticSessionPool(() => _now);
@@ -72,7 +72,7 @@ public class SemanticSessionPoolTests : IDisposable
     [Fact]
     public void PooledSession_DisposedByThePassThatMisreadOwnership_IsNotHandedOutAsWarm()
     {
-        var root = NewDir("plain-csharp");
+        var root = NewDir();
         WriteRepoFile(root, "Plain.cs", """
             public static class Plain
             {
@@ -148,17 +148,16 @@ public class SemanticSessionPoolTests : IDisposable
         }
     }
 
-    private string NewDir(string hint)
+    private string NewDir()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "squeezr-tests", $"{hint}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = TestDirs.NewTempDir();
         _tempDirs.Add(dir);
         return dir;
     }
 
     private string NewRepoWithAnUnopenableProject()
     {
-        var root = NewDir("unopenable-project");
+        var root = NewDir();
         WriteRepoFile(root, "broken.csproj", "<this is not a project file");
         WriteRepoFile(root, "Loose.cs", """
             public static class Loose

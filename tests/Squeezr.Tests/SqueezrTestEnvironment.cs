@@ -17,6 +17,10 @@ public static class SqueezrTestEnvironment
     [ModuleInitializer]
     public static void RedirectSqueezrHome()
     {
+        var staleCutoff = TimeSpan.FromHours(6);
+        FixtureSweep.SweepStaleRoots(TestDirs.FixtureBaseRoot(), staleCutoff, DateTime.UtcNow);
+        FixtureSweep.SweepStaleRoots(TestDirs.LegacyPruneBaseRoot(), staleCutoff, DateTime.UtcNow);
+
         if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SQUEEZR_HOME")))
         {
             Environment.SetEnvironmentVariable("SQUEEZR_HOME", TestDirs.SharedStoreDir);
