@@ -38,14 +38,14 @@ public sealed class WorkspaceRepairPrunerTests : IDisposable
     public WorkspaceRepairPrunerTests()
     {
         _previousEnv = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
-        _home = NewTempDir();
+        _home = TestDirs.NewTempDir();
         Environment.SetEnvironmentVariable(HomeEnvironmentVariable, _home);
         SqueezrHome.Reset();
 
-        _liveRoot = Canonical(NewTempDir());
-        _withStoreRoot = Canonical(NewTempDir());
-        _noStoreRoot = Canonical(NewTempDir());
-        _evilRoot = Canonical(NewTempDir());
+        _liveRoot = Canonical(TestDirs.NewTempDir());
+        _withStoreRoot = Canonical(TestDirs.NewTempDir());
+        _noStoreRoot = Canonical(TestDirs.NewTempDir());
+        _evilRoot = Canonical(TestDirs.NewTempDir());
         _liveKey = StoreKey(LiveName, _liveRoot);
         _withStoreKey = StoreKey(WithStoreName, _withStoreRoot);
         _noStoreKey = StoreKey(NoStoreName, _noStoreRoot);
@@ -248,7 +248,7 @@ public sealed class WorkspaceRepairPrunerTests : IDisposable
     [Fact]
     public async Task RunAsync_NonLatinStoreKey_PrunsRowAndStore()
     {
-        var root = Canonical(NewTempDir());
+        var root = Canonical(TestDirs.NewTempDir());
         var storeKey = StoreKey(NonLatinName, root);
         var storeDir = WriteStoreDir(storeKey, NonLatinName, root, ("meta.db", 64));
         WriteRegistry(Row(LiveName, _liveRoot, _liveKey), Row(NonLatinName, root, storeKey));
@@ -469,7 +469,7 @@ public sealed class WorkspaceRepairPrunerTests : IDisposable
 
     private (string Root, string Key, string Dir) AddStaleRowWithStore(string name)
     {
-        var root = Canonical(NewTempDir());
+        var root = Canonical(TestDirs.NewTempDir());
         var storeKey = StoreKey(name, root);
         var storeDir = WriteStoreDir(storeKey, name, root, ("meta.db", 64));
         WriteRegistry(
@@ -526,13 +526,6 @@ public sealed class WorkspaceRepairPrunerTests : IDisposable
         WorkspaceStoreKeys.Create(name, canonicalRoot);
 
     private static string Canonical(string path) => WorkspaceCanonicalPath.Canonicalize(path);
-
-    private static string NewTempDir()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "squeezr-prune-tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
 
     private static TestConsole InteractiveConsole()
     {
