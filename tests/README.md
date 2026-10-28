@@ -34,6 +34,12 @@ Fixtures build workspaces under `/tmp/squeezr-tests/<guid>` and nothing ever rem
 
 Rule: a run failing at scale (hundreds at once, not one knife) is a box symptom first — check `df -i /tmp` before reading stack traces; and no wait-budget widening can paper over resource hygiene, because knives keep tests honest only while the machine underneath them is alive.
 
+### 6. A full-budget expiry on a just-booted box is a boot-storm transient until reproduced warm
+
+106's first post-reboot serial run expired the drain sibling's full three-minute budget — the wait never saw its condition arrive — while the whole run was wall-clock-slow at low CPU load (watch tests 3-10x their warm durations), and a foreign fleet-beat test failed beside it; both were green on isolated reruns within minutes, no source change involved. A cold boot storms the disk and kernel resource pools, and a chain can freeze for its entire budget, which no multiple covers.
+
+Rule: a knife failing at its FULL budget with load low and the rest of the run slow is reproduced warm (isolated, a few times) before the budget or the code is touched — the budget comment's own contract ("a failure now reads as a real stall") stays true, and the stall's cause decides the fix, not the number.
+
 ## The gate
 
 Load flake evidence is only valid from a full serial suite run (`dotnet test --no-build -m:1`) on the loaded box — isolated runs are green by definition here. A fix is accepted after three consecutive clean serial runs. Precedent for load-tolerant deadlines: 087-T3 (measured multiple of observed latency, no fixed floor). Bare `Skip` is not a fix; a tolerance must name the invariant it keeps.
