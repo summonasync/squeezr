@@ -48,6 +48,12 @@ public sealed class IndexEventsTests
             semantic.RootElement.GetProperty("total").GetInt32().ShouldBe(1);
         }
 
+        using (var trigram = JsonDocument.Parse(lines[4]))
+        {
+            trigram.RootElement.GetProperty("phase").GetString().ShouldBe("trigram");
+            trigram.RootElement.GetProperty("total").GetInt32().ShouldBe(1);
+        }
+
         using (var completed = JsonDocument.Parse(lines[5]))
         {
             completed.RootElement.GetProperty("files").GetInt32().ShouldBe(1);
