@@ -8,6 +8,8 @@ public sealed class DaemonLauncher
 {
     private static readonly string[] MuxerFileNames = ["dotnet", "dotnet.exe"];
 
+    public const string AwaitClaimArgument = "--await-claim";
+
     private readonly Func<string> _processPath;
 
     public DaemonLauncher() : this(ResolveProcessPath)
@@ -16,7 +18,11 @@ public sealed class DaemonLauncher
 
     internal DaemonLauncher(Func<string> processPath) => _processPath = processPath;
 
-    public Process StartWatch(string rootPath)
+    public Process StartWatch(string rootPath) => Launch(rootPath, awaitClaim: false);
+
+    public Process StartSupervisedWatch(string rootPath) => Launch(rootPath, awaitClaim: true);
+
+    private Process Launch(string rootPath, bool awaitClaim)
     {
         var binaryPath = _processPath();
         var startInfo = new ProcessStartInfo
@@ -33,6 +39,11 @@ public sealed class DaemonLauncher
         }
 
         startInfo.ArgumentList.Add("watch");
+        if (awaitClaim)
+        {
+            startInfo.ArgumentList.Add(AwaitClaimArgument);
+        }
+
         var process = Process.Start(startInfo)
             ?? throw new WorkspaceException("Failed to start the watch daemon process.");
         process.StandardInput.Close();

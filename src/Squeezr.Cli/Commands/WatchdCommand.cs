@@ -72,7 +72,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
         public IWatchDaemonHandle StartWatch(string rootPath)
         {
             var binaryPath = launcher.DaemonBinaryPath();
-            var process = launcher.StartWatch(rootPath);
+            var process = launcher.StartSupervisedWatch(rootPath);
             return new ProcessHandle(binaryPath, process);
         }
     }
