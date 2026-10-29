@@ -3,6 +3,7 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Daemons;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Indexing.Watch.Supervision;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -11,12 +12,23 @@ namespace Squeezr.Cli.Commands;
 public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Settings>
 {
     private readonly DaemonLauncher _launcher;
+    private readonly SupervisionState _state;
+    private readonly CrashLoopGuard _guard;
 
     public FleetRestartCommand() : this(new DaemonLauncher())
     {
     }
 
-    internal FleetRestartCommand(DaemonLauncher launcher) => _launcher = launcher;
+    internal FleetRestartCommand(DaemonLauncher launcher) : this(launcher, new SupervisionState(), new CrashLoopGuard())
+    {
+    }
+
+    internal FleetRestartCommand(DaemonLauncher launcher, SupervisionState state, CrashLoopGuard guard)
+    {
+        _launcher = launcher;
+        _state = state;
+        _guard = guard;
+    }
 
     public sealed class Settings : CommandSettings
     {
@@ -105,6 +117,11 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
                 }
             }
 
+            // fleet restart is the documented way out of a crash-loop wedge, and it re-arms the store:
+            // the fresh daemon must not inherit the blocked restart budget of the run it replaces.
+            _state.SetDesire(entry.StoreKey, WatchDesire.Running);
+            _guard.Reset(entry.StoreKey);
+
             int pid;
             try
             {
@@ -120,14 +137,22 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
                 throw new WorkspaceException($"Failed to start the watch daemon: {ex.Message}", innerException: ex);
             }
 
-            Report(new FleetRestartResult(entry.Name, entry.StoreKey, previousStatus, previousPid, pid), settings.Json);
+            Report(
+                new FleetRestartResult(
+                    entry.Name,
+                    entry.StoreKey,
+                    previousStatus,
+                    previousPid,
+                    pid,
+                    WatchDesire.Running.ToString().ToLowerInvariant()),
+                settings.Json);
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return 1;
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is WorkspaceException or IOException)
         {
             return CommandError.Report(ex, settings.Json);
         }
