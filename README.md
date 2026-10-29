@@ -1294,6 +1294,48 @@ squeezr fleet restart <storeKey>  # restart the watch daemon
 - Both commands do `--json`: one NDJSON result object, clean stdout (the 035
   contract).
 
+## Watchd: the global watch supervisor
+
+A `squeezr watch` process lives as long as whoever started it — an agent
+session, a terminal, an MCP client. `squeezr watchd` is the answer to "and who
+brings the watcher back": one long-lived supervisor process per machine that
+owns the watch daemons of every workspace in the registry and applies a
+desired state per store (`running` / `stopped`), persisted across watchd
+restarts in `~/.squeezr/watchd/state.json`.
+
+```bash
+squeezr watchd                    # start the supervisor (singleton per machine)
+squeezr fleet stop <store-key>    # desired=stopped: the daemon goes down and stays down
+squeezr fleet start <store-key>   # desired=running: watchd brings it back
+squeezr fleet restart <store-key> # restart now, reset the wedged flag
+squeezr fleet status              # desired vs actual, supervised/wedged/managed elsewhere
+```
+
+The same actions live in the TUI under `Watchd supervisor` — a session list
+with per-session start / stop / restart.
+
+Supervision rules, in one place:
+
+- **Crash vs intent.** A watch process that dies is restarted (poll interval
+  2s). Killing the process outside `fleet stop` counts as a crash — watchd
+  brings it back; `fleet stop` is the way to say "keep it down".
+- **Binary upgrades self-apply.** When the squeezr binary on disk becomes
+  newer than the running watcher (version drift), watchd restarts it — after
+  an upgrade the new code picks up without a manual step. Without watchd the
+  upgrade flow is `squeezr fleet restart`.
+- **Crash-loop guard.** More than 5 restarts of one store within 10 minutes
+  wedges it: restarts stop, the status shows `wedged`, `fleet restart` resets.
+- **A second watchd refuses to start** — the lock names the running instance.
+- **Live foreign owners are respected.** A store watched by an agent session
+  or an MCP client reads `managed elsewhere`: watchd does not touch it.
+
+One nuance to know: a watch claim is intentionally held for a grace window
+(30s) after its owner dies — a fresh beat from a pid that just died keeps the
+claim until the window passes, so a takeover race cannot steal it. Supervised
+watchers wait that window out (`--await-claim`) and take over when it expires,
+so kill→respawn converges within ~30s. A manual `squeezr watch` started inside
+the window declines immediately, as before.
+
 ## Vector hygiene: `squeezr vectors reconcile`
 
 Routine cleanup is done by indexing: a file's chunk set changed — its old

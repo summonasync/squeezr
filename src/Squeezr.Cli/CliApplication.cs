@@ -64,6 +64,10 @@ public static class CliApplication
                 .WithDescription("Remove the workspace index store (use --store-key for stale entries)");
             config.AddCommand<WatchCommand>("watch")
                 .WithDescription("Watch the workspace and re-index on file changes");
+            config.AddCommand<WatchdCommand>("watchd")
+                .WithDescription(
+                    "Supervise watch daemons of all registered workspaces: keep desired watches up, " +
+                    "restart after crashes and upgrades (singleton on this machine)");
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")
@@ -72,10 +76,14 @@ public static class CliApplication
             {
                 fleet.SetDescription("Show and manage watch/serve-watch daemons across all registered workspaces");
                 fleet.SetDefaultCommand<FleetCommand>();
+                fleet.AddCommand<FleetStartCommand>("start")
+                    .WithDescription("Record desired=running for a workspace; watchd brings the watch daemon up (exact store key)");
                 fleet.AddCommand<FleetStopCommand>("stop")
-                    .WithDescription("Stop the watch and serve-watch daemons of a workspace (exact store key)");
+                    .WithDescription("Stop the watch and serve-watch daemons of a workspace and record desired=stopped (exact store key)");
                 fleet.AddCommand<FleetRestartCommand>("restart")
-                    .WithDescription("Restart the watch daemon of a workspace (exact store key)");
+                    .WithDescription("Restart the watch daemon of a workspace, clearing its crash-loop wedge (exact store key)");
+                fleet.AddCommand<FleetStatusCommand>("status")
+                    .WithDescription("Show supervision posture per workspace: desired state, supervised/wedged/managed elsewhere, last pass");
             });
             config.AddBranch("services", services =>
             {

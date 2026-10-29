@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Spectre.Console.Rendering;
+using Squeezr.Cli.Daemons;
 using Squeezr.Cli.Mcp;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
@@ -14,6 +15,8 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
 {
     public sealed class Settings : CommandSettings
     {
+        [CommandOption(DaemonLauncher.AwaitClaimArgument)]
+        public bool AwaitClaim { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -31,10 +34,15 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
             var claimFaults = new ServeWatchAnnouncer(Console.Error, "watch");
             var claim = new WatchOwnerClaim(
                 SqueezrPaths.StoreDir(workspaceRoot), DaemonHeartbeat.DefaultKind, claimFaults.Fault);
-            var outcome = claim.TryAcquire();
-            if (outcome.Status == WatchOwnerStatus.RaceLost)
+            var outcome = AcquireClaim(claim);
+            if (settings.AwaitClaim && outcome.Status == WatchOwnerStatus.OwnerHold)
             {
-                outcome = claim.TryAcquire();
+                outcome = new ClaimGraceAwaiter(wait => cts.Token.WaitHandle.WaitOne(wait))
+                    .Await(claim, outcome);
+                if (outcome.Status == WatchOwnerStatus.RaceLost)
+                {
+                    outcome = AcquireClaim(claim);
+                }
             }
 
             var role = ServeWatchRole.FromOutcome(outcome);
@@ -72,6 +80,12 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
         {
             Console.CancelKeyPress -= onStop;
         }
+    }
+
+    private static WatchOwnerOutcome AcquireClaim(WatchOwnerClaim claim)
+    {
+        var outcome = claim.TryAcquire();
+        return outcome.Status == WatchOwnerStatus.RaceLost ? claim.TryAcquire() : outcome;
     }
 
     private static void RunWatcher(

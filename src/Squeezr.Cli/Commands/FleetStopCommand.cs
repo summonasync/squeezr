@@ -3,6 +3,7 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Daemons;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Indexing.Watch.Supervision;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -10,6 +11,14 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
 {
+    private readonly SupervisionState _state;
+
+    public FleetStopCommand() : this(new SupervisionState())
+    {
+    }
+
+    internal FleetStopCommand(SupervisionState state) => _state = state;
+
     public sealed class Settings : CommandSettings
     {
         [CommandArgument(0, "<storeKey>")]
@@ -24,9 +33,13 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
         try
         {
             var entry = FleetStoreKeyResolver.Require(settings.StoreKey);
+            // The desire lands before any kill: a supervisor sweeping between the two would otherwise
+            // see a dead daemon under a still-running desire and respawn the process we are stopping.
+            _state.SetDesire(entry.StoreKey, WatchDesire.Stopped);
             var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
             var now = DateTime.UtcNow;
             var (targets, observers, noOwnerReason) = ResolveKillTargets(storeDir, now);
+
 
             if (targets.Count == 0)
             {
@@ -35,7 +48,8 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
                         entry.Name,
                         entry.StoreKey,
                         KindFill(null),
-                        observers.Count),
+                        observers.Count,
+                        WatchDesire.Stopped.ToString().ToLowerInvariant()),
                     settings.Json);
                 if (!settings.Json)
                 {
@@ -66,14 +80,21 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
                 .OrderBy(result => result.Kind == DaemonHeartbeat.DefaultKind ? 0 : 1)
                 .ToList();
 
-            Report(new FleetStopResult(entry.Name, entry.StoreKey, results, observers.Count), settings.Json);
+            Report(
+                new FleetStopResult(
+                    entry.Name,
+                    entry.StoreKey,
+                    results,
+                    observers.Count,
+                    WatchDesire.Stopped.ToString().ToLowerInvariant()),
+                settings.Json);
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return 1;
         }
-        catch (WorkspaceException ex)
+        catch (Exception ex) when (ex is WorkspaceException or IOException)
         {
             return CommandError.Report(ex, settings.Json);
         }
@@ -174,5 +195,8 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
                 AnsiConsole.MarkupLine($"[grey]{kindResult.Kind.EscapeMarkup()}: not running[/]");
             }
         }
+
+        AnsiConsole.MarkupLine(
+            "[grey]desired state: stopped — watchd will not bring it back until 'squeezr fleet start <store-key>'[/]");
     }
 }

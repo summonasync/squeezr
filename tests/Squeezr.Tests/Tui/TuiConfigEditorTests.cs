@@ -18,7 +18,7 @@ public class TuiConfigEditorTests
         console.Input.PushTextWithEnter("http://localhost:9999");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -37,7 +37,7 @@ public class TuiConfigEditorTests
         console.Input.PushTextWithEnter("not a url");
         console.Input.PushTextWithEnter("");
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -55,7 +55,7 @@ public class TuiConfigEditorTests
         TuiTestHarness.PushMenuChoice(console, 0);
         console.Input.PushTextWithEnter("");
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -80,7 +80,7 @@ public class TuiConfigEditorTests
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -105,7 +105,7 @@ public class TuiConfigEditorTests
 
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -139,7 +139,7 @@ public class TuiConfigEditorTests
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -171,7 +171,7 @@ public class TuiConfigEditorTests
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -190,7 +190,7 @@ public class TuiConfigEditorTests
         console.Input.PushTextWithEnter("http://localhost:7777");
         TuiTestHarness.PushMenuChoice(console, 1);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -213,7 +213,7 @@ public class TuiConfigEditorTests
         console.Input.PushTextWithEnter("no-such-profile");
         console.Input.PushTextWithEnter(string.Empty);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -238,7 +238,7 @@ public class TuiConfigEditorTests
         console.Input.PushTextWithEnter("bge-code-v1");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 4);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

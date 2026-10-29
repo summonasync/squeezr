@@ -15,7 +15,7 @@ public class TuiContextMenuTests
         var console = TuiTestHarness.InteractiveConsole();
         console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -50,7 +50,7 @@ public class TuiContextMenuTests
         console.Input.PushTextWithEnter("n");
         TuiTestHarness.PushMenuChoice(console, 0);
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -66,7 +66,7 @@ public class TuiContextMenuTests
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
         var console = TuiTestHarness.InteractiveConsole();
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -78,6 +78,7 @@ public class TuiContextMenuTests
         console.Output.ShouldContain("Add repository");
         console.Output.ShouldContain("Config");
         console.Output.ShouldContain("Drop workspace");
+        console.Output.ShouldContain("Watchd supervisor");
         console.Output.ShouldContain("Exit");
         console.Output.ShouldNotContain("Wizards");
     }
@@ -94,7 +95,7 @@ public class TuiContextMenuTests
         console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushTextWithEnter("repolib");
         console.Input.PushTextWithEnter(string.Empty);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -114,7 +115,7 @@ public class TuiContextMenuTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 0);
         console.Input.PushTextWithEnter("n");
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

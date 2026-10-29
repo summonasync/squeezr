@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Shouldly;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -7,6 +8,7 @@ using Squeezr.Cli.Commands;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -155,6 +157,63 @@ public sealed class WatchCommandTests
             .ShouldBe(Environment.ProcessId, "the refused watch reaped or overwrote the live owner's claim");
     }
 
+    [LinuxFact]
+    public async Task Watch_OwnerDeadWithFreshBeat_RefusesWithoutAwaitingTheGrace()
+    {
+        var workspace = NewWatchWorkspace();
+        var storeDir = SqueezrPaths.StoreDir(workspace);
+        var deadPid = SpawnReapedPid();
+        WriteOwnerMarker(storeDir, deadPid, beatAge: TimeSpan.FromSeconds(5));
+
+        using var process = StartWatchProcess(workspace);
+        try
+        {
+            var decline = await AwaitLineAsync(process.StandardError, line => line.Contains("watch not started"));
+
+            decline.ShouldContain($"pid {deadPid} owns this store");
+            WatchOwnerMarker.TryRead(storeDir)!.Pid.ShouldBe(deadPid,
+                "the refused watch reaped the dead owner's claim instead of leaving the grace window alone");
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            await process.WaitForExitAsync();
+        }
+    }
+
+    [LinuxFact]
+    public async Task Watch_AwaitClaim_WaitsOutDeadOwnerGraceThenTakesOver()
+    {
+        var workspace = NewWatchWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"watchgrace\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        var storeDir = SqueezrPaths.StoreDir(workspace);
+        var deadPid = SpawnReapedPid();
+        WriteOwnerMarker(storeDir, deadPid, beatAge: TimeSpan.FromSeconds(24));
+
+        using var process = StartWatchProcess(workspace, "--await-claim");
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await AwaitLineAsync(process, line => line.Contains("watching"));
+
+            new WatchOwnerClaim(storeDir).ReadOwner()!.Pid.ShouldBe(process.Id);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            await process.WaitForExitAsync();
+        }
+
+        (await stderrTask).ShouldNotContain("watch not started");
+    }
+
     [Fact]
     public async Task Watch_FirstClaimant_BecomesOwner_StartsWatcher_WritesHeartbeat()
     {
@@ -189,12 +248,15 @@ public sealed class WatchCommandTests
         (await stderrTask).ShouldNotContain("watch not started");
     }
 
-    private static async Task<string> AwaitLineAsync(Process process, Func<string, bool> match)
+    private static Task<string> AwaitLineAsync(Process process, Func<string, bool> match) =>
+        AwaitLineAsync(process.StandardOutput, match);
+
+    private static async Task<string> AwaitLineAsync(TextReader reader, Func<string, bool> match)
     {
         using var timeout = new CancellationTokenSource(LineTimeout);
         while (true)
         {
-            var lineTask = process.StandardOutput.ReadLineAsync();
+            var lineTask = reader.ReadLineAsync();
             var winner = await Task.WhenAny(lineTask, Task.Delay(Timeout.Infinite, timeout.Token));
             if (winner != lineTask)
             {
@@ -213,9 +275,10 @@ public sealed class WatchCommandTests
         }
     }
 
-    private static Process StartWatchProcess(string workingDir)
+    private static Process StartWatchProcess(string workingDir, params string[] arguments)
     {
-        var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" watch")
+        var args = string.Join(" ", new[] { "watch" }.Concat(arguments));
+        var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {args}")
         {
             WorkingDirectory = workingDir,
             RedirectStandardOutput = true,
@@ -223,6 +286,24 @@ public sealed class WatchCommandTests
             UseShellExecute = false
         };
         return Process.Start(startInfo)!;
+    }
+
+    private static int SpawnReapedPid()
+    {
+        using var process = Process.Start(new ProcessStartInfo("sleep", "60") { UseShellExecute = false });
+        var pid = process!.Id;
+        process.Kill();
+        process.WaitForExit(5000).ShouldBeTrue();
+        return pid;
+    }
+
+    private static void WriteOwnerMarker(string storeDir, int pid, TimeSpan beatAge)
+    {
+        var stamped = DateTime.UtcNow - beatAge;
+        var marker = new WatchOwnerMarker(pid, Environment.MachineName, DaemonHeartbeat.DefaultKind, stamped, stamped);
+        File.WriteAllText(
+            WatchOwnerMarker.PathFor(storeDir),
+            JsonSerializer.Serialize(marker, SqueezrJson.FileOptions));
     }
 
     private static Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
