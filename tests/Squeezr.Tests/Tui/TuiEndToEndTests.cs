@@ -28,7 +28,7 @@ public class TuiEndToEndTests
 
         console.Input.PushKey(ConsoleKey.Enter);
         console.Input.PushKey(ConsoleKey.Enter);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         (await TuiApp.RunAsync(console, workspace)).ShouldBe(0);
 
@@ -63,7 +63,7 @@ public class TuiEndToEndTests
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 4);
 
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

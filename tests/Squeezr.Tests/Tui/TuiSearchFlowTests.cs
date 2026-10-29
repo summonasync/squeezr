@@ -18,7 +18,7 @@ public class TuiSearchFlowTests
         TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("zanzibar");
         TuiTestHarness.PushMenuChoice(console, 2);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -37,7 +37,7 @@ public class TuiSearchFlowTests
         console.Input.PushTextWithEnter("zanzibar");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 3);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -58,7 +58,7 @@ public class TuiSearchFlowTests
         TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("return");
         TuiTestHarness.PushMenuChoice(console, 2);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -74,7 +74,7 @@ public class TuiSearchFlowTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushKey(ConsoleKey.Enter);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
@@ -142,7 +142,7 @@ public class TuiSearchFlowTests
             console.Input.PushTextWithEnter("return");
             TuiTestHarness.PushMenuChoice(console, 0);
             TuiTestHarness.PushMenuChoice(console, 3);
-            TuiTestHarness.PushMenuChoice(console, 9);
+            TuiTestHarness.PushMenuChoice(console, 10);
 
             var code = await TuiApp.RunAsync(console, workspace);
 
@@ -180,7 +180,7 @@ public class TuiSearchFlowTests
         console.Input.PushTextWithEnter("zanzibar");
         TuiTestHarness.PushMenuChoice(console, 0);
         TuiTestHarness.PushMenuChoice(console, 3);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 
