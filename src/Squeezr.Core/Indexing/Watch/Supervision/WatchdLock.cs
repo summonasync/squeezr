@@ -31,12 +31,17 @@ public sealed class WatchdLock : IDisposable
     public WatchdLockOutcome TryAcquire()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        if (TryReadOwner() is { } owner && IsOwnerAlive(owner))
+        var current = ReadLock();
+        if (current.Owner is { } owner && IsOwnerAlive(owner))
         {
             return new WatchdLockOutcome(false, owner.Pid);
         }
 
-        TryStealStaleLock();
+        if (current.Status == LockReadStatus.Unreadable || !TryStealStaleFile(current.Content))
+        {
+            return Refusal();
+        }
+
         var claim = new WatchdLockOwner(
             Environment.ProcessId,
             Environment.MachineName,
@@ -47,7 +52,7 @@ public sealed class WatchdLock : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return new WatchdLockOutcome(false, TryReadOwner()?.Pid);
+            return Refusal();
         }
 
         _held = claim;
@@ -62,9 +67,107 @@ public sealed class WatchdLock : IDisposable
         }
 
         _held = null;
-        if (TryReadOwner() is { } owner && owner.IsOwnedByCurrentProcess())
+        if (ReadLock().Owner is { } owner && owner.IsOwnedByCurrentProcess())
         {
             TryDelete();
+        }
+    }
+
+    internal bool TryStealStaleFile(string? expectedContent)
+    {
+        if (expectedContent is null)
+        {
+            return true;
+        }
+
+        var stolen = $"{_path}.{Guid.NewGuid():N}.stolen";
+        try
+        {
+            File.Move(_path, stolen);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        string actual;
+        try
+        {
+            actual = File.ReadAllText(stolen);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            PutBack(stolen);
+            return false;
+        }
+
+        if (actual != expectedContent)
+        {
+            PutBack(stolen);
+            return false;
+        }
+
+        TryCleanup(stolen);
+        return true;
+    }
+
+    private void PutBack(string stolen)
+    {
+        try
+        {
+            File.Move(stolen, _path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            try
+            {
+                File.Delete(stolen);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private void TryCleanup(string stolen)
+    {
+        try
+        {
+            File.Delete(stolen);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private WatchdLockOutcome Refusal() => new(false, ReadLock().Owner?.Pid);
+
+    private LockRead ReadLock()
+    {
+        string content;
+        try
+        {
+            content = File.ReadAllText(_path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return LockRead.Missing;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new LockRead(LockReadStatus.Unreadable, null, null);
+        }
+
+        try
+        {
+            return new LockRead(
+                LockReadStatus.Present,
+                content,
+                JsonSerializer.Deserialize<WatchdLockOwner>(content, SqueezrJson.FileOptions));
+        }
+        catch (JsonException)
+        {
+            return new LockRead(LockReadStatus.Present, content, null);
         }
     }
 
@@ -82,29 +185,6 @@ public sealed class WatchdLock : IDisposable
 
         return _processStartUtc(owner.Pid) is not { } started
             || (started - owner.StartedAtUtc).Duration() <= StartedAtTolerance;
-    }
-
-    private void TryStealStaleLock()
-    {
-        try
-        {
-            File.Delete(_path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    private WatchdLockOwner? TryReadOwner()
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<WatchdLockOwner>(File.ReadAllText(_path), SqueezrJson.FileOptions);
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
-        {
-            return null;
-        }
     }
 
     private void WriteOwner(WatchdLockOwner owner)
@@ -136,6 +216,18 @@ public sealed class WatchdLock : IDisposable
         {
             return null;
         }
+    }
+
+    private enum LockReadStatus
+    {
+        Missing,
+        Present,
+        Unreadable,
+    }
+
+    private sealed record LockRead(LockReadStatus Status, string? Content, WatchdLockOwner? Owner)
+    {
+        public static readonly LockRead Missing = new(LockReadStatus.Missing, null, null);
     }
 
     private sealed record WatchdLockOwner(int Pid, string Host, DateTime StartedAtUtc)

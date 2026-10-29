@@ -165,6 +165,11 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
                         Markup.Escape(store.Detail ?? string.Empty));
                 }
 
+                if (_sweep?.Fault is { } fault)
+                {
+                    table.AddRow(string.Empty, string.Empty, string.Empty, "[red]sweep failed[/]", Markup.Escape(fault));
+                }
+
                 return table;
             }
         }
@@ -174,7 +179,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
             SupervisionAction.Started or SupervisionAction.LeftRunning => $"[green]{action}[/]",
             SupervisionAction.DriftRestarted => $"[yellow]{action}[/]",
             SupervisionAction.StartFailed or SupervisionAction.BlockedByCrashLoop or SupervisionAction.StoppedByDesire
-                => $"[red]{action}[/]",
+                or SupervisionAction.ProbeFailed => $"[red]{action}[/]",
             _ => $"[grey]{action}[/]",
         };
 
@@ -193,9 +198,16 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
     private sealed class PlainWatchdStatus : IWatchdStatus
     {
         private readonly Dictionary<string, string> _lastLines = [];
+        private string? _lastFault;
 
         public void Update(SupervisorSweep sweep)
         {
+            if (sweep.Fault is { } fault && _lastFault != fault)
+            {
+                _lastFault = fault;
+                Console.WriteLine($"{Stamp()} registry sweep failed: {fault}");
+            }
+
             foreach (var store in sweep.Stores)
             {
                 var line = Describe(store);
@@ -222,6 +234,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
                 : $"watch {store.Name} is managed elsewhere",
             SupervisionAction.BlockedByCrashLoop => $"watch {store.Name} is wedged: {store.Detail}",
             SupervisionAction.StartFailed => $"watch {store.Name} failed to start: {store.Detail}",
+            SupervisionAction.ProbeFailed => $"watch {store.Name} could not be checked: {store.Detail}",
             SupervisionAction.SkippedRoot => $"watch {store.Name} skipped: {store.Detail}",
             _ => $"watch {store.Name}: {store.Action}",
         };

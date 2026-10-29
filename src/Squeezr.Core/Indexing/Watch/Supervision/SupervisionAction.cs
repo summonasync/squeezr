@@ -11,4 +11,5 @@ public enum SupervisionAction
     BlockedByCrashLoop,
     StartFailed,
     SkippedRoot,
+    ProbeFailed,
 }

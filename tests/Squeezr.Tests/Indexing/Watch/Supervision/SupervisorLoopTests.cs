@@ -171,24 +171,90 @@ public sealed class SupervisorLoopTests : IDisposable
         workspace.Launcher.Roots.Count.ShouldBe(2);
     }
 
+    [Fact]
+    public void RegistryFailure_ReportsAFaultSweep_AndRecoversOnTheNextSweep()
+    {
+        var workspace = NewWorkspace("demo");
+        var failing = true;
+        var loop = NewLoop([workspace.Entry], launcher: workspace.Launcher, registry: () =>
+        {
+            if (failing)
+            {
+                throw new IOException("registry is unreadable");
+            }
+
+            return [workspace.Entry];
+        });
+
+        var broken = loop.RunOnce();
+        broken.Fault.ShouldBe("registry is unreadable");
+        broken.Stores.ShouldBeEmpty();
+        workspace.Launcher.Roots.ShouldBeEmpty();
+
+        failing = false;
+        var recovered = loop.RunOnce();
+        recovered.Fault.ShouldBeNull();
+        recovered.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+        workspace.Launcher.Roots.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void ProbeFailure_MarksTheStore_AsProbeFailed_AndKeepsTheSweepAlive()
+    {
+        var workspace = NewWorkspace("demo");
+        var failing = true;
+        var loop = NewLoop(workspace, health: _ =>
+        {
+            if (failing)
+            {
+                throw new IOException("marker is unreadable");
+            }
+
+            return WatchStoreHealth.Probe(workspace.StoreDir, Now);
+        });
+
+        var sweep = loop.RunOnce();
+        sweep.Fault.ShouldBeNull();
+        var store = sweep.Stores.ShouldHaveSingleItem();
+        store.Action.ShouldBe(SupervisionAction.ProbeFailed);
+        store.Detail.ShouldBe("marker is unreadable");
+        workspace.Launcher.Roots.ShouldBeEmpty();
+
+        failing = false;
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+        workspace.Launcher.Roots.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void RegistryCancellation_PropagatesInsteadOfBeingSwallowed()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop([workspace.Entry], registry: () => throw new OperationCanceledException());
+
+        Should.Throw<OperationCanceledException>(() => loop.RunOnce());
+    }
+
     private SupervisorLoop NewLoop(
         TestWorkspace workspace,
         Func<int, bool>? isProcessAlive = null,
-        Func<string, DateTime>? binaryModifiedUtc = null) =>
-        NewLoop([workspace.Entry], workspace.State, workspace.Launcher, isProcessAlive, binaryModifiedUtc);
+        Func<string, DateTime>? binaryModifiedUtc = null,
+        Func<string, WatchStoreHealth>? health = null) =>
+        NewLoop([workspace.Entry], workspace.State, workspace.Launcher, isProcessAlive, binaryModifiedUtc, health);
 
     private SupervisorLoop NewLoop(
         IReadOnlyList<WorkspaceRegistryEntry> entries,
         SupervisionState? state = null,
         FakeLauncher? launcher = null,
         Func<int, bool>? isProcessAlive = null,
-        Func<string, DateTime>? binaryModifiedUtc = null) =>
+        Func<string, DateTime>? binaryModifiedUtc = null,
+        Func<string, WatchStoreHealth>? health = null,
+        Func<IReadOnlyList<WorkspaceRegistryEntry>>? registry = null) =>
         new(
             launcher ?? new FakeLauncher(),
             state ?? new SupervisionState(),
             new CrashLoopGuard(),
-            () => entries,
-            storeDir => WatchStoreHealth.Probe(storeDir, Now, isProcessAlive ?? (_ => false)),
+            registry ?? (() => entries),
+            health ?? (storeDir => WatchStoreHealth.Probe(storeDir, Now, isProcessAlive ?? (_ => false))),
             binaryModifiedUtc ?? (_ => Now),
             () => Now,
             SupervisorLoop.PollInterval);

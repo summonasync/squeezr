@@ -94,6 +94,78 @@ public sealed class WatchdLockTests : IDisposable
         File.Exists(LockPath).ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task ConcurrentAcquiresOnAStaleLock_LeaveExactlyOneHolder()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(LockPath)!);
+        File.WriteAllText(LockPath, OwnerJson(int.MaxValue, Environment.MachineName, DateTime.UtcNow));
+        using var first = new WatchdLock(LockPath);
+        using var second = new WatchdLock(LockPath);
+        var gate = new Barrier(2);
+
+        var outcomes = await Task.WhenAll(
+            Task.Run(() => Contend(first)),
+            Task.Run(() => Contend(second)));
+
+        outcomes.Count(outcome => outcome.Acquired).ShouldBe(1);
+        File.Exists(LockPath).ShouldBeTrue();
+
+        using var third = new WatchdLock(LockPath);
+        third.TryAcquire().Acquired.ShouldBeFalse();
+
+        WatchdLockOutcome Contend(WatchdLock contender)
+        {
+            gate.SignalAndWait();
+            return contender.TryAcquire();
+        }
+    }
+
+    [Fact]
+    public void StealWithAMismatchedSnapshot_RestoresTheFileOnDisk_AndRefuses()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(LockPath)!);
+        var liveContent = OwnerJson(Environment.ProcessId, Environment.MachineName, DateTime.UtcNow);
+        File.WriteAllText(LockPath, liveContent);
+
+        using var contender = new WatchdLock(LockPath);
+        contender
+            .TryStealStaleFile(OwnerJson(int.MaxValue, Environment.MachineName, DateTime.UtcNow))
+            .ShouldBeFalse();
+
+        File.ReadAllText(LockPath).ShouldBe(liveContent);
+        Directory.GetFiles(Path.GetDirectoryName(LockPath)!).ShouldHaveSingleItem().ShouldBe(LockPath);
+
+        using var holder = new WatchdLock(LockPath, isProcessAlive: _ => true, processStartUtc: _ => DateTime.UtcNow);
+        holder.TryAcquire().Acquired.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void StealWithTheExactSnapshot_MovesTheStaleFileAside_LeavingNoScraps()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(LockPath)!);
+        var staleContent = OwnerJson(int.MaxValue, Environment.MachineName, DateTime.UtcNow);
+        File.WriteAllText(LockPath, staleContent);
+
+        using var contender = new WatchdLock(LockPath);
+        contender.TryStealStaleFile(staleContent).ShouldBeTrue();
+
+        File.Exists(LockPath).ShouldBeFalse();
+        Directory.GetFiles(Path.GetDirectoryName(LockPath)!).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void UnreadableLockFile_RefusesInsteadOfStealing()
+    {
+        Directory.CreateDirectory(LockPath);
+
+        using var contender = new WatchdLock(LockPath);
+        var outcome = contender.TryAcquire();
+
+        outcome.Acquired.ShouldBeFalse();
+        outcome.OwnerPid.ShouldBeNull();
+        Directory.Exists(LockPath).ShouldBeTrue();
+    }
+
     private static string OwnerJson(int pid, string host, DateTime startedAtUtc) =>
         JsonSerializer.Serialize(
             new { pid, host, startedAtUtc },

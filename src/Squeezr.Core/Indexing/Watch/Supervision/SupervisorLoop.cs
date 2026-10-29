@@ -68,10 +68,46 @@ public sealed class SupervisorLoop
     {
         var now = _utcNow();
         PruneExited();
-        return new SupervisorSweep(now, _registry().Select(entry => Supervise(entry, now)).ToList());
+        IReadOnlyList<WorkspaceRegistryEntry> entries;
+        try
+        {
+            entries = _registry();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new SupervisorSweep(now, [], ex.Message);
+        }
+
+        return new SupervisorSweep(now, entries.Select(entry => Supervise(entry, now)).ToList());
     }
 
     private StoreSupervision Supervise(WorkspaceRegistryEntry entry, DateTime now)
+    {
+        try
+        {
+            return SuperviseStore(entry, now);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return Report(
+                entry,
+                _state.DesireOf(entry.StoreKey),
+                null,
+                WatchIndexerState.None,
+                SupervisionAction.ProbeFailed,
+                ex.Message);
+        }
+    }
+
+    private StoreSupervision SuperviseStore(WorkspaceRegistryEntry entry, DateTime now)
     {
         var desire = _state.DesireOf(entry.StoreKey);
         if (!WorkspaceStorePaths.IsSingleSegmentKey(entry.StoreKey) || !Directory.Exists(entry.RootPath))
