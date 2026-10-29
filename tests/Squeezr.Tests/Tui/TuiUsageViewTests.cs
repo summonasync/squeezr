@@ -80,7 +80,7 @@ public sealed class TuiUsageViewTests : IDisposable
         QueryTelemetry.Append(workspace, new QueryTelemetryEntry(DateTime.UtcNow, Guid.NewGuid(), "search", null, 10, false, 0, 1, false, null, "cli", null));
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 8);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

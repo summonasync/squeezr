@@ -95,7 +95,7 @@ public class TuiStatsViewTests
             DateTime.UtcNow, Guid.NewGuid(), "search", null, 10, false, 0, 1, false, null, "cli", null));
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 7);
-        TuiTestHarness.PushMenuChoice(console, 9);
+        TuiTestHarness.PushMenuChoice(console, 10);
 
         var code = await TuiApp.RunAsync(console, workspace);
 

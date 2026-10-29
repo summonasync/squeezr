@@ -15,6 +15,7 @@ public static class TuiApp
         "Drop workspace",
         "Token stats",
         "Usage analytics",
+        "Watchd supervisor",
         "Exit",
     ];
 
@@ -111,7 +112,7 @@ public static class TuiApp
         var items = state == TuiWorkspaceState.Uninitialized ? UninitializedMenuItems : MainMenuItems;
         return await new SelectionPrompt<string>()
             .Title("Squeezr")
-            .PageSize(10)
+            .PageSize(12)
             .AddChoices(items)
             .ShowAsync(console, cancellationToken);
     }
@@ -159,6 +160,9 @@ public static class TuiApp
                 break;
             case "Usage analytics":
                 await TuiUsageView.RenderAsync(console, workspaceRoot, cancellationToken);
+                break;
+            case "Watchd supervisor":
+                await TuiWatchdSupervisor.RunAsync(console, cancellationToken);
                 break;
         }
     }
