@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace Squeezr.Core.Indexing.Watch;
 
 /// <summary>
@@ -58,7 +56,7 @@ public sealed class WatchOwnerClaim
         _host = Environment.MachineName;
         _pid = pid ?? Environment.ProcessId;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
-        _isProcessAlive = isProcessAlive ?? IsProcessAlive;
+        _isProcessAlive = isProcessAlive ?? DaemonHeartbeatReader.IsProcessAlive;
         _markerCreate = markerCreate;
         _markerReap = markerReap;
         _onWarning = onWarning;
@@ -292,17 +290,4 @@ public sealed class WatchOwnerClaim
         Claim(NewClaim(now), displaced, now, reaping: true);
 
     private WatchOwnerMarker NewClaim(DateTime now) => new(_pid, _host, _kind, now, now);
-
-    private static bool IsProcessAlive(int pid)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
 }

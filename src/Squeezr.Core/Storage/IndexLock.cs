@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Squeezr.Core.Indexing.Watch;
@@ -51,7 +50,7 @@ public sealed class IndexLock : IDisposable
                 "do not delete index.lock by hand.", ex);
         }
 
-        if (ownerPid is int alivePid && IsProcessAlive(alivePid))
+        if (ownerPid is int alivePid && DaemonHeartbeatReader.IsProcessAlive(alivePid))
         {
             throw new WorkspaceLockedException(DescribeHolder(path, alivePid));
         }
@@ -171,19 +170,6 @@ public sealed class IndexLock : IDisposable
         int.TryParse(owner, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid)
             ? pid
             : null;
-
-    private static bool IsProcessAlive(int pid)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
 
     public void Dispose()
     {

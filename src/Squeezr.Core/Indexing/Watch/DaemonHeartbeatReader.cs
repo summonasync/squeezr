@@ -53,7 +53,22 @@ public static class DaemonHeartbeatReader
         return (isProcessAlive ?? IsProcessAlive)(heartbeat.Pid);
     }
 
+    // A zombie still has a /proc entry, so process presence alone would keep a killed owner's claim and
+    // lock alive until the parent reaps it — on Linux the kernel's own process state is the verdict, and
+    // state 'Z' is dead for every claim and beat rule. Platforms without /proc keep the presence probe.
     public static bool IsProcessAlive(int pid)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return IsKnownProcess(pid);
+        }
+
+        return ProcStat.TryReadState(pid) is { } state
+            ? state != ProcStat.ZombieState
+            : IsKnownProcess(pid);
+    }
+
+    private static bool IsKnownProcess(int pid)
     {
         try
         {
