@@ -64,6 +64,10 @@ public static class CliApplication
                 .WithDescription("Remove the workspace index store (use --store-key for stale entries)");
             config.AddCommand<WatchCommand>("watch")
                 .WithDescription("Watch the workspace and re-index on file changes");
+            config.AddCommand<WatchdCommand>("watchd")
+                .WithDescription(
+                    "Supervise watch daemons of all registered workspaces: keep desired watches up, " +
+                    "restart after crashes and upgrades (singleton on this machine)");
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")

@@ -39,6 +39,12 @@ public sealed class DaemonLauncher
         return process;
     }
 
+    internal string DaemonBinaryPath()
+    {
+        var binaryPath = _processPath();
+        return IsMuxerd(binaryPath) ? EntryAssemblyPath() : binaryPath;
+    }
+
     private static bool IsMuxerd(string binaryPath) =>
         MuxerFileNames.Contains(Path.GetFileName(binaryPath), StringComparer.OrdinalIgnoreCase);
 
