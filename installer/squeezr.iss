@@ -209,11 +209,6 @@ begin
   Result := Exec('cmd.exe', '/C where docker >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
 end;
 
-function EmbeddingModelPresent: Boolean;
-begin
-  Result := DirExists(AddBackslash(StoreDir) + 'models') or DirExists(ExpandConstant('{app}\Models'));
-end;
-
 procedure StopRunningSqueezr(const Dir: String);
 var
   Script: String;
@@ -256,9 +251,6 @@ begin
   if not DockerPresent then
     Notes := Notes + #13#10#13#10 + 'Docker was not found. Squeezr works without it (trigram and symbol layers), ' +
              'but semantic search needs Qdrant in Docker. Install Docker Desktop, then run "squeezr services up".';
-  if not EmbeddingModelPresent then
-    Notes := Notes + #13#10#13#10 + 'No embedding model found. Semantic search stays disabled until you fetch one ' +
-             'with scripts\fetch-model.ps1 from the Squeezr repository.';
   if Notes = '' then
     exit;
 

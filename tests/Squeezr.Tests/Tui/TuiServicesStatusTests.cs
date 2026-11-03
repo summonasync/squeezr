@@ -12,7 +12,7 @@ public class TuiServicesStatusTests
     {
         var console = new TestConsole();
 
-        TuiServicesStatus.Render(console, new QdrantStatus(false, null, 2), new OllamaStatus(true, true), "onnx", "nomic-embed-text");
+        TuiServicesStatus.Render(console, new QdrantStatus(false, null, 2), new OllamaStatus(true, true), "openai", "nomic-embed-text");
 
         console.Output.ShouldContain("Qdrant: not available");
         console.Output.ShouldContain("qdrant is down — start it with: squeezr services up");
@@ -24,7 +24,7 @@ public class TuiServicesStatusTests
     {
         var console = new TestConsole();
 
-        TuiServicesStatus.Render(console, new QdrantStatus(true, 3, 0), new OllamaStatus(true, true), "onnx", "nomic-embed-text");
+        TuiServicesStatus.Render(console, new QdrantStatus(true, 3, 0), new OllamaStatus(true, true), "openai", "nomic-embed-text");
 
         console.Output.ShouldContain("Qdrant: available (3 points)");
         console.Output.ShouldNotContain("squeezr services up");
@@ -65,11 +65,11 @@ public class TuiServicesStatusTests
     }
 
     [Fact]
-    public void Render_ProviderOnnx_OllamaRunning_ShowsCompactSectionWithoutModelRequirement()
+    public void Render_ProviderOpenAi_OllamaRunning_ShowsCompactSectionWithoutModelRequirement()
     {
         var console = new TestConsole();
 
-        TuiServicesStatus.Render(console, new QdrantStatus(true, 3, 0), new OllamaStatus(true, false), "onnx", "nomic-embed-text");
+        TuiServicesStatus.Render(console, new QdrantStatus(true, 3, 0), new OllamaStatus(true, false), "openai", "nomic-embed-text");
 
         console.Output.ShouldContain("Ollama: running");
         console.Output.ShouldContain("not required");
@@ -78,11 +78,11 @@ public class TuiServicesStatusTests
     }
 
     [Fact]
-    public void Render_ProviderOnnx_OllamaNotRunning_ShowsCompactSectionWithoutHint()
+    public void Render_ProviderOpenAi_OllamaNotRunning_ShowsCompactSectionWithoutHint()
     {
         var console = new TestConsole();
 
-        TuiServicesStatus.Render(console, new QdrantStatus(true, 3, 0), new OllamaStatus(false, false), "onnx", "nomic-embed-text");
+        TuiServicesStatus.Render(console, new QdrantStatus(true, 3, 0), new OllamaStatus(false, false), "openai", "nomic-embed-text");
 
         console.Output.ShouldContain("Ollama: not running");
         console.Output.ShouldContain("not required");

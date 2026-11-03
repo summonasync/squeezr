@@ -103,7 +103,7 @@ public class McpWorkspaceTests
 
     [Theory]
     [InlineData("ollama")]
-    [InlineData("onnx")]
+    [InlineData("openai")]
     [InlineData(null)]
     public void EmbeddingsProvider_IsTheCarriedStartupFact_NotASecondRead(string? provider)
     {

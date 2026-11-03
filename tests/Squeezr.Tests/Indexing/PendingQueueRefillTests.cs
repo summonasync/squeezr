@@ -11,7 +11,7 @@ namespace Squeezr.Tests.Indexing;
 [Collection("ProcessGlobals")]
 public class PendingQueueRefillTests
 {
-    private const string ModelKey = "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5";
+    private const string ModelKey = "ollama/nomic-embed-text/768/nomic-embed-text-v1.5";
 
     private const string Source = """
         class Calculator
@@ -161,7 +161,7 @@ public class PendingQueueRefillTests
         var fileId = FileIdOf(workspace, "a.cs");
         using (var store = OpenStore(workspace))
         {
-            store.MarkChunksEmbedded(store.ListChunksByFile(fileId).Select(c => c.Id), "onnx/an-older-model/768/older");
+            store.MarkChunksEmbedded(store.ListChunksByFile(fileId).Select(c => c.Id), "ollama/an-older-model/768/older");
         }
 
         var provider = new CountingEmbeddingProvider();
@@ -241,7 +241,7 @@ public class PendingQueueRefillTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         return workspace;
     }

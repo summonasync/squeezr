@@ -160,7 +160,7 @@ public sealed class DaemonHeartbeatActivityTests : IDisposable
     {
         using var writer = CreateWriter();
         writer.Start();
-        writer.SetEmbeddingExecutor(new EmbeddingExecutor("cpu", null), "onnx");
+        writer.SetEmbeddingExecutor(new EmbeddingExecutor("cpu", null), "ollama");
 
         writer.PhaseStarted("demo", IndexPhase.Files, 5);
 

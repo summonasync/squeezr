@@ -157,58 +157,7 @@ public static class TuiConfigEditor
                 Get = c => c.Embeddings.Provider,
                 Apply = (c, raw) => NormalizeProvider(raw) is { } provider
                     ? FieldResult.Valid(c with { Embeddings = c.Embeddings with { Provider = provider } })
-                    : FieldResult.Fail("must be 'auto', 'onnx', 'ollama' or 'openai'"),
-            },
-            new FieldDef
-            {
-                Key = "onnx.modelPath",
-                Get = c => c.Embeddings.Onnx.ModelPath,
-                Apply = (c, raw) => FieldResult.Valid(c with
-                {
-                    Embeddings = c.Embeddings with { Onnx = c.Embeddings.Onnx with { ModelPath = raw } },
-                }),
-            },
-            new FieldDef
-            {
-                Key = "onnx.tokenizerPath",
-                Get = c => c.Embeddings.Onnx.TokenizerPath,
-                Apply = (c, raw) => FieldResult.Valid(c with
-                {
-                    Embeddings = c.Embeddings with { Onnx = c.Embeddings.Onnx with { TokenizerPath = raw } },
-                }),
-            },
-            new FieldDef
-            {
-                Key = "onnx.dimensions",
-                Get = c => c.Embeddings.Onnx.EffectiveDimensions.ToString(),
-                Apply = (c, raw) => IsPositiveInt(raw, out var value, out var error)
-                    ? FieldResult.Valid(c with
-                    {
-                        Embeddings = c.Embeddings with { Onnx = c.Embeddings.Onnx with { Dimensions = value } },
-                    })
-                    : FieldResult.Fail(error),
-            },
-            new FieldDef
-            {
-                Key = "onnx.maxSequenceLength",
-                Get = c => c.Embeddings.Onnx.EffectiveMaxSequenceLength.ToString(),
-                Apply = (c, raw) => IsPositiveInt(raw, out var value, out var error)
-                    ? FieldResult.Valid(c with
-                    {
-                        Embeddings = c.Embeddings with { Onnx = c.Embeddings.Onnx with { MaxSequenceLength = value } },
-                    })
-                    : FieldResult.Fail(error),
-            },
-            new FieldDef
-            {
-                Key = "onnx.batchSize",
-                Get = c => c.Embeddings.Onnx.BatchSize.ToString(),
-                Apply = (c, raw) => IsPositiveInt(raw, out var value, out var error)
-                    ? FieldResult.Valid(c with
-                    {
-                        Embeddings = c.Embeddings with { Onnx = c.Embeddings.Onnx with { BatchSize = value } },
-                    })
-                    : FieldResult.Fail(error),
+                    : FieldResult.Fail("must be 'auto', 'ollama' or 'openai'"),
             },
             new FieldDef
             {
@@ -372,7 +321,7 @@ public static class TuiConfigEditor
     private static string? NormalizeProvider(string raw)
     {
         var value = raw.ToLowerInvariant();
-        return value is "auto" or "onnx" or "ollama" or "openai" ? value : null;
+        return value is "auto" or "ollama" or "openai" ? value : null;
     }
 
     private static bool TryNormalizeOllamaModelProfile(string raw, out string? profile)
@@ -399,8 +348,7 @@ public static class TuiConfigEditor
     private static int? EffectiveDimensions(EmbeddingsConfig embeddings)
         => embeddings.Provider.Trim().ToLowerInvariant() switch
         {
-            "auto" or "onnx" => embeddings.Onnx.EffectiveDimensions,
-            "ollama" => embeddings.Ollama.Dimensions,
+            "auto" or "ollama" => embeddings.Ollama.Dimensions,
             "openai" => embeddings.OpenAiCompatible.Dimensions,
             _ => null,
         };

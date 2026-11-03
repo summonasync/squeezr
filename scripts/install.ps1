@@ -76,15 +76,6 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 '@ -ForegroundColor Yellow
 }
 
-$storeHome = if ($env:SQUEEZR_HOME) { $env:SQUEEZR_HOME } else { Join-Path $env:USERPROFILE '.squeezr' }
-if (-not (Test-Path (Join-Path $InstallDir 'Models')) -and -not (Test-Path (Join-Path $storeHome 'models'))) {
-    Write-Host @'
-[!] No embedding model found - semantic search will stay disabled until you fetch one.
-    Run scripts\fetch-model.ps1 (downloads to ~\.squeezr\models), or bundle a model
-    with the CLI via scripts\fetch-model.ps1 -ModelsDir src\Squeezr.Cli\Models and re-run this script.
-'@ -ForegroundColor Yellow
-}
-
 $summary = @'
 
 Squeezr installed.

@@ -25,14 +25,18 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             var manager = new WorkspaceManager(workspaceRoot);
             var status = manager.GetStatus();
-            var config = LoadConfigIfReadable(workspaceRoot);
+            var config = LoadConfigIfReadable(workspaceRoot, out var configError);
+            var onnxStore = configError?.Code == WorkspaceException.OnnxProviderCode;
             var siblings = WorkspaceSiblingSnapshot.Build(workspaceRoot);
 
             var warnings = EmbeddingRuntimeFactory.TryCreate(
                 workspaceRoot, withProvider: false, out _, out var vectorStore);
-            foreach (var warning in warnings)
+            if (!onnxStore)
             {
-                Console.Error.WriteLine($"warning: {warning}");
+                foreach (var warning in warnings)
+                {
+                    Console.Error.WriteLine($"warning: {warning}");
+                }
             }
 
             QdrantStatus qdrant;
@@ -47,11 +51,15 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
 
             if (settings.Json)
             {
-                var staleFiles = StaleFileDetector.Detect(workspaceRoot);
+                var staleFiles = DetectStaleFilesIfReadable(workspaceRoot);
                 var report = WorkspaceStatusReport.Create(
                     status, staleFiles, config?.Embeddings.Provider, siblings,
                     FleetWatchAdoption.FromStore(workspaceRoot)) with
                 { KindChunks = kindChunks };
+                if (onnxStore)
+                {
+                    report = report with { Warnings = [.. report.Warnings, .. OnnxStoreDiagnostic.Lines()] };
+                }
                 JsonOutput.Write(report);
                 foreach (var warning in report.Warnings)
                 {
@@ -110,6 +118,14 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                 {
                     AnsiConsole.MarkupLine(
                         $"[grey]Rank exclude: {patterns.Count} pattern(s) — {string.Join(", ", patterns).EscapeMarkup()}[/]");
+                }
+            }
+
+            if (onnxStore)
+            {
+                foreach (var line in OnnxStoreDiagnostic.Lines())
+                {
+                    AnsiConsole.MarkupLine($"[yellow]{line.EscapeMarkup()}[/]");
                 }
             }
 
@@ -180,8 +196,21 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         }
     }
 
-    private static SqueezrConfig? LoadConfigIfReadable(string workspaceRoot)
+    private static IReadOnlyList<string> DetectStaleFilesIfReadable(string workspaceRoot)
     {
+        try
+        {
+            return StaleFileDetector.Detect(workspaceRoot);
+        }
+        catch (WorkspaceException ex) when (ex.Code == WorkspaceException.OnnxProviderCode)
+        {
+            return [];
+        }
+    }
+
+    private static SqueezrConfig? LoadConfigIfReadable(string workspaceRoot, out WorkspaceException? configError)
+    {
+        configError = null;
         if (!File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
         {
             return null;
@@ -191,8 +220,9 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         {
             return ConfigFile.Load(workspaceRoot);
         }
-        catch (WorkspaceException)
+        catch (WorkspaceException ex)
         {
+            configError = ex;
             return null;
         }
     }

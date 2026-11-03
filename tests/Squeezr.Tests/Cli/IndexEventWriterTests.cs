@@ -12,11 +12,11 @@ public class IndexEventWriterTests
     {
         var writer = new StringWriter();
 
-        new IndexEventWriter(writer).Started("/ws", provider: "onnx");
+        new IndexEventWriter(writer).Started("/ws", provider: "openai");
 
         using var doc = JsonDocument.Parse(writer.ToString());
         doc.RootElement.GetProperty("type").GetString().ShouldBe("started");
-        doc.RootElement.GetProperty("provider").GetString().ShouldBe("onnx");
+        doc.RootElement.GetProperty("provider").GetString().ShouldBe("openai");
     }
 
     [Fact]

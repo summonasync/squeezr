@@ -41,7 +41,7 @@ public class EmbeddingIndexPhaseTests
 
         var chunks = ListChunks(workspace);
         chunks.Count.ShouldBeGreaterThanOrEqualTo(2);
-        chunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
+        chunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
 
         var distinctHashes = chunks.Select(c => c.ChunkHash).Distinct().ToList();
         vectorStore.UpsertedPointCount.ShouldBe(distinctHashes.Count);
@@ -259,14 +259,14 @@ public class EmbeddingIndexPhaseTests
         {
             var repoId = store.FindRepo("demo")!.Id;
             var chunks = store.ListPendingChunks(repoId, "unused", int.MaxValue);
-            store.MarkChunksEmbedded(chunks.Select(c => c.Id), "onnx/old-model/768");
+            store.MarkChunksEmbedded(chunks.Select(c => c.Id), "ollama/old-model/768");
         }
 
         vectorStore.ResetCounters();
         indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
 
         vectorStore.UpsertedPointCount.ShouldBeGreaterThan(0);
-        ListChunks(workspace).ShouldAllBe(c => c.ModelKey == "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
+        ListChunks(workspace).ShouldAllBe(c => c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -595,7 +595,7 @@ public class EmbeddingIndexPhaseTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         return workspace;
     }

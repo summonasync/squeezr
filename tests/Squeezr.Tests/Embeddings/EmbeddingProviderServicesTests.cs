@@ -10,14 +10,12 @@ public partial class EmbeddingProviderServicesTests
     {
         ["ollama"] = true,
         ["auto"] = true,
-        ["onnx"] = false,
         ["openai"] = false
     };
 
     [Theory]
     [InlineData("ollama", true)]
     [InlineData("auto", true)]
-    [InlineData("onnx", false)]
     [InlineData("openai", false)]
     public void RequiresManagedService_KnownProvider_AnswersFromTheTable(string provider, bool expected) =>
         EmbeddingProviderServices.RequiresManagedService(provider).ShouldBe(expected);
@@ -25,7 +23,6 @@ public partial class EmbeddingProviderServicesTests
     [Theory]
     [InlineData("OLLAMA", true)]
     [InlineData("  Auto  ", true)]
-    [InlineData("ONNX", false)]
     [InlineData(" OpenAI", false)]
     public void RequiresManagedService_CaseAndPadding_MatchTheFactoryNormalization(string provider, bool expected) =>
         EmbeddingProviderServices.RequiresManagedService(provider).ShouldBe(expected);
@@ -44,7 +41,7 @@ public partial class EmbeddingProviderServicesTests
     {
         var named = RuntimeProviderNames();
 
-        named.ShouldContain("onnx");
+        named.ShouldNotContain("onnx");
         named.ShouldContain("ollama");
         named.ShouldContain("openai");
         named.ShouldContain("auto");
@@ -59,21 +56,21 @@ public partial class EmbeddingProviderServicesTests
             .ShouldBe(["ollama", "auto"]);
 
     [Theory]
-    [InlineData("""case "onnx":""", "onnx")]
-    [InlineData("""case "onnx" or "onnx-int8":""", "onnx,onnx-int8")]
+    [InlineData("""case "bge":""", "bge")]
+    [InlineData("""case "bge" or "bge-int8":""", "bge,bge-int8")]
     [InlineData("""case "auto" or "ollama" or "openai":""", "auto,ollama,openai")]
-    [InlineData("""case "onnx": case "ollama":""", "onnx,ollama")]
-    [InlineData("case \"onnx\"\n                or \"openai\":", "onnx,openai")]
+    [InlineData("""case "bge": case "ollama":""", "bge,ollama")]
+    [InlineData("case \"bge\"\n                or \"openai\":", "bge,openai")]
     [InlineData("""case "ollama" or "auto" when endpoint.StartsWith("http"):""", "ollama,auto")]
     [InlineData("""case ProviderName when raw.Length > 0:""", "")]
-    [InlineData("""Default: throw new WorkspaceException("Supported providers: onnx, ollama.");""", "")]
+    [InlineData("""Default: throw new WorkspaceException("Supported providers: ollama.");""", "")]
     public void SwitchLabels_EveryCaseHeadForm_ReadsEachNameOnce(string source, string expected) =>
         SwitchLabels(source).ToList()
             .ShouldBe(expected.Split(',', StringSplitOptions.RemoveEmptyEntries));
 
     [Fact]
     public void RuntimeProviderNames_OverTheTwoSwitchSources_IsExactlyTheVerdictTable() =>
-        RuntimeProviderNames().ShouldBe(["onnx", "openai", "ollama", "auto"], ignoreOrder: true);
+        RuntimeProviderNames().ShouldBe(["openai", "ollama", "auto"], ignoreOrder: true);
 
     private static string Read(string project, string file) => File.ReadAllText(Path.Combine(
         FindRepoRoot(), "src", project, "Embeddings", file));

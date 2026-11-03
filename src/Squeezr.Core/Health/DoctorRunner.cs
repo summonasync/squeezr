@@ -113,6 +113,12 @@ public static class DoctorRunner
             yield break;
         }
 
+        if (facts.Health.ModelProblem is { } problem)
+        {
+            yield return new DoctorFinding("embeddings provider", StateFail, problem, null);
+            yield break;
+        }
+
         var config = TryLoadConfig(entry);
         var chunks = status.Repos.Sum(r => r.Chunks);
         if (config?.Indexing.NoSemantic == true || chunks == 0)
@@ -124,18 +130,6 @@ public static class DoctorRunner
         {
             yield return new DoctorFinding("semantic search", StateInfo, $"facts unavailable: {unavailable}", null);
             yield break;
-        }
-
-        if (facts.Health.ModelProblem is { } problem)
-        {
-            yield return new DoctorFinding("embeddings provider", StateFail, problem, null);
-        }
-
-        if (facts.Health.FallbackReason is { } reason)
-        {
-            yield return new DoctorFinding(
-                "embeddings provider", StateInfo,
-                $"auto resolved to {facts.Health.Provider} (ollama unreachable: {reason})", null);
         }
 
         if (facts.Health.CpuOnly is { } cpu)

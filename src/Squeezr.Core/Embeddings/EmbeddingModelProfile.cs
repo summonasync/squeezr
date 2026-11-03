@@ -8,8 +8,6 @@ public sealed record EmbeddingModelProfile
 
     public required EmbeddingPooling Pooling { get; init; }
 
-    public required EmbeddingTokenizerKind TokenizerKind { get; init; }
-
     public string? DocumentPrefix { get; init; }
 
     public string? QueryPrefix { get; init; }

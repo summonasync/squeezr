@@ -225,7 +225,7 @@ public sealed class IndexEventsTests
     }
 
     [Fact]
-    public async Task Index_Events_AutoProviderWithDeadOllamaAndNoModel_ReportsBothFailures()
+    public async Task Index_Events_AutoProviderWithDeadOllama_ReportsTheProbeFailure()
     {
         var root = TestDirs.NewTempDir();
         await InitAddAsync(root, ("a.txt", "alpha body"));
@@ -246,7 +246,7 @@ public sealed class IndexEventsTests
             warning.RootElement.GetProperty("type").GetString().ShouldBe("warning");
             warning.RootElement.GetProperty("code").GetString().ShouldBe("embeddings_unavailable");
             warning.RootElement.GetProperty("message").GetString().ShouldContain("ollama probe failed");
-            warning.RootElement.GetProperty("message").GetString().ShouldContain("Embedding model not found");
+            warning.RootElement.GetProperty("message").GetString().ShouldContain("'ollama' or 'openai'");
         }
 
         using (var completed = JsonDocument.Parse(FindLine(lines, "completed")))
@@ -261,7 +261,7 @@ public sealed class IndexEventsTests
 
         index.StdErr.ShouldNotContain("embeddings provider:");
         index.StdErr.ShouldContain("warning: ollama probe failed");
-        index.StdErr.ShouldContain("warning: Embedding model not found");
+        index.StdErr.ShouldContain("Set embeddings.provider to 'ollama' or 'openai'");
     }
 
     [Fact]

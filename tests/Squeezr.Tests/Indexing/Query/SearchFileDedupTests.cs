@@ -86,7 +86,7 @@ public class SearchFileDedupTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
 
         WriteFile(workspace, "repo/docs/Guide.md",

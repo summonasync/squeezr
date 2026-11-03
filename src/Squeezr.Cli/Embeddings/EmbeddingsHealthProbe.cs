@@ -23,17 +23,16 @@ public static class EmbeddingsHealthProbe
             using var http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
             var resolution = await new EmbeddingProviderResolver(http)
                 .ResolveAsync(config.Embeddings.Provider, config.Embeddings.Ollama.Endpoint, ct);
-            var modelProblem = resolution.Provider == "onnx"
-                ? EmbeddingProviderFactory.DescribeOnnxModelProblem(config.Embeddings.Onnx, workspaceRoot)
-                : null;
             var cpu = resolution.Provider == "ollama"
                 ? await CpuOnlyAsync(config.Embeddings.Ollama, ct, handler)
                 : null;
-            return new EmbeddingsHealth(resolution.Provider, resolution.Reason, modelProblem, cpu);
+            return new EmbeddingsHealth(resolution.Provider, null, cpu);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return EmbeddingsHealth.Silent;
+            return ex is WorkspaceException { Code: WorkspaceException.OnnxProviderCode }
+                ? new EmbeddingsHealth(null, OnnxStoreDiagnostic.Text(), null)
+                : EmbeddingsHealth.Silent;
         }
     }
 

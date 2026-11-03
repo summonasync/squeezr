@@ -18,32 +18,6 @@ public class EmbeddingModelKeyTests
     }
 
     [Fact]
-    public void From_DefaultOnnxConfig_IncludesResolvedProfileId()
-    {
-        var key = EmbeddingModelKey.From(new EmbeddingsConfig { Provider = "onnx" });
-
-        key.ShouldBe("onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
-    }
-
-    [Fact]
-    public void From_ExplicitBgeOnnxConfig_IncludesBgeProfileId()
-    {
-        var config = new EmbeddingsConfig
-        {
-            Provider = "onnx",
-            Onnx = new OnnxEmbeddingOptions
-            {
-                Model = "bge-code-v1",
-                ModelPath = "~/.squeezr/models/bge-code-v1.onnx"
-            }
-        };
-
-        var key = EmbeddingModelKey.From(config);
-
-        key.ShouldBe("onnx/bge-code-v1.onnx/1536/bge-code-v1");
-    }
-
-    [Fact]
     public void From_OpenAiWithoutProfile_KeepsLegacyKeyFormat()
     {
         var config = new EmbeddingsConfig
@@ -85,13 +59,23 @@ public class EmbeddingModelKeyTests
     {
         var nomic = new EmbeddingsConfig
         {
-            Provider = "onnx",
-            Onnx = new OnnxEmbeddingOptions { Dimensions = 768 }
+            Provider = "openai",
+            OpenAiCompatible = new OpenAiCompatibleOptions
+            {
+                Model = "nomic-embed-text",
+                Dimensions = 768,
+                ModelProfile = "nomic-embed-text-v1.5"
+            }
         };
         var bge = new EmbeddingsConfig
         {
-            Provider = "onnx",
-            Onnx = new OnnxEmbeddingOptions { Model = "bge-code-v1", Dimensions = 768 }
+            Provider = "openai",
+            OpenAiCompatible = new OpenAiCompatibleOptions
+            {
+                Model = "nomic-embed-text",
+                Dimensions = 768,
+                ModelProfile = "bge-code-v1"
+            }
         };
 
         EmbeddingModelKey.From(nomic).ShouldNotBe(EmbeddingModelKey.From(bge));
@@ -122,11 +106,12 @@ public class EmbeddingModelKeyTests
     }
 
     [Fact]
-    public void From_OllamaVsOnnxSameModel_DifferentProvidersProduceDifferentKeys()
+    public void From_UnknownProvider_Throws()
     {
-        var ollama = new EmbeddingsConfig { Provider = "ollama" };
-        var onnx = new EmbeddingsConfig { Provider = "onnx" };
+        var config = new EmbeddingsConfig { Provider = "bert" };
 
-        EmbeddingModelKey.From(ollama).ShouldNotBe(EmbeddingModelKey.From(onnx));
+        var error = Should.Throw<WorkspaceException>(() => EmbeddingModelKey.From(config));
+
+        error.Message.ShouldContain("'bert'");
     }
 }

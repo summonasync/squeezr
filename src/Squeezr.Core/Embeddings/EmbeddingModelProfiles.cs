@@ -7,7 +7,6 @@ public static class EmbeddingModelProfiles
         Id = "nomic-embed-text-v1.5",
         Dimensions = 768,
         Pooling = EmbeddingPooling.MeanL2,
-        TokenizerKind = EmbeddingTokenizerKind.WordPiece,
         DocumentPrefix = "search_document: ",
         QueryPrefix = "search_query: ",
         DefaultMaxSequenceLength = 512
@@ -18,7 +17,6 @@ public static class EmbeddingModelProfiles
         Id = "bge-code-v1",
         Dimensions = 1536,
         Pooling = EmbeddingPooling.LastToken,
-        TokenizerKind = EmbeddingTokenizerKind.Bpe,
         DefaultMaxSequenceLength = 512
     };
 

@@ -82,7 +82,7 @@ public class TuiIndexRunnerTests
     }
 
     [Fact]
-    public async Task Index_SemanticEnabledWithDeadOllamaAndNoModel_ReportsBothFailures()
+    public async Task Index_SemanticEnabledWithDeadOllama_ReportsTheProbeFailure()
     {
         var workspace = NewWorkspaceWithRepo();
         TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(workspace);
@@ -97,7 +97,7 @@ public class TuiIndexRunnerTests
         code.ShouldBe(0);
         console.Output.ShouldNotContain("embeddings provider:");
         console.Output.ShouldContain("ollama probe failed");
-        console.Output.ShouldContain("Embedding model not found");
+        console.Output.ShouldContain("'ollama' or 'openai'");
     }
 
     [Fact]

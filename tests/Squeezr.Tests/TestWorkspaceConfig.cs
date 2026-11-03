@@ -29,7 +29,16 @@ public static class TestWorkspaceConfig
         });
     }
 
-    public static void UseOnnxEmbeddings(string workspaceRoot)
+    public static void UseOllamaEmbeddings(string workspaceRoot)
+    {
+        var config = ConfigFile.Load(workspaceRoot);
+        ConfigFile.Save(workspaceRoot, config with
+        {
+            Embeddings = config.Embeddings with { Provider = "ollama" }
+        });
+    }
+
+    public static void UseOnnxProvider(string workspaceRoot)
     {
         var config = ConfigFile.Load(workspaceRoot);
         ConfigFile.Save(workspaceRoot, config with

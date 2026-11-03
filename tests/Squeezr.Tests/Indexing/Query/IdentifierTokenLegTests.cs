@@ -493,7 +493,7 @@ public class IdentifierTokenLegTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
 
         foreach (var (name, dir) in new[] { ("alpha", "repo-alpha"), ("beta", "repo-beta") })
         {
@@ -638,7 +638,7 @@ public class IdentifierTokenLegTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
 
         WriteFile(workspace, "repo/src/Keep.cs", csharpSource);
         WriteFile(workspace, "repo/generated/ForeignSubtree.cs", csharpSource);
@@ -762,7 +762,7 @@ public class IdentifierTokenLegTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         return workspace;
     }

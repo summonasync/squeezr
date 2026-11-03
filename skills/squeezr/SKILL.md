@@ -47,11 +47,11 @@ only one of them is for squeezr:
 - Qdrant REST `http://localhost:6333` — dashboard/API only, never for squeezr
 - Ollama `http://127.0.0.1:11434`
 
-The embedding model needs no manual step: the default onnx model ships inside the
-release archive, and the ollama provider pulls its model automatically on first
-`squeezr index`. New workspaces default to `embeddings.provider: "auto"`: every
-indexing run picks ollama (GPU) when the endpoint is reachable, otherwise the
-bundled onnx model on CPU — no provider configuration needed.
+The embedding model needs no manual step: the ollama provider pulls its model
+automatically on first `squeezr index`. New workspaces default to
+`embeddings.provider: "auto"`: every indexing run requires the ollama endpoint
+to answer — a no-answer run fails with an explicit `squeezr services up` hint.
+No provider configuration needed.
 
 If docker is missing or the daemon is down, do not install docker and do not
 improvise — stop and ask the human how they want the services hosted.

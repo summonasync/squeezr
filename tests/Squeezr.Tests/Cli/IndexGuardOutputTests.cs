@@ -74,7 +74,7 @@ public class IndexGuardOutputTests
         new WorkspaceIndexer().Index(workspace);
         var status = new WorkspaceManager(workspace).GetStatus();
 
-        var report = WorkspaceStatusReport.Create(status, StaleFileDetector.Detect(workspace), "onnx");
+        var report = WorkspaceStatusReport.Create(status, StaleFileDetector.Detect(workspace), "ollama");
 
         var repo = report.Repos.ShouldHaveSingleItem();
         repo.Guard.ShouldNotBeNull().Withheld.ShouldBe(2);
@@ -97,7 +97,7 @@ public class IndexGuardOutputTests
         new WorkspaceIndexer().Index(workspace);
 
         var report = WorkspaceStatusReport.Create(
-            new WorkspaceManager(workspace).GetStatus(), [], "onnx");
+            new WorkspaceManager(workspace).GetStatus(), [], "ollama");
 
         report.Repos.ShouldHaveSingleItem().Guard.ShouldNotBeNull().WithheldByConfig.ShouldBe(1);
         report.Warnings.ShouldContain(w =>
@@ -111,7 +111,7 @@ public class IndexGuardOutputTests
         var workspace = IngestionWorkspaces.NewWorkspaceWithPlainFile();
 
         var report = WorkspaceStatusReport.Create(
-            new WorkspaceManager(workspace).GetStatus(), StaleFileDetector.Detect(workspace), "onnx");
+            new WorkspaceManager(workspace).GetStatus(), StaleFileDetector.Detect(workspace), "ollama");
 
         report.Repos.ShouldHaveSingleItem().Guard.ShouldBeNull();
         report.Warnings.ShouldNotContain(w => w.Contains("secret guard", StringComparison.Ordinal));

@@ -66,7 +66,7 @@ public class TreeSitterRoutingTests
         {
             var repoId = store.FindRepo("demo")!.Id;
             var allChunks = store.ListFiles(repoId).SelectMany(f => store.ListChunksByFile(f.Id)).ToList();
-            allChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
+            allChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
         }
     }
 
@@ -237,7 +237,7 @@ public class TreeSitterRoutingTests
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/src/a.cs", "class Calc {\n    int Add(int a, int b) {\n        return a + b;\n    }\n}\n");
         WriteFile(workspace, "repo/src/app.js", """

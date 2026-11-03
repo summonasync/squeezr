@@ -24,7 +24,6 @@ public static class EmbeddingModelKey
             return profile is null ? key : $"{key}/{profile.Id}";
         }
 
-        var onnx = config.Onnx;
-        return $"onnx/{Path.GetFileName(onnx.ModelPath)}/{onnx.EffectiveDimensions}/{onnx.ResolvedProfile.Id}";
+        throw new WorkspaceException($"Embeddings provider '{config.Provider}' has no model key; supported providers: ollama, openai.");
     }
 }

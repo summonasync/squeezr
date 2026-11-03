@@ -72,7 +72,7 @@ public class TuiConfigEditorTests
         TuiTestHarness.PushMenuChoice(console, 5);
         TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("openai");
-        for (var i = 0; i < 13; i++)
+        for (var i = 0; i < 8; i++)
         {
             console.Input.PushTextWithEnter("");
         }
@@ -98,7 +98,7 @@ public class TuiConfigEditorTests
         TuiTestHarness.PushMenuChoice(console, 5);
         TuiTestHarness.PushMenuChoice(console, 1);
         console.Input.PushTextWithEnter("ollama");
-        for (var i = 0; i < 13; i++)
+        for (var i = 0; i < 8; i++)
         {
             console.Input.PushTextWithEnter("");
         }
@@ -121,17 +121,17 @@ public class TuiConfigEditorTests
     [Fact]
     public async Task Config_DimensionsChange_WarnsAndCancelLeavesFileUntouched()
     {
-        var workspace = NewWorkspace();
+        var workspace = NewOpenAiWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 5);
         TuiTestHarness.PushMenuChoice(console, 1);
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < 4; i++)
         {
             console.Input.PushTextWithEnter("");
         }
 
         console.Input.PushTextWithEnter("1536");
-        for (var i = 0; i < 10; i++)
+        for (var i = 0; i < 4; i++)
         {
             console.Input.PushTextWithEnter("");
         }
@@ -147,23 +147,23 @@ public class TuiConfigEditorTests
         console.Output.ShouldContain("incompatible");
         console.Output.ShouldContain("reembed");
         console.Output.ShouldContain("Changes discarded.");
-        ConfigFile.Load(workspace).Embeddings.Onnx.Dimensions.ShouldBeNull();
+        ConfigFile.Load(workspace).Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1024);
     }
 
     [Fact]
     public async Task Config_DimensionsChange_ApplySavesNewDimensions()
     {
-        var workspace = NewWorkspace();
+        var workspace = NewOpenAiWorkspace();
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 5);
         TuiTestHarness.PushMenuChoice(console, 1);
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < 4; i++)
         {
             console.Input.PushTextWithEnter("");
         }
 
         console.Input.PushTextWithEnter("1536");
-        for (var i = 0; i < 10; i++)
+        for (var i = 0; i < 4; i++)
         {
             console.Input.PushTextWithEnter("");
         }
@@ -177,7 +177,7 @@ public class TuiConfigEditorTests
 
         code.ShouldBe(0);
         console.Output.ShouldContain("Saved.");
-        ConfigFile.Load(workspace).Embeddings.Onnx.Dimensions.ShouldBe(1536);
+        ConfigFile.Load(workspace).Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1536);
     }
 
     [Fact]
@@ -205,7 +205,7 @@ public class TuiConfigEditorTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 5);
         TuiTestHarness.PushMenuChoice(console, 1);
-        for (var i = 0; i < 13; i++)
+        for (var i = 0; i < 8; i++)
         {
             console.Input.PushTextWithEnter(string.Empty);
         }
@@ -230,7 +230,7 @@ public class TuiConfigEditorTests
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 5);
         TuiTestHarness.PushMenuChoice(console, 1);
-        for (var i = 0; i < 13; i++)
+        for (var i = 0; i < 8; i++)
         {
             console.Input.PushTextWithEnter(string.Empty);
         }
@@ -261,6 +261,17 @@ public class TuiConfigEditorTests
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("demo");
+        return workspace;
+    }
+
+    private static string NewOpenAiWorkspace()
+    {
+        var workspace = NewWorkspace();
+        var config = ConfigFile.Load(workspace) with
+        {
+            Embeddings = ConfigFile.Load(workspace).Embeddings with { Provider = "openai" }
+        };
+        ConfigFile.Save(workspace, config);
         return workspace;
     }
 }

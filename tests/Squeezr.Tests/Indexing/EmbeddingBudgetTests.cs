@@ -123,7 +123,7 @@ public class EmbeddingBudgetTests
         var warnings = new List<string>();
 
         var result = EmbeddingIndexPhase.Run(
-            new RepoDocument { Id = 1, Name = "demo" }, store, "onnx/test-model/768/test-profile",
+            new RepoDocument { Id = 1, Name = "demo" }, store, "ollama/test-model/768/test-profile",
             provider, vectorStore, warnings.Add);
 
         result.Embedded.ShouldBeGreaterThan(0);
@@ -153,7 +153,7 @@ public class EmbeddingBudgetTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         for (var i = 0; i < 8; i++)
         {

@@ -25,14 +25,13 @@ public sealed class EmbeddingProviderResolver
         var normalized = provider.Trim().ToLowerInvariant();
         switch (normalized)
         {
-            case "onnx":
             case "ollama":
             case "openai":
                 return new EmbeddingProviderResolution(normalized, null);
             case "auto":
                 return await ResolveAutoAsync(ollamaEndpoint, cancellationToken);
             default:
-                throw new WorkspaceException($"Unknown embeddings provider '{provider}'. Supported providers: onnx, ollama, openai, auto.");
+                throw new WorkspaceException($"Unknown embeddings provider '{provider}'. Supported providers: ollama, openai, auto.");
         }
     }
 
@@ -46,19 +45,20 @@ public sealed class EmbeddingProviderResolver
             using var response = await _http.SendAsync(request, probeCts.Token);
             return response.IsSuccessStatusCode
                 ? new EmbeddingProviderResolution("ollama", null)
-                : FallbackToOnnx($"HTTP {(int)response.StatusCode}");
+                : throw ProbeFailedException($"HTTP {(int)response.StatusCode}");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return FallbackToOnnx("probe timed out");
+            throw ProbeFailedException("probe timed out");
         }
         catch (HttpRequestException ex)
         {
-            return FallbackToOnnx(ex.Message);
+            throw ProbeFailedException(ex.Message);
         }
     }
 
-    private static EmbeddingProviderResolution FallbackToOnnx(string reason) => new("onnx", reason);
+    private static WorkspaceException ProbeFailedException(string reason) => new(
+        $"Ollama probe failed ({reason}). Set embeddings.provider to 'ollama' or 'openai' explicitly.");
 
     private static Uri ProbeUri(string ollamaEndpoint) => OllamaProbe.ProbeUri(ollamaEndpoint, ProbePath);
 }

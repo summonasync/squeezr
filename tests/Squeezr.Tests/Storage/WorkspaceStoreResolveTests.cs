@@ -478,7 +478,7 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
               "chunking": { "maxTokensPerChunk": 512, "fallbackWindowLines": 60, "fallbackOverlapLines": 15 },
               "indexing": { "ignore": [], "maxFileSizeKb": 512, "gitAware": true },
               "qdrant": { "endpoint": "http://localhost:6334" },
-              "embeddings": { "provider": "onnx" }
+              "embeddings": { "provider": "ollama" }
             }
             """);
 
@@ -486,7 +486,7 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
 
         var raw = File.ReadAllText(Path.Combine(result.StoreDir!, SqueezrPaths.ConfigFileName));
         raw.ShouldNotContain("gitAware");
-        ConfigFile.Load(root).Embeddings.Provider.ShouldBe("onnx");
+        ConfigFile.Load(root).Embeddings.Provider.ShouldBe("ollama");
     }
 
     [Fact]

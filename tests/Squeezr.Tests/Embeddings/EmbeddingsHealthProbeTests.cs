@@ -42,22 +42,6 @@ public sealed class EmbeddingsHealthProbeTests : IDisposable
     }
 
     [Fact]
-    public async Task Probe_OnnxWithMissingModel_ReportsModelProblem()
-    {
-        SaveConfig(new EmbeddingsConfig
-        {
-            Provider = "onnx",
-            Onnx = new OnnxEmbeddingOptions { ModelPath = "/nonexistent/probe-model.onnx" }
-        });
-
-        var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
-
-        health.Provider.ShouldBe("onnx");
-        health.FallbackReason.ShouldBeNull();
-        health.ModelProblem.ShouldNotBeNull().ShouldContain("Embedding model not found");
-    }
-
-    [Fact]
     public async Task Probe_OllamaOnCpu_ReportsCpuOnly()
     {
         SaveConfig(new EmbeddingsConfig
@@ -91,7 +75,7 @@ public sealed class EmbeddingsHealthProbeTests : IDisposable
     [Fact]
     public async Task Probe_NoSemanticConfig_StaySilent()
     {
-        SaveConfig(new EmbeddingsConfig { Provider = "onnx" }, noSemantic: true);
+        SaveConfig(new EmbeddingsConfig { Provider = "openai" }, noSemantic: true);
 
         var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
 
@@ -108,6 +92,17 @@ public sealed class EmbeddingsHealthProbeTests : IDisposable
 
         health.Provider.ShouldBeNull();
         health.ModelProblem.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Probe_OnnxStore_CarriesMigrationPathAsModelProblem()
+    {
+        SaveConfig(new EmbeddingsConfig { Provider = "onnx" });
+
+        var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
+
+        health.Provider.ShouldBeNull();
+        health.ModelProblem.ShouldNotBeNull().ShouldContain(OnnxStoreDiagnostic.ReembedCommand);
     }
 
     private void SaveConfig(EmbeddingsConfig embeddings, bool noSemantic = false)

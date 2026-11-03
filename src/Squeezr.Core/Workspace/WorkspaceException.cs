@@ -9,6 +9,7 @@ public class WorkspaceException : Exception
     public const string RegistryBusyCode = "workspace_registry_busy";
     public const string HomeUnavailableCode = "home_unavailable";
     public const string StorageUnavailableCode = "storage_unavailable";
+    public const string OnnxProviderCode = "onnx_provider_removed";
 
     public WorkspaceException(string message, string code = DefaultCode, Exception? innerException = null)
         : base(message, innerException)

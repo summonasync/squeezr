@@ -24,10 +24,10 @@ public sealed class SearchJsonPurityTests
         stderr.ShouldStartWith("{");
         using var doc = JsonDocument.Parse(stderr);
         var warnings = doc.RootElement.GetProperty("warnings");
-        warnings.GetArrayLength().ShouldBe(2);
+        warnings.GetArrayLength().ShouldBe(1);
         warnings[0].GetProperty("code").GetString().ShouldBe("embeddings_unavailable");
         warnings[0].GetProperty("message").GetString().ShouldContain("ollama probe failed");
-        warnings[1].GetProperty("message").GetString().ShouldContain("Embedding model not found");
+        warnings[0].GetProperty("message").GetString().ShouldContain("'ollama' or 'openai'");
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class SearchJsonPurityTests
 
         search.ExitCode.ShouldBe(0);
         search.StdErr.ShouldContain("warning: ollama probe failed");
-        search.StdErr.ShouldContain("warning: Embedding model not found");
+        search.StdErr.ShouldContain("Set embeddings.provider to 'ollama' or 'openai'");
     }
 
     private static Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(

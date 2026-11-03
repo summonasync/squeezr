@@ -57,7 +57,7 @@ public class WatchEmbeddingRuntimeExecutorTests : IDisposable
     public void Executor_ThrowingEvidenceSource_DegradesToUnknownInsteadOfKillingTheCaller()
     {
         var runtime = new WatchEmbeddingRuntime(
-            new ThrowingEvidenceProvider(), new SilentStore(), new EmbeddingProviderResolution("onnx", null));
+            new ThrowingEvidenceProvider(), new SilentStore(), new EmbeddingProviderResolution("ollama", null));
 
         var executor = runtime.Executor;
 

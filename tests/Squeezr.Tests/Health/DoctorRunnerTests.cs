@@ -205,7 +205,7 @@ public sealed class DoctorRunnerTests : IDisposable
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 498, 2, 500),
-                new EmbeddingsHealth("ollama", null, null, null)));
+                new EmbeddingsHealth("ollama", null, null)));
 
         report.Healthy.ShouldBeTrue();
         report.Findings.ShouldNotContain(f => f.Name == "semantic search" || f.Name == "embeddings provider");
@@ -241,23 +241,19 @@ public sealed class DoctorRunnerTests : IDisposable
     }
 
     [Fact]
-    public void SemanticFacts_ModelMissingWithFallback_FailPlusInfo()
+    public void SemanticFacts_ModelProblem_RendersFailFinding()
     {
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 4, 0, 4),
-                new EmbeddingsHealth(
-                    "onnx", "Connection refused",
-                    "Embedding model not found at '/nonexistent/model.onnx' and no bundled copy exists.", null)));
+                new EmbeddingsHealth(null, "Embeddings provider 'onnx' is no longer supported.", null)));
 
         report.Healthy.ShouldBeFalse();
         var problem = report.Findings.Single(
             f => f.Name == "embeddings provider" && f.State == DoctorRunner.StateFail);
-        problem.Detail.ShouldContain("Embedding model not found");
-        report.Findings.ShouldContain(
-            f => f.State == DoctorRunner.StateInfo && f.Detail.Contains("auto resolved to onnx"));
+        problem.Detail.ShouldContain("'onnx' is no longer supported");
     }
 
     [Fact]
@@ -268,7 +264,7 @@ public sealed class DoctorRunnerTests : IDisposable
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
             _ => new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 4, 0, 4),
-                new EmbeddingsHealth("ollama", null, null, "embedding model runs on CPU — embeddings will be slow")));
+                new EmbeddingsHealth("ollama", null, "embedding model runs on CPU — embeddings will be slow")));
 
         report.Healthy.ShouldBeTrue();
         var info = report.Findings.Single(f => f.Name == "embeddings provider");
