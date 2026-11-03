@@ -106,7 +106,7 @@ public class EmbeddingRuntimeFactoryTests
     }
 
     [Fact]
-    public void TryCreate_AutoWithUnreachableOllama_FallsBackToOnnxResolution()
+    public void TryCreate_AutoWithUnreachableOllama_FailsWithTheProbeHint()
     {
         var root = TestDirs.NewTempDir();
         ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
@@ -114,23 +114,19 @@ public class EmbeddingRuntimeFactoryTests
             Embeddings = new EmbeddingsConfig
             {
                 Provider = "auto",
-                Ollama = new OllamaOptions { Endpoint = TestWorkspaceConfig.DeadOllamaEndpoint },
-                Onnx = new OnnxEmbeddingOptions { ModelPath = "/nonexistent/model.onnx", TokenizerPath = "/nonexistent/tokenizer" }
+                Ollama = new OllamaOptions { Endpoint = TestWorkspaceConfig.DeadOllamaEndpoint }
             }
         });
 
         var warnings = EmbeddingRuntimeFactory.TryCreate(
             root, withProvider: true, out var provider, out var store, out var resolution);
 
-        resolution.ShouldNotBeNull();
-        resolution.Provider.ShouldBe("onnx");
-        resolution.Reason.ShouldNotBeNullOrWhiteSpace();
+        resolution.ShouldBeNull();
         provider.ShouldBeNull();
         store.ShouldBeNull();
-        warnings.Count.ShouldBe(2);
-        warnings[0].ShouldStartWith("ollama probe failed");
-        warnings[0].ShouldContain(resolution.Reason);
-        warnings[1].ShouldContain("Embedding model not found");
+        warnings.Count.ShouldBe(1);
+        warnings[0].ShouldContain("Ollama probe failed");
+        warnings[0].ShouldContain("'ollama' or 'openai'");
     }
 
     [Fact]

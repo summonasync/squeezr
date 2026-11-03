@@ -233,7 +233,7 @@ public class SecretStorePurgeTests
             workspace,
             embeddings: new SecretGuardFixture.FixedEmbeddings(),
             vectorStore: vectorStore,
-            embeddingProviderResolution: new EmbeddingProviderResolution("onnx", null));
+            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         var entries = store.ListPendingReaps();
@@ -333,7 +333,7 @@ public class SecretStorePurgeTests
             workspace,
             embeddings: new SecretGuardFixture.FixedEmbeddings(),
             vectorStore: vectorStore,
-            embeddingProviderResolution: new EmbeddingProviderResolution("onnx", null));
+            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
 
         replayed.Warnings.ShouldContain(w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));
         foreach (var id in doomedIds)
@@ -366,7 +366,7 @@ public class SecretStorePurgeTests
             workspace,
             embeddings: new SecretGuardFixture.FixedEmbeddings(),
             vectorStore: vectorStore,
-            embeddingProviderResolution: new EmbeddingProviderResolution("onnx", null));
+            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
 
         replayed.Warnings.ShouldNotContain(
             w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));

@@ -6,7 +6,6 @@ internal static class EmbeddingProviderServices
     {
         "ollama" => true,
         "auto" => true,
-        "onnx" => false,
         "openai" => false,
         _ => false
     };

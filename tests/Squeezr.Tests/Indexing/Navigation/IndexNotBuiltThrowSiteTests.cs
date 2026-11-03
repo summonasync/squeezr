@@ -61,7 +61,7 @@ public class IndexNotBuiltThrowSiteTests
         new WorkspaceManager(root).Init(null);
         ConfigFile.Save(root, ConfigFile.Load(root) with
         {
-            Embeddings = new EmbeddingsConfig { Provider = "onnx" }
+            Embeddings = new EmbeddingsConfig { Provider = "openai" }
         });
         File.Exists(SqueezrPaths.TrigramIndexPath(root)).ShouldBeFalse();
         return root;

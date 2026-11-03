@@ -251,7 +251,7 @@ public class WorkspaceWatcherEmbedDrainTests
 
     private static Task<WatchEmbeddingRuntime?> Runtime(IEmbeddingProvider provider, IVectorStore store) =>
         Task.FromResult<WatchEmbeddingRuntime?>(
-            new WatchEmbeddingRuntime(provider, store, new EmbeddingProviderResolution("onnx", null)));
+            new WatchEmbeddingRuntime(provider, store, new EmbeddingProviderResolution("ollama", null)));
 
     private static async Task UntilAsync(Func<bool> condition, string? what = null) =>
         await UntilAsync(condition, WaitTimeout, what);
@@ -296,7 +296,7 @@ public class WorkspaceWatcherEmbedDrainTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
         {

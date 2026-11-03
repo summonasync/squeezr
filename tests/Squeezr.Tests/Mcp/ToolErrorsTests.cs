@@ -193,7 +193,6 @@ public class ToolErrorsTests
     }
 
     [Theory]
-    [InlineData("onnx")]
     [InlineData("openai")]
     public void From_IndexNotBuiltWithProviderThatNeedsNoService_KeepsOnlyTheIndexStep(string provider)
     {
@@ -207,7 +206,6 @@ public class ToolErrorsTests
     [Theory]
     [InlineData("ollama")]
     [InlineData("auto")]
-    [InlineData("onnx")]
     [InlineData("openai")]
     [InlineData(null)]
     public void From_IndexNotBuilt_AlwaysCarriesTheIndexStep(string? provider)
@@ -224,7 +222,7 @@ public class ToolErrorsTests
     [Fact]
     public void From_IndexNotBuilt_NeverSuggestsInitializingAStoreThatAlreadyExists()
     {
-        foreach (var provider in new string?[] { "ollama", "onnx", null })
+        foreach (var provider in new string?[] { "ollama", "openai", null })
         {
             Wire(From(IndexNotBuiltMessage, WorkspaceException.IndexNotBuiltCode, WorkspaceAtRoot(provider)))
                 .ShouldNotContain("squeezr init");
@@ -261,7 +259,7 @@ public class ToolErrorsTests
         var root = TestDirs.NewTempDir();
         ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
         {
-            Embeddings = new EmbeddingsConfig { Provider = "onnx" }
+            Embeddings = new EmbeddingsConfig { Provider = "openai" }
         });
         var workspace = new McpWorkspace(root, root, "ollama");
 

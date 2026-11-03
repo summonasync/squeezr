@@ -54,11 +54,11 @@ public static class TuiDashboard
         }
         catch (WorkspaceException)
         {
-            return ("onnx", new OllamaOptions());
+            return ("unknown", new OllamaOptions());
         }
         catch (IOException)
         {
-            return ("onnx", new OllamaOptions());
+            return ("unknown", new OllamaOptions());
         }
     }
 

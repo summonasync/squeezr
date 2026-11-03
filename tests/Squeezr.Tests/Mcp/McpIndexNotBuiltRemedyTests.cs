@@ -15,7 +15,6 @@ public class McpIndexNotBuiltRemedyTests
     [Theory]
     [InlineData("ollama", true)]
     [InlineData("auto", true)]
-    [InlineData("onnx", false)]
     [InlineData("openai", false)]
     public async Task Wire_UnbuiltIndex_RemedyFollowsTheProviderOfThatWorkspace(string provider, bool needsServices)
     {
@@ -120,7 +119,7 @@ public class McpIndexNotBuiltRemedyTests
 
         ConfigFile.Save(root, ConfigFile.Load(root) with
         {
-            Embeddings = new EmbeddingsConfig { Provider = "onnx" }
+            Embeddings = new EmbeddingsConfig { Provider = "openai" }
         });
         var payload = await CallUnbuiltIndexAsync(harness, "symbol_lookup", ("name", "Add"));
 

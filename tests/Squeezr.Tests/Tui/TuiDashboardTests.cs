@@ -50,7 +50,7 @@ public class TuiDashboardTests
     {
         var workspace = TestDirs.NewTempDir();
         new WorkspaceManager(workspace).Init("dash");
-        PointConfigAt(workspace, provider: "onnx");
+        PointConfigAt(workspace, provider: "openai");
         return workspace;
     }
 

@@ -23,38 +23,41 @@ public class EmbeddingProviderResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_AutoWithNonSuccessStatus_ReturnsOnnxWithStatusReason()
+    public async Task ResolveAsync_AutoWithNonSuccessStatus_ThrowsWithHint()
     {
         var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.ServiceUnavailable, "{}"));
         var resolver = new EmbeddingProviderResolver(new HttpClient(handler));
 
-        var resolution = await resolver.ResolveAsync("auto", "http://localhost:11434", CancellationToken.None);
+        var error = await Should.ThrowAsync<WorkspaceException>(
+            () => resolver.ResolveAsync("auto", "http://localhost:11434", CancellationToken.None));
 
-        resolution.Provider.ShouldBe("onnx");
-        resolution.Reason.ShouldNotBeNull().ShouldContain("503");
+        error.Message.ShouldContain("503");
+        error.Message.ShouldContain("'ollama' or 'openai'");
     }
 
     [Fact]
-    public async Task ResolveAsync_AutoWithDeadEndpoint_ReturnsOnnxWithReason()
+    public async Task ResolveAsync_AutoWithDeadEndpoint_ThrowsWithHint()
     {
         var resolver = new EmbeddingProviderResolver(new HttpClient());
 
-        var resolution = await resolver.ResolveAsync("auto", "http://localhost:1", CancellationToken.None);
+        var error = await Should.ThrowAsync<WorkspaceException>(
+            () => resolver.ResolveAsync("auto", "http://localhost:1", CancellationToken.None));
 
-        resolution.Provider.ShouldBe("onnx");
-        resolution.Reason.ShouldNotBeNullOrWhiteSpace();
+        error.Message.ShouldNotBeNullOrWhiteSpace();
+        error.Message.ShouldContain("'ollama' or 'openai'");
     }
 
     [Fact]
-    public async Task ResolveAsync_AutoWhenProbeTimesOut_ReturnsOnnxWithTimeoutReason()
+    public async Task ResolveAsync_AutoWhenProbeTimesOut_ThrowsWithTimeoutReason()
     {
         var resolver = new EmbeddingProviderResolver(
             new HttpClient(new StalledHttpMessageHandler()), TimeSpan.FromMilliseconds(200));
 
-        var resolution = await resolver.ResolveAsync("auto", "http://localhost:11434", CancellationToken.None);
+        var error = await Should.ThrowAsync<WorkspaceException>(
+            () => resolver.ResolveAsync("auto", "http://localhost:11434", CancellationToken.None));
 
-        resolution.Provider.ShouldBe("onnx");
-        resolution.Reason.ShouldNotBeNull().ShouldContain("timed out");
+        error.Message.ShouldContain("timed out");
+        error.Message.ShouldContain("'ollama' or 'openai'");
     }
 
     [Fact]
@@ -77,7 +80,6 @@ public class EmbeddingProviderResolverTests
     }
 
     [Theory]
-    [InlineData("onnx", "onnx")]
     [InlineData("ollama", "ollama")]
     [InlineData("openai", "openai")]
     [InlineData(" Ollama ", "ollama")]
@@ -94,6 +96,18 @@ public class EmbeddingProviderResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_OnnxProvider_ThrowsAsRemoved()
+    {
+        var resolver = new EmbeddingProviderResolver(new HttpClient(new StubHttpMessageHandler()));
+
+        var error = await Should.ThrowAsync<WorkspaceException>(
+            () => resolver.ResolveAsync("onnx", "http://localhost:11434", CancellationToken.None));
+
+        error.Message.ShouldContain("'onnx'");
+        error.Message.ShouldContain("ollama, openai, auto");
+    }
+
+    [Fact]
     public async Task ResolveAsync_UnknownProvider_ThrowsWorkspaceException()
     {
         var resolver = new EmbeddingProviderResolver(new HttpClient(new StubHttpMessageHandler()));
@@ -102,6 +116,7 @@ public class EmbeddingProviderResolverTests
             () => resolver.ResolveAsync("bert", "http://localhost:11434", CancellationToken.None));
 
         error.Message.ShouldContain("'bert'");
+        error.Message.ShouldContain("ollama, openai, auto");
     }
 
     private sealed class StalledHttpMessageHandler : HttpMessageHandler

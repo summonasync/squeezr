@@ -36,9 +36,14 @@ public static class ConfigFile
 
         config = NormalizeNullSections(config);
 
+        if (config.Embeddings.Provider.Trim().ToLowerInvariant() == "onnx")
+        {
+            throw new WorkspaceException(
+                "Embeddings provider 'onnx' is no longer supported. Switch embeddings.provider to 'ollama' or 'openai' and run a full reindex ('squeezr index --reembed'): vectors produced by the ONNX model are incompatible with every other embedding model.");
+        }
+
         try
         {
-            _ = config.Embeddings.Onnx.ResolvedProfile;
             _ = config.Embeddings.Ollama.ResolvedProfile;
             _ = config.Embeddings.OpenAiCompatible.ResolvedProfile;
         }

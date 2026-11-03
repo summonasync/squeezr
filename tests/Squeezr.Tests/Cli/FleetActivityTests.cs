@@ -106,8 +106,8 @@ public sealed class FleetActivityTests : IDisposable
         FleetCommand.FormatActivity([Row("files", "alpha", 12, 40)]).ShouldBe("indexing alpha · files 12/40");
         FleetCommand.FormatActivity([Row("embeddings", "alpha", 3, 9, "gpu", "ollama")])
             .ShouldBe("embedding alpha · chunks 3/9 · ollama · gpu");
-        FleetCommand.FormatActivity([Row("embeddings", "alpha", 3, 9, "cpu", "onnx")])
-            .ShouldBe("embedding alpha · chunks 3/9 · onnx · cpu");
+        FleetCommand.FormatActivity([Row("embeddings", "alpha", 3, 9, "cpu", "openai")])
+            .ShouldBe("embedding alpha · chunks 3/9 · openai · cpu");
         FleetCommand.FormatActivity([Row("walk", "alpha", 0, 0)]).ShouldBe("walking alpha");
         FleetCommand.FormatActivity([Row("semantic", "alpha", 5, 20)]).ShouldBe("semantic alpha · 5/20");
         FleetCommand.FormatActivity([Row("trigram", "alpha", 5, 20)]).ShouldBe("trigram alpha · 5/20");

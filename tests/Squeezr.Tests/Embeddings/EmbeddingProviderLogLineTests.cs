@@ -20,9 +20,9 @@ public class EmbeddingProviderLogLineTests
     }
 
     [Fact]
-    public void Describe_FallbackResolution_AppendsOllamaUnreachableReason()
+    public void Describe_ResolutionWithReason_AppendsOllamaUnreachableReason()
     {
-        EmbeddingProviderLogLine.Describe(new EmbeddingProviderResolution("onnx", "connection refused"))
-            .ShouldBe("embeddings provider: onnx (ollama unreachable: connection refused)");
+        EmbeddingProviderLogLine.Describe(new EmbeddingProviderResolution("ollama", "connection refused"))
+            .ShouldBe("embeddings provider: ollama (ollama unreachable: connection refused)");
     }
 }

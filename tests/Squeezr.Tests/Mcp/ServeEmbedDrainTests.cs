@@ -59,7 +59,7 @@ public sealed class ServeEmbedDrainTests
     }
 
     private static WatchEmbeddingRuntime Runtime(CountingEmbeddingProvider provider) =>
-        new(provider, new FakeVectorStore(), new EmbeddingProviderResolution("onnx", null));
+        new(provider, new FakeVectorStore(), new EmbeddingProviderResolution("ollama", null));
 
     private static async Task<int> PendingFromIndexStatusAsync(McpTestHarness harness)
     {
@@ -126,7 +126,7 @@ public sealed class ServeEmbedDrainTests
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
         {

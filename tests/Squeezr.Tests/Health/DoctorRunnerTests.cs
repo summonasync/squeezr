@@ -249,15 +249,15 @@ public sealed class DoctorRunnerTests : IDisposable
             _ => new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 4, 0, 4),
                 new EmbeddingsHealth(
-                    "onnx", "Connection refused",
-                    "Embedding model not found at '/nonexistent/model.onnx' and no bundled copy exists.", null)));
+                    "ollama", "Connection refused",
+                    "Embedding model not found at '/nonexistent/model.bin' and no bundled copy exists.", null)));
 
         report.Healthy.ShouldBeFalse();
         var problem = report.Findings.Single(
             f => f.Name == "embeddings provider" && f.State == DoctorRunner.StateFail);
         problem.Detail.ShouldContain("Embedding model not found");
         report.Findings.ShouldContain(
-            f => f.State == DoctorRunner.StateInfo && f.Detail.Contains("auto resolved to onnx"));
+            f => f.State == DoctorRunner.StateInfo && f.Detail.Contains("auto resolved to ollama"));
     }
 
     [Fact]

@@ -304,7 +304,7 @@ public class PrefixScopeTests
         if (withChunks)
         {
             TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-            TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+            TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         }
 
         WriteFile(workspace, "repo/src/Core/Alpha.cs", $$"""

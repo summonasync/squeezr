@@ -16,7 +16,7 @@ public class EmbeddingProviderFactoryTests
         var error = Should.Throw<WorkspaceException>(() => EmbeddingProviderFactory.Create(config, TestDirs.NewTempDir()));
 
         error.Message.ShouldContain("'bert'");
-        error.Message.ShouldContain("onnx, ollama, openai");
+        error.Message.ShouldContain("ollama, openai");
     }
 
     [Fact]
@@ -47,25 +47,6 @@ public class EmbeddingProviderFactoryTests
         var error = Should.Throw<WorkspaceException>(() => EmbeddingProviderFactory.Create(config, TestDirs.NewTempDir(), handler));
 
         error.Message.ShouldContain("squeezr services up");
-    }
-
-    [Fact]
-    public void Create_OnnxProvider_MissingModel_ThrowsWorkspaceException()
-    {
-        var root = TestDirs.NewTempDir();
-        var config = new EmbeddingsConfig
-        {
-            Provider = "onnx",
-            Onnx = new OnnxEmbeddingOptions
-            {
-                ModelPath = Path.Combine(root, "no-such-model.onnx"),
-                TokenizerPath = Path.Combine(root, "no-such-tokenizer")
-            }
-        };
-
-        var error = Should.Throw<WorkspaceException>(() => EmbeddingProviderFactory.Create(config, root));
-
-        error.Message.ShouldContain("fetch-model.ps1");
     }
 
     [Fact]

@@ -59,13 +59,6 @@ public class ConfigFileTests
         var config = ConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("auto");
-        config.Embeddings.Onnx.Model.ShouldBeNull();
-        config.Embeddings.Onnx.Dimensions.ShouldBeNull();
-        config.Embeddings.Onnx.MaxSequenceLength.ShouldBeNull();
-        config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
-        config.Embeddings.Onnx.EffectiveDimensions.ShouldBe(768);
-        config.Embeddings.Onnx.EffectiveMaxSequenceLength.ShouldBe(512);
-        config.Embeddings.Onnx.BatchSize.ShouldBe(32);
         config.Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1024);
         config.Chunking.MaxTokensPerChunk.ShouldBe(512);
         config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
@@ -78,7 +71,7 @@ public class ConfigFileTests
             """
             {
               "embeddings": {
-                "provider": "onnx"
+                "provider": "ollama"
               },
               "chunking": {
                 "maxTokensPerChunk": 256,
@@ -97,11 +90,42 @@ public class ConfigFileTests
 
         var config = ConfigFile.Load(root);
 
-        config.Embeddings.Provider.ShouldBe("onnx");
-        config.Embeddings.Onnx.Dimensions.ShouldBeNull();
-        config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
-        config.Embeddings.Onnx.ModelPath.ShouldBe(
-            Path.Combine("~", ".squeezr", "models", "nomic-embed-text-v1.5.onnx"));
+        config.Embeddings.Provider.ShouldBe("ollama");
+        config.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
+        config.Embeddings.Ollama.Model.ShouldBe("nomic-embed-text");
+        config.Embeddings.Ollama.Dimensions.ShouldBe(768);
+    }
+
+    [Fact]
+    public void Load_ProviderOnnx_ThrowsWithMigrationInstruction()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": {
+                "provider": "onnx"
+              },
+              "chunking": {
+                "maxTokensPerChunk": 512,
+                "fallbackWindowLines": 60,
+                "fallbackOverlapLines": 15
+              },
+              "indexing": {
+                "ignore": [],
+                "maxFileSizeKb": 512
+              },
+              "qdrant": {
+                "endpoint": "http://localhost:6334"
+              }
+            }
+            """);
+
+        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+
+        error.Message.ShouldContain("'onnx'");
+        error.Message.ShouldContain("ollama");
+        error.Message.ShouldContain("openai");
+        error.Message.ShouldContain("reembed");
     }
 
     [Fact]
@@ -130,8 +154,6 @@ public class ConfigFileTests
         loaded.Embeddings.OpenAiCompatible.Endpoint.ShouldBe("http://localhost:11434/v1");
         loaded.Embeddings.OpenAiCompatible.Model.ShouldBe("nomic-embed-text");
         loaded.Embeddings.OpenAiCompatible.Dimensions.ShouldBe(768);
-        loaded.Embeddings.Onnx.Dimensions.ShouldBeNull();
-        loaded.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -143,136 +165,6 @@ public class ConfigFileTests
 
         error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
         error.Message.ShouldContain("not valid JSON");
-    }
-
-    [Fact]
-    public void Load_OnnxModelBgeCodeV1_ResolvesBgeProfile()
-    {
-        var root = NewWorkspaceWithConfig(
-            """
-            {
-              "embeddings": {
-                "provider": "onnx",
-                "onnx": { "model": "bge-code-v1" }
-              },
-              "chunking": {
-                "maxTokensPerChunk": 512,
-                "fallbackWindowLines": 60,
-                "fallbackOverlapLines": 15
-              },
-              "indexing": {
-                "ignore": [],
-                "maxFileSizeKb": 512
-              },
-              "qdrant": {
-                "endpoint": "http://localhost:6334"
-              }
-            }
-            """);
-
-        var config = ConfigFile.Load(root);
-
-        config.Embeddings.Onnx.Model.ShouldBe("bge-code-v1");
-        config.Embeddings.Onnx.Dimensions.ShouldBeNull();
-        config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("bge-code-v1");
-        config.Embeddings.Onnx.EffectiveDimensions.ShouldBe(1536);
-    }
-
-    [Fact]
-    public void Load_OnnxExplicitDimensions_TakePriorityOverProfile()
-    {
-        var root = NewWorkspaceWithConfig(
-            """
-            {
-              "embeddings": {
-                "provider": "onnx",
-                "onnx": {
-                  "model": "bge-code-v1",
-                  "dimensions": 256,
-                  "maxSequenceLength": 128
-                }
-              },
-              "chunking": {
-                "maxTokensPerChunk": 512,
-                "fallbackWindowLines": 60,
-                "fallbackOverlapLines": 15
-              },
-              "indexing": {
-                "ignore": [],
-                "maxFileSizeKb": 512
-              },
-              "qdrant": {
-                "endpoint": "http://localhost:6334"
-              }
-            }
-            """);
-
-        var config = ConfigFile.Load(root);
-
-        config.Embeddings.Onnx.Dimensions.ShouldBe(256);
-        config.Embeddings.Onnx.MaxSequenceLength.ShouldBe(128);
-        config.Embeddings.Onnx.EffectiveDimensions.ShouldBe(256);
-        config.Embeddings.Onnx.EffectiveMaxSequenceLength.ShouldBe(128);
-    }
-
-    [Fact]
-    public void Load_UnknownOnnxModel_ThrowsWorkspaceExceptionListingKnownIds()
-    {
-        var root = NewWorkspaceWithConfig(
-            """
-            {
-              "embeddings": {
-                "provider": "onnx",
-                "onnx": { "model": "no-such-model" }
-              },
-              "chunking": {
-                "maxTokensPerChunk": 512,
-                "fallbackWindowLines": 60,
-                "fallbackOverlapLines": 15
-              },
-              "indexing": {
-                "ignore": [],
-                "maxFileSizeKb": 512
-              },
-              "qdrant": {
-                "endpoint": "http://localhost:6334"
-              }
-            }
-            """);
-
-        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
-
-        error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
-        error.Message.ShouldContain("'no-such-model'");
-        error.Message.ShouldContain("nomic-embed-text-v1.5");
-        error.Message.ShouldContain("bge-code-v1");
-    }
-
-    [Fact]
-    public void Save_ThenLoad_RoundTripsOnnxModelAndExplicitOverrides()
-    {
-        var root = TestDirs.NewTempDir();
-        var config = SqueezrConfig.CreateDefault() with
-        {
-            Embeddings = new EmbeddingsConfig
-            {
-                Onnx = new OnnxEmbeddingOptions
-                {
-                    Model = "bge-code-v1",
-                    Dimensions = 256,
-                    MaxSequenceLength = 128
-                }
-            }
-        };
-
-        ConfigFile.Save(root, config);
-        var loaded = ConfigFile.Load(root);
-
-        loaded.Embeddings.Onnx.Model.ShouldBe("bge-code-v1");
-        loaded.Embeddings.Onnx.Dimensions.ShouldBe(256);
-        loaded.Embeddings.Onnx.MaxSequenceLength.ShouldBe(128);
-        loaded.Embeddings.Onnx.EffectiveDimensions.ShouldBe(256);
-        loaded.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("bge-code-v1");
     }
 
     [Fact]
@@ -448,7 +340,7 @@ public class ConfigFileTests
                 "fallbackWindowLines": 60,
                 "fallbackOverlapLines": 15
               },
-              "embeddings": { "provider": "onnx" },
+              "embeddings": { "provider": "ollama" },
               "indexing": {
                 "ignore": [],
                 "maxFileSizeKb": 512,
@@ -463,7 +355,7 @@ public class ConfigFileTests
         var config = ConfigFile.Load(root);
 
         config.Indexing.RankExclude.ShouldBe(["audits/**"]);
-        config.Embeddings.Provider.ShouldBe("onnx");
+        config.Embeddings.Provider.ShouldBe("ollama");
         config.Chunking.MaxTokensPerChunk.ShouldBe(512);
         config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
     }
@@ -566,7 +458,6 @@ public class ConfigFileTests
         var config = ConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("auto");
-        config.Embeddings.Onnx.ResolvedProfile.Id.ShouldBe("nomic-embed-text-v1.5");
         config.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
         config.Chunking.MaxTokensPerChunk.ShouldBe(256);
         config.Qdrant.Endpoint.ShouldBe("http://localhost:9999");
@@ -578,7 +469,7 @@ public class ConfigFileTests
         var root = NewWorkspaceWithConfig(
             """
             {
-              "embeddings": { "provider": "onnx" },
+              "embeddings": { "provider": "ollama" },
               "chunking": null,
               "indexing": { "ignore": [], "maxFileSizeKb": 128 },
               "qdrant": { "endpoint": "http://localhost:6334" }
@@ -590,7 +481,7 @@ public class ConfigFileTests
         config.Chunking.MaxTokensPerChunk.ShouldBe(512);
         config.Chunking.FallbackWindowLines.ShouldBe(60);
         config.Chunking.FallbackOverlapLines.ShouldBe(15);
-        config.Embeddings.Provider.ShouldBe("onnx");
+        config.Embeddings.Provider.ShouldBe("ollama");
         config.Indexing.MaxFileSizeKb.ShouldBe(128);
     }
 
@@ -687,7 +578,6 @@ public class ConfigFileTests
         config.Indexing.Ignore.ShouldBe(defaults.Indexing.Ignore);
         config.Qdrant.Endpoint.ShouldBe(defaults.Qdrant.Endpoint);
         config.Watch.EmbedBudgetPerPass.ShouldBe(defaults.Watch.EmbedBudgetPerPass);
-        _ = config.Embeddings.Onnx.ResolvedProfile;
         _ = config.Embeddings.Ollama.ResolvedProfile;
         _ = config.Embeddings.OpenAiCompatible.ResolvedProfile;
     }

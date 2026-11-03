@@ -51,7 +51,7 @@ public class RemedyDriftGuardTests
     public void Envelope_IndexNotBuilt_ServesTheCarrierSentenceAndTheAnchoredIndexStep()
     {
         var root = "/work/demo";
-        var workspace = new McpWorkspace(root, root, "onnx");
+        var workspace = new McpWorkspace(root, root, "openai");
         var ex = Should.Throw<WorkspaceException>(() => NavigationContext.RequireIndex(workspace.Root));
 
         var payload = Payload(ToolErrors.From(ex, workspace));
@@ -84,7 +84,6 @@ public class RemedyDriftGuardTests
     [Theory]
     [InlineData("ollama", true)]
     [InlineData("auto", true)]
-    [InlineData("onnx", false)]
     [InlineData("openai", false)]
     public void Envelope_IndexNotBuilt_PerProviderStepsComeFromTheCarrier(string provider, bool needsServices)
     {
@@ -108,10 +107,10 @@ public class RemedyDriftGuardTests
     [Fact]
     public async Task Doctor_UnbuiltIndex_ServesTheSameBlockAsTheEnvelope()
     {
-        var workspace = NewWorkspaceWithManifest("onnx");
+        var workspace = NewWorkspaceWithManifest("openai");
         var diagnostics = await DoctorAsync(workspace);
 
-        var envelope = Payload(EnvelopeForIndexNotBuilt(workspace, "onnx"));
+        var envelope = Payload(EnvelopeForIndexNotBuilt(workspace, "openai"));
         var state = diagnostics.IndexState.ShouldNotBeNull();
 
         state.Code.ShouldBe(envelope.Code);
@@ -125,7 +124,6 @@ public class RemedyDriftGuardTests
     [Theory]
     [InlineData("ollama", true)]
     [InlineData("auto", true)]
-    [InlineData("onnx", false)]
     [InlineData("openai", false)]
     public async Task Doctor_UnbuiltIndex_PerProviderBlockMatchesTheEnvelope(string provider, bool needsServices)
     {
@@ -186,7 +184,7 @@ public class RemedyDriftGuardTests
     [Fact]
     public async Task Doctor_WorkspaceIndexed_CannotContradictTheStateBlock()
     {
-        var built = NewWorkspaceWithManifest("onnx");
+        var built = NewWorkspaceWithManifest("openai");
         File.WriteAllText(SqueezrPaths.TrigramIndexPath(built), "not-a-real-index");
         (await DoctorAsync(built)).WorkspaceIndexed.ShouldBeTrue();
 
@@ -215,7 +213,7 @@ public class RemedyDriftGuardTests
     [Fact]
     public async Task Doctor_BuiltIndex_OmitsTheStateBlock()
     {
-        var workspace = NewWorkspaceWithManifest("onnx");
+        var workspace = NewWorkspaceWithManifest("openai");
         File.WriteAllText(SqueezrPaths.TrigramIndexPath(workspace), "not-a-real-index");
 
         var diagnostics = await DoctorAsync(workspace);

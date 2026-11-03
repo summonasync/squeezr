@@ -344,7 +344,7 @@ public static class McpServerHost
         };
 
     // Runs on a worker thread off the JSON-RPC startup path: provider resolution may probe an HTTP
-    // endpoint and an onnx provider loads its model. Whatever happens here, serve must keep answering.
+    // endpoint before the runtime is usable. Whatever happens here, serve must keep answering.
     private static WatchEmbeddingRuntime? CreateWatchEmbeddingRuntime(string workspaceRoot, TextWriter stderr)
     {
         try

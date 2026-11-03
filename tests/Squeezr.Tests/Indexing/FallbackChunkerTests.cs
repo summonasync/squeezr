@@ -88,7 +88,7 @@ public class FallbackChunkerTests
             workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
 
         ListChunks(workspace).ShouldAllBe(
-            c => c.EmbeddingStatus == "ok" && c.ModelKey == "onnx/nomic-embed-text-v1.5.onnx/768/nomic-embed-text-v1.5");
+            c => c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public class FallbackChunkerTests
         Directory.CreateDirectory(Path.Combine(workspace, "repo"));
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
-        TestWorkspaceConfig.UseOnnxEmbeddings(workspace);
+        TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         WriteFile(workspace, "repo/docs/guide.md", Lines(20, "md line"));
         WriteFile(workspace, "repo/app/settings.yml", Lines(5, "yml line"));

@@ -69,8 +69,6 @@ public sealed class DoctorCommandTests
         checks.ShouldContain(c =>
             c.GetProperty("name").GetString() == "semantic search" &&
             c.GetProperty("state").GetString() == "fail");
-        checks.ShouldContain(c =>
-            c.GetProperty("name").GetString() == "embeddings provider" &&
-            (c.GetProperty("detail").GetString() ?? string.Empty).Contains("ollama unreachable"));
+        checks.ShouldNotContain(c => c.GetProperty("name").GetString() == "embeddings provider");
     }
 }
