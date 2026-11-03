@@ -30,7 +30,9 @@ public static class EmbeddingsHealthProbe
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return EmbeddingsHealth.Silent;
+            return ex is WorkspaceException { Code: WorkspaceException.OnnxProviderCode }
+                ? new EmbeddingsHealth(null, null, OnnxStoreDiagnostic.Text(), null)
+                : EmbeddingsHealth.Silent;
         }
     }
 

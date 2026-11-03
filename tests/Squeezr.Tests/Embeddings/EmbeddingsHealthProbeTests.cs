@@ -94,6 +94,17 @@ public sealed class EmbeddingsHealthProbeTests : IDisposable
         health.ModelProblem.ShouldBeNull();
     }
 
+    [Fact]
+    public async Task Probe_OnnxStore_CarriesMigrationPathAsModelProblem()
+    {
+        SaveConfig(new EmbeddingsConfig { Provider = "onnx" });
+
+        var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
+
+        health.Provider.ShouldBeNull();
+        health.ModelProblem.ShouldNotBeNull().ShouldContain(OnnxStoreDiagnostic.ReembedCommand);
+    }
+
     private void SaveConfig(EmbeddingsConfig embeddings, bool noSemantic = false)
     {
         var config = ConfigFile.Load(_root);

@@ -122,6 +122,7 @@ public class ConfigFileTests
 
         var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
 
+        error.Code.ShouldBe(WorkspaceException.OnnxProviderCode);
         error.Message.ShouldContain("'onnx'");
         error.Message.ShouldContain("ollama");
         error.Message.ShouldContain("openai");

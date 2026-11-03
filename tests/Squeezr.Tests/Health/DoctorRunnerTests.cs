@@ -241,7 +241,7 @@ public sealed class DoctorRunnerTests : IDisposable
     }
 
     [Fact]
-    public void SemanticFacts_ModelMissingWithFallback_FailPlusInfo()
+    public void SemanticFacts_ModelProblem_TakesPrecedenceOverFallbackInfo()
     {
         _ = NewIndexedWorkspace();
 
@@ -256,8 +256,22 @@ public sealed class DoctorRunnerTests : IDisposable
         var problem = report.Findings.Single(
             f => f.Name == "embeddings provider" && f.State == DoctorRunner.StateFail);
         problem.Detail.ShouldContain("Embedding model not found");
-        report.Findings.ShouldContain(
-            f => f.State == DoctorRunner.StateInfo && f.Detail.Contains("auto resolved to ollama"));
+        report.Findings.ShouldNotContain(f => f.Detail.Contains("auto resolved to ollama"));
+    }
+
+    [Fact]
+    public void SemanticFacts_FallbackReason_AloneRendersInfo()
+    {
+        _ = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 4, 0, 4),
+                new EmbeddingsHealth("ollama", "Connection refused", null, null)));
+
+        report.Healthy.ShouldBeTrue();
+        var info = report.Findings.Single(f => f.Detail.Contains("auto resolved to ollama"));
+        info.State.ShouldBe(DoctorRunner.StateInfo);
     }
 
     [Fact]
