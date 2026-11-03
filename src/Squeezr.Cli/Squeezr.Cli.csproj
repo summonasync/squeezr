@@ -14,10 +14,6 @@
     <PackageReference Include="Qdrant.Client" Version="1.19.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="Models\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-  </ItemGroup>
-
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>squeezr</AssemblyName>

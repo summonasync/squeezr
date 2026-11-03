@@ -13,7 +13,6 @@ public class EmbeddingModelProfilesTests
         profile.Id.ShouldBe("nomic-embed-text-v1.5");
         profile.Dimensions.ShouldBe(768);
         profile.Pooling.ShouldBe(EmbeddingPooling.MeanL2);
-        profile.TokenizerKind.ShouldBe(EmbeddingTokenizerKind.WordPiece);
         profile.DocumentPrefix.ShouldBe("search_document: ");
         profile.QueryPrefix.ShouldBe("search_query: ");
         profile.DefaultMaxSequenceLength.ShouldBe(512);
@@ -27,7 +26,6 @@ public class EmbeddingModelProfilesTests
         profile.Id.ShouldBe("bge-code-v1");
         profile.Dimensions.ShouldBe(1536);
         profile.Pooling.ShouldBe(EmbeddingPooling.LastToken);
-        profile.TokenizerKind.ShouldBe(EmbeddingTokenizerKind.Bpe);
         profile.DocumentPrefix.ShouldBeNull();
         profile.QueryPrefix.ShouldBeNull();
         profile.DefaultMaxSequenceLength.ShouldBe(512);

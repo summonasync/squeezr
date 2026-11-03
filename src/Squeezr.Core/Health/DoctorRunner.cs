@@ -132,13 +132,6 @@ public static class DoctorRunner
             yield break;
         }
 
-        if (facts.Health.FallbackReason is { } reason)
-        {
-            yield return new DoctorFinding(
-                "embeddings provider", StateInfo,
-                $"auto resolved to {facts.Health.Provider} (ollama unreachable: {reason})", null);
-        }
-
         if (facts.Health.CpuOnly is { } cpu)
         {
             yield return new DoctorFinding("embeddings provider", StateInfo, cpu, null);

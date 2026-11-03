@@ -34,7 +34,7 @@ step() { echo "==> $1"; }
 
 step "Publishing self-contained $rid single-file build"
 # dotnet publish does not clean -o; leftovers from a previous publish with
-# another RID (e.g. onnxruntime.dll) would leak into the install dir.
+# another RID would leak into the install dir.
 rm -rf "$publish_dir"
 dotnet publish "$repo_root/src/Squeezr.Cli/Squeezr.Cli.csproj" \
   -c Release -r "$rid" --self-contained true \
