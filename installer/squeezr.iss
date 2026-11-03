@@ -51,8 +51,9 @@ ArchitecturesInstallIn64BitMode={#Architectures}
 MinVersion=10.0.14393
 UninstallDisplayName=Squeezr {#AppVersion}
 UninstallDisplayIcon={app}\squeezr.exe
-; A live `squeezr watch` / `serve --watch` holds the binary open; let the
-; Restart Manager close the holders instead of failing the copy.
+; Our own squeezr.exe processes are stopped in PrepareToInstall - the Restart
+; Manager cannot close console apps and a silent upgrade aborts on them. It
+; stays on for foreign holders of files in {app}.
 CloseApplications=yes
 RestartApplications=no
 ChangesEnvironment=yes
@@ -208,6 +209,29 @@ begin
   Result := Exec('cmd.exe', '/C where docker >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
 end;
 
+procedure StopRunningSqueezr(const Dir: String);
+var
+  Script: String;
+  ResultCode: Integer;
+begin
+  // `serve` (MCP, one per agent session) and `watch` are console processes with
+  // no window to receive WM_CLOSE, so the Restart Manager gives up on them.
+  Script := AddBackslash(Dir);
+  StringChangeEx(Script, '''', '''''', True);
+  Script := 'Get-Process squeezr -ErrorAction SilentlyContinue | ' +
+            'Where-Object { $_.Path -and $_.Path.StartsWith(''' + Script + ''', ''OrdinalIgnoreCase'') } | ' +
+            'Stop-Process -Force -PassThru | Wait-Process -Timeout 15 -ErrorAction SilentlyContinue';
+  Exec('powershell.exe', '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if DirExists(ExpandConstant('{app}')) then
+    StopRunningSqueezr(ExpandConstant('{app}'));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and WizardIsTaskSelected('addtopath') then
@@ -239,7 +263,10 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
+  begin
+    StopRunningSqueezr(ExpandConstant('{app}'));
     RemoveDirFromPath(ExpandConstant('{app}'));
+  end;
 
   if (CurUninstallStep = usPostUninstall) and (not UninstallSilent) and DirExists(StoreDir) then
     MsgBox('Squeezr was removed.' + #13#10#13#10 +
