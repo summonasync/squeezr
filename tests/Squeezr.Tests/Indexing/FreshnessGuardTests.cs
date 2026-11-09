@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Shouldly;
@@ -175,11 +176,177 @@ public class FreshnessGuardTests
         }
     }
 
+    [Fact]
+    public void ProtectedPath_WithContentNewerThanTheRow_IsSkippedWithoutAReRead()
+    {
+        var workspace = IngestionWorkspaces.NewWorkspaceWithSecrets();
+        new WorkspaceIndexer().Index(workspace);
+        SecretGuardFixture.PlantPreGuardRows(workspace, [IngestionWorkspaces.EnvPath]);
+        var storedSha = StoredSha(workspace, IngestionWorkspaces.EnvPath);
+        var withheld = IngestionWorkspaces.LedgerWithheld(workspace);
+
+        File.AppendAllText(
+            IngestionWorkspaces.Full(workspace, IngestionWorkspaces.EnvPath), "SUF=POSTGUARDOVEDITNEEDLE\n");
+
+        var result = FreshnessGuard.CheckAndRefresh(workspace,
+            [("demo", IngestionWorkspaces.EnvPath), ("demo", IngestionWorkspaces.AppPath)]);
+
+        result.Refreshed.ShouldBeEmpty();
+        result.Stale.ShouldBeEmpty();
+        StoredSha(workspace, IngestionWorkspaces.EnvPath).ShouldBe(storedSha,
+            "the row kept the hash of the content the guard never opened");
+        IngestionWorkspaces.LedgerWithheld(workspace).ShouldBe(withheld,
+            "a re-read would reach ingestion and be counted there as a refusal");
+        new SearchEngine(workspace).Search(Query("POSTGUARDOVEDITNEEDLE")).Matches.ShouldBeEmpty();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void IndexedEmptyFile_PathSubstitutedWithAUnixSocket_TakesTheRefreshRouteNotTheHashRead()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/empty.cs", string.Empty);
+        new WorkspaceIndexer().Index(workspace);
+
+        var path = Path.Combine(workspace, "repo", "empty.cs");
+        File.Delete(path);
+        // the listener stays open for the whole test: closing it unlinks the socket file, and a stale
+        // socket inode is what File.Exists already refuses — the live one is the shape that reaches the probe
+        using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        listener.Bind(new UnixDomainSocketEndPoint(path));
+
+        // the premises are what make this a value assertion rather than the timing one the FIFO test is:
+        // a socket is present for stat and reads fail at once, so a dropped file-type probe shows up as a
+        // stale verdict instead of as the hang the writerless channel would cause
+        File.Exists(path).ShouldBeTrue("a socket is present for File.Exists, so only the type probe stands between it and the read");
+        UnixFileType.IsRegularFile(path).ShouldBeFalse();
+        Should.Throw<IOException>(() => File.ReadAllBytes(path));
+
+        var result = FreshnessGuard.CheckAndRefresh(workspace, [("demo", "empty.cs")]);
+
+        result.Refreshed.ShouldBe(["demo/empty.cs"]);
+        result.Stale.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void GuardSource_ReadsTheFileRowByIndex_AndOpensOneStoreSessionPerCall()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(SolutionRoot(), "src/Squeezr.Core/Indexing/FreshnessGuard.cs"));
+
+        CountOccurrences(source, "new MetaStore(").ShouldBe(1,
+            "one session per call — a second open site is the shape that made a candidate pay a store roundtrip");
+        source.ShouldNotContain("ListFiles(",
+            customMessage: "the files collection has an index on path; scanning every repo row per candidate is the price this route replaced");
+        source.ShouldContain("FindFile(",
+            customMessage: "the row a candidate names is looked up, not filtered out of a scan");
+
+        var loop = CandidateLoopBody(source);
+        loop.ShouldNotContain("new MetaStore(",
+            customMessage: "the candidate loop must not open the store");
+        loop.ShouldNotContain("WorkspaceManifestFile.Load(",
+            customMessage: "the manifest is read once for the call, not once per candidate");
+        loop.ShouldNotContain("SecretGuardIngestion.Load(",
+            customMessage: "the guard profile is read once for the call, not once per candidate");
+    }
+
+    [Fact]
+    public void MissingStore_EveryNonProtectedCandidateTurnsStale_WithoutAThrow()
+    {
+        var workspace = IngestionWorkspaces.NewWorkspaceWithSecrets();
+        new WorkspaceIndexer().Index(workspace);
+        File.Delete(SqueezrPaths.MetaDbPath(workspace));
+
+        FreshnessResult result = default;
+        Should.NotThrow(() => result = FreshnessGuard.CheckAndRefresh(workspace,
+            [("demo", IngestionWorkspaces.AppPath), ("demo", IngestionWorkspaces.EnvPath)]));
+
+        // the per-candidate open used to fail one candidate at a time into the same list; the shared
+        // session fails once, so this pins that the tally did not move — and that the protected path is
+        // still not counted, which is the ordering the old loop gave by skipping it before the probe
+        result.Refreshed.ShouldBeEmpty();
+        result.Stale.ShouldBe(["demo/src/App.cs"], StringComparer.Ordinal);
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void RowThatDiffersFromTheCandidateOnlyInCase_IsNotAcceptedAsTheCandidatesRow()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/Case.cs", "class Cased { string Term = \"ordinalneedle\"; }\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        // a real second file, identical in content, differing from the indexed row only by one letter's
+        // case: the path index answers with the other row, so only an Ordinal check on the row keeps the
+        // candidate from being called fresh against content that is not its own row
+        WriteFile(workspace, "repo/case.cs", "class Cased { string Term = \"ordinalneedle\"; }\n");
+
+        var result = FreshnessGuard.CheckAndRefresh(workspace, [("demo", "case.cs")]);
+
+        result.Refreshed.ShouldBe(["demo/case.cs"]);
+        result.Stale.ShouldBeEmpty();
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.ListRepos().First().Id;
+        store.ListFiles(repoId).ShouldContain(f => f.Path == "case.cs",
+            "the candidate is a separate row now, not a verdict borrowed from 'Case.cs'");
+    }
+
     private static readonly TimeSpan WedgeBudget = TimeSpan.FromSeconds(30);
 
     [SupportedOSPlatform("linux")]
     [DllImport("libc", SetLastError = true)]
     private static extern int mkfifo(string pathname, uint mode);
+
+    private static string StoredSha(string workspace, string relativePath)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        return store.FindFile(store.ListRepos().First().Id, relativePath)!.Sha256;
+    }
+
+    private static string SolutionRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Squeezr.slnx")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new InvalidOperationException("Squeezr.slnx not found above the test assembly");
+    }
+
+    private static int CountOccurrences(string source, string needle)
+    {
+        var count = 0;
+        for (var at = source.IndexOf(needle, StringComparison.Ordinal); at >= 0; at = source.IndexOf(needle, at + 1, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private static string CandidateLoopBody(string source)
+    {
+        const string header = "foreach (var candidate in candidates)";
+        var headerAt = source.IndexOf(header, StringComparison.Ordinal);
+        headerAt.ShouldBeGreaterThan(-1, $"the guard no longer has the '{header}' loop this pin reads");
+
+        var open = source.IndexOf('{', headerAt + header.Length);
+        var depth = 0;
+        for (var i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{')
+            {
+                depth++;
+            }
+            else if (source[i] == '}' && --depth == 0)
+            {
+                return source[open..(i + 1)];
+            }
+        }
+
+        throw new InvalidOperationException("unbalanced braces in the candidate loop");
+    }
 
     private static DateTime IndexedAt(string workspace, string path)
     {

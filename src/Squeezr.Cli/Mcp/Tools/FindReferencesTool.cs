@@ -15,7 +15,6 @@ namespace Squeezr.Cli.Mcp.Tools;
 [McpServerToolType]
 public sealed class FindReferencesTool
 {
-    private const int GuardCandidateLimit = 50;
     private const int LaggingNamesInWarning = 3;
 
     private readonly McpWorkspace _workspace;
@@ -195,7 +194,7 @@ public sealed class FindReferencesTool
                     .Select(r => (g.Repo, r.File))
                     .Concat(g.Definitions.Select(d => (g.Repo, d.File))))
                 .Distinct()
-                .Take(GuardCandidateLimit)
+                .Take(FreshnessGuard.CandidateLimit)
                 .ToList(),
             StaleLockWarningSink.ToStderr);
 

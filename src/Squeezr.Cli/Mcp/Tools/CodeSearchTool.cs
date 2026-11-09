@@ -15,8 +15,6 @@ namespace Squeezr.Cli.Mcp.Tools;
 [McpServerToolType]
 public sealed class CodeSearchTool
 {
-    private const int GuardCandidateLimit = 50;
-
     private const int DefaultMaxTokens = 2000;
 
     private readonly McpWorkspace _workspace;
@@ -168,7 +166,7 @@ public sealed class CodeSearchTool
     private static FreshnessResult Guard(string root, SearchResponse response) =>
         FreshnessGuard.CheckAndRefresh(
             root,
-            response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
+            response.Matches.Take(FreshnessGuard.CandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
     private static object Params(

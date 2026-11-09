@@ -14,8 +14,6 @@ namespace Squeezr.Cli.Mcp.Tools;
 [McpServerToolType]
 public sealed class SymbolLookupTool
 {
-    private const int GuardCandidateLimit = 50;
-
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
     private readonly ToolResponseCache? _cache;
@@ -138,7 +136,7 @@ public sealed class SymbolLookupTool
     private static FreshnessResult Guard(string root, SymbolLookupResult result) =>
         FreshnessGuard.CheckAndRefresh(
             root,
-            result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
+            result.Matches.Take(FreshnessGuard.CandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
     // the guard re-reads its widening patterns from the config on every call, so a cached answer is only
