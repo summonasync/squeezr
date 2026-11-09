@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -27,15 +28,55 @@ public static class QueryTelemetry
     // (the counters over queries.jsonl are the reason the file exists), only the name leaves it
     public const string RedactedPlaceholder = "[secret-guard withheld]";
 
+    // The append primitive has to survive two writers sharing the file. File.AppendAllText opens with
+    // FileShare.Read, and that is not enough: append placement is settled when the file is opened, not when the
+    // bytes are written, so two handles that open before the other's bytes land overwrite one another with no
+    // error anywhere (measured on Linux — audits/107-gate-2026-11-09/probe-append-primitive.log: eight writers
+    // released from a barrier go bad in all 200 trials, losing up to seven of eight rows, whichever share mask
+    // is asked for). The writer lock is the only real exclusion; this gate is the same exclusion inside one
+    // process, and FileShare.Delete is what lets a swap rename the log on Windows while a handle is still open.
+    private static readonly object UnsynchronisedAppendGate = new();
+
+    private static void AppendLine(string path, string line)
+    {
+        lock (UnsynchronisedAppendGate)
+        {
+            using var stream = new FileStream(
+                path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            stream.Write(Encoding.UTF8.GetBytes(line));
+        }
+    }
+
     public static void Append(string workspaceRoot, QueryTelemetryEntry entry)
     {
         try
         {
             var line = JsonSerializer.Serialize(entry) + '\n';
-            // waiting behind a scrub is the discipline; writing anyway once the budget runs out is the price of
-            // never dropping telemetry — a wedged holder is the only way to reach it, and it is already late
-            using var writer = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(workspaceRoot));
-            File.AppendAllText(SqueezrPaths.QueriesLogPath(workspaceRoot), line);
+            var logPath = SqueezrPaths.QueriesLogPath(workspaceRoot);
+            var storeDir = SqueezrPaths.StoreDir(workspaceRoot);
+            // A row that missed the first budget is late either way, so it waits a second, longer one rather than
+            // writing anyway: outside the lock a line can land on top of a queued holder's line as easily as into
+            // a file a swap is about to rename, and neither is noticed by anybody but the row that vanished. The
+            // unsynchronised write is the last resort, reachable only when both budgets are gone.
+            using (var writer = TelemetryWriteLock.TryAcquire(storeDir))
+            {
+                if (writer is not null)
+                {
+                    AppendLine(logPath, line);
+                    return;
+                }
+            }
+
+            using (var late = TelemetryWriteLock.TryAcquire(storeDir, TelemetryWriteLock.LateAppendWait))
+            {
+                if (late is not null)
+                {
+                    AppendLine(logPath, line);
+                    return;
+                }
+            }
+
+            AppendLine(logPath, line);
         }
         catch
         {
@@ -73,7 +114,7 @@ public static class QueryTelemetry
         try
         {
             var entries = new List<QueryTelemetryEntry>();
-            foreach (var line in File.ReadLines(path))
+            foreach (var line in ReadLogLines(path))
             {
                 if (string.IsNullOrWhiteSpace(line))
                 {
@@ -111,11 +152,24 @@ public static class QueryTelemetry
 
         try
         {
-            return File.ReadLines(path).Count();
+            return ReadLogLines(path).Count();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return 0;
+        }
+    }
+
+    // A reader that does not share delete is, on Windows, a lock on the rename the scrub is trying to finish: a
+    // stats call sitting next to a compact would make the pass throw and report an already-clean log. Every read
+    // of the log therefore takes the share mask the writers take.
+    private static IEnumerable<string> ReadLogLines(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var text = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false);
+        while (text.ReadLine() is { } line)
+        {
+            yield return line;
         }
     }
 
@@ -153,36 +207,131 @@ public static class QueryTelemetry
         RedactProtectedParams(workspaceRoot, isProtectedPath, out _);
 
     public static int RedactProtectedParams(
-        string workspaceRoot, Func<string, bool> isProtectedPath, out bool lockBusy)
+        string workspaceRoot, Func<string, bool> isProtectedPath, out bool lockBusy) =>
+        RedactProtectedParams(workspaceRoot, isProtectedPath, out lockBusy, null);
+
+    // The lock guards the swap, not the reading of it. Classification is the slow half of this pass and it used
+    // to run inside the writer lock, which pushed every queued append past its wait budget and into an
+    // unsynchronised write — and a log written outside the lock is not safe to write at all, because append
+    // placement is fixed when the file is opened, so two racing writers overwrite one another silently. Under
+    // the lock this pass now costs the log two byte reads and a rename; the CPU between them is what a scrub of
+    // a big file actually takes, and no writer has to queue through it.
+    // beforeTheSwap runs inside the lock with only the rename left to do — the deterministic seam the
+    // interleaving pins watch exclusivity through, the way Reset's onLockHeld is.
+    internal static int RedactProtectedParams(
+        string workspaceRoot, Func<string, bool> isProtectedPath, out bool lockBusy, Action? beforeTheSwap)
     {
         lockBusy = false;
         var path = SqueezrPaths.QueriesLogPath(workspaceRoot);
+        var storeDir = SqueezrPaths.StoreDir(workspaceRoot);
         if (!File.Exists(path))
         {
             return 0;
         }
 
-        // the writer lock spans snapshot → temp → move, which is the window where a line that arrived after the
-        // read used to be published away together with the file it had been written into; a holder that outlasts
-        // the budget means this pass skips rather than eats somebody's row — and the skip is reported as a skip,
-        // because a silent zero is indistinguishable from "nothing to hide" and hides the unscrubbed values
-        using var writer = TelemetryWriteLock.TryAcquire(SqueezrPaths.StoreDir(workspaceRoot));
-        if (writer is null)
+        byte[] snapshot;
+        using (var reader = TelemetryWriteLock.TryAcquire(storeDir))
+        {
+            if (reader is null)
+            {
+                lockBusy = true;
+                return 0;
+            }
+
+            try
+            {
+                snapshot = File.ReadAllBytes(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return 0;
+            }
+        }
+
+        var (lines, snapshotBytes) = TakeCompleteLines(snapshot);
+        var redacted = RedactLines(lines, isProtectedPath);
+        if (redacted == 0)
+        {
+            return 0;
+        }
+
+        using var swapper = TelemetryWriteLock.TryAcquire(storeDir);
+        if (swapper is null)
         {
             lockBusy = true;
             return 0;
         }
 
-        string[] lines;
+        byte[] live;
         try
         {
-            lines = File.ReadAllLines(path);
+            live = File.ReadAllBytes(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return 0;
         }
 
+        // A reset that ran while we were classifying replaced the log under us. Publishing the redacted prefix we
+        // read earlier would resurrect rows the caller deleted, so the pass is abandoned when the bytes that hold
+        // our snapshot are no longer the bytes on disk.
+        if (live.Length < snapshotBytes ||
+            !live.AsSpan(0, snapshotBytes).SequenceEqual(snapshot.AsSpan(0, snapshotBytes)))
+        {
+            return 0;
+        }
+
+        // Whatever an append landed while the classification was running is part of the log the swap publishes:
+        // dropping it here is exactly the row loss this pass used to cause, so it is scrubbed and carried too.
+        var (arrived, arrivedBytes) = TakeCompleteLines(live.AsSpan(snapshotBytes));
+        if (arrived.Length > 0)
+        {
+            redacted += RedactLines(arrived, isProtectedPath);
+            lines = [.. lines, .. arrived];
+        }
+
+        var publishedBytes = snapshotBytes + arrivedBytes;
+        var tempPath = path + ".scrub.tmp";
+        // A pass killed between the temp write and the rename leaves the temp behind for good. Nothing else can be
+        // mid-swap while this lock is held, so a temp sitting here is stale by definition and gets reclaimed.
+        TryDeleteTemp(tempPath);
+        try
+        {
+            // joined explicitly so a scrub run on one platform does not rewrite the line endings of a log
+            // another platform appended
+            File.WriteAllText(tempPath, string.Join('\n', lines) + '\n');
+
+            // The handle is taken before the rename and read after it: it keeps pointing at the inode the path
+            // just gave up, so whatever a writer pushed into that inode while the swap was running is still
+            // reachable and gets carried into the published log instead of being orphaned with it. Share.Delete is
+            // not decoration: on Windows a destination held without it cannot be replaced, so the rename would
+            // throw and the pass would report "nothing to redact" forever on the platform that ships the installer.
+            using var orphaned = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            beforeTheSwap?.Invoke();
+            File.Move(tempPath, path, overwrite: true);
+            var swept = TakeCompleteLines(ReadBytesFrom(orphaned, publishedBytes)).Lines;
+            if (swept.Length > 0)
+            {
+                redacted += RedactLines(swept, isProtectedPath);
+                AppendLine(path, string.Join('\n', swept) + '\n');
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            TryDeleteTemp(tempPath);
+            // Nothing was published, so a bare zero would read as "this log holds no protected names" while the
+            // values are still in it. The pass reports the same skip the busy lock reports: the caller's warning
+            // names the lock as the usual cause, and the swap failing under a reader is its rarer twin.
+            lockBusy = true;
+            return 0;
+        }
+
+        return redacted;
+    }
+
+    private static int RedactLines(string[] lines, Func<string, bool> isProtectedPath)
+    {
         var redacted = 0;
         for (var i = 0; i < lines.Length; i++)
         {
@@ -213,26 +362,38 @@ public static class QueryTelemetry
             }
         }
 
-        if (redacted == 0)
-        {
-            return 0;
-        }
-
-        var tempPath = path + ".scrub.tmp";
-        try
-        {
-            // joined explicitly so a scrub run on one platform does not rewrite the line endings of a log
-            // another platform appended
-            File.WriteAllText(tempPath, string.Join('\n', lines) + '\n');
-            File.Move(tempPath, path, overwrite: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            TryDeleteTemp(tempPath);
-            return 0;
-        }
-
         return redacted;
+    }
+
+    // Whole lines only, both for the snapshot and for the arrived tail: a writer caught mid-line leaves its bytes
+    // out of the swap instead of being published as two halves of a corrupt record. What completed after the last
+    // read is stranded with the inode it was written into — reachable by nobody, which is the price a row pays
+    // when it had to write without the lock at all. Never a half-published record, only a late one.
+    private static (string[] Lines, int Bytes) TakeCompleteLines(ReadOnlySpan<byte> raw)
+    {
+        var lastBreak = raw.LastIndexOf((byte)'\n');
+        if (lastBreak < 0)
+        {
+            return ([], 0);
+        }
+
+        return (Encoding.UTF8.GetString(raw[..(lastBreak + 1)]).Split('\n')[..^1], lastBreak + 1);
+    }
+
+    // the length is taken once and read to: a writer appending while the tail is copied only adds bytes the next
+    // pass will see, it never shifts the window this one is reading
+    private static byte[] ReadBytesFrom(Stream stream, int offset)
+    {
+        var length = stream.Length;
+        if (length <= offset)
+        {
+            return [];
+        }
+
+        stream.Seek(offset, SeekOrigin.Begin);
+        var bytes = new byte[length - offset];
+        stream.ReadExactly(bytes);
+        return bytes;
     }
 
     private static int RedactTree(JsonNode node, Func<string, bool> isProtectedPath, ref int redacted)
