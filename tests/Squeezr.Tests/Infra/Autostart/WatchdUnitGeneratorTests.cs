@@ -9,6 +9,10 @@ public sealed class WatchdUnitGeneratorTests
     private const string Binary = "/opt/squeezr/squeezr";
     private const string Home = "/var/tmp/squeezr-home";
     private const string WindowsBinary = @"C:\Program Files\Squeezr\squeezr.exe";
+    private const string WindowsHome = @"D:\squeezr home";
+    private const string WindowsBinaryWithQuote = @"C:\Program Files\sq""ueezr\squeezr.exe";
+    private const string WindowsHomeWithQuote = @"D:\evil"" & calc & ""x";
+    private const string WindowsUnitNameWithQuote = @"watchd"" & calc & ""lane";
 
     [Fact]
     public void Generate_SystemdUser_ReturnsUnitFileText()
@@ -175,6 +179,43 @@ public sealed class WatchdUnitGeneratorTests
         text.ShouldContain("""ExecStart="/opt/мой dir/we\\ird\"$$n/%%i/squeezr" watchd --autostart""");
     }
 
+    [Theory]
+    [InlineData("/var/tmp/my$d$home", "Environment=\"SQUEEZR_HOME=/var/tmp/my$d$home\"")]
+    [InlineData("/var/tmp/%h/squeezr", "Environment=\"SQUEEZR_HOME=/var/tmp/%%h/squeezr\"")]
+    [InlineData("/var/tmp/a$b%c", "Environment=\"SQUEEZR_HOME=/var/tmp/a$b%%c\"")]
+    public void Generate_SystemdUserHomeWithDollarOrPercent_EscapesOnlySpecifiersInEnvironment(
+        string squeezrHome,
+        string expectedLine)
+    {
+        var text = WatchdUnitGenerator.Generate(AutostartPlatform.SystemdUser, Binary, squeezrHome);
+
+        text.ShouldContain(expectedLine);
+    }
+
+    [Fact]
+    public void Generate_SystemdUserDollarAndPercentInBothInputs_EscapesEachSurfaceItsOwnWay()
+    {
+        var text = WatchdUnitGenerator.Generate(
+            AutostartPlatform.SystemdUser, "/opt/sq%s/we$d/squeezr", "/var/tmp/my$dhome/%i");
+
+        text.ShouldContain("""ExecStart="/opt/sq%%s/we$$d/squeezr" watchd --autostart""");
+        text.ShouldContain("""
+            Environment="SQUEEZR_HOME=/var/tmp/my$dhome/%%i"
+            """);
+    }
+
+    [Fact]
+    public void Generate_HomeWithDoubleQuoteOutsideWindows_KeepsPerSurfaceEscaping()
+    {
+        var systemd = WatchdUnitGenerator.Generate(AutostartPlatform.SystemdUser, Binary, @"/var/tmp/my""home");
+        var plist = WatchdUnitGenerator.Generate(AutostartPlatform.LaunchAgent, Binary, @"/var/tmp/my""home");
+
+        systemd.ShouldContain("""
+            Environment="SQUEEZR_HOME=/var/tmp/my\"home"
+            """);
+        plist.ShouldContain("""<string>/var/tmp/my"home</string>""");
+    }
+
     [Fact]
     public void Generate_LaunchAgentPathWithSpaceBackslashAndXmlMarkup_EscapesPlistString()
     {
@@ -190,6 +231,32 @@ public sealed class WatchdUnitGeneratorTests
 
         text.ShouldBe(ArgLine("""
             /Create /TN "squeezr-watchd" /SC ONLOGON /TR "\"C:\squeezr\app\\\" watchd --autostart"
+            """));
+    }
+
+    [Theory]
+    [InlineData(WindowsBinaryWithQuote, WindowsHome, null, "binaryPath")]
+    [InlineData(WindowsBinary, WindowsHomeWithQuote, null, "squeezrHome")]
+    [InlineData(WindowsBinary, WindowsHome, WindowsUnitNameWithQuote, "unitName")]
+    public void Generate_WindowsValueWithDoubleQuote_Throws(
+        string binaryPath,
+        string squeezrHome,
+        string? unitName,
+        string expectedParameterName)
+    {
+        var error = Should.Throw<ArgumentException>(() => WatchdUnitGenerator.Generate(
+            AutostartPlatform.WindowsScheduledTask, binaryPath, squeezrHome, unitName));
+
+        error.ParamName.ShouldBe(expectedParameterName);
+    }
+
+    [Fact]
+    public void Generate_WindowsHomeWithAmpersand_StaysLiteralInsideBalancedQuotes()
+    {
+        var text = WatchdUnitGenerator.Generate(AutostartPlatform.WindowsScheduledTask, WindowsBinary, @"D:\a&b");
+
+        text.ShouldBe(ArgLine("""
+            /Create /TN "squeezr-watchd" /SC ONLOGON /TR "cmd /c set \"SQUEEZR_HOME=D:\a&b\" && \"C:\Program Files\Squeezr\squeezr.exe\" watchd --autostart"
             """));
     }
 
@@ -257,15 +324,64 @@ public sealed class WatchdUnitGeneratorTests
     }
 
     [Fact]
-    public void GeneratorFiles_DoNotProbeTheHostOs()
+    public void RunCommand_ReturnsExecutableAndWatchdArguments()
+    {
+        var command = WatchdUnitGenerator.RunCommand("/opt/my dir/squeezr");
+
+        command.Executable.ShouldBe("/opt/my dir/squeezr");
+        command.Arguments.ShouldBe([WatchdUnitGenerator.WatchdVerb, WatchdUnitGenerator.AutostartFlag]);
+    }
+
+    [Fact]
+    public void RunCommand_ValueWithShellMetacharacters_IsReturnedVerbatim()
+    {
+        const string binaryPath = "/opt/мой dir/we\\ird\"$n/%i/squeezr";
+
+        WatchdUnitGenerator.RunCommand(binaryPath).Executable.ShouldBe(binaryPath);
+    }
+
+    [Fact]
+    public void RunCommand_IsNotInterchangeableWithTheSchtasksTaskCommand()
+    {
+        var command = WatchdUnitGenerator.RunCommand(WindowsBinary);
+        var schtasks = WatchdUnitGenerator.Generate(
+            AutostartPlatform.WindowsScheduledTask, WindowsBinary, WindowsHome);
+
+        var plain = $"{command.Executable} {string.Join(' ', command.Arguments)}";
+
+        plain.ShouldBe(@"C:\Program Files\Squeezr\squeezr.exe watchd --autostart");
+        plain.ShouldNotContain("SQUEEZR_HOME");
+        plain.ShouldNotContain("\\\"");
+        schtasks.ShouldContain("""
+            /TR "cmd /c set \"SQUEEZR_HOME=D:\squeezr home\" && \"C:\Program Files\Squeezr\squeezr.exe\" watchd --autostart"
+            """);
+    }
+
+    [Theory]
+    [InlineData("/opt/squeezr\nsqueezr")]
+    [InlineData("/opt/squeezr\rhome")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RunCommand_ValueWithLineBreakOrBlank_Throws(string binaryPath)
+    {
+        var error = Should.Throw<ArgumentException>(() => WatchdUnitGenerator.RunCommand(binaryPath));
+
+        error.ParamName.ShouldBe(nameof(binaryPath));
+    }
+
+    [Fact]
+    public void AutostartSources_DoNotProbeTheHostOs()
     {
         var dir = Path.Combine(RepoRoot(), "src", "Squeezr.Core", "Infra", "Autostart");
-        foreach (var file in new[] { "AutostartPlatform.cs", "WatchdUnitGenerator.cs" })
+        var sources = Directory.EnumerateFiles(dir, "*.cs").ToArray();
+
+        sources.ShouldContain(source => Path.GetFileName(source) == "WatchdUnitGenerator.cs");
+        foreach (var source in sources)
         {
-            var source = File.ReadAllText(Path.Combine(dir, file));
+            var text = File.ReadAllText(source);
             foreach (var probe in new[] { "RuntimeInformation", "OSVersion", "OperatingSystem." })
             {
-                source.ShouldNotContain(probe);
+                text.ShouldNotContain(probe);
             }
         }
     }

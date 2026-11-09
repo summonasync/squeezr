@@ -38,6 +38,13 @@ public static class WatchdUnitGenerator
         };
     }
 
+    public static WatchdRunCommand RunCommand(string binaryPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(binaryPath);
+        RejectLineBreaks(binaryPath, nameof(binaryPath));
+        return new WatchdRunCommand(binaryPath, [WatchdVerb, AutostartFlag]);
+    }
+
     private static string SystemdUnit(string unitName, string binaryPath, string? squeezrHome)
     {
         var lines = new List<string>
@@ -51,12 +58,13 @@ public static class WatchdUnitGenerator
         };
         if (squeezrHome is not null)
         {
-            lines.Add($"Environment={SystemdQuote($"{SqueezrHome.HomeEnvironmentVariable}={squeezrHome}")}");
+            var assignment = $"{SqueezrHome.HomeEnvironmentVariable}={squeezrHome}";
+            lines.Add($"Environment={SystemdQuote(assignment, escapeDollarSign: false)}");
         }
 
         lines.AddRange(
         [
-            $"ExecStart={SystemdQuote(binaryPath)} {WatchdVerb} {AutostartFlag}",
+            $"ExecStart={SystemdQuote(binaryPath, escapeDollarSign: true)} {WatchdVerb} {AutostartFlag}",
             "Restart=on-failure",
             "RestartSec=5",
             string.Empty,
@@ -68,6 +76,10 @@ public static class WatchdUnitGenerator
 
     private static string SchtasksArguments(string unitName, string binaryPath, string? squeezrHome)
     {
+        RejectCmdQuote(unitName, nameof(unitName));
+        RejectCmdQuote(binaryPath, nameof(binaryPath));
+        RejectCmdQuote(squeezrHome, nameof(squeezrHome));
+
         var run = $"\"{binaryPath}\" {WatchdVerb} {AutostartFlag}";
         var taskCommand = squeezrHome is null
             ? run
@@ -122,7 +134,9 @@ public static class WatchdUnitGenerator
 
     private static string FileText(IEnumerable<string> lines) => string.Join('\n', lines) + '\n';
 
-    private static string SystemdQuote(string value)
+    // systemd.exec(5): ExecStart expands both variables ($) and specifiers (%), Environment= expands
+    // specifiers only — a "$" there is literal and doubling it would corrupt the path the process sees.
+    private static string SystemdQuote(string value, bool escapeDollarSign)
     {
         var builder = new StringBuilder(value.Length + 2);
         builder.Append('"');
@@ -136,7 +150,7 @@ public static class WatchdUnitGenerator
                 case '"':
                     builder.Append("\\\"");
                     break;
-                case '$':
+                case '$' when escapeDollarSign:
                     builder.Append("$$");
                     break;
                 case '%':
@@ -193,6 +207,18 @@ public static class WatchdUnitGenerator
         {
             throw new ArgumentException(
                 "Autostart unit text is line-oriented — the value must not carry a line break.", parameterName);
+        }
+    }
+
+    // One level of argv escaping cannot protect a value that cmd.exe parses again: a quote here would
+    // close the wrapper and the rest of the line would run as commands. "&" is safe inside the quotes.
+    private static void RejectCmdQuote(string? value, string parameterName)
+    {
+        if (value is not null && value.Contains('"', StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "The scheduled-task command is re-parsed by cmd.exe — the value must not carry a double quote.",
+                parameterName);
         }
     }
 }
