@@ -76,6 +76,44 @@ public class TreeSitterSpikeTests
         }
         """;
 
+    private const string RustReferenceSource = """
+        use std::collections::HashMap;
+        use serde::{Deserialize, Serialize};
+        use std::io::{self, Read as Rd};
+        use app::model::{order::Sort as S};
+        use rand::prelude::*;
+        use crate::util::helper;
+
+        macro_rules! shout {
+            ($msg:expr) => {
+                println!("{}", $msg);
+            };
+        }
+
+        pub struct Registry {
+            entries: u32,
+        }
+
+        impl fmt::Display for Registry {
+            fn render(&self) -> String {
+                self.entries.to_string()
+            }
+        }
+
+        impl Registry {
+            pub fn build() -> Self {
+                let map = HashMap::new();
+                shout!("built");
+                println!("{}", map.len());
+                let items = vec![1, 2, 3];
+                helper(items.len())
+            }
+        }
+
+        impl<T> app::Boxed<T> {
+        }
+        """;
+
     [Fact]
     public void JavaScript_Parse_ProducesExpectedNodeTypes()
     {
@@ -213,6 +251,140 @@ public class TreeSitterSpikeTests
         types.ShouldNotContain("struct_item");
         types.ShouldNotContain("impl_item");
         CollectNodes(tree.RootNode!).ShouldContain(n => n.IsError);
+    }
+
+    [Fact]
+    public void Rust_UseDeclaration_ExposesArgumentPathTreeAndBindingFields()
+    {
+        using var language = new Language("Rust");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustReferenceSource);
+
+        tree.RootNode!.HasError.ShouldBeFalse();
+        var types = CollectTypes(tree.RootNode!);
+        types.ShouldContain("use_declaration");
+        types.ShouldContain("scoped_identifier");
+        types.ShouldContain("scoped_use_list");
+        types.ShouldContain("use_list");
+        types.ShouldContain("use_as_clause");
+        types.ShouldContain("use_wildcard");
+
+        // plain path: argument = scoped_identifier, name = the binding, path = everything before it
+        var plain = FindNode(tree.RootNode!, "use_declaration")!;
+        var scoped = plain.GetChildForField("argument")!;
+        scoped.Type.ShouldBe("scoped_identifier");
+        scoped.GetChildForField("name")!.Text.ShouldBe("HashMap");
+        scoped.GetChildForField("path")!.Text.ShouldBe("std::collections");
+
+        // brace list: path plus a use_list of bindings, aliases carry their own name
+        var listed = FindNode(tree.RootNode!, "use_declaration", after: plain)!;
+        var argument = listed.GetChildForField("argument")!;
+        argument.Type.ShouldBe("scoped_use_list");
+        argument.GetChildForField("path")!.Text.ShouldBe("serde");
+        argument.NamedChildren.ShouldContain(c => c.Type == "use_list");
+        var aliased = FindNode(tree.RootNode!, "use_as_clause")!;
+        aliased.GetChildForField("path")!.Text.ShouldBe("Read");
+        aliased.GetChildForField("alias")!.Text.ShouldBe("Rd");
+
+        // an alias can sit on a nested path: the clause keeps its own path node, so the module of
+        // the binding is the list prefix plus that path, not just the prefix
+        var nestedAlias = FindNode(tree.RootNode!, "use_as_clause", after: aliased)!;
+        nestedAlias.GetChildForField("path")!.Type.ShouldBe("scoped_identifier");
+        nestedAlias.GetChildForField("path")!.GetChildForField("path")!.Text.ShouldBe("order");
+        nestedAlias.GetChildForField("alias")!.Text.ShouldBe("S");
+
+        // glob: no binding name at all, only the path the star expands
+        var wildcard = FindNode(tree.RootNode!, "use_wildcard")!;
+        wildcard.NamedChildren.ShouldContain(c => c.Type == "scoped_identifier");
+    }
+
+    [Fact]
+    public void Rust_MacroInvocation_IsItsOwnNodeKindWithMacroNameField()
+    {
+        using var language = new Language("Rust");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustReferenceSource);
+
+        var invocations = CollectNodes(tree.RootNode!).Where(n => n.Type == "macro_invocation").ToList();
+        invocations.Select(n => n.GetChildForField("macro")!.Text)
+            .ShouldBe(["shout", "println", "vec"]);
+    }
+
+    [Fact]
+    public void Rust_MacroDefinitionBody_HasNoMacroInvocationNodes()
+    {
+        using var language = new Language("Rust");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustReferenceSource);
+
+        // macro_rules! bodies are raw token trees: the println! inside the definition is not an
+        // invocation node, so a definition must not be walked as a call site
+        var definition = FindNode(tree.RootNode!, "macro_definition")!;
+        CollectTypes(definition).ShouldNotContain("macro_invocation");
+        CollectTypes(definition).ShouldContain("token_tree");
+    }
+
+    [Fact]
+    public void Rust_CallCallee_VariantsAreIdentifierFieldExpressionAndScopedIdentifier()
+    {
+        using var language = new Language("Rust");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustReferenceSource);
+
+        var callees = CollectNodes(tree.RootNode!)
+            .Where(n => n.Type == "call_expression")
+            .Select(n => n.GetChildForField("function")!.Type)
+            .ToList();
+        callees.ShouldContain("identifier");
+        callees.ShouldContain("field_expression");
+        callees.ShouldContain("scoped_identifier");
+
+        var method = CollectNodes(tree.RootNode!)
+            .First(n => n.Type == "call_expression" && n.GetChildForField("function")!.Type == "field_expression");
+        method.GetChildForField("function")!.GetChildForField("field")!.Text.ShouldBe("to_string");
+
+        var pathCall = CollectNodes(tree.RootNode!)
+            .First(n => n.Type == "call_expression" && n.GetChildForField("function")!.Type == "scoped_identifier");
+        pathCall.GetChildForField("function")!.GetChildForField("name")!.Text.ShouldBe("new");
+        pathCall.GetChildForField("function")!.GetChildForField("path")!.Text.ShouldBe("HashMap");
+
+        // this grammar spells neither of the js names, so the callee rules cannot be shared with js
+        var types = CollectTypes(tree.RootNode!);
+        types.ShouldNotContain("scope_resolution");
+        types.ShouldNotContain("member_expression");
+    }
+
+    [Fact]
+    public void Rust_ImplItem_TraitFieldCarriesPathAndName()
+    {
+        using var language = new Language("Rust");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustReferenceSource);
+
+        var impl = FindNode(tree.RootNode!, "impl_item")!;
+        impl.GetChildForField("trait")!.Type.ShouldBe("scoped_type_identifier");
+        impl.GetChildForField("trait")!.GetChildForField("name")!.Text.ShouldBe("Display");
+        impl.GetChildForField("trait")!.GetChildForField("path")!.Text.ShouldBe("fmt");
+        impl.GetChildForField("type")!.Text.ShouldBe("Registry");
+    }
+
+    [Fact]
+    public void Rust_GenericTypeTargetFieldUnwrapsToTheScopedTypeIdentifier()
+    {
+        using var language = new Language("Rust");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustReferenceSource);
+
+        // the name of a generic target lives one node deeper than the field, and one deeper again
+        // for a qualified path: reading the generic's own text would put 'app::Boxed' in the name
+        // column and the edge would silently miss the struct row
+        var generic = CollectNodes(tree.RootNode!)
+            .Select(n => n.GetChildForField("type"))
+            .First(child => child is not null && child.Type == "generic_type")!;
+        var bare = generic.GetChildForField("type")!;
+        bare.Type.ShouldBe("scoped_type_identifier");
+        bare.GetChildForField("name")!.Text.ShouldBe("Boxed");
+        bare.GetChildForField("path")!.Text.ShouldBe("app");
     }
 
     [Fact]

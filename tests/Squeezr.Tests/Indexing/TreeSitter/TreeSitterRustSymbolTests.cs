@@ -231,7 +231,7 @@ public class TreeSitterRustSymbolTests
     }
 
     [Fact]
-    public void Rust_FreeFunctionCall_ProducesNoReferenceRowsYet()
+    public void Rust_FreeFunctionCall_ProducesCallReferenceInsideItsCaller()
     {
         var result = Parse("src/calls.rs", """
             fn helper(n: u32) -> u32 {
@@ -244,7 +244,11 @@ public class TreeSitterRustSymbolTests
             """);
 
         result.Symbols.Select(s => s.Name).ShouldBe(["helper", "boot"]);
-        result.Refs.ShouldBe([]);
+        var call = result.Refs.ShouldHaveSingleItem();
+        call.ToName.ShouldBe("helper");
+        call.Kind.ShouldBe(RefKind.Call);
+        call.Line.ShouldBe(6);
+        call.EnclosingName.ShouldBe("boot");
     }
 
     [Fact]

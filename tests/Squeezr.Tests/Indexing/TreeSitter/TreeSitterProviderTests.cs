@@ -92,7 +92,15 @@ public class TreeSitterProviderTests
             ("render", SymbolKind.Method, "Registry"),
             ("boot", SymbolKind.Function, null),
         ]);
-        result.Refs.ShouldBe([]);
+        result.Refs.Select(r => (r.ToName, r.Kind, r.Line)).ShouldBe(
+        [
+            ("fmt", RefKind.Import, 1),
+            ("Registry", RefKind.Reference, 7),
+            ("join", RefKind.Call, 9),
+            ("new", RefKind.Call, 14),
+        ]);
+        result.Refs[0].ToSymbolId.ShouldBe("std");
+        result.Refs[2].EnclosingName.ShouldBe("Registry.render");
     }
 
     [Fact]
@@ -423,6 +431,22 @@ public class TreeSitterProviderTests
         chunks[0].Text.ShouldStartWith("function big()\n");
         chunks.ShouldAllBe(c => c.Text.Contains("function big()"));
         chunks[^1].Span.EndLine.ShouldBe(symbol.Span.EndLine);
+    }
+
+    [Fact]
+    public void JavaScript_MemberExpressionCall_NamedAfterTheProperty()
+    {
+        var result = Parse("run.js", """
+            export function run(items, each) {
+              return items.map(each);
+            }
+            """);
+
+        var call = result.Refs.ShouldHaveSingleItem();
+        call.ToName.ShouldBe("map");
+        call.Kind.ShouldBe(RefKind.Call);
+        call.Line.ShouldBe(2);
+        call.EnclosingName.ShouldBe("run");
     }
 
     private static ParseResult Parse(string path, string text, SqueezrConfig? config = null) =>

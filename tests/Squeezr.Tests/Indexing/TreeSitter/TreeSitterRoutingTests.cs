@@ -115,6 +115,103 @@ public class TreeSitterRoutingTests
     }
 
     [Fact]
+    public void Index_RustCallNames_EdgeWithinTheRustPoolAndNeverAcrossTheWall()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/defs.rs", "pub fn widget() -> u32 {\n    1\n}\n");
+        WriteFile(workspace, "repo/src/calls.rs", "pub fn boot() -> u32 {\n    widget();\n    mul(1);\n    0\n}\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var defsFile = store.ListFiles(repoId).Single(f => f.Path == "src/defs.rs");
+        var callsFile = store.ListFiles(repoId).Single(f => f.Path == "src/calls.rs");
+        var utilFile = store.ListFiles(repoId).Single(f => f.Path == "src/util.js");
+        var appFile = store.ListFiles(repoId).Single(f => f.Path == "src/app.js");
+
+        var widget = store.ListSymbolsByFile(defsFile.Id).ShouldHaveSingleItem();
+        var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
+        jsMul.Name.ShouldBe("mul");
+
+        // the mirror of the js side: rust 'widget' finds its rust row, rust 'mul' must not borrow
+        // the javascript one — the row stays unmatched rather than becoming a cross-language edge
+        var refs = store.ListRefsByFile(callsFile.Id);
+        refs.Single(r => r.ToName == "widget").FromSymbolId.ShouldBe(widget.Id);
+        refs.Single(r => r.ToName == "mul").FromSymbolId.ShouldBe(0);
+
+        store.ListRefsByFile(appFile.Id).ShouldContain(r => r.ToName == "mul" && r.FromSymbolId == jsMul.Id);
+    }
+
+    [Fact]
+    public void Index_JavascriptCallIntoTypeScript_EdgeStillSpansTheSharedPool()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/bridge.js", "import { find } from './store';\n\nexport function go() {\n  find(1);\n}\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var bridgeFile = store.ListFiles(repoId).Single(f => f.Path == "src/bridge.js");
+        var tsFile = store.ListFiles(repoId).Single(f => f.Path == "src/store.ts");
+        var tsFind = store.ListSymbolsByFile(tsFile.Id).Single(s => s.Name == "find");
+        tsFind.ContainerName.ShouldBe("Store");
+
+        // javascript, typescript and tsx are one pool: splitting them would silently delete every
+        // cross-file edge in a typescript project, and the row would just lose its FromSymbolId
+        var refs = store.ListRefsByFile(bridgeFile.Id);
+        refs.Count.ShouldBe(2);
+        refs.ShouldAllBe(r => r.ToName == "find" && r.FromSymbolId == tsFind.Id);
+    }
+
+    [Fact]
+    public void Index_TypeScriptTsxRefs_ResolveInsideTheSharedJsPool()
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var badgeFile = store.ListFiles(repoId).Single(f => f.Path == "src/Badge.tsx");
+        var utilFile = store.ListFiles(repoId).Single(f => f.Path == "src/util.js");
+        badgeFile.Language.ShouldBe("tsx");
+
+        var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
+        var refs = store.ListRefsByFile(badgeFile.Id).Where(r => r.ToName == "mul").ToList();
+
+        // the third member of the family has reference rules too and lives in the same pool, so a
+        // .tsx file reaching a .js symbol produces the edge it always produced for .js and .ts
+        refs.Count.ShouldBe(2);
+        refs.ShouldAllBe(r => r.FromSymbolId == jsMul.Id);
+    }
+
+    [Fact]
+    public void Index_RustQualifiedGlob_BindsTheModuleRowTheBareGlobAlreadyBound()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/things.rs", "pub mod things {\n    pub fn leaf() {\n    }\n}\n");
+        WriteFile(workspace, "repo/src/bare.rs", "use things::*;\n");
+        WriteFile(workspace, "repo/src/deep.rs", "use app::crate_path::things::*;\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var moduleRow = store.ListSymbolsByFile(
+            store.ListFiles(repoId).Single(f => f.Path == "src/things.rs").Id).Single(s => s.Name == "things");
+
+        // the depth of a glob path used to decide whether it resolved at all: the bare form bound
+        // the module row, the qualified one carried 'app::crate_path::things' as its name and hit
+        // nothing — one semantics, one binding name, whatever the depth
+        var bare = store.ListRefsByFile(store.ListFiles(repoId).Single(f => f.Path == "src/bare.rs").Id);
+        var deep = store.ListRefsByFile(store.ListFiles(repoId).Single(f => f.Path == "src/deep.rs").Id);
+        bare.ShouldHaveSingleItem().ToName.ShouldBe("things");
+        deep.ShouldHaveSingleItem().ToName.ShouldBe("things");
+        bare[0].FromSymbolId.ShouldBe(moduleRow.Id);
+        deep[0].FromSymbolId.ShouldBe(moduleRow.Id);
+        deep[0].ToSymbolId.ShouldBe("app::crate_path");
+        bare[0].ToSymbolId.ShouldBeNull();
+    }
+
+    [Fact]
     public void Run_Downgrade_FallbackChunksAndAggregatedWarning()
     {
         var workspace = NewPolyglotWorkspace();
@@ -349,6 +446,13 @@ public class TreeSitterRoutingTests
               find(id: number): User | undefined {
                 return undefined;
               }
+            }
+            """);
+        WriteFile(workspace, "repo/src/Badge.tsx", """
+            import { mul } from './util';
+
+            export function Badge({ count }: { count: number }) {
+              return <div className="badge">{mul(count, 2)}</div>;
             }
             """);
         WriteFile(workspace, "repo/src/lib.rs", """

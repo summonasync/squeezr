@@ -939,8 +939,7 @@ public sealed class WorkspaceIndexer
         TrigramIndexWriter.AppendBatch(trigramPath, [], tombstones);
     }
 
-    private static bool IsTreeSitterLanguage(string language) =>
-        language is "javascript" or "typescript" or "tsx" or "rust";
+    private static bool IsTreeSitterLanguage(string language) => TreeSitterLanguages.Routed(language);
 
     private static void IndexFallbackChunks(
         MetaStore store,

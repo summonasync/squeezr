@@ -4,71 +4,9 @@ namespace Squeezr.Core.Indexing.TreeSitter;
 
 internal static class TsSymbolExtractor
 {
-    // measured on these two grammars (grammar spike): no *_item appears in a js/ts tree and no
-    // *_declaration/method_definition appears in a rust tree, so the type-keyed rules below are only
-    // ever reached by the language that owns the type. Proven for this pair, not for languages to come
-    private static readonly SymbolVocabulary JsTs = new(
-        new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
-        {
-            ["function_declaration"] = SymbolKind.Function,
-            ["function_expression"] = SymbolKind.Function,
-            ["method_definition"] = SymbolKind.Method,
-            ["class_declaration"] = SymbolKind.Class,
-            ["interface_declaration"] = SymbolKind.Interface,
-            ["type_alias_declaration"] = SymbolKind.Other,
-            ["variable_declarator"] = SymbolKind.Function,
-        },
-        new HashSet<string>(StringComparer.Ordinal)
-        {
-            "class_declaration",
-            "interface_declaration",
-            "function_declaration",
-            "method_definition",
-            "type_alias_declaration",
-            "function_expression",
-            "variable_declarator",
-        });
-
-    private static readonly SymbolVocabulary Rust = new(
-        new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
-        {
-            ["function_item"] = SymbolKind.Function,
-            ["function_signature_item"] = SymbolKind.Function,
-            ["struct_item"] = SymbolKind.Class,
-            ["trait_item"] = SymbolKind.Interface,
-            ["impl_item"] = SymbolKind.Other,
-            ["enum_item"] = SymbolKind.Other,
-            ["union_item"] = SymbolKind.Other,
-            ["mod_item"] = SymbolKind.Other,
-            ["type_item"] = SymbolKind.Other,
-            ["const_item"] = SymbolKind.Field,
-            ["static_item"] = SymbolKind.Field,
-            ["macro_definition"] = SymbolKind.Other,
-        },
-        new HashSet<string>(StringComparer.Ordinal)
-        {
-            "mod_item",
-            "impl_item",
-            "trait_item",
-            "function_item",
-        });
-
-    private static readonly SymbolVocabulary Empty = new(
-        new Dictionary<string, SymbolKind>(StringComparer.Ordinal),
-        new HashSet<string>(StringComparer.Ordinal));
-
-    private static readonly Dictionary<string, SymbolVocabulary> Vocabularies =
-        new(StringComparer.Ordinal)
-        {
-            ["javascript"] = JsTs,
-            ["typescript"] = JsTs,
-            ["tsx"] = JsTs,
-            ["rust"] = Rust,
-        };
-
     public static IReadOnlyList<Symbol> Extract(Node root, string language)
     {
-        var vocabulary = VocabularyFor(language);
+        var vocabulary = TreeSitterLanguages.SymbolsFor(language);
         var comments = new List<Node>();
         CollectComments(root, comments);
 
@@ -76,13 +14,6 @@ internal static class TsSymbolExtractor
         Walk(root, vocabulary, comments, results);
         return results;
     }
-
-    // an unrouted language yields zero rows rather than borrowing the js/ts table: tree-sitter-go
-    // names a plain function node function_declaration too, so a js-default would silently extract
-    // through the wrong rules. Silence here is loud downstream — routing and chunk-coverage
-    // assertions already fail on a file that produced no symbols
-    private static SymbolVocabulary VocabularyFor(string language) =>
-        Vocabularies.TryGetValue(language, out var vocabulary) ? vocabulary : Empty;
 
     private static void Walk(Node node, SymbolVocabulary vocabulary, List<Node> comments, List<Symbol> results)
     {
@@ -122,7 +53,7 @@ internal static class TsSymbolExtractor
         return true;
     }
 
-    private static bool HasOwnName(Node node) => node.Type switch
+    internal static bool HasOwnName(Node node) => node.Type switch
     {
         // only a named function expression is a binding (module.exports = function run() {}); an
         // anonymous one has no name of its own and the identifier fallback in NameOf could pick up
@@ -144,7 +75,7 @@ internal static class TsSymbolExtractor
         };
     }
 
-    private static string? NameOf(Node node) => node.Type switch
+    internal static string? NameOf(Node node) => node.Type switch
     {
         "impl_item" => ImplName(node),
         _ => node.GetChildForField("name")?.Text
@@ -154,7 +85,8 @@ internal static class TsSymbolExtractor
 
     // tree-sitter-rust gives impl_item no name field: the row is named after its self type, qualified
     // by the trait when the block implements one — and the same string is the container of the items
-    // inside, so symbol_lookup resolves an impl's members through it
+    // inside, so symbol_lookup resolves an impl's members through it and the reference walker's
+    // enclosing name lands on the same string
     private static string? ImplName(Node node)
     {
         var target = node.GetChildForField("type")?.Text;
@@ -289,8 +221,4 @@ internal static class TsSymbolExtractor
             CollectComments(child, comments);
         }
     }
-
-    private sealed record SymbolVocabulary(
-        IReadOnlyDictionary<string, SymbolKind> Kinds,
-        IReadOnlySet<string> ContainerTypes);
 }

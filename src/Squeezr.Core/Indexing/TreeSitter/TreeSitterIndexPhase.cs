@@ -103,15 +103,20 @@ public static class TreeSitterIndexPhase
         Dictionary<uint, string> textCache,
         IParsingProviderWithWarnings provider)
     {
-        // ref rows are owned and deleted for every routed file, but a symbol may only be matched as an
-        // edge target in a language that has reference rules: a js import of 'mul' can never resolve to
-        // a rust fn of the same name, and name matching has no way to know they are different languages
-        var matchPoolIds = tsFiles
-            .Where(f => TreeSitterProvider.HasReferenceRules(f.Language))
-            .Select(f => f.Id)
-            .ToHashSet();
+        // ref rows are owned and deleted for every routed file, but names only match inside a pool:
+        // 'mul' in javascript and 'mul' in rust are two unrelated symbols and name matching has no
+        // way to know that. javascript, typescript and tsx share the pool they always shared
+        var poolByFileId = new Dictionary<uint, string>();
+        foreach (var file in tsFiles)
+        {
+            if (TreeSitterLanguages.ReferencePoolFor(file.Language) is { } pool)
+            {
+                poolByFileId[file.Id] = pool;
+            }
+        }
+
         var tsSymbols = store.ListSymbolsByRepo(repoDoc.Id)
-            .Where(s => matchPoolIds.Contains(s.FileId))
+            .Where(s => poolByFileId.ContainsKey(s.FileId))
             .ToList();
         store.DeleteRefsByFileIds(tsFiles.Select(f => f.Id).ToList());
 
@@ -137,7 +142,7 @@ public static class TreeSitterIndexPhase
                 }
             }
 
-            InsertRefs(result, tsSymbols, file, store);
+            InsertRefs(result, tsSymbols, poolByFileId, file, store);
         }
     }
 
@@ -164,19 +169,25 @@ public static class TreeSitterIndexPhase
         }
     }
 
-    private static bool IsTreeSitter(string language) =>
-        language is "javascript" or "typescript" or "tsx" or "rust";
+    private static bool IsTreeSitter(string language) => TreeSitterLanguages.Routed(language);
 
     private static void InsertRefs(
         ParseResult result,
         IReadOnlyList<SymbolDocument> repoSymbols,
+        Dictionary<uint, string> poolByFileId,
         FileDocument fileDoc,
         MetaStore store)
     {
+        if (!poolByFileId.TryGetValue(fileDoc.Id, out var pool))
+        {
+            return;
+        }
+
+        var candidates = repoSymbols.Where(s => poolByFileId[s.FileId] == pool).ToList();
         var refDocs = new List<RefDocument>();
         foreach (var r in result.Refs)
         {
-            var matches = repoSymbols
+            var matches = candidates
                 .Where(s => string.Equals(s.Name, r.ToName, StringComparison.Ordinal))
                 .ToList();
             if (matches.Count == 0)
