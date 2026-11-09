@@ -64,10 +64,17 @@ public static class CliApplication
                 .WithDescription("Remove the workspace index store (use --store-key for stale entries)");
             config.AddCommand<WatchCommand>("watch")
                 .WithDescription("Watch the workspace and re-index on file changes");
-            config.AddCommand<WatchdCommand>("watchd")
-                .WithDescription(
+            config.AddBranch("watchd", watchd =>
+            {
+                watchd.SetDescription(
                     "Supervise watch daemons of all registered workspaces: keep desired watches up, " +
                     "restart after crashes and upgrades (singleton on this machine)");
+                watchd.SetDefaultCommand<WatchdCommand>();
+                watchd.AddCommand<WatchdInstallCommand>("install")
+                    .WithDescription("Register watchd to start with this account and keep it running (idempotent)");
+                watchd.AddCommand<WatchdUninstallCommand>("uninstall")
+                    .WithDescription("Remove the autostart entry squeezr manages; a no-op when there is none");
+            });
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run an MCP server over stdio for AI agents");
             config.AddCommand<TuiCommand>("tui")
