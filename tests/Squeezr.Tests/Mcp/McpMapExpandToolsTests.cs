@@ -149,7 +149,7 @@ public class McpMapExpandToolsTests
     }
 
     [Fact]
-    public async Task RepoMap_AfterInlineRefresh_ReturnsFreshSignatures()
+    public async Task RepoMap_OnChangedFile_RendersTheIndexAndNamesTheLag()
     {
         var workspace = NewIndexedWorkspace();
         WriteFile(workspace, "repo/src/Calc.cs", """
@@ -180,9 +180,18 @@ public class McpMapExpandToolsTests
         var envelope = ParseEnvelope(result);
         var texts = envelope.GetProperty("data").EnumerateArray()
             .Select(l => l.GetProperty("text").GetString()!).ToList();
-        texts.ShouldContain("int Calc.Sum(int a, int b)");
-        texts.ShouldNotContain("int Calc.Add(int a, int b)");
-        envelope.GetProperty("staleFiles").EnumerateArray().ShouldBeEmpty();
+        texts.ShouldNotContain("int Calc.Sum(int a, int b)");
+        texts.ShouldContain("int Calc.Add(int a, int b)");
+        envelope.GetProperty("staleFiles").EnumerateArray()
+            .Select(s => s.GetString()!).ShouldBe(["demo/src/Calc.cs"]);
+
+        // the map is a read surface now: an inline refresh would have rewritten the row between two calls
+        var second = ParseEnvelope(await harness.Client.CallToolAsync(
+            "repo_map",
+            new Dictionary<string, object?> { ["depth"] = 3 },
+            cancellationToken: CancellationToken.None));
+        second.GetProperty("staleFiles").EnumerateArray()
+            .Select(s => s.GetString()!).ShouldBe(["demo/src/Calc.cs"]);
     }
 
     [Fact]
