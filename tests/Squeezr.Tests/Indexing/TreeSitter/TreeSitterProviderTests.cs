@@ -30,6 +30,64 @@ public class TreeSitterProviderTests
     }
 
     [Fact]
+    public void CanHandle_RustExtension_AcceptsRustHintsAndRejectsForeign()
+    {
+        var provider = new TreeSitterProvider(Config);
+
+        provider.CanHandle("app.rs", null).ShouldBeTrue();
+        provider.CanHandle("app.rs", "rust").ShouldBeTrue();
+        provider.CanHandle("app.rs", "rs").ShouldBeTrue();
+        provider.CanHandle("src/model.RS", "RUST").ShouldBeTrue();
+        provider.CanHandle("app.rs", "javascript").ShouldBeFalse();
+        provider.CanHandle("app.rs", "typescript").ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("src/app.js", "JavaScript", "javascript")]
+    [InlineData("src/app.jsx", "JavaScript", "javascript")]
+    [InlineData("tools/a.mjs", "JavaScript", "javascript")]
+    [InlineData("tools/b.cjs", "JavaScript", "javascript")]
+    [InlineData("src/store.ts", "TypeScript", "typescript")]
+    [InlineData("src/Badge.tsx", "TSX", "tsx")]
+    [InlineData("src/lib.rs", "Rust", "rust")]
+    [InlineData("src/LIB.RS", "Rust", "rust")]
+    [InlineData("notes.md", "JavaScript", "javascript")]
+    public void GrammarAndLanguageArms_PerExtension_ResolvesOffTheDefault(string path, string grammar, string language)
+    {
+        // both switches end in a JavaScript default, so every routed extension needs its own row here
+        TreeSitterProvider.GrammarName(path).ShouldBe(grammar);
+        TreeSitterProvider.LanguageName(path).ShouldBe(language);
+    }
+
+    [Fact]
+    public void Rust_Sample_ParsesThroughTheRustArmsWithoutWarnings()
+    {
+        var provider = new TreeSitterProvider(Config);
+        var result = provider.Parse(new FileRef("demo", "src/registry.rs"), Encoding.UTF8.GetBytes("""
+            use std::fmt;
+
+            pub struct Registry {
+                items: Vec<String>,
+            }
+
+            impl Registry {
+                pub fn render(&self) -> String {
+                    self.items.join(", ")
+                }
+            }
+
+            fn boot() -> Registry {
+                Registry { items: Vec::new() }
+            }
+            """));
+
+        // GrammarName/LanguageName hand every unmatched extension to JavaScript — Rust_JavaScriptGrammar_FlagsRustSourceAsError is the grammar side of this pin
+        result.Language.ShouldBe("rust");
+        provider.Warnings.ShouldBeEmpty();
+        result.Symbols.ShouldBe([]);
+    }
+
+    [Fact]
     public void CommonJsAssignment_NamedFunctionExpression_ExtractedAsFunction()
     {
         var result = Parse("module.cjs", "module.exports = function run() {\n  return 'ready';\n};\n");

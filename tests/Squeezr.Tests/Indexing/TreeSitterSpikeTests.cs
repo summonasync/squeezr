@@ -6,6 +6,24 @@ namespace Squeezr.Tests.Indexing;
 
 public class TreeSitterSpikeTests
 {
+    private const string RustSource = """
+        use std::collections::HashMap;
+
+        pub struct Registry {
+            entries: HashMap<String, String>,
+        }
+
+        pub trait Lookup {
+            fn get(&self, key: &str) -> Option<&String>;
+        }
+
+        impl Lookup for Registry {
+            fn get(&self, key: &str) -> Option<&String> {
+                self.entries.get(key)
+            }
+        }
+        """;
+
     [Fact]
     public void JavaScript_Parse_ProducesExpectedNodeTypes()
     {
@@ -113,6 +131,33 @@ public class TreeSitterSpikeTests
         using var tree = Parse(parser, "export const el = <div className=\"badge\">1</div>;\n");
 
         tree.RootNode!.HasError.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Rust_Parse_ProducesExpectedNodeTypes()
+    {
+        using var language = new Language("Rust");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustSource);
+
+        tree.RootNode!.HasError.ShouldBeFalse();
+        var types = CollectTypes(tree.RootNode!);
+        types.ShouldContain("use_declaration");
+        types.ShouldContain("struct_item");
+        types.ShouldContain("trait_item");
+        types.ShouldContain("impl_item");
+        types.ShouldContain("function_item");
+    }
+
+    [Fact]
+    public void Rust_JavaScriptGrammar_FlagsRustSourceAsError()
+    {
+        using var language = new Language("JavaScript");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, RustSource);
+
+        tree.RootNode!.HasError.ShouldBeTrue();
+        CollectTypes(tree.RootNode!).ShouldNotContain("function_item");
     }
 
     [Fact]

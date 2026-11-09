@@ -24,6 +24,7 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
             ".js" or ".jsx" or ".mjs" or ".cjs" => MatchesHint(languageHint, "javascript", "js"),
             ".ts" => MatchesHint(languageHint, "typescript", "ts"),
             ".tsx" => MatchesHint(languageHint, "typescript", "tsx", "ts"),
+            ".rs" => MatchesHint(languageHint, "rust", "rs"),
             _ => false,
         };
     }
@@ -55,20 +56,22 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
     private static bool MatchesHint(string? languageHint, params string[] accepted) =>
         languageHint is null || accepted.Any(h => h.Equals(languageHint, StringComparison.OrdinalIgnoreCase));
 
-    private static string GrammarName(string path) =>
+    internal static string GrammarName(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".ts" => "TypeScript",
             ".tsx" => "TSX",
+            ".rs" => "Rust",
             _ => "JavaScript",
         };
 
-    private static string LanguageName(string path) =>
+    internal static string LanguageName(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".ts" => "typescript",
             ".tsx" => "tsx",
             ".jsx" or ".mjs" or ".cjs" => "javascript",
+            ".rs" => "rust",
             _ => "javascript",
         };
 }

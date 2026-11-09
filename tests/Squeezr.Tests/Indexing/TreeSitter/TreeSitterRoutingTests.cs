@@ -130,6 +130,55 @@ public class TreeSitterRoutingTests
     }
 
     [Fact]
+    public void Index_RustFile_DetectedAsRustCodeWithChunkCoverageIntact()
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var rustFile = store.ListFiles(repoId).Single(f => f.Path == "src/lib.rs");
+
+        rustFile.Language.ShouldBe("rust");
+        rustFile.Kind.ShouldBe("code");
+        // whichever pipeline owns .rs has to leave rows here — a file handed to tree-sitter before the
+        // rust symbol vocabulary lands goes red on this line instead of quietly losing its chunks
+        store.ListChunksByFile(rustFile.Id).ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void Run_RustFileInStore_RebuildsRefRowsAsTreeSitterOwned()
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoDoc = store.FindRepo("demo")!;
+        var rustFile = store.ListFiles(repoDoc.Id).Single(f => f.Path == "src/lib.rs");
+        var jsFile = store.ListFiles(repoDoc.Id).Single(f => f.Path == "src/app.js");
+        store.InsertRefs([new RefDocument
+        {
+            FromSymbolId = 0,
+            ToName = "stale_before_phase",
+            Kind = "call",
+            FileId = rustFile.Id,
+            Line = 3,
+        }]);
+        var jsText = File.ReadAllText(Path.Combine(workspace, "repo", "src", "app.js"));
+        var warnings = new List<string>();
+
+        // IsTreeSitter is the predicate that puts a file's ref rows in this phase's ownership set;
+        // drop "rust" from it and the stale row above survives the pass
+        TreeSitterIndexPhase.Run(
+            Path.Combine(workspace, "repo"), repoDoc, store, [jsFile],
+            new Dictionary<uint, string> { [jsFile.Id] = jsText },
+            SqueezrConfig.CreateDefault().Chunking, noSemantic: true,
+            new TreeSitterProvider(SqueezrConfig.CreateDefault()), warnings.Add);
+
+        store.ListRefsByFile(rustFile.Id).ShouldNotContain(r => r.ToName == "stale_before_phase");
+    }
+
+    [Fact]
     public void RefLookup_CrossFileImportAndCallRefs_Reachable()
     {
         var workspace = NewPolyglotWorkspace();
@@ -263,6 +312,19 @@ public class TreeSitterRoutingTests
               find(id: number): User | undefined {
                 return undefined;
               }
+            }
+            """);
+        WriteFile(workspace, "repo/src/lib.rs", """
+            use std::collections::HashMap;
+
+            pub struct Registry {
+                entries: HashMap<String, String>,
+            }
+
+            impl Registry {
+                pub fn lookup(&self, key: &str) -> Option<&String> {
+                    self.entries.get(key)
+                }
             }
             """);
         WriteFile(workspace, "repo/docs/notes.md", "alpha\nbeta\ngamma\n");

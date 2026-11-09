@@ -25,6 +25,7 @@ public static class LanguageDetector
         ["css"] = "css",
         ["sql"] = "sql",
         ["py"] = "python",
+        ["rs"] = "rust",
         ["sh"] = "shell",
         ["txt"] = "text"
     };

@@ -159,7 +159,7 @@ public static class TreeSitterIndexPhase
     }
 
     private static bool IsTreeSitter(string language) =>
-        language is "javascript" or "typescript" or "tsx";
+        language is "javascript" or "typescript" or "tsx" or "rust";
 
     private static void InsertRefs(
         ParseResult result,
