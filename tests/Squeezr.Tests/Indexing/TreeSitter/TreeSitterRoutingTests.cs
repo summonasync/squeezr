@@ -90,6 +90,31 @@ public class TreeSitterRoutingTests
     }
 
     [Fact]
+    public void Index_RustSymbolNamedLikeJsCallee_KeepsJsEdgesOnTheJsRow()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/mul.rs", "pub fn mul(a: u32, b: u32) -> u32 {\n    a * b\n}\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var rustFile = store.ListFiles(repoId).Single(f => f.Path == "src/mul.rs");
+        var utilFile = store.ListFiles(repoId).Single(f => f.Path == "src/util.js");
+        var appFile = store.ListFiles(repoId).Single(f => f.Path == "src/app.js");
+
+        // the rust row has to exist, otherwise the pool filter below is asserted against an empty set
+        var rustMul = store.ListSymbolsByFile(rustFile.Id).ShouldHaveSingleItem();
+        rustMul.Name.ShouldBe("mul");
+        var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
+        jsMul.Name.ShouldBe("mul");
+
+        var edges = store.ListRefsByFile(appFile.Id).Where(r => r.ToName == "mul").ToList();
+        edges.Count.ShouldBe(2);
+        edges.ShouldAllBe(r => r.FromSymbolId == jsMul.Id);
+        edges.ShouldNotContain(r => r.FromSymbolId == rustMul.Id);
+    }
+
+    [Fact]
     public void Run_Downgrade_FallbackChunksAndAggregatedWarning()
     {
         var workspace = NewPolyglotWorkspace();
@@ -130,7 +155,7 @@ public class TreeSitterRoutingTests
     }
 
     [Fact]
-    public void Index_RustFile_DetectedAsRustCodeWithChunkCoverageIntact()
+    public void Index_RustFile_PersistsSymbolsAndPerSymbolChunksThroughTreeSitter()
     {
         var workspace = NewPolyglotWorkspace();
         new WorkspaceIndexer().Index(workspace);
@@ -141,9 +166,21 @@ public class TreeSitterRoutingTests
 
         rustFile.Language.ShouldBe("rust");
         rustFile.Kind.ShouldBe("code");
-        // whichever pipeline owns .rs has to leave rows here — a file handed to tree-sitter before the
-        // rust symbol vocabulary lands goes red on this line instead of quietly losing its chunks
-        store.ListChunksByFile(rustFile.Id).ShouldNotBeEmpty();
+
+        // WorkspaceIndexer.IsTreeSitterLanguage is what routes .rs here: drop "rust" and the file
+        // falls to the sliding-window chunker, leaving zero symbol rows and SymbolId-less chunks
+        var symbols = store.ListSymbolsByFile(rustFile.Id);
+        symbols.Count.ShouldBe(3);
+        symbols.ShouldContain(s => s.Name == "Registry" && s.Kind == "class" && s.ContainerName == null);
+        symbols.ShouldContain(s => s.Name == "Registry" && s.Kind == "other" && s.ContainerName == null);
+        symbols.ShouldContain(s => s.Name == "lookup" && s.Kind == "method" && s.ContainerName == "Registry");
+
+        var chunks = store.ListChunksByFile(rustFile.Id);
+        chunks.ShouldNotBeEmpty();
+        chunks.ShouldAllBe(c => c.SymbolId != null);
+        var lookup = symbols.Single(s => s.Name == "lookup");
+        chunks.Single(c => c.StartLine == 8).SymbolId.ShouldBe(lookup.Id);
+        chunks.Single(c => c.StartLine == 8).Text.ShouldContain("pub fn lookup(&self, key: &str)");
     }
 
     [Fact]

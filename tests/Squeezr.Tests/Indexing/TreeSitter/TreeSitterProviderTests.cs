@@ -81,10 +81,18 @@ public class TreeSitterProviderTests
             }
             """));
 
-        // GrammarName/LanguageName hand every unmatched extension to JavaScript — Rust_JavaScriptGrammar_FlagsRustSourceAsError is the grammar side of this pin
+        // the extension arms are pinned by GrammarAndLanguageArms_PerExtension_ResolvesOffTheDefault;
+        // here the rust grammar has to actually reach the rust symbol vocabulary
         result.Language.ShouldBe("rust");
         provider.Warnings.ShouldBeEmpty();
-        result.Symbols.ShouldBe([]);
+        result.Symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe(
+        [
+            ("Registry", SymbolKind.Class, null),
+            ("Registry", SymbolKind.Other, null),
+            ("render", SymbolKind.Method, "Registry"),
+            ("boot", SymbolKind.Function, null),
+        ]);
+        result.Refs.ShouldBe([]);
     }
 
     [Fact]

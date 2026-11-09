@@ -940,7 +940,7 @@ public sealed class WorkspaceIndexer
     }
 
     private static bool IsTreeSitterLanguage(string language) =>
-        language is "javascript" or "typescript" or "tsx";
+        language is "javascript" or "typescript" or "tsx" or "rust";
 
     private static void IndexFallbackChunks(
         MetaStore store,

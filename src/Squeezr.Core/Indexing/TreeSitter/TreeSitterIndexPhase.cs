@@ -103,9 +103,15 @@ public static class TreeSitterIndexPhase
         Dictionary<uint, string> textCache,
         IParsingProviderWithWarnings provider)
     {
-        var tsFileIds = tsFiles.Select(f => f.Id).ToHashSet();
+        // ref rows are owned and deleted for every routed file, but a symbol may only be matched as an
+        // edge target in a language that has reference rules: a js import of 'mul' can never resolve to
+        // a rust fn of the same name, and name matching has no way to know they are different languages
+        var matchPoolIds = tsFiles
+            .Where(f => TreeSitterProvider.HasReferenceRules(f.Language))
+            .Select(f => f.Id)
+            .ToHashSet();
         var tsSymbols = store.ListSymbolsByRepo(repoDoc.Id)
-            .Where(s => tsFileIds.Contains(s.FileId))
+            .Where(s => matchPoolIds.Contains(s.FileId))
             .ToList();
         store.DeleteRefsByFileIds(tsFiles.Select(f => f.Id).ToList());
 

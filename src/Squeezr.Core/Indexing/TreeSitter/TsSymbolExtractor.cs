@@ -4,54 +4,103 @@ namespace Squeezr.Core.Indexing.TreeSitter;
 
 internal static class TsSymbolExtractor
 {
-    private static readonly string[] SymbolNodeTypes =
-    [
-        "function_declaration",
-        "function_expression",
-        "method_definition",
-        "class_declaration",
-        "interface_declaration",
-        "type_alias_declaration",
-        "variable_declarator"
-    ];
+    // measured on these two grammars (grammar spike): no *_item appears in a js/ts tree and no
+    // *_declaration/method_definition appears in a rust tree, so the type-keyed rules below are only
+    // ever reached by the language that owns the type. Proven for this pair, not for languages to come
+    private static readonly SymbolVocabulary JsTs = new(
+        new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+        {
+            ["function_declaration"] = SymbolKind.Function,
+            ["function_expression"] = SymbolKind.Function,
+            ["method_definition"] = SymbolKind.Method,
+            ["class_declaration"] = SymbolKind.Class,
+            ["interface_declaration"] = SymbolKind.Interface,
+            ["type_alias_declaration"] = SymbolKind.Other,
+            ["variable_declarator"] = SymbolKind.Function,
+        },
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "class_declaration",
+            "interface_declaration",
+            "function_declaration",
+            "method_definition",
+            "type_alias_declaration",
+            "function_expression",
+            "variable_declarator",
+        });
 
-    public static IReadOnlyList<Symbol> Extract(Node root)
+    private static readonly SymbolVocabulary Rust = new(
+        new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+        {
+            ["function_item"] = SymbolKind.Function,
+            ["function_signature_item"] = SymbolKind.Function,
+            ["struct_item"] = SymbolKind.Class,
+            ["trait_item"] = SymbolKind.Interface,
+            ["impl_item"] = SymbolKind.Other,
+            ["enum_item"] = SymbolKind.Other,
+            ["union_item"] = SymbolKind.Other,
+            ["mod_item"] = SymbolKind.Other,
+            ["type_item"] = SymbolKind.Other,
+            ["const_item"] = SymbolKind.Field,
+            ["static_item"] = SymbolKind.Field,
+            ["macro_definition"] = SymbolKind.Other,
+        },
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "mod_item",
+            "impl_item",
+            "trait_item",
+            "function_item",
+        });
+
+    private static readonly SymbolVocabulary Empty = new(
+        new Dictionary<string, SymbolKind>(StringComparer.Ordinal),
+        new HashSet<string>(StringComparer.Ordinal));
+
+    private static readonly Dictionary<string, SymbolVocabulary> Vocabularies =
+        new(StringComparer.Ordinal)
+        {
+            ["javascript"] = JsTs,
+            ["typescript"] = JsTs,
+            ["tsx"] = JsTs,
+            ["rust"] = Rust,
+        };
+
+    public static IReadOnlyList<Symbol> Extract(Node root, string language)
     {
+        var vocabulary = VocabularyFor(language);
         var comments = new List<Node>();
         CollectComments(root, comments);
 
         var results = new List<Symbol>();
-        Walk(root, comments, results);
+        Walk(root, vocabulary, comments, results);
         return results;
     }
 
-    private static void Walk(Node node, List<Node> comments, List<Symbol> results)
+    // an unrouted language yields zero rows rather than borrowing the js/ts table: tree-sitter-go
+    // names a plain function node function_declaration too, so a js-default would silently extract
+    // through the wrong rules. Silence here is loud downstream — routing and chunk-coverage
+    // assertions already fail on a file that produced no symbols
+    private static SymbolVocabulary VocabularyFor(string language) =>
+        Vocabularies.TryGetValue(language, out var vocabulary) ? vocabulary : Empty;
+
+    private static void Walk(Node node, SymbolVocabulary vocabulary, List<Node> comments, List<Symbol> results)
     {
-        if (Array.IndexOf(SymbolNodeTypes, node.Type) >= 0 && TryCreateSymbol(node, comments, out var symbol))
+        if (vocabulary.Kinds.ContainsKey(node.Type) && TryCreateSymbol(node, vocabulary, comments, out var symbol))
         {
             results.Add(symbol);
         }
 
         foreach (var child in node.Children)
         {
-            Walk(child, comments, results);
+            Walk(child, vocabulary, comments, results);
         }
     }
 
-    private static bool TryCreateSymbol(Node node, List<Node> comments, out Symbol symbol)
+    private static bool TryCreateSymbol(Node node, SymbolVocabulary vocabulary, List<Node> comments, out Symbol symbol)
     {
         symbol = null!;
-        var isArrowVariable = node.Type == "variable_declarator"
-                              && node.NamedChildren.Any(c => c.Type == "arrow_function");
-        if (node.Type == "variable_declarator" && !isArrowVariable)
-        {
-            return false;
-        }
-
-        // only a named function expression is a binding (module.exports = function run() {}); an
-        // anonymous one has no name of its own and the identifier fallback below could pick up a
-        // parameter instead
-        if (node.Type == "function_expression" && node.GetChildForField("name") is null)
+        if (!HasOwnName(node))
         {
             return false;
         }
@@ -62,38 +111,59 @@ internal static class TsSymbolExtractor
             return false;
         }
 
-        var kind = node.Type switch
-        {
-            "function_declaration" => SymbolKind.Function,
-            "method_definition" when name == "constructor" => SymbolKind.Constructor,
-            "method_definition" => SymbolKind.Method,
-            "class_declaration" => SymbolKind.Class,
-            "interface_declaration" => SymbolKind.Interface,
-            "type_alias_declaration" => SymbolKind.Other,
-            _ => SymbolKind.Function,
-        };
-
         var span = new CodeSpan(node.StartPosition.Row + 1, node.EndPosition.Row + 1);
         symbol = new Symbol(
             name,
-            kind,
+            KindOf(node, vocabulary),
             SignatureOf(node),
             span,
-            ContainerOf(node),
+            ContainerOf(node, vocabulary),
             DocCommentFor(node, comments));
         return true;
     }
 
-    private static string? NameOf(Node node)
+    private static bool HasOwnName(Node node) => node.Type switch
     {
-        var name = node.GetChildForField("name");
-        if (name is not null)
+        // only a named function expression is a binding (module.exports = function run() {}); an
+        // anonymous one has no name of its own and the identifier fallback in NameOf could pick up
+        // a parameter instead
+        "function_expression" => node.GetChildForField("name") is not null,
+        "variable_declarator" => node.NamedChildren.Any(c => c.Type == "arrow_function"),
+        _ => true,
+    };
+
+    private static SymbolKind KindOf(Node node, SymbolVocabulary vocabulary)
+    {
+        var kind = vocabulary.Kinds[node.Type];
+        return node.Type switch
         {
-            return name.Text;
+            "method_definition" when NameOf(node) == "constructor" => SymbolKind.Constructor,
+            "function_item" or "function_signature_item"
+                when InnermostContainer(node, vocabulary)?.Type is "impl_item" or "trait_item" => SymbolKind.Method,
+            _ => kind,
+        };
+    }
+
+    private static string? NameOf(Node node) => node.Type switch
+    {
+        "impl_item" => ImplName(node),
+        _ => node.GetChildForField("name")?.Text
+             ?? node.NamedChildren.FirstOrDefault(c =>
+                 c.Type is "identifier" or "type_identifier" or "property_identifier")?.Text,
+    };
+
+    // tree-sitter-rust gives impl_item no name field: the row is named after its self type, qualified
+    // by the trait when the block implements one — and the same string is the container of the items
+    // inside, so symbol_lookup resolves an impl's members through it
+    private static string? ImplName(Node node)
+    {
+        var target = node.GetChildForField("type")?.Text;
+        if (target is null)
+        {
+            return null;
         }
 
-        return node.NamedChildren.FirstOrDefault(c =>
-            c.Type is "identifier" or "type_identifier" or "property_identifier")?.Text;
+        return node.GetChildForField("trait")?.Text is { } trait ? $"{trait} for {target}" : target;
     }
 
     private static string SignatureOf(Node node)
@@ -112,20 +182,15 @@ internal static class TsSymbolExtractor
         return firstLine.Trim().TrimEnd('{').Trim();
     }
 
-    private static string? ContainerOf(Node node)
+    private static string? ContainerOf(Node node, SymbolVocabulary vocabulary)
     {
         var names = new List<string>();
         for (var current = node.Parent; current is not null; current = current.Parent)
         {
-            var name = DeclarationName(current);
+            var name = DeclarationName(current, vocabulary);
             if (name is null)
             {
                 continue;
-            }
-
-            if (current.Type == "method_definition")
-            {
-                name += "()";
             }
 
             names.Insert(0, name);
@@ -134,14 +199,34 @@ internal static class TsSymbolExtractor
         return names.Count == 0 ? null : string.Join('.', names);
     }
 
-    private static string? DeclarationName(Node node) => node.Type switch
+    private static Node? InnermostContainer(Node node, SymbolVocabulary vocabulary)
     {
-        "class_declaration" or "interface_declaration" or "function_declaration"
-            or "method_definition" or "type_alias_declaration" => NameOf(node),
-        "function_expression" when node.GetChildForField("name") is not null => NameOf(node),
-        "variable_declarator" when node.NamedChildren.Any(c => c.Type == "arrow_function") => NameOf(node),
-        _ => null,
-    };
+        for (var current = node.Parent; current is not null; current = current.Parent)
+        {
+            if (DeclarationName(current, vocabulary) is not null)
+            {
+                return current;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? DeclarationName(Node node, SymbolVocabulary vocabulary)
+    {
+        if (!vocabulary.ContainerTypes.Contains(node.Type) || !HasOwnName(node))
+        {
+            return null;
+        }
+
+        var name = NameOf(node);
+        if (name is null)
+        {
+            return null;
+        }
+
+        return node.Type == "method_definition" ? name + "()" : name;
+    }
 
     private static string? DocCommentFor(Node node, List<Node> comments)
     {
@@ -204,4 +289,8 @@ internal static class TsSymbolExtractor
             CollectComments(child, comments);
         }
     }
+
+    private sealed record SymbolVocabulary(
+        IReadOnlyDictionary<string, SymbolKind> Kinds,
+        IReadOnlySet<string> ContainerTypes);
 }
