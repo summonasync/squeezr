@@ -221,8 +221,12 @@ that is the deal.
 - **C# is first class.** Roslyn-grade symbol precision means the matrix is
   honest: C# gets symbols, signatures, doc-comments and real callers; JS/TS/TSX
   get a tree-sitter symbol layer — functions, classes, interfaces, type
-  aliases, import graph; every other text (Markdown, YAML, JSON…) is indexed by
-  a sliding-window fallback chunker — searchable, but not symbol-aware.
+  aliases, import graph; Rust gets that same layer over its own vocabulary —
+  functions, structs, enums, unions, traits, impl blocks, modules, type
+  aliases, consts, statics and macro definitions, with `use` trees, calls,
+  trait/impl targets and macro invocations as its reference graph; every other
+  text (Markdown, YAML, JSON…) is indexed by a sliding-window fallback chunker
+  — searchable, but not symbol-aware.
 - **Adoption is the hard part, not the tech.** Agents must be *allowed* to
   call it. Tool allowlists and flow gates decide whether the index gets used
   at all.

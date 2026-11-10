@@ -22,6 +22,17 @@ public class LanguageDetectorTests
         language.ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData("src/registry.rs", "rust")]
+    [InlineData("src/bin/main.RS", "rust")]
+    [InlineData("readme.rst", "unknown")]
+    public void Detect_RustSource_IsTrackedAsRust(string path, string expected)
+    {
+        var language = LanguageDetector.Detect(path);
+
+        language.ShouldBe(expected);
+    }
+
     [Fact]
     public void ProjectLayoutExtensions_CompositionIsPinnedAbsolutely()
     {
