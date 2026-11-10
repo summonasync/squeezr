@@ -69,10 +69,12 @@ internal static class WatchdInstalledProbe
             return WatchdAutostartState.InstalledButBinaryMissing;
         }
 
-        // The failure question is open on a platform that asks it: the entry may well be sitting in
-        // the crash-loop state the unit's own Restart=on-failure walks into, and calling that
-        // healthy would be the exact lie this command exists to stop.
-        return probe.Failed == WatchdUnitAnswer.Unknown
+        // Two questions can still be open once everything an operator can act on has been ruled out:
+        // whether the entry is hooked in at all, and whether it is sitting in the crash-loop state the
+        // unit's own Restart=on-failure walks into. Either one unanswered is an answer this command may
+        // not spend on a healthy verdict — that is the exact lie it exists to stop — so both dimensions
+        // share this rung and the no-verdict exit behind it.
+        return probe.Enabled == WatchdUnitAnswer.Unknown || probe.Failed == WatchdUnitAnswer.Unknown
             ? WatchdAutostartState.ProbeUnknown
             : WatchdAutostartState.Installed;
     }

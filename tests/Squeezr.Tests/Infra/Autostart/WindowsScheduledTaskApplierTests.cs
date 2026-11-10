@@ -175,23 +175,46 @@ public sealed class WindowsScheduledTaskApplierTests
         probe.UnitText.ShouldBe(TaskXml);
     }
 
-    [Fact]
-    public async Task Probe_WhenTheTaskIsDisabled_SaysItIsPresentButNotEnabled()
+    // Settings/Enabled is typed xs:boolean in the task schema, which legalizes the digit spellings
+    // beside the words: an export that carries <Enabled>0</Enabled> is saying the task is disabled, and
+    // a reader that only speaks the words answers "could not ask" for a fact the XML stated outright.
+    [Theory]
+    [InlineData("false", WatchdUnitAnswer.No)]
+    [InlineData("0", WatchdUnitAnswer.No)]
+    [InlineData("true", WatchdUnitAnswer.Yes)]
+    [InlineData("1", WatchdUnitAnswer.Yes)]
+    public async Task Probe_TheEnablementFlag_ReadsBothSpellingsTheSchemaLegalizes(string flag, WatchdUnitAnswer expected)
     {
         var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(
             0,
-            TaskXml.Replace("<Enabled>true</Enabled>", "<Enabled>false</Enabled>"),
+            TaskXml.Replace("<Enabled>true</Enabled>", $"<Enabled>{flag}</Enabled>"),
             string.Empty));
         var applier = new WindowsScheduledTaskApplier(runner);
 
         var probe = await applier.ProbeAsync(CancellationToken.None);
 
         probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
-        probe.Enabled.ShouldBe(WatchdUnitAnswer.No);
+        probe.Enabled.ShouldBe(expected);
+    }
+
+    // A value that is neither spelling is not an answer either, and inventing one is the schema default
+    // the reader above refuses to do.
+    [Fact]
+    public async Task Probe_WhenTheEnablementFlagSaysNeither_ReadsItAsCouldNotAsk()
+    {
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(
+            0,
+            TaskXml.Replace("<Enabled>true</Enabled>", "<Enabled>maybe</Enabled>"),
+            string.Empty));
+        var applier = new WindowsScheduledTaskApplier(runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Enabled.ShouldBe(WatchdUnitAnswer.Unknown);
     }
 
     // An XML answer without the Settings flag is the schema default, not an answer this reader may
-    // invent: it comes back as "could not ask" and leaves the verdict to the lines that do have one.
+    // invent: it comes back as "could not ask", and the verdict has to treat that as an open question.
     [Fact]
     public async Task Probe_WhenTheXmlNamesNoEnabledFlag_SaysItCouldNotAsk()
     {

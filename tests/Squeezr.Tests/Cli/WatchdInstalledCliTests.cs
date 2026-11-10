@@ -54,6 +54,9 @@ public sealed class WatchdInstalledCliTests
         result.Exit.ShouldBe(WatchdInstalledVerdict.NotRegistered);
         Lines(result.Out).ShouldContain("status=not-installed");
         Lines(result.Out).ShouldContain("present=no");
+        // Nothing is registered, so there is no entry whose failure could be asked about: the answer
+        // this dimension carries is "no such question here", not a question this probe lost.
+        Lines(result.Out).ShouldContain("failed=not-supported");
         Lines(result.Out).ShouldContain(line => line.StartsWith("hint=", StringComparison.Ordinal) &&
                                                 line.Contains(InstallHint, StringComparison.Ordinal));
         result.Out.ShouldNotContain("at Squeezr.");
@@ -151,6 +154,49 @@ public sealed class WatchdInstalledCliTests
         result.Exit.ShouldBe(WatchdInstalledVerdict.NoVerdict);
         Lines(result.Out).ShouldContain("status=probe-unknown");
         Lines(result.Out).ShouldContain("failed=couldn't-ask");
+    }
+
+    // The enablement question is asked on more than one platform, and an answer that never came back is
+    // an open question on all of them: the half-hooked entry this command exists to name is exactly the
+    // one an unread flag cannot be allowed to hide behind. Same rung as the failure rule, same exit.
+    [Theory]
+    [InlineData("<Enabled>maybe</Enabled>")]
+    [InlineData("")]
+    public async Task Installed_OnTheWindowsApplier_WhenTheEnablementFlagSaysNothing_LeavesTheVerdictOpen(string flag)
+    {
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(
+            0,
+            TaskXml(
+                $"/c set \"SQUEEZR_HOME=D:\\squeezr home\" && \"{TestProgram.Executable("squeezr.exe")}\" watchd --autostart")
+                .Replace("<Enabled>true</Enabled>", flag),
+            string.Empty));
+
+        var result = await RunAsync(new WindowsScheduledTaskApplier(runner));
+
+        result.Exit.ShouldBe(WatchdInstalledVerdict.NoVerdict);
+        Lines(result.Out).ShouldContain("status=probe-unknown");
+        Lines(result.Out).ShouldContain("enabled=couldn't-ask");
+    }
+
+    // The schema types the flag as xs:boolean, so the digit spelling is a legal byte in a real export
+    // and it says the same thing the word does: a disabled task reads disabled, never healthy.
+    [Theory]
+    [InlineData("false")]
+    [InlineData("0")]
+    public async Task Installed_OnTheWindowsApplier_EitherSpellingOfADisabledTask_SaysPresentButNotEnabled(string flag)
+    {
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(
+            0,
+            TaskXml(
+                $"/c set \"SQUEEZR_HOME=D:\\squeezr home\" && \"{TestProgram.Executable("squeezr.exe")}\" watchd --autostart",
+                flag),
+            string.Empty));
+
+        var result = await RunAsync(new WindowsScheduledTaskApplier(runner));
+
+        result.Exit.ShouldBe(WatchdInstalledVerdict.Broken);
+        Lines(result.Out).ShouldContain("status=present-but-not-enabled");
+        Lines(result.Out).ShouldContain("enabled=no");
     }
 
     [Fact]
@@ -263,6 +309,81 @@ public sealed class WatchdInstalledCliTests
         Lines(result.Out).ShouldContain("loaded=yes");
         Lines(result.Out).ShouldContain($"program={program}");
         runner.Commands().ShouldBe(["systemctl --user is-failed squeezr-watchd.service"]);
+    }
+
+    // The exit-4 answer carried all the way to the printed lines: the manager named a state of a unit it
+    // has never read, so the failure dimension has no answer to print and says so, while the half-applied
+    // install still reads as the state an operator can act on.
+    [Fact]
+    public async Task Installed_OnTheSystemdApplier_WhenTheManagerHasNotReadTheUnit_PrintsThatItDidNotAnswer()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var program = TestProgram.Executable("squeezr");
+        File.WriteAllText(
+            Path.Combine(unitDirectory, "squeezr-watchd.service"),
+            UnitOnSystemd(program));
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(4, "inactive\n", string.Empty));
+
+        var result = await RunAsync(new SystemdUserApplier(unitDirectory, runner));
+
+        result.Exit.ShouldBe(WatchdInstalledVerdict.Broken);
+        Lines(result.Out).ShouldContain("status=present-but-not-enabled");
+        Lines(result.Out).ShouldContain("failed=not-supported");
+        Lines(result.Out).ShouldContain("loaded=no");
+        Lines(result.Out).ShouldContain(line =>
+            line.Contains("the running manager does not know squeezr-watchd.service (exit 4, answer 'inactive')",
+                StringComparison.Ordinal));
+    }
+
+    // The other half of the exit-4 reading, measured rather than argued: a unit that is on disk AND
+    // hooked, but the running manager has never read it. The verdict rides on the three facts the
+    // platform did answer (present, hooked, launchable program), while the failure dimension says
+    // plainly that this answer was not given — and a unit the manager never loaded also never failed,
+    // so exit 4 hides no crash report the healthy arm would be swallowing.
+    [LinuxFact]
+    public async Task Installed_OnTheSystemdApplier_WhenAHookedUnitIsNotLoaded_KeepsTheVerdictOnTheAnsweredFacts()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var program = TestProgram.Executable("squeezr");
+        File.WriteAllText(
+            Path.Combine(unitDirectory, "squeezr-watchd.service"),
+            UnitOnSystemd(program));
+        Directory.CreateDirectory(Path.Combine(unitDirectory, "default.target.wants"));
+        File.CreateSymbolicLink(
+            Path.Combine(unitDirectory, "default.target.wants", "squeezr-watchd.service"),
+            "../squeezr-watchd.service");
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(4, "inactive\n", string.Empty));
+
+        var result = await RunAsync(new SystemdUserApplier(unitDirectory, runner));
+
+        Lines(result.Out).ShouldContain("enabled=yes");
+        Lines(result.Out).ShouldContain("failed=not-supported");
+        Lines(result.Out).ShouldContain("loaded=no");
+        Lines(result.Out).ShouldContain("status=installed");
+        result.Exit.ShouldBe(WatchdInstalledVerdict.Healthy);
+    }
+
+    // Why the failure answer "not-supported" stays non-blocking, pinned rather than argued: this
+    // platform has no machine-readable failure question at all, and its entry answers that way on every
+    // run. Turn the unanswered shape into a verdict-blocked one and a healthy agent stops being
+    // reportable here — the same lie with the sign flipped.
+    [Fact]
+    public async Task Installed_OnTheLaunchAgentApplier_WhereFailureIsNeverAnAnswer_StillReportsTheEntry()
+    {
+        var agentsDirectory = TestDirs.NewTempDir();
+        var program = TestProgram.Executable("squeezr");
+        Directory.CreateDirectory(agentsDirectory);
+        File.WriteAllText(
+            Path.Combine(agentsDirectory, "dev.summonasync.squeezr-watchd.plist"),
+            WatchdUnitGenerator.Generate(AutostartPlatform.LaunchAgent, program));
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(0, "Guiv2 GUI\n", string.Empty));
+
+        var result = await RunAsync(new LaunchAgentApplier(agentsDirectory, "gui/1000", runner));
+
+        result.Exit.ShouldBe(WatchdInstalledVerdict.Healthy);
+        Lines(result.Out).ShouldContain("status=installed");
+        Lines(result.Out).ShouldContain("failed=not-supported");
+        Lines(result.Out).ShouldContain("enabled=yes");
     }
 
     [Fact]
@@ -387,10 +508,10 @@ public sealed class WatchdInstalledCliTests
     private static string UnitOnSystemd(string programPath) =>
         WatchdUnitGenerator.Generate(AutostartPlatform.SystemdUser, programPath);
 
-    private static string TaskXml(string cmdArguments) =>
+    private static string TaskXml(string cmdArguments, string enabled = "true") =>
         $"""
         <Task version="1.2">
-          <Settings><Enabled>true</Enabled></Settings>
+          <Settings><Enabled>{enabled}</Enabled></Settings>
           <Actions><Exec><Command>cmd.exe</Command><Arguments>{XmlText(cmdArguments)}</Arguments></Exec></Actions>
           <RuntimeInfo><LastTaskResult>0</LastTaskResult></RuntimeInfo>
         </Task>

@@ -56,9 +56,20 @@ internal static class ScheduledTaskXml
             return WatchdUnitAnswer.Unknown;
         }
 
-        return bool.TryParse(enabled.Trim(), out var flag)
-            ? flag ? WatchdUnitAnswer.Yes : WatchdUnitAnswer.No
-            : WatchdUnitAnswer.Unknown;
+        // The schema types this flag as xs:boolean, whose legal spellings are four, not the two words a
+        // word-only reader knows: a disabled task exported as <Enabled>0</Enabled> must not come back as
+        // "no answer", because an unanswered question is one the verdict may walk past. The word arm
+        // keeps the casing a live export uses (<Enabled>TRUE</Enabled>).
+        var flag = enabled.Trim();
+        return flag switch
+        {
+            "true" or "1" => WatchdUnitAnswer.Yes,
+            "false" or "0" => WatchdUnitAnswer.No,
+            _ when bool.TryParse(flag, out var word) => word
+                ? WatchdUnitAnswer.Yes
+                : WatchdUnitAnswer.No,
+            _ => WatchdUnitAnswer.Unknown,
+        };
     }
 
     // The last run outcome only exists once the task has run: no RuntimeInfo at all, or no result

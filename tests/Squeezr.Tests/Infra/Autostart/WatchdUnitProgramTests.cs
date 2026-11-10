@@ -119,6 +119,22 @@ public sealed class WatchdUnitProgramTests
         command.Executable.ShouldBe(program);
     }
 
+    // systemd.exec(5) quotes a run with either sign, and a hand-edited unit carrying the single-quoted
+    // form names one path with a space in it — the same answer the double-quoted form gives. Inside
+    // single quotes nothing is escaped, which is why the sign is read as a run and not as a literal.
+    [Theory]
+    [InlineData("""ExecStart='/opt/my dir/squeezr' watchd --autostart""")]
+    [InlineData("""ExecStart="/opt/my dir/squeezr" watchd --autostart""")]
+    public void Read_OnSystemd_KeepsAQuotedRunWithASpaceInsideOneToken(string statement)
+    {
+        var command = WatchdUnitProgram.Read(
+            AutostartPlatform.SystemdUser, $"[Service]\n{statement}\n");
+
+        command.ShouldNotBeNull();
+        command.Executable.ShouldBe("/opt/my dir/squeezr");
+        command.Arguments.ShouldBe(["watchd", "--autostart"]);
+    }
+
     [Fact]
     public void Read_OnSystemd_TakesTheFirstTokenAndKeepsTheRestAsArguments()
     {
@@ -181,6 +197,37 @@ public sealed class WatchdUnitProgramTests
     [Fact]
     public void Read_OnLaunchAgent_WhenTheTextIsNotAPlist_NamesNoProgram() =>
         WatchdUnitProgram.Read(AutostartPlatform.LaunchAgent, "ExecStart=/opt/squeezr/squeezr").ShouldBeNull();
+
+    // The DTD posture of the reader, pinned by its two halves. A plist carrying an external entity is
+    // read as nothing: the DTD is skipped, the entity stays undefined, the parse fails and no file off
+    // the disk is opened as a side effect of a diagnostic. The other half is why the posture is Ignore
+    // and not Prohibit — every plist install generates carries the public DOCTYPE, and a reader that
+    // refused one would refuse its own entries.
+    [Fact]
+    public void Read_OnLaunchAgent_DtdCarriesNoAnswerAndStillStandsForOurOwnPlists()
+    {
+        var xxe = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd" [
+              <!ENTITY xxe SYSTEM "file:///etc/passwd">
+            ]>
+            <plist version="1.0">
+              <dict>
+                <key>ProgramArguments</key>
+                <array><string>&xxe;</string></array>
+              </dict>
+            </plist>
+            """;
+
+        WatchdUnitProgram.Read(AutostartPlatform.LaunchAgent, xxe).ShouldBeNull();
+
+        var command = WatchdUnitProgram.Read(
+            AutostartPlatform.LaunchAgent,
+            WatchdUnitGenerator.Generate(AutostartPlatform.LaunchAgent, Binary));
+
+        command.ShouldNotBeNull();
+        command.Executable.ShouldBe(Binary);
+    }
 
     [Fact]
     public void Read_WithNoTextAtAll_NamesNoProgram()

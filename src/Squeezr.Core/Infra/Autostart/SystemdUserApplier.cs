@@ -161,7 +161,11 @@ public sealed class SystemdUserApplier(
         {
             0 => (WatchdUnitAnswer.Yes, WatchdUnitAnswer.Yes, null),
             1 => (WatchdUnitAnswer.No, WatchdUnitAnswer.Yes, null),
-            NotLoadedExit => (WatchdUnitAnswer.No, WatchdUnitAnswer.No,
+            // Exit 4 is the manager saying it has never read this file, which answers the loaded
+            // question and leaves the failure question open: the word it prints beside it ('inactive'
+            // was measured) is a statement about a unit it does not have, not a verdict on ours. A
+            // reader that stored that word as "not failed" would be reporting an answer nobody gave.
+            NotLoadedExit => (WatchdUnitAnswer.Unsupported, WatchdUnitAnswer.No,
                 $"the running manager does not know {UnitFileName} (exit {NotLoadedExit}, answer '{state}') — " +
                 "a daemon-reload has not read this file yet"),
             _ => (WatchdUnitAnswer.Unknown, WatchdUnitAnswer.Unknown,

@@ -18,12 +18,15 @@ public sealed record WatchdUnitProbe(
     IReadOnlyList<string> Notes,
     bool Probed = true)
 {
+    // Nothing is registered here, so the failure question has no subject to answer it: the entry is
+    // absent, and an absent entry never ran and never failed. "could not ask" reads as a question this
+    // probe tried and lost, which it did not.
     public static WatchdUnitProbe Absent(AutostartPlatform platform, string? note = null) =>
         new(
             platform,
             WatchdUnitAnswer.No,
             WatchdUnitAnswer.No,
-            WatchdUnitAnswer.Unknown,
+            WatchdUnitAnswer.Unsupported,
             WatchdUnitAnswer.No,
             null,
             note is null ? [] : [note]);

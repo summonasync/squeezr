@@ -247,6 +247,8 @@ public sealed class SystemdUserApplierTests
     // Measured shape of a unit the file manager has on disk but the running manager has not read:
     // is-failed answers exit 4 with a state word, which is neither "failed" nor "healthy" — it is the
     // half-applied install, and the probe has to say so instead of letting the word read as an answer.
+    // The state word answers the loaded question and nothing else, so failure comes back as no answer
+    // while loaded comes back as a plain no.
     [Fact]
     public async Task Probe_WhenTheManagerHasNotReadTheUnit_SaysItIsNotLoadedAndNamesTheExit()
     {
@@ -258,7 +260,7 @@ public sealed class SystemdUserApplierTests
 
         var probe = await applier.ProbeAsync(CancellationToken.None);
 
-        probe.Failed.ShouldBe(WatchdUnitAnswer.No);
+        probe.Failed.ShouldBe(WatchdUnitAnswer.Unsupported);
         probe.Loaded.ShouldBe(WatchdUnitAnswer.No);
         probe.Notes.ShouldContain(note =>
             note.Contains($"the running manager does not know {UnitFileName} (exit 4, answer 'inactive')"));

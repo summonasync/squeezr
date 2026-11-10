@@ -60,17 +60,19 @@ public static class WatchdUnitProgram
 
     // Quoted runs are read as one token, and the escaper's rules are inverted one character at a
     // time: a doubled signifier is one literal character, a backslash takes what follows it as it is.
+    // systemd.exec(5) quotes with both signs and asks nothing inside single quotes, so a path carrying
+    // a space through the single-quoted form still reads as the one token it is to the manager.
     private static List<string> SystemdTokens(string value)
     {
         var tokens = new List<string>();
         var token = new StringBuilder();
-        var quoted = false;
+        var quote = '\0';
         var index = 0;
 
         while (index < value.Length)
         {
             var c = value[index];
-            if (!quoted && char.IsWhiteSpace(c))
+            if (quote == '\0' && char.IsWhiteSpace(c))
             {
                 if (token.Length > 0)
                 {
@@ -82,9 +84,23 @@ public static class WatchdUnitProgram
                 continue;
             }
 
-            if (c == '"')
+            if (quote == '\0' && (c == '"' || c == '\''))
             {
-                quoted = !quoted;
+                quote = c;
+                index++;
+                continue;
+            }
+
+            if (quote == c)
+            {
+                quote = '\0';
+                index++;
+                continue;
+            }
+
+            if (quote == '\'')
+            {
+                token.Append(c);
                 index++;
                 continue;
             }
