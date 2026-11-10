@@ -50,6 +50,16 @@ public sealed class WatchdUninstallCommand : AsyncCommand<WatchdUninstallCommand
             return 0;
         }
 
+        // A platform tool that would not say whether the entry exists leaves it exactly where it was,
+        // and a silent zero here would read as "uninstalled" on a machine that still autostarts the
+        // daemon. This is the one not-removed case that is a failure.
+        if (removal.Warnings.Count > 0)
+        {
+            Console.Error.WriteLine(
+                $"error: nothing was removed — the entry at {applier.ManagedTarget} could not be confirmed.");
+            return 1;
+        }
+
         // Nothing of ours to take away is not a failure: uninstall stays repeatable, but saying so
         // out loud on stderr is what keeps a silent exit code from reading as "it was removed".
         Console.Error.WriteLine(

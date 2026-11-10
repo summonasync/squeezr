@@ -74,6 +74,10 @@ public static class CliApplication
                     .WithDescription("Register watchd to start with this account and keep it running (idempotent)");
                 watchd.AddCommand<WatchdUninstallCommand>("uninstall")
                     .WithDescription("Remove the autostart entry squeezr manages; a no-op when there is none");
+                watchd.AddCommand<WatchdInstalledCommand>("installed")
+                    .WithDescription(
+                        "Report the autostart entry as the platform has it: registered or not, where, " +
+                        "and whether the program it starts still exists (read-only, exit 0 only when it is healthy)");
             });
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run an MCP server over stdio for AI agents");

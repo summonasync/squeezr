@@ -8,5 +8,9 @@ public sealed record AutostartRemoval(bool WasRemoved, IReadOnlyList<string> War
 {
     public static AutostartRemoval NothingManaged { get; } = new(false, []);
 
+    // The entry may still be there: the platform tool would not say. Nothing was deleted, and saying
+    // "no entry" out loud would be the other half of the same lie.
+    public static AutostartRemoval Unconfirmed(string warning) => new(false, [warning]);
+
     public static AutostartRemoval Removed(params string[] warnings) => new(true, warnings);
 }

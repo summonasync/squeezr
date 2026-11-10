@@ -158,7 +158,7 @@ public sealed class SystemdUserApplierTests
 
         removal.WasRemoved.ShouldBeFalse();
         removal.Warnings.ShouldBeEmpty();
-        (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeFalse();
+        (await applier.ProbeAsync(CancellationToken.None)).Presence.ShouldBe(WatchdUnitAnswer.No);
 
         runner.Calls.ShouldBeEmpty();
         Directory.Exists(Path.Combine(unitDirectory, "default.target.wants")).ShouldBeFalse();
@@ -211,16 +211,142 @@ public sealed class SystemdUserApplierTests
     }
 
     [Fact]
-    public async Task IsInstalled_FollowsTheUnitFile()
+    public async Task Probe_FollowsTheUnitFileAndCarriesItsText()
     {
         var unitDirectory = TestDirs.NewTempDir();
         var applier = new SystemdUserApplier(unitDirectory, new FakeAutostartProcessRunner());
 
-        (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeFalse();
+        (await applier.ProbeAsync(CancellationToken.None)).Presence.ShouldBe(WatchdUnitAnswer.No);
         Directory.CreateDirectory(unitDirectory);
         File.WriteAllText(Path.Combine(unitDirectory, UnitFileName), UnitText());
 
-        (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeTrue();
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+        probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.UnitText.ShouldBe(UnitText());
+        probe.Enabled.ShouldBe(WatchdUnitAnswer.No);
+    }
+
+    [LinuxFact]
+    public async Task Probe_WhenTheManagerReportsTheUnitFailed_SaysFailedAndKnowsTheUnit()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        WriteWantsLink(unitDirectory, "../" + UnitFileName);
+        File.WriteAllText(Path.Combine(unitDirectory, UnitFileName), UnitText());
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(0, "failed\n", string.Empty));
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Failed.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Loaded.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Enabled.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Notes.ShouldBeEmpty();
+        runner.Commands().ShouldBe([$"systemctl --user is-failed {UnitFileName}"]);
+    }
+
+    // Measured shape of a unit the file manager has on disk but the running manager has not read:
+    // is-failed answers exit 4 with a state word, which is neither "failed" nor "healthy" — it is the
+    // half-applied install, and the probe has to say so instead of letting the word read as an answer.
+    [Fact]
+    public async Task Probe_WhenTheManagerHasNotReadTheUnit_SaysItIsNotLoadedAndNamesTheExit()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(unitDirectory);
+        File.WriteAllText(Path.Combine(unitDirectory, UnitFileName), UnitText());
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(4, "inactive\n", string.Empty));
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Failed.ShouldBe(WatchdUnitAnswer.No);
+        probe.Loaded.ShouldBe(WatchdUnitAnswer.No);
+        probe.Notes.ShouldContain(note =>
+            note.Contains($"the running manager does not know {UnitFileName} (exit 4, answer 'inactive')"));
+    }
+
+    // The bus-down answer carries the same exit code as an answered "not failed" and differs only by
+    // the silence on stdout: an exit code alone would call this a healthy unit.
+    [Fact]
+    public async Task Probe_WhenTheBusWillNotAnswer_SaysItCouldNotAskAndCarriesTheReason()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(unitDirectory);
+        File.WriteAllText(Path.Combine(unitDirectory, UnitFileName), UnitText());
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(
+            1,
+            string.Empty,
+            "Failed to connect to user scope bus via local transport: $DBUS_SESSION_BUS_ADDRESS not defined"));
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Failed.ShouldBe(WatchdUnitAnswer.Unknown);
+        probe.Loaded.ShouldBe(WatchdUnitAnswer.Unknown);
+        probe.Notes.ShouldContain(note => note.Contains("Failed to connect to user scope bus"));
+    }
+
+    [Fact]
+    public async Task Probe_WhenSystemctlCannotBeStarted_SaysItCouldNotAskAndStillReadsTheDisk()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(unitDirectory);
+        File.WriteAllText(Path.Combine(unitDirectory, UnitFileName), UnitText());
+        var runner = new UnstartableSystemctlRunner();
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Probed.ShouldBeTrue();
+        probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Failed.ShouldBe(WatchdUnitAnswer.Unknown);
+        probe.Notes.ShouldContain(note => note.Contains("could not be asked whether the unit failed"));
+    }
+
+    [LinuxFact]
+    public async Task Probe_WhenTheWantsLinkIsOurs_SaysEnabled()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        WriteWantsLink(unitDirectory, "../" + UnitFileName);
+        File.WriteAllText(Path.Combine(unitDirectory, UnitFileName), UnitText());
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(1, "active\n", string.Empty));
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Enabled.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Failed.ShouldBe(WatchdUnitAnswer.No);
+        probe.Notes.ShouldBeEmpty();
+    }
+
+    [LinuxFact]
+    public async Task Probe_WhenTheEnableLinkIsGoneButStale_SaysAbsentAndCarriesTheResidue()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var link = WriteWantsLink(unitDirectory, "../" + UnitFileName);
+        var applier = new SystemdUserApplier(unitDirectory, new FakeAutostartProcessRunner());
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Presence.ShouldBe(WatchdUnitAnswer.No);
+        probe.Notes.ShouldHaveSingleItem().ShouldContain("points at a unit file that is gone");
+        File.Exists(link).ShouldBeTrue();
+    }
+
+    [LinuxFact]
+    public async Task Probe_WhenTheUnitFileCannotBeRead_KeepsTheDiskFactsAndNamesTheRefusal()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var unit = Path.Combine(unitDirectory, UnitFileName);
+        File.WriteAllText(unit, UnitText());
+        SetOwnerMode(unit, UnixFileMode.UserWrite);
+
+        var probe = await new SystemdUserApplier(unitDirectory, new FakeAutostartProcessRunner())
+            .ProbeAsync(CancellationToken.None);
+
+        probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.UnitText.ShouldBeNull();
+        probe.Notes.ShouldContain(note => note.Contains("could not be read"));
     }
 
     [Fact]
@@ -241,6 +367,16 @@ public sealed class SystemdUserApplierTests
         string? squeezrHome = Home,
         string? unitName = null) =>
         WatchdUnitGenerator.Generate(AutostartPlatform.SystemdUser, binaryPath, squeezrHome, unitName);
+
+    // The mode rules are Linux file semantics — the test that leans on them is [LinuxFact], and the host
+    // check here keeps the analyzer from calling the site reachable on a platform with no file mode.
+    private static void SetOwnerMode(string path, UnixFileMode mode)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, mode);
+        }
+    }
 
     private static string WriteWantsLink(string unitDirectory, string target)
     {
@@ -267,6 +403,24 @@ public sealed class SystemdUserApplierTests
 
             return Task.FromResult(FakeAutostartProcessRunner.Ok);
         }
+
+        public Task<AutostartProcessResult> RunRawAsync(
+            string fileName,
+            string argumentLine,
+            CancellationToken cancellationToken) =>
+            RunAsync(fileName, [argumentLine], cancellationToken);
+    }
+
+    // A host with no systemctl at all: the seam refuses before any process exists, which is a
+    // different answer from a tool that ran and said something. The disk facts still have to come
+    // through, and the failure question has to come back as "could not ask", never as "not failed".
+    private sealed class UnstartableSystemctlRunner : IAutostartProcessRunner
+    {
+        public Task<AutostartProcessResult> RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            CancellationToken cancellationToken) =>
+            throw new AutostartException($"Could not start '{fileName}': No such file or directory");
 
         public Task<AutostartProcessResult> RunRawAsync(
             string fileName,

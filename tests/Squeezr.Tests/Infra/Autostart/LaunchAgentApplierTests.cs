@@ -74,7 +74,7 @@ public sealed class LaunchAgentApplierTests
         var applier = new LaunchAgentApplier(agentsDirectory, Domain, runner);
 
         (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeFalse();
-        (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeFalse();
+        (await applier.ProbeAsync(CancellationToken.None)).Presence.ShouldBe(WatchdUnitAnswer.No);
 
         runner.Calls.ShouldBeEmpty();
     }
@@ -93,7 +93,7 @@ public sealed class LaunchAgentApplierTests
         removal.WasRemoved.ShouldBeTrue();
         removal.Warnings.ShouldBeEmpty();
         File.Exists(Path.Combine(agentsDirectory, PlistFileName)).ShouldBeFalse();
-        (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeFalse();
+        (await applier.ProbeAsync(CancellationToken.None)).Presence.ShouldBe(WatchdUnitAnswer.No);
         runner.Commands().ShouldBe([$"{Launchctl} bootout {Domain}/{Label}"]);
     }
 
@@ -174,6 +174,85 @@ public sealed class LaunchAgentApplierTests
 
         File.Exists(Path.Combine(agentsDirectory, "watchd-lane.plist")).ShouldBeTrue();
         runner.Commands().ShouldBe([$"{Launchctl} bootstrap gui/1000 {Path.Combine(agentsDirectory, "watchd-lane.plist")}"]);
+    }
+
+    [Fact]
+    public async Task Probe_WhenThePlistIsOnDisk_SaysRegisteredAndCarriesItsTextWithoutAskingAnythingElse()
+    {
+        var agentsDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(agentsDirectory);
+        File.WriteAllText(Path.Combine(agentsDirectory, PlistFileName), PlistText());
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(0, "Guiv2 GUI\n", string.Empty));
+        var applier = new LaunchAgentApplier(agentsDirectory, Domain, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Enabled.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Loaded.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Failed.ShouldBe(WatchdUnitAnswer.Unsupported);
+        probe.UnitText.ShouldBe(PlistText());
+        runner.Commands().ShouldBe([$"{Launchctl} print {Domain}/{Label}"]);
+    }
+
+    // The case the contract names: a plist that is registered for the next login with no job loaded in
+    // this session. It is not "installed and running", and it is not "not installed" either, so the
+    // loaded answer says no and the refusal text rides along.
+    [Fact]
+    public async Task Probe_WhenLaunchctlHasNoJobLoaded_SaysRegisteredButNotLoaded()
+    {
+        var agentsDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(agentsDirectory);
+        File.WriteAllText(Path.Combine(agentsDirectory, PlistFileName), PlistText());
+        var runner = new FakeAutostartProcessRunner((_, _) => new AutostartProcessResult(
+            3,
+            string.Empty,
+            $"Could not find service {Label} in domain for user gui: 0x1000005"));
+        var applier = new LaunchAgentApplier(agentsDirectory, Domain, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Enabled.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Loaded.ShouldBe(WatchdUnitAnswer.No);
+        probe.Notes.ShouldHaveSingleItem().ShouldContain("has no job loaded for it now");
+    }
+
+    // An answer that is neither "loaded" nor the documented not-found refusal is not an answer about
+    // the job: guessing unloaded from any non-zero exit would call a loaded agent missing.
+    [Fact]
+    public async Task Probe_WhenLaunchctlAnswersSomethingElse_SaysItCouldNotAsk()
+    {
+        var agentsDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(agentsDirectory);
+        File.WriteAllText(Path.Combine(agentsDirectory, PlistFileName), PlistText());
+        var runner = new FakeAutostartProcessRunner((_, _) =>
+            new AutostartProcessResult(78, string.Empty, "Error: unknown domain string."));
+        var applier = new LaunchAgentApplier(agentsDirectory, Domain, runner);
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Loaded.ShouldBe(WatchdUnitAnswer.Unknown);
+        probe.Notes.ShouldHaveSingleItem().ShouldContain("Error: unknown domain string.");
+    }
+
+    [Fact]
+    public async Task Probe_WhenLaunchctlCannotBeStarted_SaysItCouldNotAskAndKeepsThePlistFacts()
+    {
+        var agentsDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(agentsDirectory);
+        File.WriteAllText(Path.Combine(agentsDirectory, PlistFileName), PlistText());
+        var applier = new LaunchAgentApplier(
+            agentsDirectory,
+            Domain,
+            new FakeAutostartProcessRunner((_, _) => throw new AutostartException("Could not start 'launchctl'.")));
+
+        var probe = await applier.ProbeAsync(CancellationToken.None);
+
+        probe.Probed.ShouldBeTrue();
+        probe.Presence.ShouldBe(WatchdUnitAnswer.Yes);
+        probe.Loaded.ShouldBe(WatchdUnitAnswer.Unknown);
+        probe.Notes.ShouldHaveSingleItem().ShouldContain("launchctl could not be asked whether the agent is loaded");
     }
 
     private static string PlistText(

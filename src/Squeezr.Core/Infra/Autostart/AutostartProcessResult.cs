@@ -19,4 +19,9 @@ public sealed record AutostartProcessResult(int ExitCode, string StandardOutput,
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Trim())
             .FirstOrDefault(line => line.Length > 0);
+
+    // The tool's own words, for a caller that has to report an answer it could not act on: a probe
+    // reads the response instead of throwing on it, so the text is the only thing left to carry.
+    public static string AnswerLine(string text, string whenSilent) =>
+        FirstLine(text) ?? whenSilent;
 }

@@ -8,5 +8,5 @@ public interface IWatchdAutostartApplier
 
     Task<AutostartRemoval> UninstallAsync(CancellationToken cancellationToken);
 
-    Task<bool> IsInstalledAsync(CancellationToken cancellationToken);
+    Task<WatchdUnitProbe> ProbeAsync(CancellationToken cancellationToken);
 }
