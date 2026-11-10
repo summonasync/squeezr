@@ -163,6 +163,40 @@ public sealed class StatsRenderTests
         output.ShouldNotContain("Cache hit-rate: 0.0 %");
     }
 
+    [Fact]
+    public void Render_MappedRowsBesideStatelessOnes_SplitsTheRatesAndNamesTheUnsplitShare()
+    {
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", BigFileBytes);
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Split(truncated: false, mapped: true),
+            Split(truncated: false, mapped: true),
+            Split(truncated: true, mapped: false),
+            Split(truncated: false, mapped: false),
+            Entry("pre-read", 0)
+        };
+
+        var output = Render(entries, root);
+
+        output.ShouldContain("Mapped");
+        output.ShouldContain("25.0 %");
+        output.ShouldContain("50.0 %");
+        output.ShouldContain("n/a");
+        output.ShouldContain("Mapped rate covers 4 of 5 row(s): 1 row(s) carry no state");
+    }
+
+    [Fact]
+    public void Render_EveryRowKnowsItsState_LeavesTheUnsplitShareLineOut()
+    {
+        var root = NewWorkspaceWithIndexedFile("src/Big.cs", BigFileBytes);
+        var entries = new List<QueryTelemetryEntry> { Split(truncated: false, mapped: true) };
+
+        var output = Render(entries, root);
+
+        output.ShouldContain("100.0 %");
+        output.ShouldNotContain("carry no state");
+    }
+
     private static string Render(IReadOnlyList<QueryTelemetryEntry> entries, string root)
     {
         var summary = QueryTelemetrySummary.Summarize(entries, root);
@@ -182,6 +216,9 @@ public sealed class StatsRenderTests
         store.UpsertFile(new FileDocument { Id = 1, RepoId = 1, Path = path, SizeBytes = sizeBytes });
         return root;
     }
+
+    private static QueryTelemetryEntry Split(bool truncated, bool mapped) =>
+        new(DateTime.UtcNow, Guid.NewGuid(), "symbol_lookup", null, 100, truncated, 1, 5, false, null, Mapped: mapped);
 
     private static QueryTelemetryEntry Entry(
         string tool,

@@ -43,7 +43,7 @@ public sealed class MapCommand : Command<MapCommand.Settings>
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "map",
                 new { repo = settings.Repo, prefix = settings.Prefix, depth = settings.Depth, maxTokens = settings.MaxTokens },
                 result.TokensUsed, result.Truncated, result.Lines.Count,
-                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
+                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot), mapped: false);
 
             if (settings.Json)
             {

@@ -56,11 +56,7 @@ public sealed class SymbolLookupTool
             if (_cache is not null && _cache.TryGet("symbol_lookup", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
-                QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
-                    hit.TokensUsed, hit.Truncated, ((List<SymbolHitData>)hit.Data!).Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                    baselineTokens: hit.Cost?.BaselineTokens);
+                RecordLedger(root, parameters, hit, sw, cacheHit: true, cacheInvalidated: false);
                 return hit;
             }
 
@@ -123,12 +119,7 @@ public sealed class SymbolLookupTool
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, clipped, warnings, root, freshness.Stale,
                 result.DidYouMean, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
-            QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
-                result.TokensUsed, result.Truncated, data.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null,
-                baselineTokens: envelope.Cost?.BaselineTokens);
+            RecordLedger(root, parameters, envelope, sw, cacheHit: false, cacheInvalidated: invalidated is not null);
             _cache?.Put("symbol_lookup", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
@@ -143,6 +134,32 @@ public sealed class SymbolLookupTool
             root,
             result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
+
+    // both roads write through here, reading the state off the envelope the caller is about to receive: a fresh
+    // call and the cache hit that replays it carry one answer, so one answer cannot be two rows in the ledger
+    private void RecordLedger(
+        string root,
+        object parameters,
+        ToolEnvelope answer,
+        Stopwatch sw,
+        bool cacheHit,
+        bool cacheInvalidated)
+    {
+        QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
+            answer.TokensUsed, answer.Truncated, Hits(answer).Count, sw.ElapsedMilliseconds,
+            cacheHit: cacheHit, indexAge: answer.IndexAge,
+            client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+            cacheInvalidated: cacheInvalidated,
+            baselineTokens: answer.Cost?.BaselineTokens,
+            mapped: MappedOf(answer));
+    }
+
+    // an untruncated answer that still reports a body it left out is the mapped case: the map stood in, nothing
+    // went missing — the same reading on both roads, because both roads only look at the envelope
+    private static bool MappedOf(ToolEnvelope answer) =>
+        !answer.Truncated && Hits(answer).Any(static hit => hit.BodyOmitted);
+
+    private static List<SymbolHitData> Hits(ToolEnvelope answer) => (List<SymbolHitData>)answer.Data!;
 
     // a refused body with no member map to stand in for it is the one clipped case the caller can only weigh
     // against a number: the hint the engine carries names rows to narrow, not what the gap costs

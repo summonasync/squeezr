@@ -131,7 +131,7 @@ public sealed class IndexStatusTool
             QueryTelemetry.Record(root, _workspace.SessionId, "index_status",
                 null, envelope.TokensUsed, envelope.Truncated, 1,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                client: _identity.Name ?? "unknown", clientVersion: _identity.Version, mapped: false);
             return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)

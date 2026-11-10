@@ -178,6 +178,47 @@ public class QueryTelemetrySummaryTests
     }
 
     [Fact]
+    public void Summarize_MixedStateAndPreSplitRows_MappedRateSpreadsOnlyOverRowsThatKnow()
+    {
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Split("symbol_lookup", truncated: false, mapped: true),
+            Split("symbol_lookup", truncated: false, mapped: true),
+            Split("symbol_lookup", truncated: true, mapped: false),
+            Split("symbol_lookup", truncated: false, mapped: false),
+            Entry("symbol_lookup", 10)
+        };
+
+        var summary = QueryTelemetrySummary.Summarize(entries, TestDirs.NewTempDir());
+
+        var tool = summary.ByTool.Single();
+        tool.Count.ShouldBe(5);
+        tool.TruncationRate.ShouldBe(0.2, tolerance: 0.0001);
+        tool.MappedRate.ShouldNotBeNull().ShouldBe(0.5, tolerance: 0.0001);
+        tool.UnsplitRows.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Summarize_ToolWithNoRecordedState_MappedRateStaysNullNotZero()
+    {
+        var entries = new List<QueryTelemetryEntry>
+        {
+            Entry("pre-read", 0),
+            Entry("refs", 10),
+            Split("symbol_lookup", truncated: true, mapped: false)
+        };
+
+        var summary = QueryTelemetrySummary.Summarize(entries, TestDirs.NewTempDir());
+
+        var preRead = summary.ByTool.Single(t => t.Tool == "pre-read");
+        preRead.MappedRate.ShouldBeNull();
+        preRead.UnsplitRows.ShouldBe(1);
+        preRead.TruncationRate.ShouldBe(0);
+        summary.ByTool.Single(t => t.Tool == "refs").MappedRate.ShouldBeNull();
+        summary.ByTool.Single(t => t.Tool == "symbol_lookup").MappedRate.ShouldNotBeNull().ShouldBe(0.0);
+    }
+
+    [Fact]
     public void Summarize_TruncationRateAndPeriod_AggregatedAcrossEntries()
     {
         var from = new DateTime(2026, 9, 17, 8, 0, 0, DateTimeKind.Utc);
@@ -297,6 +338,9 @@ public class QueryTelemetrySummaryTests
         store.UpsertFile(new FileDocument { Id = 1, RepoId = 1, Path = path, SizeBytes = sizeBytes });
         return root;
     }
+
+    private static QueryTelemetryEntry Split(string tool, bool truncated, bool mapped) =>
+        new(DateTime.UtcNow, Guid.NewGuid(), tool, null, 100, truncated, 1, 5, false, null, Mapped: mapped);
 
     private static QueryTelemetryEntry Entry(
         string tool,

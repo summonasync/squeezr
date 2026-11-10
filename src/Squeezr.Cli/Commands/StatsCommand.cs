@@ -92,16 +92,30 @@ public sealed class StatsCommand : Command<StatsCommand.Settings>
         table.AddColumn("Count");
         table.AddColumn("Avg tokens");
         table.AddColumn("Truncation");
+        table.AddColumn("Mapped");
         foreach (var tool in summary.ByTool)
         {
             table.AddRow(
                 tool.Tool.EscapeMarkup(),
                 tool.Count.ToString(),
                 tool.AvgTokensUsed.ToString("F1", CultureInfo.InvariantCulture),
-                tool.TruncationRate.ToString("P1", CultureInfo.InvariantCulture));
+                tool.TruncationRate.ToString("P1", CultureInfo.InvariantCulture),
+                tool.MappedRate is { } mapped
+                    ? mapped.ToString("P1", CultureInfo.InvariantCulture)
+                    : "n/a");
         }
 
         console.Write(table);
+
+        // a row with no recorded state cannot be told between clipped and mapped, so the share that sits behind
+        // the n/a cells is named instead of being averaged away
+        var unsplit = summary.ByTool.Sum(t => t.UnsplitRows);
+        if (unsplit > 0)
+        {
+            console.MarkupLine(
+                $"[grey]Mapped rate covers {summary.Records - unsplit} of {summary.Records} row(s): " +
+                $"{unsplit} row(s) carry no state, recorded before the clipped/mapped split or by a surface that has none.[/]");
+        }
 
         var savings = summary.Savings;
         if (savings.BaselineApplies)

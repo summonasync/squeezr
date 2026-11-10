@@ -20,7 +20,8 @@ public sealed record QueryTelemetryEntry(
     [property: JsonPropertyName("client"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Client = null,
     [property: JsonPropertyName("clientVersion"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClientVersion = null,
     [property: JsonPropertyName("cacheInvalidated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CacheInvalidated = false,
-    [property: JsonPropertyName("baselineTokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? BaselineTokens = null);
+    [property: JsonPropertyName("baselineTokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? BaselineTokens = null,
+    [property: JsonPropertyName("mapped"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Mapped = null);
 
 public static class QueryTelemetry
 {
@@ -83,6 +84,10 @@ public static class QueryTelemetry
         }
     }
 
+    // `truncated` means the answer lost rows the caller asked for; `mapped` says the budget traded a body for the
+    // member map instead of losing anything. A caller that has a state passes both — a null `mapped` is left for
+    // the rows written before the split, plus the surfaces that record no budget state at all (hook pre-read),
+    // and stats reads the absence as "this row cannot be split", never as "not mapped".
     public static void Record(
         string workspaceRoot,
         Guid sessionId,
@@ -97,11 +102,12 @@ public static class QueryTelemetry
         string? client = "cli",
         string? clientVersion = null,
         bool cacheInvalidated = false,
-        long? baselineTokens = null) =>
+        long? baselineTokens = null,
+        bool? mapped = null) =>
         Append(workspaceRoot, new QueryTelemetryEntry(
             DateTime.UtcNow, sessionId, tool, parameters, tokensUsed, truncated,
             hits, durationMs, cacheHit, indexAge is null ? null : (long)indexAge.Value.TotalSeconds,
-            client, clientVersion, cacheInvalidated, baselineTokens));
+            client, clientVersion, cacheInvalidated, baselineTokens, mapped));
 
     public static IReadOnlyList<QueryTelemetryEntry> ReadAll(string workspaceRoot)
     {

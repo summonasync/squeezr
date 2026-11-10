@@ -56,11 +56,7 @@ public sealed class CodePackTool
             if (_cache is not null && _cache.TryGet("code_pack", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
-                QueryTelemetry.Record(root, _workspace.SessionId, "code_pack", parameters,
-                    hit.TokensUsed, hit.Truncated, ((CodePackData)hit.Data!).Callers.Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                    baselineTokens: hit.Cost?.BaselineTokens);
+                RecordLedger(root, parameters, hit, sw, cacheHit: true, cacheInvalidated: false);
                 return hit;
             }
 
@@ -136,12 +132,7 @@ public sealed class CodePackTool
                 didYouMean: pack.DidYouMean, cost: cost,
                 fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
-            QueryTelemetry.Record(root, _workspace.SessionId, "code_pack", parameters,
-                envelope.TokensUsed, envelope.Truncated, pack.Callers.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null,
-                baselineTokens: envelope.Cost?.BaselineTokens);
+            RecordLedger(root, parameters, envelope, sw, cacheHit: false, cacheInvalidated: invalidated is not null);
             _cache?.Put("code_pack", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
@@ -157,6 +148,26 @@ public sealed class CodePackTool
         pack.RefusedBodyTokens > 0 && pack.Members.Count == 0
             ? HintText.BodyPriceRemedy(pack.RefusedBodyTokens)
             : pack.LookupHint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy;
+
+    // one write road for the fresh answer and the hit that replays it, both reading the state off the envelope
+    private void RecordLedger(
+        string root,
+        object parameters,
+        ToolEnvelope answer,
+        Stopwatch sw,
+        bool cacheHit,
+        bool cacheInvalidated)
+    {
+        var pack = (CodePackData)answer.Data!;
+        QueryTelemetry.Record(root, _workspace.SessionId, "code_pack", parameters,
+            answer.TokensUsed, answer.Truncated, pack.Callers.Count, sw.ElapsedMilliseconds,
+            cacheHit: cacheHit, indexAge: answer.IndexAge,
+            client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+            cacheInvalidated: cacheInvalidated,
+            baselineTokens: answer.Cost?.BaselineTokens,
+            // a pack that lost nothing and still says the body stayed out was answered with the member map
+            mapped: !answer.Truncated && pack.BodyOmitted);
+    }
 
     public sealed record CodePackData(
         [property: JsonPropertyName("name")] string Name,

@@ -51,7 +51,7 @@ public sealed class FindReferencesTool
                 QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<RefData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version, mapped: false);
                 return hit;
             }
 
@@ -107,7 +107,7 @@ public sealed class FindReferencesTool
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,
-                baselineTokens: envelope.Cost?.BaselineTokens);
+                baselineTokens: envelope.Cost?.BaselineTokens, mapped: false);
             _cache?.Put("find_references", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }

@@ -46,8 +46,9 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
 
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "symbol",
                 new { name = settings.Name, kind = settings.Kind, repo = settings.Repo },
-                result.TokensUsed, result.Truncated, result.Matches.Count,
-                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
+                result.TokensUsed, result.State is AnswerState.Clipped, result.Matches.Count,
+                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot),
+                mapped: result.State is AnswerState.Mapped);
 
             if (settings.Json)
             {

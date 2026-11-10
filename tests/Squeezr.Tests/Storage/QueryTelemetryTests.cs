@@ -161,6 +161,84 @@ public class QueryTelemetryTests
         QueryTelemetry.ReadAll(root).Single().CacheInvalidated.ShouldBeTrue();
     }
 
+    [Fact]
+    public void Record_MappedAnswer_WritesTruncatedFalseMappedTrueLastInTheLine()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", null, 164, false, 1, 5, mapped: true);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        raw.ShouldContain("\"truncated\":false");
+        raw.ShouldContain("\"mapped\":true");
+        Keys(raw).ShouldBe(
+            "ts,sessionId,tool,params,tokensUsed,truncated,hits,durationMs,cacheHit,indexAgeSeconds,client,mapped");
+        QueryTelemetry.ReadAll(root).Single().Mapped.ShouldBe(true);
+    }
+
+    [Fact]
+    public void Record_ClippedAnswer_WritesTruncatedTrueMappedFalse()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", null, 40, true, 1, 5, mapped: false);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        raw.ShouldContain("\"truncated\":true");
+        raw.ShouldContain("\"mapped\":false");
+        raw.ShouldEndWith(",\"mapped\":false}\n");
+        QueryTelemetry.ReadAll(root).Single().Mapped.ShouldBe(false);
+    }
+
+    [Fact]
+    public void Record_FullyPopulatedEntry_WritesMappedLastRightAfterBaselineTokens()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", new { name = "Huge" }, 85, false, 1, 6,
+            cacheHit: true, indexAge: TimeSpan.FromSeconds(12), client: "qwen", clientVersion: "1.2.3",
+            cacheInvalidated: true, baselineTokens: 1100, mapped: true);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        Keys(raw).ShouldBe(
+            "ts,sessionId,tool,params,tokensUsed,truncated,hits,durationMs,cacheHit,indexAgeSeconds," +
+            "client,clientVersion,cacheInvalidated,baselineTokens,mapped");
+        raw.ShouldEndWith("\"baselineTokens\":1100,\"mapped\":true}\n");
+    }
+
+    [Fact]
+    public void Record_WithoutState_OmitsTheMappedKeySoTheRowStaysUnsplittable()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "pre-read", null, 0, false, 0, 0, mapped: null);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        raw.ShouldNotContain("mapped");
+        QueryTelemetry.ReadAll(root).Single().Mapped.ShouldBeNull();
+    }
+
+    [Fact]
+    public void ReadAll_PreSplitLine_StillParsesAndReadsAsNullMapped_WhileMappedFalseRowReadsAsFalse()
+    {
+        var root = TestDirs.NewTempDir();
+        Directory.CreateDirectory(SqueezrPaths.StoreDir(root));
+        const string preSplit = """{"ts":"2026-10-01T10:00:00Z","sessionId":"00000000-0000-0000-0000-000000000000","tool":"symbol_lookup","params":null,"tokensUsed":164,"truncated":true,"hits":1,"durationMs":5,"cacheHit":false,"indexAgeSeconds":null,"client":"cli"}""";
+        File.WriteAllText(SqueezrPaths.QueriesLogPath(root), preSplit + '\n');
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", null, 164, false, 1, 5, mapped: false);
+
+        var rows = QueryTelemetry.ReadAll(root);
+
+        rows.Count.ShouldBe(2);
+        rows[0].Mapped.ShouldBeNull();
+        rows[0].Truncated.ShouldBeTrue();
+        rows[1].Mapped.ShouldBe(false);
+        rows[1].Truncated.ShouldBeFalse();
+    }
+
+    private static string Keys(string line) =>
+        string.Join(',', JsonDocument.Parse(line).RootElement.EnumerateObject().Select(p => p.Name));
+
     private static QueryTelemetryEntry Entry(string tool) =>
         new(DateTime.UtcNow, Guid.NewGuid(), tool, null, 0, false, 0, 1, false, null);
 }
