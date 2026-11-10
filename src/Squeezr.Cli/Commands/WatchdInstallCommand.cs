@@ -24,14 +24,17 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
         {
             SqueezrHome.RequireHabitableProfileHome();
             var platform = AutostartEnvironment.CurrentPlatform;
+            var binaryPath = new DaemonLauncher().DaemonBinaryPath();
+            Launchability.Require(platform, binaryPath);
             return await ApplyAsync(
                 platform,
-                new DaemonLauncher().DaemonBinaryPath(),
+                binaryPath,
                 AutostartEnvironment.ExplicitSqueezrHome(),
                 AutostartEnvironment.CreateApplier(platform, new AutostartProcessRunner()),
                 cancellationToken);
         }
-        catch (Exception ex) when (ex is AutostartException or ArgumentException or WorkspaceException)
+        catch (Exception ex) when (ex is AutostartException or ArgumentException or WorkspaceException
+                                   or IOException or UnauthorizedAccessException)
         {
             return CommandError.Report(ex, json: false);
         }

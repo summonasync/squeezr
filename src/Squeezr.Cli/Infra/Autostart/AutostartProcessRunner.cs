@@ -51,22 +51,24 @@ public sealed class AutostartProcessRunner : IAutostartProcessRunner
         using var process = Start(fileName, startInfo);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(RunBudget);
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
         try
         {
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-            var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
             await process.WaitForExitAsync(budget.Token);
             return new AutostartProcessResult(process.ExitCode, await stdoutTask, await stderrTask);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             TryKill(process);
+            await DrainQuietly(stdoutTask, stderrTask);
             throw new AutostartException(
                 $"'{fileName}' did not finish within {RunBudget.TotalSeconds:0} seconds.");
         }
         catch (OperationCanceledException)
         {
             TryKill(process);
+            await DrainQuietly(stdoutTask, stderrTask);
             throw;
         }
     }
@@ -83,6 +85,20 @@ public sealed class AutostartProcessRunner : IAutostartProcessRunner
         catch (Exception ex) when (ex is Win32Exception or IOException)
         {
             throw new AutostartException($"Could not start '{fileName}': {ex.Message}");
+        }
+    }
+
+    // A killed tool tears the redirected streams it leaves behind, so the pending reads are awaited
+    // and their outcomes discarded here: the refusal the operator gets is the cancellation, not the
+    // wreckage of a pipe, and no read is left faulting without a listener.
+    internal static async Task DrainQuietly(Task stdoutTask, Task stderrTask)
+    {
+        try
+        {
+            await Task.WhenAll(stdoutTask, stderrTask);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
         }
     }
 

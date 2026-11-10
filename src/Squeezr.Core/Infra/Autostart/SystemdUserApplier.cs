@@ -37,21 +37,34 @@ public sealed class SystemdUserApplier(
     public Task<bool> IsInstalledAsync(CancellationToken cancellationToken) =>
         Task.FromResult(File.Exists(UnitPath) || WantedLinkIsOurs());
 
-    public async Task<bool> UninstallAsync(CancellationToken cancellationToken)
+    public async Task<AutostartRemoval> UninstallAsync(CancellationToken cancellationToken)
     {
         var unitWritten = File.Exists(UnitPath);
         var linkIsOurs = WantedLinkIsOurs();
         if (!unitWritten && !linkIsOurs)
         {
-            return false;
+            return AutostartRemoval.NothingManaged;
         }
 
+        var warnings = new List<string>();
         if (unitWritten)
         {
-            await RunCheckedAsync(
-                [UserScope, "disable", "--now", UnitFileName],
-                "stop and unhook the watch daemon",
-                cancellationToken);
+            // disable is best-effort here, unlike every other tool call: it is the one step whose
+            // failure would otherwise make the managed file impossible to ever take away, and the
+            // bus being down is exactly the state an operator reaches for uninstall in. What the
+            // tool answered is carried to the CLI instead of aborting the removal.
+            try
+            {
+                await RunCheckedAsync(
+                    [UserScope, "disable", "--now", UnitFileName],
+                    "stop and unhook the watch daemon",
+                    cancellationToken);
+            }
+            catch (AutostartException ex)
+            {
+                warnings.Add(ex.Message);
+            }
+
             File.Delete(UnitPath);
         }
 
@@ -64,15 +77,16 @@ public sealed class SystemdUserApplier(
             [UserScope, "daemon-reload"],
             "reload the systemd user manager",
             cancellationToken);
-        return true;
+        return AutostartRemoval.Removed([.. warnings]);
     }
 
     private async Task RunCheckedAsync(IReadOnlyList<string> arguments, string action, CancellationToken cancellationToken) =>
         (await runner.RunAsync(Systemctl, arguments, cancellationToken)).EnsureSuccess(Systemctl, action);
 
-    // systemd's own disable drops the wants link; it is removed here too, so a unit enabled by hand
-    // or a half-finished install cannot keep resurrecting the daemon. A link that does not resolve
-    // into our unit file belongs to somebody else and is never touched.
+    // systemd's own disable drops the wants link; it is removed here too, so a unit enabled by hand,
+    // a half-finished install or a disable that never got an answer cannot keep resurrecting the
+    // daemon. A link that does not resolve into our unit file belongs to somebody else and is never
+    // touched.
     private bool WantedLinkIsOurs()
     {
         var target = new FileInfo(WantsLink).LinkTarget;

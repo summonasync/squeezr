@@ -22,16 +22,16 @@ public sealed class WindowsScheduledTaskApplier(
     public Task<bool> IsInstalledAsync(CancellationToken cancellationToken) =>
         QueryAsync(cancellationToken);
 
-    public async Task<bool> UninstallAsync(CancellationToken cancellationToken)
+    public async Task<AutostartRemoval> UninstallAsync(CancellationToken cancellationToken)
     {
         if (!await QueryAsync(cancellationToken))
         {
-            return false;
+            return AutostartRemoval.NothingManaged;
         }
 
         (await runner.RunAsync(Schtasks, ["/Delete", TaskNameFlag, unitName, ForceFlag], cancellationToken))
             .EnsureSuccess(Schtasks, "delete the scheduled task");
-        return true;
+        return AutostartRemoval.Removed();
     }
 
     // The task lives in the Task Scheduler store, not on the filesystem, so existence is a question

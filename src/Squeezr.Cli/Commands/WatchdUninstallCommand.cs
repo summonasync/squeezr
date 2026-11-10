@@ -25,7 +25,8 @@ public sealed class WatchdUninstallCommand : AsyncCommand<WatchdUninstallCommand
             var platform = AutostartEnvironment.CurrentPlatform;
             return await RemoveAsync(AutostartEnvironment.CreateApplier(platform, new AutostartProcessRunner()), cancellationToken);
         }
-        catch (Exception ex) when (ex is AutostartException or ArgumentException or WorkspaceException)
+        catch (Exception ex) when (ex is AutostartException or ArgumentException or WorkspaceException
+                                   or IOException or UnauthorizedAccessException)
         {
             return CommandError.Report(ex, json: false);
         }
@@ -35,7 +36,15 @@ public sealed class WatchdUninstallCommand : AsyncCommand<WatchdUninstallCommand
         IWatchdAutostartApplier applier,
         CancellationToken cancellationToken)
     {
-        if (await applier.UninstallAsync(cancellationToken))
+        var removal = await applier.UninstallAsync(cancellationToken);
+        foreach (var warning in removal.Warnings)
+        {
+            // The removal stands even when the init system refused to answer: the managed file is
+            // gone, so this is the operator's notice about what could not be checked, not a failure.
+            Console.Error.WriteLine($"warning: {warning}");
+        }
+
+        if (removal.WasRemoved)
         {
             AnsiConsole.MarkupLine($"[green]watchd autostart removed[/] — {applier.ManagedTarget.EscapeMarkup()}");
             return 0;

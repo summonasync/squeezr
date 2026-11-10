@@ -78,7 +78,7 @@ public sealed class WindowsScheduledTaskApplierTests
             : FakeAutostartProcessRunner.Ok);
         var applier = new WindowsScheduledTaskApplier(runner);
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeFalse();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeFalse();
 
         runner.Commands().ShouldBe(["schtasks.exe /Query /TN squeezr-watchd"]);
     }
@@ -101,7 +101,7 @@ public sealed class WindowsScheduledTaskApplierTests
         var applier = new WindowsScheduledTaskApplier(runner);
 
         (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeTrue();
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeTrue();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeTrue();
 
         runner.Commands().ShouldBe(
         [

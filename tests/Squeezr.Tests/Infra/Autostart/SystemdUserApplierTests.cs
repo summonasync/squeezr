@@ -66,8 +66,83 @@ public sealed class SystemdUserApplierTests
         await applier.InstallAsync(UnitText(), CancellationToken.None);
         runner.Calls.Clear();
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeTrue();
+        var removal = await applier.UninstallAsync(CancellationToken.None);
 
+        removal.WasRemoved.ShouldBeTrue();
+        removal.Warnings.ShouldBeEmpty();
+        File.Exists(Path.Combine(unitDirectory, UnitFileName)).ShouldBeFalse();
+        runner.Commands().ShouldBe([Disable, Reload]);
+    }
+
+    [Fact]
+    public async Task Uninstall_WhenDisableRefusesToAnswer_StillDropsTheUnitAndCarriesItsAnswer()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var runner = new FakeAutostartProcessRunner((_, arguments) => arguments.Contains("disable")
+            ? new AutostartProcessResult(1, string.Empty, "Failed to connect to bus: No such file or directory")
+            : FakeAutostartProcessRunner.Ok);
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        await applier.InstallAsync(UnitText(), CancellationToken.None);
+        runner.Calls.Clear();
+
+        var removal = await applier.UninstallAsync(CancellationToken.None);
+
+        File.Exists(Path.Combine(unitDirectory, UnitFileName)).ShouldBeFalse();
+        removal.WasRemoved.ShouldBeTrue();
+        removal.Warnings.ShouldHaveSingleItem()
+            .ShouldContain("'systemctl' failed to stop and unhook the watch daemon (exit 1)");
+        removal.Warnings.Single().ShouldContain("Failed to connect to bus");
+        runner.Commands().ShouldBe([Disable, Reload]);
+    }
+
+    [Fact]
+    public async Task Uninstall_WhenDisableThrows_StillDropsTheUnitAndCarriesItsMessage()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var runner = new ThrowingDisableRunner();
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        await applier.InstallAsync(UnitText(), CancellationToken.None);
+
+        var removal = await applier.UninstallAsync(CancellationToken.None);
+
+        File.Exists(Path.Combine(unitDirectory, UnitFileName)).ShouldBeFalse();
+        removal.WasRemoved.ShouldBeTrue();
+        removal.Warnings.ShouldHaveSingleItem().ShouldContain("Could not start 'systemctl'");
+    }
+
+    [LinuxFact]
+    public async Task Uninstall_WhenDisableRefusesToAnswer_StillDropsTheWantsLinkOfOurOwnUnit()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var link = WriteWantsLink(unitDirectory, "../" + UnitFileName);
+        var runner = new FakeAutostartProcessRunner((_, arguments) => arguments.Contains("disable")
+            ? new AutostartProcessResult(1, string.Empty, "Failed to connect to bus: No such file or directory")
+            : FakeAutostartProcessRunner.Ok);
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        await applier.InstallAsync(UnitText(), CancellationToken.None);
+
+        var removal = await applier.UninstallAsync(CancellationToken.None);
+
+        removal.WasRemoved.ShouldBeTrue();
+        removal.Warnings.ShouldHaveSingleItem();
+        File.Exists(link).ShouldBeFalse();
+        File.Exists(Path.Combine(unitDirectory, UnitFileName)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Uninstall_WhenReloadRefusesToAnswer_FailsCheckedAfterTheUnitIsGone()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        Directory.CreateDirectory(unitDirectory);
+        File.WriteAllText(Path.Combine(unitDirectory, UnitFileName), UnitText());
+        var runner = new FakeAutostartProcessRunner((_, arguments) => arguments.Contains("daemon-reload")
+            ? new AutostartProcessResult(1, string.Empty, "Failed to connect to bus: No such file or directory")
+            : FakeAutostartProcessRunner.Ok);
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+
+        var error = await Should.ThrowAsync<AutostartException>(() => applier.UninstallAsync(CancellationToken.None));
+
+        error.Message.ShouldContain("failed to reload the systemd user manager (exit 1)");
         File.Exists(Path.Combine(unitDirectory, UnitFileName)).ShouldBeFalse();
         runner.Commands().ShouldBe([Disable, Reload]);
     }
@@ -79,7 +154,10 @@ public sealed class SystemdUserApplierTests
         var runner = new FakeAutostartProcessRunner();
         var applier = new SystemdUserApplier(unitDirectory, runner);
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeFalse();
+        var removal = await applier.UninstallAsync(CancellationToken.None);
+
+        removal.WasRemoved.ShouldBeFalse();
+        removal.Warnings.ShouldBeEmpty();
         (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeFalse();
 
         runner.Calls.ShouldBeEmpty();
@@ -96,7 +174,7 @@ public sealed class SystemdUserApplierTests
         await applier.InstallAsync(UnitText(), CancellationToken.None);
         runner.Calls.Clear();
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeTrue();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeTrue();
 
         File.Exists(link).ShouldBeFalse();
         File.Exists(Path.Combine(unitDirectory, UnitFileName)).ShouldBeFalse();
@@ -110,7 +188,7 @@ public sealed class SystemdUserApplierTests
         var runner = new FakeAutostartProcessRunner();
         var applier = new SystemdUserApplier(unitDirectory, runner);
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeTrue();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeTrue();
 
         File.Exists(link).ShouldBeFalse();
         runner.Commands().ShouldBe([Reload]);
@@ -125,7 +203,7 @@ public sealed class SystemdUserApplierTests
         var runner = new FakeAutostartProcessRunner();
         var applier = new SystemdUserApplier(unitDirectory, runner);
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeFalse();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeFalse();
 
         File.Exists(link).ShouldBeTrue();
         new FileInfo(link).LinkTarget.ShouldBe("../foreign.service");
@@ -171,5 +249,29 @@ public sealed class SystemdUserApplierTests
         var link = Path.Combine(wantsDirectory, UnitFileName);
         File.CreateSymbolicLink(link, target);
         return link;
+    }
+
+    // The answer a machine without a startable systemctl gives: not an exit code but a refusal from
+    // the seam itself, raised only for the disable call so the reload still gets to speak.
+    private sealed class ThrowingDisableRunner : IAutostartProcessRunner
+    {
+        public Task<AutostartProcessResult> RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            CancellationToken cancellationToken)
+        {
+            if (arguments.Contains("disable"))
+            {
+                throw new AutostartException($"Could not start '{fileName}'.");
+            }
+
+            return Task.FromResult(FakeAutostartProcessRunner.Ok);
+        }
+
+        public Task<AutostartProcessResult> RunRawAsync(
+            string fileName,
+            string argumentLine,
+            CancellationToken cancellationToken) =>
+            RunAsync(fileName, [argumentLine], cancellationToken);
     }
 }

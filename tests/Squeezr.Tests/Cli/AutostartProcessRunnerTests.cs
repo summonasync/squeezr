@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Shouldly;
 using Squeezr.Cli.Infra.Autostart;
 using Squeezr.Core.Infra.Autostart;
@@ -40,5 +41,44 @@ public sealed class AutostartProcessRunnerTests
 
         error.Message.ShouldContain(missing);
         error.Message.ShouldStartWith("Could not start");
+    }
+
+    // The cancellation is the caller's, not the 30 s budget, so the branch that walks away from a live
+    // tool is reachable in a test without paying for the budget: the operator's cancellation has to
+    // come back as itself, not as a timeout, and the run has to be over promptly.
+    [LinuxFact]
+    public async Task RunAsync_WhenTheCallerCancels_KillsTheToolAndRethrowsTheCancellation()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+        var started = Stopwatch.StartNew();
+
+        var error = await Should.ThrowAsync<OperationCanceledException>(
+            () => new AutostartProcessRunner().RunAsync("/bin/sh", ["-c", "sleep 30"], cts.Token));
+
+        started.Stop();
+        error.Message.ShouldNotContain("did not finish within");
+        started.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+    }
+
+    // A killed tool leaves its pipe readers mid-flight. Draining means two things and both are
+    // measured here: every open read is waited for before the caller moves on, and the answer a torn
+    // stream gives is discarded rather than thrown at the cancellation it follows.
+    [Fact]
+    public async Task DrainQuietly_WaitsForEveryOpenReadAndKeepsATornStreamQuiet()
+    {
+        var stdout = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stderr = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var draining = AutostartProcessRunner.DrainQuietly(stdout.Task, stderr.Task);
+        draining.IsCompleted.ShouldBeFalse();
+
+        stdout.SetResult("x");
+        draining.IsCompleted.ShouldBeFalse();
+
+        stderr.SetException(new IOException("the redirected stream was torn"));
+        await draining;
+
+        stdout.Task.IsCompleted.ShouldBeTrue();
+        stderr.Task.IsCompleted.ShouldBeTrue();
     }
 }

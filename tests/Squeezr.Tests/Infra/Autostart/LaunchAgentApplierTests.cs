@@ -69,7 +69,7 @@ public sealed class LaunchAgentApplierTests
         var runner = new FakeAutostartProcessRunner();
         var applier = new LaunchAgentApplier(agentsDirectory, Domain, runner);
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeFalse();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeFalse();
         (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeFalse();
 
         runner.Calls.ShouldBeEmpty();
@@ -84,7 +84,7 @@ public sealed class LaunchAgentApplierTests
         await applier.InstallAsync(PlistText(), CancellationToken.None);
         runner.Calls.Clear();
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeTrue();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeTrue();
 
         File.Exists(Path.Combine(agentsDirectory, PlistFileName)).ShouldBeFalse();
         (await applier.IsInstalledAsync(CancellationToken.None)).ShouldBeFalse();
@@ -101,7 +101,7 @@ public sealed class LaunchAgentApplierTests
         Directory.CreateDirectory(agentsDirectory);
         File.WriteAllText(Path.Combine(agentsDirectory, PlistFileName), PlistText());
 
-        (await applier.UninstallAsync(CancellationToken.None)).ShouldBeTrue();
+        (await applier.UninstallAsync(CancellationToken.None)).WasRemoved.ShouldBeTrue();
 
         File.Exists(Path.Combine(agentsDirectory, PlistFileName)).ShouldBeFalse();
     }
