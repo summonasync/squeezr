@@ -59,7 +59,9 @@ public sealed class FindReferencesTool
 
             var result = lookup.Find(symbolName, repo);
 
-            var freshness = Guard(root, result);
+            var namedUniverse = AnsweredFiles(result);
+            IReadOnlyList<(string Repo, string File)> candidates = [.. namedUniverse.Take(FreshnessGuard.CandidateLimit)];
+            var freshness = Guard(root, candidates);
             if (freshness.Refreshed.Count > 0)
             {
                 result = lookup.Find(symbolName, repo);
@@ -98,11 +100,22 @@ public sealed class FindReferencesTool
                     $"{unknownBaselineFiles} referenced file(s) not in the index — excluded from the whole-file baseline");
             }
 
-            var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, MergeStale(freshness.Stale, lagging),
-                definitions: definitions, cost: cost, fileFreshness: fileFreshness);
+            var carried = MergeStale(freshness.Stale, lagging);
+            if (AnswerFreshness.CoverageWarning(candidates.Count, namedUniverse.Count) is { } coverageLine)
+            {
+                warnings.Add(coverageLine);
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, carried,
+                definitions: definitions, cost: cost, fileFreshness: fileFreshness,
+                freshness: AnswerFreshness.ForContent(
+                    checkedCandidates: candidates.Count,
+                    namedFiles: namedUniverse.Count,
+                    staleTotal: carried.Count,
+                    listed: carried.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
-                tokensUsed, false, data.Count,
+                envelope.TokensUsed, false, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,
@@ -186,17 +199,17 @@ public sealed class FindReferencesTool
             .Select(s => s.ContainerName is null ? s.Name : $"{s.ContainerName}.{s.Name}")
             .FirstOrDefault();
 
-    private static FreshnessResult Guard(string root, RefLookupResult result) =>
-        FreshnessGuard.CheckAndRefresh(
-            root,
-            result.Groups
-                .SelectMany(g => g.Refs
-                    .Select(r => (g.Repo, r.File))
-                    .Concat(g.Definitions.Select(d => (g.Repo, d.File))))
-                .Distinct()
-                .Take(FreshnessGuard.CandidateLimit)
-                .ToList(),
-            StaleLockWarningSink.ToStderr);
+    // every file the answer speaks for, rows and declarations alike: this is the denominator the content
+    // check is measured against, before the candidate cap trims what it may reach
+    private static IReadOnlyList<(string Repo, string File)> AnsweredFiles(RefLookupResult result) =>
+        [.. result.Groups
+            .SelectMany(g => g.Refs
+                .Select(r => (g.Repo, r.File))
+                .Concat(g.Definitions.Select(d => (g.Repo, d.File))))
+            .Distinct()];
+
+    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string File)> candidates) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
 
     private static object Params(string symbol, string? repo, IReadOnlyList<string> secretGuardExtra) =>
         new { symbol, repo, secretGuardExtra };

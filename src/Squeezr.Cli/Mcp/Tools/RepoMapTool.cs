@@ -39,7 +39,7 @@ public sealed class RepoMapTool
                   ((root, repo, depth, maxTokens, prefix) => new RepoMapper(root).Build(repo, depth, maxTokens, prefix));
     }
 
-    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Pass prefix (e.g. \"src/Squeezr.Cli/\") to render only that subtree with prefix-relative directory labels — depth keeps its structural meaning. Lines come from the index: one structural pass over the indexed rows reports files missing from disk or changed by size or mtime in staleFiles, and nothing is reindexed on this call — expand_span reads code on coordinates from other tools.")]
+    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Pass prefix (e.g. \"src/Squeezr.Cli/\") to render only that subtree with prefix-relative directory labels — depth keeps its structural meaning. Lines come from the index: one structural pass over the indexed rows reports files missing from disk or changed by size or mtime in staleFiles — a bounded sample of what it found, never the full verdict, with the covered row count and the sample size in freshness — and nothing is reindexed on this call; expand_span reads code on coordinates from other tools.")]
     [McpServerTool(Name = "repo_map", Title = "Repository map")]
     public object Build(string? repo = null, string? prefix = null, int? depth = null, int? maxTokens = null) =>
         _gate.Run(() => BuildCore(repo, prefix, depth, maxTokens));
@@ -88,11 +88,20 @@ public sealed class RepoMapTool
 
             var data = result.Lines.Select(l => new MapLineData(l.Depth, l.Text)).ToList();
 
-            warnings.Add(
-                "repo_map renders the tree structurally — per-file freshness is not attached to map lines; " +
-                "code_search or code_pack carries the verdict for a file you are about to open");
-
+            // the answer carries per-file verdicts, so the line stops denying them and says which class of
+            // check produced them instead — structure from a stat, never a content hash, never a refresh.
+            // It speaks only when a verdict ships: freshness already names the class when nothing did
             var sample = CarryStaleSample(freshness);
+            if (sample.Carried > 0)
+            {
+                warnings.Add(
+                    "repo_map answers structure, not content: staleFiles names indexed rows of this scope whose " +
+                    "file is gone or whose size or mtime no longer matches the stamp, with no content read " +
+                    "behind a verdict; the map lines themselves still come from the index, code_search and " +
+                    $"symbol_lookup carry the content check for one file, and '{RemedyText.IndexCommand}' " +
+                    "reconciles the rows");
+            }
+
             if (sample.Omitted > 0)
             {
                 warnings.Add(
@@ -101,11 +110,21 @@ public sealed class RepoMapTool
                     $"a sample of {sample.Carried} of them, {sample.Omitted} stale rows are not listed");
             }
 
+            // named is the scope this answer speaks for, not the scope the pass reached: rows withheld or
+            // skipped above are claims without a verdict, so a pass that covered nothing cannot read as clean
             var envelope = ToolEnvelope.Wrap(
-                data, result.TokensUsed, result.Truncated, warnings, root, sample.Paths);
+                data, result.TokensUsed, result.Truncated, warnings, root, sample.Paths,
+                freshness: AnswerFreshness.ForStructure(
+                    checkedRows: freshness.Checked,
+                    namedRows: freshness.Checked + freshness.Withheld + freshness.Skipped,
+                    staleTotal: freshness.Missing.Count + freshness.Changed.Count,
+                    listed: sample.Carried,
+                    listedMissing: sample.Missing.Count,
+                    missing: freshness.Missing.Count,
+                    changed: freshness.Changed.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
-                result.TokensUsed, result.Truncated, data.Count,
+                envelope.TokensUsed, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null);

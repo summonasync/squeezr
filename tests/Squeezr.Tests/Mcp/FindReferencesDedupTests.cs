@@ -79,7 +79,8 @@ public class FindReferencesDedupTests
                 "alpha:src/IMaterializer.cs", "alpha:src/Materializer.cs",
                 "beta:src/IMaterializer.cs", "beta:src/Materializer.cs",
             ]);
-        string[] requiredKeys = ["cost", "data", "fileFreshness", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"];
+        string[] requiredKeys =
+            ["cost", "data", "fileFreshness", "freshness", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"];
         envelope.EnumerateObject().Select(p => p.Name).ToList().ShouldBe([.. requiredKeys, "definitions"], ignoreOrder: true);
     }
 

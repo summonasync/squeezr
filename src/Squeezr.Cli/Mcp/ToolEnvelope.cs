@@ -17,7 +17,9 @@ public sealed record ToolEnvelope(
     IReadOnlyList<RefDefinitionData>? Definitions = null,
     [property: JsonPropertyName("cost")] AnswerCost? Cost = null,
     [property: JsonPropertyName("fileFreshness"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<FileFreshness>? FileFreshness = null)
+    IReadOnlyList<FileFreshness>? FileFreshness = null,
+    [property: JsonPropertyName("freshness"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    AnswerFreshness? Freshness = null)
 {
     public static ToolEnvelope Wrap(
         object? data,
@@ -29,11 +31,17 @@ public sealed record ToolEnvelope(
         IReadOnlyList<string>? didYouMean = null,
         IReadOnlyList<RefDefinitionData>? definitions = null,
         AnswerCost? cost = null,
-        IReadOnlyList<FileFreshness>? fileFreshness = null)
+        IReadOnlyList<FileFreshness>? fileFreshness = null,
+        AnswerFreshness? freshness = null)
     {
-        var resolved = cost ?? AnswerCost.Unknown(tokensUsed, !truncated);
+        // one rule for every tool that declares a check: an answer that carries less of the verdict than it
+        // found is not complete. tokensUsed stays the price of the content the caller's budget governs — the
+        // freshness payload is declared by freshness itself and costs the answer its completeness instead
+        var complete = !truncated && (freshness is null || freshness.CarriesWholeVerdict);
+        var resolved = cost ?? AnswerCost.Unknown(tokensUsed, complete);
         return new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [],
-            didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = !truncated }, fileFreshness);
+            didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = complete }, fileFreshness,
+            freshness);
     }
 
     public ToolEnvelope WithWarning(string? warning) =>

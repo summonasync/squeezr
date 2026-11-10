@@ -988,10 +988,26 @@ Every tool answers in one envelope:
   chunks pending embedding)" in `code_search` when the semantic layer is not
   fully pumped — at 100% the line is absent), trimming hints, and "cache:
   invalidated (index changed)" — the cache-death mark (see below).
-- `indexAge` / `staleFiles` — freshness. Modified files refresh inline on
-  read; what could not be refreshed lands honestly in `staleFiles` — the
-  agent sees the data for those files is stale and may suggest `squeezr
-  index`. The final call on a reindex belongs to the workspace owner.
+- `indexAge` / `staleFiles` — freshness. `staleFiles` names indexed rows the
+  answer can no longer vouch for, in one of two classes: on `repo_map` it is
+  the verdict of a structure pass (a row whose file is gone, or whose size or
+  mtime moved — no content is read there and nothing is refreshed), on
+  `code_search` / `symbol_lookup` / `find_references` it is the content guard
+  (modified files refresh inline on read; what could not be refreshed lands
+  honestly in `staleFiles`). Either way the agent sees the data behind those
+  files is not confirmed and may suggest `squeezr index`. The final call on a
+  reindex belongs to the workspace owner.
+- `freshness` — present only on answers that ran a check of their own, and
+  additive over the core keys above: `{check, checked, named, staleTotal,
+  listed}`, plus `listedMissing`, `missing` and `changed` on the map's
+  structure pass. It says which class of check ran (`structure` or `content`),
+  how many positions it examined against how many the answer speaks for
+  (`named` — the rows of a map scope, withheld and unresolvable ones included;
+  the distinct files a query answer names), how many came back stale, and how
+  many of those the answer actually lists. An empty `staleFiles` with
+  `checked: 0` means nothing was examined, not that everything is fine; a
+  `listed` below `staleTotal` means the answer carries a sample, and
+  `cost.complete` says so.
 
 Repeat queries are nearly free: the expensive tools (`repo_map`,
 `code_search`, `symbol_lookup`, `find_references`) cache answers within a

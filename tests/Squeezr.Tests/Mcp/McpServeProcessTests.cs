@@ -72,6 +72,53 @@ public sealed class McpServeProcessTests
     }
 
     [Fact]
+    public async Task Serve_MapAnswer_WiresFreshnessLast_WithTheOldKeysUntouched()
+    {
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        (await CliTestProcess.RunWithHomeAsync(home, workspace, "init", "--name", "freshwire", "--json"))
+            .ExitCode.ShouldBe(0);
+        // no embedding rewiring here: this pin reads the envelope's bytes, and an answer shape does not
+        // depend on whether the vector arm of the index came up
+        Directory.CreateDirectory(Path.Combine(workspace, "repo", "src"));
+        File.WriteAllText(Path.Combine(workspace, "repo", "src", "Alpha.cs"), "public class Alpha { public int Value = 1; }\n");
+        File.WriteAllText(Path.Combine(workspace, "repo", "src", "Gone.cs"), "public class Gone { public int Value = 1; }\n");
+        (await CliTestProcess.RunWithHomeAsync(home, workspace, "add", "repo", "--name", "demo", "--json"))
+            .ExitCode.ShouldBe(0);
+        (await CliTestProcess.RunWithHomeAsync(home, workspace, "index", "--json")).ExitCode.ShouldBe(0);
+        File.Delete(Path.Combine(workspace, "repo", "src", "Gone.cs"));
+
+        var (stdout, _) = await ServeToolCallAsync(home, workspace, workspace,
+            """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"repo_map","arguments":{"depth":2}}}""");
+
+        // raw bytes off the pipe: the field is additive, sits last, and moves no existing name, type or order
+        var answer = ToolCallResponse(stdout);
+        answer.ShouldContain(@"\u0022freshness\u0022:");
+
+        using var message = JsonDocument.Parse(answer);
+        using var envelope = JsonDocument.Parse(message.RootElement
+            .GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!);
+        var root = envelope.RootElement;
+
+        root.EnumerateObject().Select(p => p.Name).ShouldBe(
+            ["data", "tokensUsed", "truncated", "warnings", "indexAge", "staleFiles", "cost", "freshness"]);
+        root.GetProperty("staleFiles").ValueKind.ShouldBe(JsonValueKind.Array);
+        root.GetProperty("staleFiles").EnumerateArray().Select(v => v.GetString())
+            .ShouldBe(["demo/src/Gone.cs"]);
+        root.GetProperty("tokensUsed").ValueKind.ShouldBe(JsonValueKind.Number);
+        root.GetProperty("indexAge").ValueKind.ShouldNotBe(JsonValueKind.Null);
+        root.GetProperty("cost").EnumerateObject().Select(p => p.Name)
+            .ShouldBe(["tokensUsed", "complete"]);
+        root.GetProperty("freshness").EnumerateObject().Select(p => p.Name).ShouldBe(
+            ["check", "checked", "named", "staleTotal", "listed", "listedMissing", "missing", "changed"]);
+        root.GetProperty("freshness").GetProperty("check").GetString().ShouldBe("structure");
+        root.GetProperty("freshness").GetProperty("named").GetInt32().ShouldBe(2);
+        root.GetProperty("freshness").GetProperty("staleTotal").GetInt32().ShouldBe(1);
+        // the verdict is named whole here, so the answer keeps its completeness claim
+        root.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Serve_SessionOutsideResolvedRoot_EnvelopeRebindsAndStderrWarningStays()
     {
         var home = TestDirs.NewTempDir();

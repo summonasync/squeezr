@@ -68,7 +68,8 @@ public sealed class SymbolLookupTool
 
             var result = lookup.Find(symbolName, repo, kind, budget, body: true);
 
-            var freshness = Guard(root, result);
+            var candidates = GuardCandidates(result);
+            var freshness = Guard(root, candidates);
             if (freshness.Refreshed.Count > 0)
             {
                 result = lookup.Find(symbolName, repo, kind, budget, body: true);
@@ -115,11 +116,22 @@ public sealed class SymbolLookupTool
                     $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
             }
 
-            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale,
-                result.DidYouMean, cost: cost, fileFreshness: fileFreshness);
+            var namedCount = namedFiles.Distinct().Count();
+            if (AnswerFreshness.CoverageWarning(candidates.Count, namedCount) is { } coverageLine)
+            {
+                warnings.Add(coverageLine);
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root,
+                freshness.Stale, result.DidYouMean, cost: cost, fileFreshness: fileFreshness,
+                freshness: AnswerFreshness.ForContent(
+                    checkedCandidates: candidates.Count,
+                    namedFiles: namedCount,
+                    staleTotal: freshness.Stale.Count,
+                    listed: freshness.Stale.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
-                result.TokensUsed, result.Truncated, data.Count,
+                envelope.TokensUsed, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,
@@ -133,11 +145,14 @@ public sealed class SymbolLookupTool
         }
     }
 
-    private static FreshnessResult Guard(string root, SymbolLookupResult result) =>
-        FreshnessGuard.CheckAndRefresh(
-            root,
-            result.Matches.Take(FreshnessGuard.CandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
-            StaleLockWarningSink.ToStderr);
+    private static IReadOnlyList<(string Repo, string File)> GuardCandidates(SymbolLookupResult result) =>
+        [.. result.Matches
+            .Take(FreshnessGuard.CandidateLimit)
+            .Select(m => (m.Repo, m.File))
+            .Distinct()];
+
+    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string File)> candidates) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
 
     // the guard re-reads its widening patterns from the config on every call, so a cached answer is only
     // valid for the pattern set it was computed with

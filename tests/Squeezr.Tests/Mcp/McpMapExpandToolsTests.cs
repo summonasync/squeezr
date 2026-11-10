@@ -260,7 +260,7 @@ public class McpMapExpandToolsTests
             result.IsError.ShouldNotBe(true);
             var envelope = ParseEnvelope(result);
             var keys = envelope.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray();
-            var withoutOptional = keys.Where(k => k != "fileFreshness").ToArray();
+            var withoutOptional = keys.Where(k => k is not ("fileFreshness" or "freshness")).ToArray();
             expectedKeys ??= withoutOptional;
             withoutOptional.ShouldBe(expectedKeys);
 

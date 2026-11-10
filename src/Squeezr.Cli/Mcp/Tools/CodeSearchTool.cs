@@ -95,7 +95,8 @@ public sealed class CodeSearchTool
 
             warnings.AddRange(response.Warnings);
 
-            var freshness = Guard(root, response);
+            var candidates = GuardCandidates(response);
+            var freshness = Guard(root, candidates);
             if (freshness.Refreshed.Count > 0)
             {
                 response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
@@ -139,11 +140,24 @@ public sealed class CodeSearchTool
                     $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
             }
 
+            // the candidate cap bounds what the content check covered, not what the answer claims: when the
+            // answer names more files than that, the answer says how many the check actually reached
+            var namedCount = namedFiles.Distinct().Count();
+            if (AnswerFreshness.CoverageWarning(candidates.Count, namedCount) is { } coverageLine)
+            {
+                warnings.Add(coverageLine);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
-                freshness.Stale, cost: cost, fileFreshness: fileFreshness);
+                freshness.Stale, cost: cost, fileFreshness: fileFreshness,
+                freshness: AnswerFreshness.ForContent(
+                    checkedCandidates: candidates.Count,
+                    namedFiles: namedCount,
+                    staleTotal: freshness.Stale.Count,
+                    listed: freshness.Stale.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
-                response.TokensUsed, response.Truncated, data.Count,
+                envelope.TokensUsed, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,
@@ -163,11 +177,14 @@ public sealed class CodeSearchTool
         return meta?.GetSemanticCoverage();
     }
 
-    private static FreshnessResult Guard(string root, SearchResponse response) =>
-        FreshnessGuard.CheckAndRefresh(
-            root,
-            response.Matches.Take(FreshnessGuard.CandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
-            StaleLockWarningSink.ToStderr);
+    private static IReadOnlyList<(string Repo, string Path)> GuardCandidates(SearchResponse response) =>
+        [.. response.Matches
+            .Take(FreshnessGuard.CandidateLimit)
+            .Select(m => (m.Repo, m.Path))
+            .Distinct()];
+
+    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string Path)> candidates) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
 
     private static object Params(
         string query,
