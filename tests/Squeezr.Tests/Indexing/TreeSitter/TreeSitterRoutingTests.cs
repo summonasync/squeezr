@@ -211,6 +211,31 @@ public class TreeSitterRoutingTests
         bare[0].ToSymbolId.ShouldBeNull();
     }
 
+    [Theory]
+    [InlineData("src/loader.py", "python")]
+    [InlineData("cmd/server.go", "go")]
+    public void Index_PythonAndGoFiles_StayOnFallbackChunksUntilTheirVocabulariesLand(string path, string language)
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var file = store.ListFiles(repoId).Single(f => f.Path == path);
+
+        // the tripwire T2/T4 convert: the grammar arms and the home row are in place, but no symbol
+        // vocabulary is, so the language must keep the sliding-window chunker. Convert each row into
+        // the per-symbol form when its vocabulary ships — deleting this test instead is a fail, and
+        // so is a file that leaves this run with no chunks at all (routed with an empty vocabulary)
+        file.Language.ShouldBe(language);
+        file.Kind.ShouldBe("code");
+        store.ListSymbolsByFile(file.Id).ShouldBeEmpty();
+        store.ListRefsByFile(file.Id).ShouldBeEmpty();
+        var chunks = store.ListChunksByFile(file.Id);
+        chunks.ShouldNotBeEmpty();
+        chunks.ShouldAllBe(c => c.SymbolId == null);
+    }
+
     [Fact]
     public void Run_Downgrade_FallbackChunksAndAggregatedWarning()
     {
@@ -453,6 +478,22 @@ public class TreeSitterRoutingTests
 
             export function Badge({ count }: { count: number }) {
               return <div className="badge">{mul(count, 2)}</div>;
+            }
+            """);
+        WriteFile(workspace, "repo/src/loader.py", """
+            import os
+
+            def load(path):
+                return open(path).read()
+            """);
+        WriteFile(workspace, "repo/cmd/server.go", """
+            package main
+
+            import "fmt"
+
+            func Serve(path string) string {
+                fmt.Println(path)
+                return path
             }
             """);
         WriteFile(workspace, "repo/src/lib.rs", """

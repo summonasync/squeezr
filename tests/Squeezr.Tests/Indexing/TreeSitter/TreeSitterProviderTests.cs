@@ -42,6 +42,22 @@ public class TreeSitterProviderTests
         provider.CanHandle("app.rs", "typescript").ShouldBeFalse();
     }
 
+    [Fact]
+    public void CanHandle_PythonAndGoExtensions_AcceptOwnHintsAndRejectForeign()
+    {
+        var provider = new TreeSitterProvider(Config);
+
+        provider.CanHandle("app.py", null).ShouldBeTrue();
+        provider.CanHandle("app.py", "python").ShouldBeTrue();
+        provider.CanHandle("app.py", "py").ShouldBeTrue();
+        provider.CanHandle("src/MODEL.PY", "PYTHON").ShouldBeTrue();
+        provider.CanHandle("app.py", "javascript").ShouldBeFalse();
+        provider.CanHandle("main.go", null).ShouldBeTrue();
+        provider.CanHandle("main.go", "go").ShouldBeTrue();
+        provider.CanHandle("cmd/Main.GO", "GO").ShouldBeTrue();
+        provider.CanHandle("main.go", "rust").ShouldBeFalse();
+    }
+
     [Theory]
     [InlineData("src/app.js", "JavaScript", "javascript")]
     [InlineData("src/app.jsx", "JavaScript", "javascript")]
@@ -51,6 +67,10 @@ public class TreeSitterProviderTests
     [InlineData("src/Badge.tsx", "TSX", "tsx")]
     [InlineData("src/lib.rs", "Rust", "rust")]
     [InlineData("src/LIB.RS", "Rust", "rust")]
+    [InlineData("src/main.py", "Python", "python")]
+    [InlineData("src/MAIN.PY", "Python", "python")]
+    [InlineData("cmd/server.go", "Go", "go")]
+    [InlineData("cmd/SERVER.GO", "Go", "go")]
     [InlineData("notes.md", "JavaScript", "javascript")]
     public void GrammarAndLanguageArms_PerExtension_ResolvesOffTheDefault(string path, string grammar, string language)
     {
@@ -431,6 +451,25 @@ public class TreeSitterProviderTests
         chunks[0].Text.ShouldStartWith("function big()\n");
         chunks.ShouldAllBe(c => c.Text.Contains("function big()"));
         chunks[^1].Span.EndLine.ShouldBe(symbol.Span.EndLine);
+    }
+
+    [Theory]
+    [InlineData("src/main.py", "python", "def load(path):\n  return path\n")]
+    [InlineData("cmd/server.go", "go", "package main\n\nfunc Load(path string) string {\n  return path\n}\n")]
+    public void UnroutedButRegisteredLanguage_ParsesCleanlyAndYieldsNoRows(string path, string language, string source)
+    {
+        var provider = new TreeSitterProvider(Config);
+        var result = provider.Parse(new FileRef("demo", path), Encoding.UTF8.GetBytes(source));
+
+        // the warnings check is what makes the empty rows mean 'nothing to extract' rather than 'the
+        // parse blew up and the catch-all hid it'; the arms resolve to the real grammar, the home
+        // answers with an empty vocabulary, and the indexer keeps such a file on the fallback chunker
+        // because Routed() is false — none of those three facts may silently flip
+        provider.Warnings.ShouldBeEmpty();
+        result.Language.ShouldBe(language);
+        result.Symbols.ShouldBe([]);
+        result.Refs.ShouldBe([]);
+        result.Chunks.ShouldBe([]);
     }
 
     [Fact]

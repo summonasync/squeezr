@@ -27,9 +27,16 @@ internal static class TreeSitterLanguages
     internal const string TypeScript = "typescript";
     internal const string Tsx = "tsx";
     internal const string Rust = "rust";
+    internal const string Python = "python";
+    internal const string Go = "go";
 
     internal const string JsTsPool = "js-ts";
     internal const string RustPool = "rust";
+
+    // reserved now so a grammar's pool name is not invented mid-extraction later: python and go are
+    // registered below without reference rules, and these are the names their rows will carry
+    internal const string PythonPool = "python";
+    internal const string GoPool = "go";
 
     private sealed record LanguageSet(SymbolVocabulary Symbols, ReferenceVocabulary? References);
 
@@ -105,10 +112,22 @@ internal static class TreeSitterLanguages
         [TypeScript] = new LanguageSet(JsTsSymbols, JsTsReferences),
         [Tsx] = new LanguageSet(JsTsSymbols, JsTsReferences),
         [Rust] = new LanguageSet(RustSymbols, RustReferences),
+
+        // registered ahead of their vocabularies so the grammar arms, the pool names and this row are
+        // already in place when a symbol table lands; empty Kinds is what keeps them unrouted
+        [Python] = new LanguageSet(NoSymbols, null),
+        [Go] = new LanguageSet(NoSymbols, null),
     };
 
+    // routing is 'has a symbol vocabulary', not 'has a row here': a routed file is taken off the
+    // fallback chunker, so routing a language whose vocabulary is EMPTY would index it to zero symbols
+    // AND zero chunks (the trap 111/T1 nearly shipped). Deriving the predicate makes exactly that
+    // state impossible to write — it says nothing about a vocabulary that is non-empty but wrong,
+    // which is the per-language extraction tests' job, nor about a half-landed table: the guard that a
+    // routed file never loses its chunks to a missing entry is the fallback tripwire in
+    // TreeSitterRoutingTests, which T2/T4 convert to per-symbol assertions rather than delete
     internal static bool Routed(string language) =>
-        Sets.ContainsKey(language);
+        Sets.TryGetValue(language, out var set) && set.Symbols.Kinds.Count > 0;
 
     // an unrouted language yields zero rows rather than borrowing the js/ts table: tree-sitter-go
     // names a plain function node function_declaration too, so a js/ts fallback would silently

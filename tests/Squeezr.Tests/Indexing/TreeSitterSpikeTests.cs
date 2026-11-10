@@ -479,6 +479,136 @@ public class TreeSitterSpikeTests
         types.ShouldNotContain("method_call_expression");
     }
 
+    // node-kind names measured on the grammars bundled for linux-x64, before any table exists.
+    // 'function_declaration' is deliberately in both go and javascript assertions: the names repeat
+    // across grammars, which is why a reference pool cannot be keyed on a node kind alone
+    private const string PythonSource = """
+        import os
+
+        @staticmethod
+        def load(path: str) -> str:
+            return open(path).read()
+
+        async def fetch(url: str) -> str:
+            return url
+
+        class Registry:
+            def add(self, item):
+                self.items = []
+                return self
+        """;
+
+    private const string GoSource = """
+        package registry
+
+        import "fmt"
+
+        type Registry struct {
+            items []string
+        }
+
+        type Lookuper interface {
+            Lookup(key string) string
+        }
+
+        func New() *Registry {
+            return &Registry{}
+        }
+
+        func (r *Registry) Add(item string) *Registry {
+            r.items = append(r.items, item)
+            fmt.Println(item)
+            return r
+        }
+        """;
+
+    [Fact]
+    public void Python_Parse_ProducesExpectedNodeTypes()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonSource);
+
+        tree.RootNode!.HasError.ShouldBeFalse();
+        var types = CollectTypes(tree.RootNode!);
+        types.ShouldContain("import_statement");
+        types.ShouldContain("function_definition");
+        types.ShouldContain("class_definition");
+        types.ShouldContain("decorated_definition");
+    }
+
+    [Fact]
+    public void Python_AsyncAndDecoratedFunctions_BothCarryAFunctionDefinitionNode()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonSource);
+
+        var definitions = CollectNodes(tree.RootNode!).Where(n => n.Type == "function_definition").ToList();
+        definitions.Select(n => n.GetChildForField("name")?.Text).ShouldBe(["load", "fetch", "add"]);
+
+        // the decorator wraps rather than replaces, and 'async' is a keyword inside the same node:
+        // a vocabulary keyed only on function_definition reaches both, no decorated/async extra needed
+        CollectTypes(CollectNodes(tree.RootNode!).First(n => n.Type == "decorated_definition"))
+            .ShouldContain("function_definition");
+    }
+
+    [Fact]
+    public void Go_Parse_ProducesExpectedNodeTypes()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoSource);
+
+        tree.RootNode!.HasError.ShouldBeFalse();
+        var types = CollectTypes(tree.RootNode!);
+        types.ShouldContain("package_clause");
+        types.ShouldContain("import_declaration");
+        types.ShouldContain("type_declaration");
+        types.ShouldContain("struct_type");
+        types.ShouldContain("interface_type");
+        types.ShouldContain("function_declaration");
+        types.ShouldContain("method_declaration");
+    }
+
+    [Fact]
+    public void JavaScriptGrammar_FlagsGoSourceAsError()
+    {
+        using var language = new Language("JavaScript");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoSource);
+        var types = CollectTypes(tree.RootNode!);
+
+        // the collision proof for the per-language pools, measured on this exact source: reading go as
+        // javascript is not a silent near-miss — it is an error tree, and its go-only kinds vanish —
+        // yet the go 'import "fmt"' line still arrives as javascript's own import_statement, the node
+        // name the javascript reference rules treat as an import source. A pool keyed on node kinds
+        // would therefore invent an import reference from a go file that has no import to resolve
+        tree.RootNode!.HasError.ShouldBeTrue();
+        CollectNodes(tree.RootNode!).ShouldContain(n => n.IsError);
+        types.ShouldContain("import_statement");
+        types.ShouldContain("call_expression");
+        types.ShouldNotContain("type_declaration");
+        types.ShouldNotContain("method_declaration");
+        types.ShouldNotContain("struct_type");
+        types.ShouldNotContain("package_clause");
+    }
+
+    [Fact]
+    public void JavaScriptGrammar_FlagsPythonSourceAsError()
+    {
+        using var language = new Language("JavaScript");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonSource);
+        var types = CollectTypes(tree.RootNode!);
+
+        tree.RootNode!.HasError.ShouldBeTrue();
+        CollectNodes(tree.RootNode!).ShouldContain(n => n.IsError);
+        types.ShouldNotContain("function_definition");
+        types.ShouldNotContain("class_definition");
+        types.ShouldNotContain("decorated_definition");
+    }
+
     [Fact]
     public void BrokenJavaScript_RecoversWithErrorNodes()
     {
