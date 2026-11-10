@@ -8,6 +8,7 @@ public static class RemedyText
     public const string InitCommand = "squeezr init";
     public const string IndexCommand = "squeezr index";
     public const string AddCommand = "squeezr add";
+    public const string DropCommand = "squeezr drop";
     public const string ServicesUp = "squeezr services up";
     public const int ScopeHintSiblingLimit = 3;
     public const string WorkspaceNotInitialized = $"Workspace is not initialized. Run '{InitCommand}' first.";
@@ -22,6 +23,8 @@ public static class RemedyText
     public static string AnchorIndex(string root) => $"cd {ShellPath.Quote(root)} && {IndexCommand}";
 
     public static string AddRepo(string path, string name) => $"{AddCommand} {ShellPath.Quote(path)} --name {name}";
+
+    public static string DropStore(string storeKey) => $"{DropCommand} --store-key {ShellPath.Quote(storeKey)}";
 
     public static string? ScopeBlindSiblings(IReadOnlyList<WorkspaceSiblingEntry> siblings)
     {

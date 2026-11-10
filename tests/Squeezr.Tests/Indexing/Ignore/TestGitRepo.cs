@@ -4,9 +4,17 @@ namespace Squeezr.Tests.Indexing.Ignore;
 
 internal static class TestGitRepo
 {
-    public static string Init(string root)
+    public static string Init(string root, string? separateGitDir = null)
     {
-        Run(root, "init");
+        if (separateGitDir is null)
+        {
+            Run(root, "init");
+        }
+        else
+        {
+            Run(root, "init", "--separate-git-dir", separateGitDir);
+        }
+
         Run(root, "config", "user.email", "lane@example.test");
         Run(root, "config", "user.name", "lane");
         return root;

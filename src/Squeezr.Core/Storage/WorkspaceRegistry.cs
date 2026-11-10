@@ -70,6 +70,21 @@ public static class WorkspaceRegistry
         }
     }
 
+    // Canonicalize resolves only the final component, so a tree reached through a linked ancestor is a
+    // different string from the root its row was written at, while both name one directory. A caller
+    // that must not mint a second identity for one tree cannot trust the spelling-sensitive lookup above
+    // and asks for this one; it costs a link walk per row, so it stays the fallback, never the default.
+    public static WorkspaceRegistryEntry? FindByAnyRootSpelling(string rootPath)
+    {
+        var physical = WorkspaceCanonicalPath.ResolveThroughLinks(rootPath);
+        lock (Sync)
+        {
+            InvalidateCacheIfHomeChanged();
+            return Load().FirstOrDefault(e =>
+                string.Equals(WorkspaceCanonicalPath.ResolveThroughLinks(e.RootPath), physical, Comparison));
+        }
+    }
+
     public static WorkspaceRegistryEntry? FindByStoreKey(string storeKey)
     {
         lock (Sync)

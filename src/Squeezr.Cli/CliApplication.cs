@@ -85,6 +85,15 @@ public static class CliApplication
                 fleet.AddCommand<FleetStatusCommand>("status")
                     .WithDescription("Show supervision posture per workspace: desired state, supervised/wedged/managed elsewhere, last pass");
             });
+            config.AddBranch("worktree", worktree =>
+            {
+                worktree.SetDescription("Give a git worktree its own store, filled from the indexed main worktree");
+                worktree.SetDefaultCommand<WorktreeInitCommand>();
+                worktree.AddCommand<WorktreeInitCommand>("init")
+                    .WithDescription(
+                        "Register this worktree as its own store — idempotent by path, and only once the main " +
+                        "worktree is indexed");
+            });
             config.AddBranch("services", services =>
             {
                 services.SetDescription("Manage Squeezr infrastructure services (Qdrant and Ollama)");

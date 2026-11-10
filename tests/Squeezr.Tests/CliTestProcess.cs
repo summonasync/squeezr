@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Squeezr.Core.Storage;
 
@@ -20,14 +21,47 @@ internal static partial class CliTestProcess
         string workingDir, params string[] args)
     {
         var result = await StartAsync(workingDir, args, squeezrHome: null);
-        if (result.ExitCode == 0 && args.Length > 0 && args[0] == "init")
+        // A verb can exit 0 having created nothing — worktree init reports an unindexed main worktree
+        // that way — so the rewire asks the store whether a config is there instead of trusting the code.
+        // The config lives at the root the report names, which is not the cwd when the verb took an
+        // explicit path (`worktree init <path>`), and a bare `worktree` mints through its default command.
+        if (result.ExitCode == 0 && MintsAStore(args))
         {
-            // init writes the default config pointing at the developer's real Qdrant;
-            // rewire to a dead endpoint so CLI flows degrade deterministically.
-            TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workingDir);
+            var mintedRoot = MintedRootFrom(result.StdOut) ?? workingDir;
+            if (File.Exists(SqueezrPaths.ConfigPath(mintedRoot)))
+            {
+                // init writes the default config pointing at the developer's real Qdrant;
+                // rewire to a dead endpoint so CLI flows degrade deterministically.
+                TestWorkspaceConfig.PointQdrantAtDeadEndpoint(mintedRoot);
+            }
         }
 
         return result;
+    }
+
+    // worktree init mints a store through the same path, so its config carries the same live endpoint.
+    // Without the rewire a later command in a test would write real collections into the developer's Qdrant.
+    private static bool MintsAStore(string[] args) =>
+        args.Length > 0 && (args[0] == "init" || args[0] == "worktree");
+
+    private static string? MintedRootFrom(string stdOut)
+    {
+        var start = stdOut.IndexOf('{');
+        if (start < 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(stdOut[start..]);
+            return doc.RootElement.TryGetProperty("rootPath", out var root) ? root.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            // Human-mode output is not JSON; the cwd probe above is still the right fallback.
+            return null;
+        }
     }
 
     public static Task<(int ExitCode, string StdOut, string StdErr)> RunWithHomeAsync(

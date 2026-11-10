@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
+using Squeezr.Tests.Indexing.Ignore;
 
 namespace Squeezr.Tests.Cli;
 
@@ -63,22 +63,32 @@ public sealed class CliWorkspaceDiscoveryTests
     public async Task HookPreRead_InsideRegisteredChild_RecordsTelemetryToTheChildStore()
     {
         var home = TestDirs.NewTempDir();
-        var parent = WorkspaceCanonicalPath.Canonicalize(TestDirs.NewTempDir());
-        var child = WorkspaceCanonicalPath.Canonicalize(
-            Directory.CreateDirectory(Path.Combine(parent, ".lanes", "lane-x")).FullName);
+        var main = TestDirs.NewTempDir();
+        TestGitRepo.Init(main);
+        File.WriteAllText(Path.Combine(main, "seed.txt"), "seed\n");
+        TestGitRepo.Add(main, "seed.txt");
+        TestGitRepo.Commit(main, "seed");
+        var child = Path.Combine(main, ".lanes", "lane-x");
+        TestGitRepo.AddWorktree(main, child, "feat/116-test-lane");
         var file = Path.Combine(child, "src", "a.cs");
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file, "class A { }");
-        Directory.CreateDirectory(StoreDir(home, "parentws-aaaa1111"));
-        Directory.CreateDirectory(StoreDir(home, "lanews-bbbb2222"));
+
+        (await CliTestProcess.RunWithHomeAsync(home, main, "init", "--name", "parentws", "--json"))
+            .ExitCode.ShouldBe(0);
+        var registered = await CliTestProcess.RunWithHomeAsync(home, child, "worktree", "init", "--json");
+        registered.ExitCode.ShouldBe(0);
+        using (var state = JsonDocument.Parse(registered.StdOut.Trim()))
+        {
+            state.RootElement.GetProperty("state").GetString().ShouldBe(
+                "Registered", "the child store has to come from the verb, not from a hand-written row");
+        }
+
+        var parentKey = StoreKeyOf(home, main);
+        var childKey = StoreKeyOf(home, child);
 
         // The parent row is the first one on disk, so arrival order hands the read to the parent;
         // only depth hands it to the child, and the child's telemetry log is where that shows.
-        File.WriteAllText(
-            Path.Combine(home, SqueezrPaths.RegistryFileName),
-            new JsonArray(RegistryRow("parentws", parent, "parentws-aaaa1111"),
-                RegistryRow("lanews", child, "lanews-bbbb2222", parent)).ToJsonString());
-
         var result = await CliTestProcess.RunPipedAsync(
             home,
             "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"" + file + "\"}}",
@@ -86,9 +96,9 @@ public sealed class CliWorkspaceDiscoveryTests
 
         result.ExitCode.ShouldBe(0);
         result.StdOut.ShouldBeEmpty();
-        var childLog = Path.Combine(StoreDir(home, "lanews-bbbb2222"), SqueezrPaths.QueriesLogFileName);
+        var childLog = Path.Combine(StoreDir(home, childKey), SqueezrPaths.QueriesLogFileName);
         File.Exists(childLog).ShouldBeTrue();
-        File.Exists(Path.Combine(StoreDir(home, "parentws-aaaa1111"), SqueezrPaths.QueriesLogFileName))
+        File.Exists(Path.Combine(StoreDir(home, parentKey), SqueezrPaths.QueriesLogFileName))
             .ShouldBeFalse();
         using var doc = JsonDocument.Parse(File.ReadAllText(childLog));
         doc.RootElement.GetProperty("tool").GetString().ShouldBe("pre-read");
@@ -223,24 +233,15 @@ public sealed class CliWorkspaceDiscoveryTests
     private static string StoreDir(string home, string storeKey) =>
         Path.Combine(home, SqueezrPaths.WorkspacesDirName, storeKey);
 
-    private static JsonObject RegistryRow(string name, string rootPath, string storeKey, string? parentRoot = null)
+    private static string StoreKeyOf(string home, string rootPath)
     {
-        var row = new JsonObject
-        {
-            ["name"] = name,
-            ["rootPath"] = rootPath,
-            ["storeKey"] = storeKey,
-            ["createdAt"] = "2026-11-01T00:00:00+00:00",
-            ["lastUsedAt"] = "2026-11-01T00:00:00+00:00",
-        };
-        if (parentRoot is not null)
-        {
-            row["parentRootPath"] = parentRoot;
-            row["kind"] = "Worktree";
-            row["branch"] = "feat/116-test-lane";
-        }
-
-        return row;
+        var canonical = WorkspaceCanonicalPath.Canonicalize(rootPath);
+        using var doc = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(home, SqueezrPaths.RegistryFileName)));
+        return doc.RootElement.EnumerateArray()
+            .Single(row => row.GetProperty("rootPath").GetString() == canonical)
+            .GetProperty("storeKey")
+            .GetString()!;
     }
 
     private static async Task InitAndIndexAsync(string root)
