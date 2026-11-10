@@ -30,6 +30,16 @@ internal static class TestGitRepo
         Run(mainRoot, "worktree", "add", worktreePath, "-b", branch);
     }
 
+    public static void Detach(string root)
+    {
+        Run(root, "checkout", "--detach");
+    }
+
+    public static void SymbolicRef(string root, string target)
+    {
+        Run(root, "symbolic-ref", "HEAD", target);
+    }
+
     private static void Run(string root, params string[] args)
     {
         var start = new ProcessStartInfo

@@ -50,7 +50,7 @@ public sealed class GitTrackedSet
     private static StringComparer PathComparer =>
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-    private static bool HasRepoMarker(string repoRoot) =>
+    internal static bool HasRepoMarker(string repoRoot) =>
         Directory.Exists(Path.Combine(repoRoot, ".git")) || File.Exists(Path.Combine(repoRoot, ".git"));
 
     private static bool TryReadTrackedPaths(string repoRoot, Action<string>? warn, out string output)
