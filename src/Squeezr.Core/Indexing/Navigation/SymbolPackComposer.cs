@@ -28,7 +28,9 @@ public sealed record SymbolPack(
     IReadOnlyList<GhostRefDeclaration> LaggingDeclarations,
     IReadOnlyList<string> GuardWarnings,
     IReadOnlyList<string>? DidYouMean,
-    AnswerState State)
+    AnswerState State,
+    TruncationHint? LookupHint,
+    int RefusedBodyTokens)
 {
     public bool Complete => WithheldCallers == 0 && State is not AnswerState.Clipped;
 }
@@ -52,7 +54,8 @@ public sealed class SymbolPackComposer
                 name, kind ?? "symbol", repo ?? string.Empty, string.Empty, "0-0", null, null, null,
                 [], false, [], 0, [], 0, lookup.TokensUsed, 0, maxTokens,
                 lookup.State is AnswerState.Clipped, 0, [],
-                lookup.GuardWarnings ?? [], lookup.DidYouMean, lookup.State);
+                lookup.GuardWarnings ?? [], lookup.DidYouMean, lookup.State,
+                lookup.Hint, lookup.RefusedBodyTokens);
         }
 
         var hit = lookup.Matches[0];
@@ -107,7 +110,9 @@ public sealed class SymbolPackComposer
             refs.LaggingDeclarations ?? [],
             guardWarnings,
             lookup.DidYouMean,
-            lookup.State);
+            lookup.State,
+            lookup.Hint,
+            lookup.RefusedBodyTokens);
     }
 
     private static void BackfillEnclosingSymbols(MetaStore store, List<PackCaller> rows)

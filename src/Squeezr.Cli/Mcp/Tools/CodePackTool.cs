@@ -80,7 +80,7 @@ public sealed class CodePackTool
 
             if (pack.LookupTruncated)
             {
-                warnings.Add(HintText.TruncationLine(pack.LookupTokens, budget, "raise maxTokens"));
+                warnings.Add(HintText.TruncationLine(pack.LookupTokens, budget, RemedyFor(pack)));
             }
 
             var tokens = pack.LookupTokens + pack.CallerTokens;
@@ -133,7 +133,7 @@ public sealed class CodePackTool
                 pack.GuardWarnings.Count == 0 ? null : pack.GuardWarnings);
 
             var envelope = ToolEnvelope.Wrap(data, tokens, !pack.Complete, warnings, root, staleFiles: null,
-                didYouMean: pack.LookupTruncated ? null : pack.DidYouMean, cost: cost,
+                didYouMean: pack.DidYouMean, cost: cost,
                 fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_pack", parameters,
@@ -150,6 +150,13 @@ public sealed class CodePackTool
             return ToolErrors.From(ex, _workspace);
         }
     }
+
+    // the pack renders the same remedy the lookup would: a refused body with no member map behind it is only
+    // weighable against a number, and the engine already priced it when it turned the text away
+    private static string RemedyFor(SymbolPack pack) =>
+        pack.RefusedBodyTokens > 0 && pack.Members.Count == 0
+            ? HintText.BodyPriceRemedy(pack.RefusedBodyTokens)
+            : pack.LookupHint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy;
 
     public sealed record CodePackData(
         [property: JsonPropertyName("name")] string Name,
