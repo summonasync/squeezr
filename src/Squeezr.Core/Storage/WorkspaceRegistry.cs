@@ -79,6 +79,8 @@ public static class WorkspaceRegistry
         }
     }
 
+    // A nested row owns the paths under its own root: the deepest matching root wins, never the row
+    // that happened to be written first. Equal-length roots tie-break on load order.
     public static WorkspaceRegistryEntry? FindContainingPath(string path)
     {
         var full = Path.GetFullPath(path);
@@ -92,18 +94,22 @@ public static class WorkspaceRegistry
         lock (Sync)
         {
             InvalidateCacheIfHomeChanged();
+            WorkspaceRegistryEntry? deepest = null;
+            var deepestRootLength = -1;
             foreach (var entry in Load())
             {
                 var root = entry.RootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (string.Equals(directory, root, Comparison)
-                    || directory.StartsWith(root + Path.DirectorySeparatorChar, Comparison))
+                if (root.Length <= deepestRootLength || !ContainsDirectory(directory, root))
                 {
-                    return entry;
+                    continue;
                 }
-            }
-        }
 
-        return null;
+                deepest = entry;
+                deepestRootLength = root.Length;
+            }
+
+            return deepest;
+        }
     }
 
     public static void Add(WorkspaceRegistryEntry entry)
@@ -165,6 +171,10 @@ public static class WorkspaceRegistry
         storeDir = string.Empty;
         return false;
     }
+
+    private static bool ContainsDirectory(string directory, string root) =>
+        string.Equals(directory, root, Comparison)
+        || directory.StartsWith(root + Path.DirectorySeparatorChar, Comparison);
 
     private static void Save(IReadOnlyList<WorkspaceRegistryEntry> entries)
     {

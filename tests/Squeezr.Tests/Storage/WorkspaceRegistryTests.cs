@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Shouldly;
 using Squeezr.Core.Storage;
 
@@ -127,6 +128,122 @@ public sealed class WorkspaceRegistryTests : IDisposable
     }
 
     [Fact]
+    public void FindContainingPath_InsideRegisteredChild_ReturnsChildNotParent()
+    {
+        var parent = RegisteredRoot(NewTempDir());
+        var child = RegisteredRoot(Directory.CreateDirectory(Path.Combine(parent, ".lanes", "lane-x")).FullName);
+        WorkspaceRegistry.Add(NewEntry("parent", parent, "parent-aaaa1111"));
+        WorkspaceRegistry.Add(NewEntry("lane", child, "lane-bbbb2222"));
+
+        var inChild = WorkspaceRegistry.FindContainingPath(Path.Combine(child, "src", "a.cs"));
+        inChild.ShouldNotBeNull();
+        inChild!.StoreKey.ShouldBe("lane-bbbb2222");
+
+        var inParent = WorkspaceRegistry.FindContainingPath(Path.Combine(parent, "src", "a.cs"));
+        inParent.ShouldNotBeNull();
+        inParent!.StoreKey.ShouldBe("parent-aaaa1111");
+    }
+
+    [Fact]
+    public void FindContainingPath_ChildRowLoadedFirst_SameVerdictsAsParentRowFirst()
+    {
+        var parent = RegisteredRoot(NewTempDir());
+        var child = RegisteredRoot(Directory.CreateDirectory(Path.Combine(parent, ".lanes", "lane-x")).FullName);
+        WorkspaceRegistry.Add(NewEntry("lane", child, "lane-bbbb2222"));
+        WorkspaceRegistry.Add(NewEntry("parent", parent, "parent-aaaa1111"));
+
+        WorkspaceRegistry.FindContainingPath(Path.Combine(child, "src", "a.cs"))!.StoreKey.ShouldBe("lane-bbbb2222");
+        WorkspaceRegistry.FindContainingPath(Path.Combine(parent, "src", "a.cs"))!.StoreKey.ShouldBe("parent-aaaa1111");
+    }
+
+    [Fact]
+    public void FindContainingPath_RegisteredChildWithDeeperGrandchild_ReturnsDeepest()
+    {
+        var parent = RegisteredRoot(NewTempDir());
+        var child = RegisteredRoot(Directory.CreateDirectory(Path.Combine(parent, ".lanes", "lane-x")).FullName);
+        var grandchild = RegisteredRoot(Directory.CreateDirectory(Path.Combine(child, "src", "pkg")).FullName);
+        WorkspaceRegistry.Add(NewEntry("parent", parent, "parent-aaaa1111"));
+        WorkspaceRegistry.Add(NewEntry("pkg", grandchild, "pkg-cccc3333"));
+        WorkspaceRegistry.Add(NewEntry("lane", child, "lane-bbbb2222"));
+
+        WorkspaceRegistry.FindContainingPath(Path.Combine(grandchild, "a.cs"))!.StoreKey.ShouldBe("pkg-cccc3333");
+        WorkspaceRegistry.FindContainingPath(Path.Combine(child, "other.cs"))!.StoreKey.ShouldBe("lane-bbbb2222");
+    }
+
+    [Fact]
+    public void Load_LegacyFiveFieldRow_NewMembersDefaultAndResolutionUnchanged()
+    {
+        var root = RegisteredRoot(NewTempDir());
+        Directory.CreateDirectory(Path.Combine(root, "src"));
+        File.WriteAllText(
+            WorkspaceRegistry.FilePath,
+            new JsonArray(
+                new JsonObject
+                {
+                    ["name"] = "legacy",
+                    ["rootPath"] = root,
+                    ["storeKey"] = "legacy-dddd4444",
+                    ["createdAt"] = "2026-09-01T10:00:00+00:00",
+                    ["lastUsedAt"] = "2026-09-02T11:00:00+00:00",
+                }).ToJsonString());
+
+        var stored = WorkspaceRegistry.Load().ShouldHaveSingleItem();
+        stored.Name.ShouldBe("legacy");
+        stored.RootPath.ShouldBe(root);
+        stored.StoreKey.ShouldBe("legacy-dddd4444");
+        stored.ParentRootPath.ShouldBeNull();
+        stored.Kind.ShouldBeNull();
+        stored.Branch.ShouldBeNull();
+        WorkspaceRegistry.FindByRootPath(root).ShouldNotBeNull();
+        WorkspaceRegistry.FindContainingPath(Path.Combine(root, "src", "a.cs"))!.StoreKey.ShouldBe("legacy-dddd4444");
+    }
+
+    [Fact]
+    public void Add_WithWorktreeFields_RoundTripsThroughDisk()
+    {
+        var parent = RegisteredRoot(NewTempDir());
+        var child = RegisteredRoot(Directory.CreateDirectory(Path.Combine(parent, ".lanes", "lane-x")).FullName);
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            "lane",
+            child,
+            "lane-eeee5555",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            parent,
+            WorkspaceKind.Worktree,
+            "feat/116-worktree-aware-workspaces"));
+
+        using (var doc = JsonDocument.Parse(File.ReadAllText(WorkspaceRegistry.FilePath)))
+        {
+            var stored = doc.RootElement[0];
+            stored.GetProperty("parentRootPath").GetString().ShouldBe(parent);
+            stored.GetProperty("kind").GetString().ShouldBe("Worktree");
+            stored.GetProperty("branch").GetString().ShouldBe("feat/116-worktree-aware-workspaces");
+        }
+
+        var reloaded = WorkspaceRegistry.Load().ShouldHaveSingleItem();
+        reloaded.ParentRootPath.ShouldBe(parent);
+        reloaded.Kind.ShouldBe(WorkspaceKind.Worktree);
+        reloaded.Branch.ShouldBe("feat/116-worktree-aware-workspaces");
+        WorkspaceRegistry.FindContainingPath(Path.Combine(child, "src", "a.cs"))!.StoreKey.ShouldBe("lane-eeee5555");
+    }
+
+    [Fact]
+    public void Add_WithoutWorktreeFields_WritesTheFiveFieldShapeAnOldBuildReads()
+    {
+        var root = RegisteredRoot(NewTempDir());
+
+        WorkspaceRegistry.Add(NewEntry("demo", root, "demo-ffff6666"));
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(WorkspaceRegistry.FilePath));
+        var stored = doc.RootElement[0];
+        stored.EnumerateObject().Count().ShouldBe(5);
+        stored.TryGetProperty("parentRootPath", out _).ShouldBeFalse();
+        stored.TryGetProperty("kind", out _).ShouldBeFalse();
+        stored.TryGetProperty("branch", out _).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Add_ConcurrentFromMultipleThreads_KeepsAllEntries()
     {
         const int writers = 8;
@@ -216,4 +333,16 @@ public sealed class WorkspaceRegistryTests : IDisposable
         _createdDirs.Add(dir);
         return dir;
     }
+
+    // Roots go into the registry the way the product writes them: canonical, so the containment
+    // comparison sees the same spelling FindContainingPath resolves a queried path to.
+    private string RegisteredRoot(string dir)
+    {
+        var canonical = WorkspaceCanonicalPath.Canonicalize(dir);
+        Directory.CreateDirectory(canonical);
+        return canonical;
+    }
+
+    private static WorkspaceRegistryEntry NewEntry(string name, string root, string storeKey) =>
+        new(name, root, storeKey, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
@@ -56,6 +57,42 @@ public sealed class CliWorkspaceDiscoveryTests
         symbol.ExitCode.ShouldBe(0);
         using var doc = JsonDocument.Parse(symbol.StdOut.Trim());
         doc.RootElement.GetProperty("matches").EnumerateArray().ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task HookPreRead_InsideRegisteredChild_RecordsTelemetryToTheChildStore()
+    {
+        var home = TestDirs.NewTempDir();
+        var parent = WorkspaceCanonicalPath.Canonicalize(TestDirs.NewTempDir());
+        var child = WorkspaceCanonicalPath.Canonicalize(
+            Directory.CreateDirectory(Path.Combine(parent, ".lanes", "lane-x")).FullName);
+        var file = Path.Combine(child, "src", "a.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "class A { }");
+        Directory.CreateDirectory(StoreDir(home, "parentws-aaaa1111"));
+        Directory.CreateDirectory(StoreDir(home, "lanews-bbbb2222"));
+
+        // The parent row is the first one on disk, so arrival order hands the read to the parent;
+        // only depth hands it to the child, and the child's telemetry log is where that shows.
+        File.WriteAllText(
+            Path.Combine(home, SqueezrPaths.RegistryFileName),
+            new JsonArray(RegistryRow("parentws", parent, "parentws-aaaa1111"),
+                RegistryRow("lanews", child, "lanews-bbbb2222", parent)).ToJsonString());
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home,
+            "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"" + file + "\"}}",
+            child, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+        var childLog = Path.Combine(StoreDir(home, "lanews-bbbb2222"), SqueezrPaths.QueriesLogFileName);
+        File.Exists(childLog).ShouldBeTrue();
+        File.Exists(Path.Combine(StoreDir(home, "parentws-aaaa1111"), SqueezrPaths.QueriesLogFileName))
+            .ShouldBeFalse();
+        using var doc = JsonDocument.Parse(File.ReadAllText(childLog));
+        doc.RootElement.GetProperty("tool").GetString().ShouldBe("pre-read");
+        doc.RootElement.GetProperty("params").GetProperty("file").GetString().ShouldBe(file);
     }
 
     [Fact]
@@ -181,6 +218,29 @@ public sealed class CliWorkspaceDiscoveryTests
         process.ExitCode.ShouldBe(0);
         stdErr.ShouldContain($"workspace root resolved via CLAUDE_PROJECT_DIR: {Path.GetFullPath(root)}");
         stdErr.ShouldContain("squeezr serve: workspace");
+    }
+
+    private static string StoreDir(string home, string storeKey) =>
+        Path.Combine(home, SqueezrPaths.WorkspacesDirName, storeKey);
+
+    private static JsonObject RegistryRow(string name, string rootPath, string storeKey, string? parentRoot = null)
+    {
+        var row = new JsonObject
+        {
+            ["name"] = name,
+            ["rootPath"] = rootPath,
+            ["storeKey"] = storeKey,
+            ["createdAt"] = "2026-11-01T00:00:00+00:00",
+            ["lastUsedAt"] = "2026-11-01T00:00:00+00:00",
+        };
+        if (parentRoot is not null)
+        {
+            row["parentRootPath"] = parentRoot;
+            row["kind"] = "Worktree";
+            row["branch"] = "feat/116-test-lane";
+        }
+
+        return row;
     }
 
     private static async Task InitAndIndexAsync(string root)
