@@ -1064,11 +1064,12 @@ target, not a fact: the no-substitute predicate is written at three sites today
 collapse onto the result-typed CLI helper), and folding them into a single
 predicate-shaped helper is the named follow-up.
 
-`raise maxTokens` is a ceiling decision for a **new** call, not a promise about
-the session you are in: `symbol_lookup`'s response-cache key omits `maxTokens`,
-so asking the same name at a bigger ceiling in one serve session replays the
-stored envelope (`BUGS/024`, open — closing it is this feature's task 7);
-`code_pack` keys its cache with the budget and does re-run.
+`raise maxTokens` re-runs inside the session you are in: the resolved ceiling is
+part of `symbol_lookup`'s response-cache key, so the same name at a bigger
+ceiling gets its own envelope instead of the stored one (`BUGS/024`, closed by
+115/T7 — its additive `params.maxTokens` row key is declared in the CHANGELOG).
+An identical ceiling still replays, which is the point of the cache; `code_pack`
+keyed its budget this way before `symbol_lookup` did.
 
 The CLI json is not the envelope. `squeezr symbol --json` says the same thing
 in its own vocabulary: additive `state` (`complete`/`mapped`/`clipped`) as the
@@ -1087,10 +1088,14 @@ for the body, while CLI `symbol` asks only with `--body` (or when exactly one
 symbol matches), so a multi-match `squeezr symbol` answer is `complete` with no
 bodies at all — `complete` means nothing was refused, not that a body came back.
 
-Repeat queries are nearly free: the expensive tools (`repo_map`,
-`code_search`, `symbol_lookup`, `find_references`) cache answers within a
-serve session — an LRU of 100 entries, keyed by the canonical JSON of the
-parameters (property order and null-vs-absent do not affect the key). An
+Repeat queries are nearly free: the cached tools (`code_search`,
+`symbol_lookup`, `repo_map`, `find_references`, `code_pack`) cache answers
+within a serve session — an LRU of 100 entries, keyed by the canonical JSON of
+the parameters (property order and null-vs-absent do not affect the key).
+`symbol_lookup` and `code_pack` put the **resolved** ceiling into that key, so a
+raised `maxTokens` is a different entry and a different answer; `code_search`
+and `repo_map` key the value as it was passed, so leaving `maxTokens` out and
+passing the default are two different entries there. An
 identical query in the same session = an instant replay of the stored
 envelope; telemetry marks it `cacheHit: true` (and it shows in the hit-rate
 of `squeezr stats`). Any reindex — a watch pass or an external `squeezr index`

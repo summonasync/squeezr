@@ -28,77 +28,66 @@ public sealed class TruncationStateCrossingTests
     private const int MethodCount = 12;
 
     [Fact]
-    public async Task MappedAnswer_EnvelopeCliDocumentAndLedgerRows_AgreeOnTheState()
+    public async Task MappedThenClippedCeilingsOnOneConnection_EachAnswerCrossesOnItsOwnState()
     {
+        // one workspace, one connection, both ceilings — the honest shape of this crossing. T5 had to split the
+        // two states into harnesses of their own because BUGS/024 kept the ceiling out of the symbol_lookup cache
+        // key: the second call replayed the first envelope, so a shared connection measured a replay instead of
+        // the state. With the budget in the key, the legs run side by side and each answers at its own ceiling.
         var workspace = NewFixtureWorkspace();
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        var envelope = await CallToolAsync(harness, "symbol_lookup", Args("Huge", MappedBudget));
-        var cli = await RunCliAsync(workspace, "symbol", "Huge", "--max-tokens", MappedBudget.ToString(), "--json");
-        cli.ExitCode.ShouldBe(0);
+        var mapped = await CrossOneAnswerAsync(harness, workspace, MappedBudget, mcpLeg: 0, cliLeg: 0);
+        using var mappedDoc = JsonDocument.Parse(mapped.CliJson);
 
-        using var cliDoc = JsonDocument.Parse(cli.StdOut.Trim());
-        var rows = QueryTelemetry.ReadAll(workspace);
-        var mcpRow = rows.Single(row => row.Tool == "symbol_lookup");
-        var cliRow = rows.Single(row => row.Tool == "symbol");
+        mapped.Envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
+        mapped.Envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue();
+        EnvelopeHit(mapped.Envelope).GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
 
-        envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
-        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue();
-        EnvelopeHit(envelope).GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
+        mappedDoc.RootElement.GetProperty("state").GetString().ShouldBe("mapped");
+        mappedDoc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeFalse();
+        CliHit(mappedDoc.RootElement).GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
 
-        cliDoc.RootElement.GetProperty("state").GetString().ShouldBe("mapped");
-        cliDoc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeFalse();
-        CliHit(cliDoc.RootElement).GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
-
-        foreach (var row in new[] { mcpRow, cliRow })
+        foreach (var row in new[] { mapped.McpRow, mapped.CliRow })
         {
             row.Truncated.ShouldBeFalse();
             row.Mapped.ShouldBe(true);
         }
 
-        var billed = envelope.GetProperty("tokensUsed").GetInt32();
-        billed.ShouldBeGreaterThan(0);
-        cliDoc.RootElement.GetProperty("tokensUsed").GetInt32().ShouldBe(billed);
-        mcpRow.TokensUsed.ShouldBe(billed);
-        cliRow.TokensUsed.ShouldBe(billed);
-    }
+        var mappedBilled = mapped.Envelope.GetProperty("tokensUsed").GetInt32();
+        mappedBilled.ShouldBeGreaterThan(0);
+        mappedDoc.RootElement.GetProperty("tokensUsed").GetInt32().ShouldBe(mappedBilled);
+        mapped.McpRow.TokensUsed.ShouldBe(mappedBilled);
+        mapped.CliRow.TokensUsed.ShouldBe(mappedBilled);
 
-    [Fact]
-    public async Task ClippedAnswer_EnvelopeCliDocumentAndLedgerRows_AgreeOnTheState()
-    {
-        // a workspace and a connection of its own: BUGS/024 keeps maxTokens out of the symbol_lookup cache key,
-        // so a second ceiling on one connection would replay the mapped answer instead of measuring this one
-        var workspace = NewFixtureWorkspace();
-        await using var harness = await McpTestHarness.StartAsync(workspace);
+        var clipped = await CrossOneAnswerAsync(harness, workspace, ClippedBudget, mcpLeg: 1, cliLeg: 1);
+        using var clippedDoc = JsonDocument.Parse(clipped.CliJson);
 
-        var envelope = await CallToolAsync(harness, "symbol_lookup", Args("Huge", ClippedBudget));
-        var cli = await RunCliAsync(workspace, "symbol", "Huge", "--max-tokens", ClippedBudget.ToString(), "--json");
-        cli.ExitCode.ShouldBe(0);
-
-        using var cliDoc = JsonDocument.Parse(cli.StdOut.Trim());
-        var rows = QueryTelemetry.ReadAll(workspace);
-        var mcpRow = rows.Single(row => row.Tool == "symbol_lookup");
-        var cliRow = rows.Single(row => row.Tool == "symbol");
-
-        envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
-        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
+        clipped.Envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        clipped.Envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
         // the leg has to be a clipped answer WITH a refused body: a header refusal would leave zero hits and the
         // mapped formula would come out false whatever the guard says, so the pin would measure nothing
-        EnvelopeHit(envelope).GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
+        EnvelopeHit(clipped.Envelope).GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
 
-        cliDoc.RootElement.GetProperty("state").GetString().ShouldBe("clipped");
-        cliDoc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        clippedDoc.RootElement.GetProperty("state").GetString().ShouldBe("clipped");
+        clippedDoc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
 
-        foreach (var row in new[] { mcpRow, cliRow })
+        foreach (var row in new[] { clipped.McpRow, clipped.CliRow })
         {
             row.Truncated.ShouldBeTrue();
             row.Mapped.ShouldBe(false);
         }
 
-        var billed = envelope.GetProperty("tokensUsed").GetInt32();
-        cliDoc.RootElement.GetProperty("tokensUsed").GetInt32().ShouldBe(billed);
-        mcpRow.TokensUsed.ShouldBe(billed);
-        cliRow.TokensUsed.ShouldBe(billed);
+        var clippedBilled = clipped.Envelope.GetProperty("tokensUsed").GetInt32();
+        clippedDoc.RootElement.GetProperty("tokensUsed").GetInt32().ShouldBe(clippedBilled);
+        clipped.McpRow.TokensUsed.ShouldBe(clippedBilled);
+        clipped.CliRow.TokensUsed.ShouldBe(clippedBilled);
+
+        // the pair that the split could not measure: the lower ceiling billed its own answer on the same
+        // connection, and neither row is a replay of the other
+        clippedBilled.ShouldBeLessThan(mappedBilled);
+        clipped.McpRow.CacheHit.ShouldBeFalse();
+        clipped.CliRow.TokensUsed.ShouldNotBe(mapped.CliRow.TokensUsed);
     }
 
     [Fact]
@@ -189,6 +178,27 @@ public sealed class TruncationStateCrossingTests
 
     private static Dictionary<string, object?> Args(string name, int maxTokens) =>
         new() { ["name"] = name, ["maxTokens"] = maxTokens };
+
+    // one ceiling read out on all three planes; the leg counters are asserted because a crossing that silently
+    // lost one of its rows would still agree with itself
+    private async Task<Leg> CrossOneAnswerAsync(
+        McpTestHarness harness, string workspace, int budget, int mcpLeg, int cliLeg)
+    {
+        var envelope = await CallToolAsync(harness, "symbol_lookup", Args("Huge", budget));
+        var cli = await RunCliAsync(workspace, "symbol", "Huge", "--max-tokens", budget.ToString(), "--json");
+        cli.ExitCode.ShouldBe(0);
+
+        var rows = QueryTelemetry.ReadAll(workspace);
+        var mcpRows = rows.Where(row => row.Tool == "symbol_lookup").ToList();
+        var cliRows = rows.Where(row => row.Tool == "symbol").ToList();
+        mcpRows.Count.ShouldBe(mcpLeg + 1);
+        cliRows.Count.ShouldBe(cliLeg + 1);
+
+        return new Leg(envelope, cli.StdOut.Trim(), mcpRows[mcpLeg], cliRows[cliLeg]);
+    }
+
+    private sealed record Leg(
+        JsonElement Envelope, string CliJson, QueryTelemetryEntry McpRow, QueryTelemetryEntry CliRow);
 
     private static async Task<JsonElement> CallToolAsync(
         McpTestHarness harness, string tool, Dictionary<string, object?> arguments)

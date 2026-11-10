@@ -188,8 +188,9 @@ public sealed class QueryTelemetryInstrumentationTests
         var fresh = await CallAsync(harness, arguments);
         await CallAsync(harness, arguments);
 
-        // one ceiling for both calls: the symbol_lookup cache key carries no maxTokens (BUGS/024), so a pin that
-        // varied it would be measuring the replay of the first answer, not the state of the second
+        // both calls carry one ceiling on purpose: what this pair pins is the fresh answer and the hit that
+        // replays it, and a hit only exists under an identical key. The ceiling-varying legs — the ones that must
+        // NOT hit since 115/T7 put the budget into the symbol_lookup key (BUGS/024) — are SymbolLookupBudgetCacheKeyTests
         return (fresh, QueryTelemetry.ReadAll(root).Where(row => row.Tool == "symbol_lookup").ToList());
     }
 

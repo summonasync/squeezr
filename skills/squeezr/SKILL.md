@@ -247,10 +247,11 @@ dropped, answer clipped).
 Read the state through `truncated` plus the hit's
 `bodyOmitted`/`members`/`membersOmitted`, never through the absence of a `body`
 key (nulls are dropped on serialization, so a mapped hit has no `body` field at
-all). `raise maxTokens` in a remedy is a ceiling choice for a NEW call, not a
-guarantee that your next call in the same session re-runs: `symbol_lookup`'s
-response cache key omits `maxTokens` (`BUGS/024`), so asking the same name at a
-bigger ceiling can still replay the stored envelope. `code_search` defaults to
+all). `raise maxTokens` in a remedy is a ceiling choice that re-runs in your
+next call on the same connection: the resolved ceiling is part of
+`symbol_lookup`'s response cache key (`BUGS/024`, closed by 115/T7), so a bigger
+ceiling answers with its own envelope; only an identical ceiling replays.
+`code_search` defaults to
 maxTokens 2000 and sets `truncated` when it overflows — narrow the query or
 adjust maxTokens instead of reading files. A member map is not authoritative
 while `truncated: true`: an empty map still reports nothing omitted

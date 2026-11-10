@@ -52,7 +52,8 @@ public sealed class SymbolLookupTool
             var symbolName = SymbolParamAlias.Resolve("symbol_lookup", name, symbol, "name", "symbol");
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(symbolName, kind, repo, SecretGuardReader.Load(root).ExtraPatterns);
+            var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
+            var parameters = Params(symbolName, kind, repo, budget, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("symbol_lookup", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
@@ -61,7 +62,6 @@ public sealed class SymbolLookupTool
             }
 
             var warnings = new List<string>();
-            var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
             var lookup = new SymbolLookup(root);
 
             var result = lookup.Find(symbolName, repo, kind, budget, body: true);
@@ -169,13 +169,16 @@ public sealed class SymbolLookupTool
             : result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy;
 
     // the guard re-reads its widening patterns from the config on every call, so a cached answer is only
-    // valid for the pattern set it was computed with
+    // valid for the pattern set it was computed with. The ceiling belongs in the same key: the answer is
+    // shaped by it, and an envelope stored at 300 that replays for a request at 2000 makes the documented
+    // "raise maxTokens" unre-runnable inside the session it was recommended in
     private static object Params(
         string name,
         string? kind,
         string? repo,
+        int maxTokens,
         IReadOnlyList<string> secretGuardExtra) =>
-        new { name, kind, repo, secretGuardExtra };
+        new { name, kind, repo, maxTokens, secretGuardExtra };
 
     private sealed record SymbolHitData(
         [property: JsonPropertyName("repo")] string Repo,

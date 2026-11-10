@@ -236,6 +236,29 @@ public class QueryTelemetryTests
         rows[1].Truncated.ShouldBeFalse();
     }
 
+    [Fact]
+    public void ReadAll_SymbolLookupRowFromBeforeTheBudgetKey_StillParsesWithoutIt()
+    {
+        // 115/T7 put the resolved ceiling into symbol_lookup's recorded params: an additive key, so a row
+        // written by an older build has to keep loading with the key simply absent instead of failing the line
+        var root = TestDirs.NewTempDir();
+        Directory.CreateDirectory(SqueezrPaths.StoreDir(root));
+        const string beforeBudgetKey = """{"ts":"2026-11-01T10:00:00Z","sessionId":"00000000-0000-0000-0000-000000000000","tool":"symbol_lookup","params":{"name":"Huge","kind":null,"repo":null,"secretGuardExtra":[]},"tokensUsed":36,"truncated":true,"hits":1,"durationMs":5,"cacheHit":false,"indexAgeSeconds":null,"client":"cli","mapped":false}""";
+        File.WriteAllText(SqueezrPaths.QueriesLogPath(root), beforeBudgetKey + '\n');
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup",
+            new { name = "Huge", kind = (string?)null, repo = (string?)null, maxTokens = 600, secretGuardExtra = Array.Empty<string>() },
+            237, false, 1, 6, mapped: false);
+
+        var rows = QueryTelemetry.ReadAll(root);
+
+        rows.Count.ShouldBe(2);
+        var legacyParams = (JsonElement)rows[0].Params!;
+        legacyParams.TryGetProperty("maxTokens", out _).ShouldBeFalse();
+        legacyParams.GetProperty("name").GetString().ShouldBe("Huge");
+        ((JsonElement)rows[1].Params!).GetProperty("maxTokens").GetInt32().ShouldBe(600);
+    }
+
     private static string Keys(string line) =>
         string.Join(',', JsonDocument.Parse(line).RootElement.EnumerateObject().Select(p => p.Name));
 
