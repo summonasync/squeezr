@@ -453,23 +453,28 @@ public class TreeSitterProviderTests
         chunks[^1].Span.EndLine.ShouldBe(symbol.Span.EndLine);
     }
 
-    // python left this list in T2 — its table landed, so it is no longer the empty-vocabulary shape
-    [Theory]
-    [InlineData("cmd/server.go", "go", "package main\n\nfunc Load(path string) string {\n  return path\n}\n")]
-    public void UnroutedButRegisteredLanguage_ParsesCleanlyAndYieldsNoRows(string path, string language, string source)
+    // T1's two placeholder arms are both gone: python took its table in T2 and go in T4, so no
+    // registered language answers with an empty vocabulary any more. What the tripwire was protecting
+    // — 'a registered language that is not routed keeps the fallback chunker' — is now pinned against
+    // an unknown label in the registration tests, and this file pins the state go is actually in
+    [Fact]
+    public void Go_RoutedWithSymbolsButNoReferenceRules_YieldsRowsWithoutEdges()
     {
         var provider = new TreeSitterProvider(Config);
-        var result = provider.Parse(new FileRef("demo", path), Encoding.UTF8.GetBytes(source));
+        var result = provider.Parse(
+            new FileRef("demo", "cmd/server.go"),
+            Encoding.UTF8.GetBytes(
+                "package main\n\nimport \"fmt\"\n\nfunc Serve(path string) string {\n  fmt.Println(path)\n  return path\n}\n"));
 
-        // the warnings check is what makes the empty rows mean 'nothing to extract' rather than 'the
-        // parse blew up and the catch-all hid it'; the arms resolve to the real grammar, the home
-        // answers with an empty vocabulary, and the indexer keeps such a file on the fallback chunker
-        // because Routed() is false — none of those three facts may silently flip
+        // the middle state read through the provider: the symbol table is live (so rows and per-symbol
+        // chunks appear) and the reference vocabulary is still null, so a real call in the file body
+        // emits no edge — T5 fills the second half and this test flips to its rows, the way python's
+        // equivalent flipped in T3
         provider.Warnings.ShouldBeEmpty();
-        result.Language.ShouldBe(language);
-        result.Symbols.ShouldBe([]);
+        result.Language.ShouldBe("go");
+        result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([("Serve", SymbolKind.Function)]);
         result.Refs.ShouldBe([]);
-        result.Chunks.ShouldBe([]);
+        result.Chunks.Count.ShouldBe(1);
     }
 
     [Fact]

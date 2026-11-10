@@ -949,6 +949,298 @@ public class TreeSitterSpikeTests
         }
         """;
 
+    // the shapes the go symbol table keys on, measured on tree-sitter-python's sibling grammar before the
+    // table was written: a type is named inside its declaration wrapper, a method's owner is a field
+    // rather than an ancestor, and a package-level const is the same node kind as a local one
+    private const string GoVocabularySource = """
+        package registry
+
+        import "fmt"
+
+        // Run starts the service.
+        func Run(items []string) string {
+            return fmt.Sprint(items)
+        }
+
+        type Registry struct {
+            items []string
+        }
+
+        type Lookuper interface {
+            Lookup(key string) string
+        }
+
+        type Mode string
+
+        const MaxSize = 128
+
+        const (
+            A int = 1
+            B = 2
+        )
+
+        func (r *Registry) Add(item string) *Registry {
+            const local = 1
+            return r
+        }
+
+        func (g *Generic[T]) Get() T {
+            var zero T
+            return zero
+        }
+
+        type Generic[T any] struct {
+            value T
+        }
+
+        func use(items []string) int {
+            handler := func(n int) int { return n * 2 }
+            return handler(len(items))
+        }
+        """;
+
+    [Fact]
+    public void Go_TypeSpecCarriesTheNameItsDeclarationWrapperDoesNot()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoVocabularySource);
+
+        var wrappers = CollectNodes(tree.RootNode!).Where(n => n.Type == "type_declaration").ToList();
+        wrappers.Count.ShouldBe(4);
+
+        // one row per type, each with its own span: a grouped 'const ( A; B )' shows the same wrapper
+        // shape, and a wrapper keyed as a row — or used as a span anchor the way python's decorator is —
+        // would hand every member of the group one identical span, the BUGS/022 duplicate-chunk shape
+        wrappers.Count(w => w.GetChildForField("name") == null).ShouldBe(wrappers.Count);
+
+        // three const_declarations here — 'const MaxSize', the 'const ( A; B )' group and the 'const
+        // local' inside a method body — all the same node kind, and the last two differ only by scope.
+        // That is the fact the extractor's scope test rests on, and why a group cannot be a span anchor:
+        // the group node holds two specs, so one span would belong to two types
+        var declarations = CollectNodes(tree.RootNode!).Where(n => n.Type == "const_declaration").ToList();
+        declarations.Count.ShouldBe(3);
+        declarations.Single(d => d.Text.StartsWith("const (", StringComparison.Ordinal))
+            .NamedChildren.Count(c => c.Type == "const_spec").ShouldBe(2);
+        declarations.Where(d => !d.Text.StartsWith("const (", StringComparison.Ordinal))
+            .Select(d => d.NamedChildren.Count(c => c.Type == "const_spec")).ShouldBe([1, 1]);
+        var specs = CollectNodes(tree.RootNode!).Where(n => n.Type == "type_spec").ToList();
+        specs.Select(s => s.GetChildForField("name")?.Text).ShouldBe(["Registry", "Lookuper", "Mode", "Generic"]);
+        specs.Select(s => s.Text.Split('\n')[0]).ShouldBe(
+            ["Registry struct {", "Lookuper interface {", "Mode string", "Generic[T any] struct {"]);
+
+        // the kind distinction lives in the type field, not in a node kind of its own
+        specs.Select(s => s.GetChildForField("type")?.Type)
+            .ShouldBe(["struct_type", "interface_type", "type_identifier", "struct_type"]);
+    }
+
+    [Fact]
+    public void Go_MethodDeclaration_HoldsItsOwnerInAReceiverFieldNotAnAncestor()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoVocabularySource);
+        var methods = CollectNodes(tree.RootNode!).Where(n => n.Type == "method_declaration").ToList();
+
+        methods.Count.ShouldBe(2);
+        foreach (var method in methods)
+        {
+            // a method sits directly in source_file, so no ancestor walk can name its owner
+            method.Parent!.Type.ShouldBe("source_file");
+            var receiver = method.GetChildForField("receiver");
+            receiver.ShouldNotBeNull();
+            receiver!.Type.ShouldBe("parameter_list");
+            var parameter = receiver.NamedChildren.Single(c => c.Type == "parameter_declaration");
+            parameter.GetChildForField("name")?.Text.ShouldBeOneOf("r", "g");
+        }
+
+        // the receiver's type arrives as type_identifier, pointer_type (whose type is a plain child, not
+        // a field) or generic_type (field 'type' plus a type_arguments child), so reading an owner means
+        // unwrapping twice: '*Registry' and 'Generic[T]' both end at the name the type row itself uses
+        var pointer = methods.First(m => m.GetChildForField("name")?.Text == "Add")
+            .GetChildForField("receiver")!.NamedChildren.Single(c => c.Type == "parameter_declaration")
+            .GetChildForField("type")!;
+        pointer.Type.ShouldBe("pointer_type");
+        pointer.GetChildForField("type").ShouldBeNull();
+        pointer.NamedChildren.Single().Type.ShouldBe("type_identifier");
+
+        var generic = methods.Single(m => m.GetChildForField("name")?.Text == "Get")
+            .GetChildForField("receiver")!.NamedChildren.Single(c => c.Type == "parameter_declaration")
+            .GetChildForField("type")!;
+        generic.Type.ShouldBe("pointer_type");
+        var genericType = generic.NamedChildren.Single();
+        genericType.Type.ShouldBe("generic_type");
+        genericType.GetChildForField("type")!.Text.ShouldBe("Generic");
+        genericType.NamedChildren.ShouldContain(c => c.Type == "type_arguments");
+    }
+
+    [Fact]
+    public void Go_ConstAndVarSpecsShareOneKindBetweenPackageAndFunctionBody()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoVocabularySource);
+        var specs = CollectNodes(tree.RootNode!).Where(n => n.Type == "const_spec").ToList();
+
+        // 'MaxSize', 'A', 'B' are package-level and 'local' is inside a method body — four nodes, one
+        // kind, and the only difference is whether a function/method/func_literal encloses them, so the
+        // table cannot separate them and the extractor has to look at the ancestor chain
+        specs.Select(s => s.GetChildForField("name")?.Text).ShouldBe(["MaxSize", "A", "B", "local"]);
+        HasAncestor(specs.Single(s => s.GetChildForField("name")?.Text == "MaxSize"), "method_declaration")
+            .ShouldBeFalse();
+        HasAncestor(specs.Single(s => s.GetChildForField("name")?.Text == "local"), "method_declaration")
+            .ShouldBeTrue();
+
+        // a 'var zero T' inside a body is a var_spec too, and ':=' is a different kind entirely —
+        // short_var_declaration, which the table has no row for and therefore never reads as a symbol
+        CollectNodes(tree.RootNode!).Count(n => n.Type == "var_spec").ShouldBe(1);
+        CollectTypes(tree.RootNode!).ShouldContain("short_var_declaration");
+    }
+
+    [Fact]
+    public void Go_NodesTheTableDeliberatelyIgnores_ExistWithNames()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoVocabularySource);
+        var types = CollectTypes(tree.RootNode!);
+
+        // struct fields carry a name field of their own and type parameters do too, so 'items' and 'T'
+        // would arrive as rows if field_declaration or type_parameter_declaration were keyed. Rust
+        // doesn't index struct fields either, so the silence is the shipped shape, not an oversight
+        types.ShouldContain("field_declaration");
+        types.ShouldContain("type_parameter_declaration");
+        types.ShouldContain("func_literal");
+        CollectNodes(tree.RootNode!).Where(n => n.Type == "field_declaration")
+            .Select(n => n.GetChildForField("name")?.Text).ShouldBe(["items", "value"]);
+
+        // and the doc line above 'func Run' is the same node kind javascript uses, which is why go's
+        // documentation gap is a renderer question rather than a collector one (python's is both)
+        types.ShouldContain("comment");
+        types.ShouldNotContain("doc_comment");
+    }
+
+    [Fact]
+    public void Go_AliasesBlanksMultiNamesAndGroupLists_HaveTheShapesTheGateReads()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, """
+            package p
+
+            type Alias = int
+
+            const _ = iota
+
+            var _ Sailer = (*Boat)(nil)
+
+            const A, B = 1, 2
+
+            var Sink interface{ Do() error }
+
+            var (
+                Counter int
+            )
+            """)!;
+
+        // an alias is its own node kind with its own name field — it is NOT a type_spec, which is why an
+        // alias needed a table row of its own and why 'which node carries the name' had to be asked per
+        // form rather than once per concept
+        var alias = CollectNodes(tree.RootNode!).Single(n => n.Type == "type_alias");
+        alias.GetChildForField("name")!.Text.ShouldBe("Alias");
+        alias.GetChildForField("type")!.Text.ShouldBe("int");
+        CollectNodes(tree.RootNode!).Where(n => n.Type == "type_spec").ShouldBe([]);
+
+        // the blank is an ordinary identifier node with the text '_': nothing about the node kind says
+        // 'throwaway', so the refusal can only be a name test
+        CollectNodes(tree.RootNode!).Where(n => n.Type == "const_spec")
+            .Select(n => n.GetChildForField("name")?.Text).ShouldBe(["_", "A"]);
+        CollectNodes(tree.RootNode!).Where(n => n.Type == "var_spec")
+            .Select(n => n.GetChildForField("name")?.Text).ShouldBe(["_", "Sink", "Counter"]);
+
+        // and a multi-name spec is ONE node carrying TWO identifier children while its name field points
+        // at the first — the second name has no field of its own, which is what makes per-name rows
+        // share one span instead of getting their own
+        var multi = CollectNodes(tree.RootNode!).Single(n => n.Text == "A, B = 1, 2");
+        multi.NamedChildren.Count(c => c.Type == "identifier").ShouldBe(2);
+        multi.GetChildForField("name")!.Text.ShouldBe("A");
+
+        // an interface that no type declaration names: its method_elem's ancestors reach a var_spec and
+        // nothing with a name, which is the case the owner rule refuses
+        var element = CollectNodes(tree.RootNode!).Single(n => n.Type == "method_elem");
+        element.Text.ShouldBe("Do() error");
+        CollectNodes(element).ShouldNotContain(n => n.Type == "type_spec");
+        var namedOwner = false;
+        for (var current = element.Parent; current is not null; current = current.Parent)
+        {
+            namedOwner |= current.Type is "type_spec" or "type_alias";
+        }
+
+        namedOwner.ShouldBeFalse();
+
+        // the group list is the reason a spec's parent is not always the declaration: 'var (' wraps its
+        // members in a var_spec_list, so both the hoist decision and the group test have to look one
+        // level up or they read '(' as a signature
+        var counter = CollectNodes(tree.RootNode!).Single(n => n.Text == "Counter int");
+        counter.Parent!.Type.ShouldBe("var_spec_list");
+        counter.Parent!.Parent!.Type.ShouldBe("var_declaration");
+    }
+
+    [Fact]
+    public void Go_AndJavascript_ShareTheFunctionDeclarationKind_AndShareNothingElse()
+    {
+        using var go = new Language("Go");
+        using var goParser = new Parser(go);
+        using var goTree = Parse(goParser, GoVocabularySource);
+        var goNames = CollectTypes(goTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var js = new Language("JavaScript");
+        using var jsParser = new Parser(js);
+        using var jsTree = Parse(jsParser, JsVocabularySource);
+        var jsNames = CollectTypes(jsTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var rust = new Language("Rust");
+        using var rustParser = new Parser(rust);
+        using var rustTree = Parse(rustParser, RustVocabularySource);
+        var rustNames = CollectTypes(rustTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var python = new Language("Python");
+        using var pythonParser = new Parser(python);
+        using var pyTree = Parse(pythonParser, PythonReferenceSource);
+        var pythonNames = CollectTypes(pyTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        // THE collision of the whole feature, in one name: go's plain function and javascript's are both
+        // function_declaration, so one grammar's table reads the other's functions and produces rows —
+        // the guard tests in TreeSitterGoSymbolTests pin exactly how many and which
+        goNames.ShouldContain("function_declaration");
+        jsNames.ShouldContain("function_declaration");
+
+        // every other name the go table keys on is absent from js, and the method owner has no js analogue
+        foreach (var name in new[] { "method_declaration", "method_elem", "type_spec", "const_spec", "var_spec" })
+        {
+            goNames.ShouldContain(name);
+            jsNames.ShouldNotContain(name);
+        }
+
+        // and against the grammars whose tables are already shipped, go shares nothing it keys on
+        foreach (var other in new[] { rustNames, pythonNames })
+        {
+            other.ShouldNotContain("method_declaration");
+            other.ShouldNotContain("type_spec");
+            other.ShouldNotContain("const_spec");
+            other.ShouldNotContain("var_spec");
+            other.ShouldNotContain("method_elem");
+        }
+
+        // rust shares go's root kind, so a root-node check could separate go from javascript and python
+        // but never from rust — recorded here because it is the obvious 'obvious fix' for the mislabel
+        // exposure and it does not fully work
+        goTree.RootNode!.Type.ShouldBe("source_file");
+        rustTree.RootNode!.Type.ShouldBe("source_file");
+        jsTree.RootNode!.Type.ShouldBe("program");
+        pyTree.RootNode!.Type.ShouldBe("module");
+    }
+
     [Fact]
     public void Go_Parse_ProducesExpectedNodeTypes()
     {
@@ -1018,6 +1310,19 @@ public class TreeSitterSpikeTests
     }
 
     private static Tree Parse(Parser parser, string source) => parser.Parse(source)!;
+
+    private static bool HasAncestor(Node node, string type)
+    {
+        for (var current = node.Parent; current is not null; current = current.Parent)
+        {
+            if (current.Type == type)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static Node? FindNode(Node node, string type, Node? after = null)
     {

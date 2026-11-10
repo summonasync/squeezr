@@ -134,6 +134,42 @@ internal static class TreeSitterLanguages
         },
         DecoratorWrapper: "decorated_definition");
 
+    // read off tree-sitter-go itself (TreeSitterSpikeTests.Go_*), borrowing nothing: a type is named by
+    // the 'type_spec' INSIDE the type_declaration wrapper — the wrapper has no name field, and for a
+    // grouped 'type ( A int; B string )' it spans several types at once, so keying it as a row or as a
+    // span anchor would hand every member of the group the same span (the BUGS/022 duplicate-chunk
+    // shape). Unlike a python decorator, a go declaration group describes no single item, so it stays
+    // out of the table entirely. The two named forms are separate node kinds and both are keyed:
+    // 'type Alias = int' is a type_alias, NOT a type_spec (measured), so an earlier draft of this row
+    // indexed no go alias at all while javascript and rust index theirs. 'const_spec'/'var_spec' name
+    // SINGLE-identifier package-level bindings, and two refusals live with them: a multi-name spec
+    // ('const A, B = 1, 2' — the grammar keeps only 'A' in the name field and B is an unnamed sibling,
+    // so one row per name would hand both the same span, the 022 shape again) and the blank identifier,
+    // which is a throwaway and not a name. The scope test that drops 'const local = 1' inside a function
+    // body is a divergence chosen for go, not a rule inherited from the others: rust's const_item and
+    // static_item DO sit inside blocks and rust ships rows for them (measured — a 'const K' and a
+    // 'static S' in an fn body arrive as Field rows under container 'main'). A method's owner is not an
+    // ancestor either: it is the 'receiver' field, so the container is read from that field
+    // (GoReceiverType) and the kind comes straight from this row
+    private static readonly SymbolVocabulary GoSymbols = new(
+        new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+        {
+            ["function_declaration"] = SymbolKind.Function,
+            ["method_declaration"] = SymbolKind.Method,
+            ["type_spec"] = SymbolKind.Other,
+            ["type_alias"] = SymbolKind.Other,
+            ["method_elem"] = SymbolKind.Method,
+            ["const_spec"] = SymbolKind.Field,
+            ["var_spec"] = SymbolKind.Field,
+        },
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "type_spec",
+            "type_alias",
+            "function_declaration",
+            "method_declaration",
+        });
+
     private static readonly SymbolVocabulary NoSymbols = new(
         new Dictionary<string, SymbolKind>(StringComparer.Ordinal),
         new HashSet<string>(StringComparer.Ordinal));
@@ -177,9 +213,11 @@ internal static class TreeSitterLanguages
         // this row
         [Python] = new LanguageSet(PythonSymbols, PythonReferences),
 
-        // registered ahead of its vocabulary so the grammar arms, the pool name and this row are
-        // already in place when a symbol table lands; empty Kinds is what keeps it unrouted
-        [Go] = new LanguageSet(NoSymbols, null),
+        // go's symbol table is the flip — Routed derives from it — and it lands alone: the reference
+        // rules and the pool are T5's, which puts go back in the middle state python passed through in
+        // T2 (routed, pool-less), so that state is occupied again and pinned as such in the registration
+        // tests rather than being a historical footnote
+        [Go] = new LanguageSet(GoSymbols, null),
     };
 
     // routing is 'has a symbol vocabulary', not 'has a row here': a routed file is taken off the

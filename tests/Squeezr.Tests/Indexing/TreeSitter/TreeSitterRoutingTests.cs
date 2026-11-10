@@ -255,7 +255,7 @@ public class TreeSitterRoutingTests
     }
 
     [Fact]
-    public void Index_GoFile_StillOnFallbackChunksUntilItsVocabularyLands()
+    public void Index_GoFile_RoutesToTreeSitterSymbolsAndPerSymbolChunks()
     {
         var workspace = NewPolyglotWorkspace();
         new WorkspaceIndexer().Index(workspace);
@@ -264,17 +264,48 @@ public class TreeSitterRoutingTests
         var repoId = store.FindRepo("demo")!.Id;
         var file = store.ListFiles(repoId).Single(f => f.Path == "cmd/server.go");
 
-        // the remaining tripwire row, unchanged in shape: grammar arms and the home row are in place,
-        // no symbol vocabulary is, so go must keep the sliding-window chunker. T4 converts this into
-        // the per-symbol form above — deleting it instead is a fail, and so is a file that leaves this
-        // run with no chunks at all (routed with an empty vocabulary)
+        // T1's last tripwire, converted on schedule (python's half became this shape in T2): the
+        // grammar arms, the home row and the pool name were already in place, and the symbol table is
+        // what moved this file off the sliding-window chunker. Deleting the guard instead of converting
+        // it was the fail this form avoids, and so is a routed file leaving the run with no chunks
         file.Language.ShouldBe("go");
         file.Kind.ShouldBe("code");
-        store.ListSymbolsByFile(file.Id).ShouldBeEmpty();
-        store.ListRefsByFile(file.Id).ShouldBeEmpty();
+
+        var symbols = store.ListSymbolsByFile(file.Id);
+        symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe([("Listen", "function", null)]);
+        symbols.Single(s => s.Name == "Listen").Signature.ShouldBe("func Listen(path string) string");
+
         var chunks = store.ListChunksByFile(file.Id);
         chunks.ShouldNotBeEmpty();
-        chunks.ShouldAllBe(c => c.SymbolId == null);
+        chunks.Count.ShouldBe(symbols.Count);
+        chunks.ShouldAllBe(c => c.SymbolId != null);
+        var listen = symbols.Single(s => s.Name == "Listen");
+        chunks.ShouldAllBe(c => c.SymbolId == listen.Id);
+        chunks[0].Text.ShouldContain("func Listen(path string) string");
+
+        // references are T5's: go is routed with no pool, so nothing may be emitted for it yet — the
+        // same middle state python held between T2 and T3
+        store.ListRefsByFile(file.Id).ShouldBeEmpty();
+
+        // the F3 name collision, checked where it would bite: symbol_lookup and RefLookup match names
+        // case-insensitively, so any name one language contributes must not be contributed by another
+        // differing only in case. Iterated over what the go file actually defines rather than a typed
+        // list, so a fixture that grows (T5's go references will add names here) extends the sweep by
+        // itself instead of leaving a hand-typed one behind
+        var goNames = symbols.Select(s => s.Name).ToList();
+        goNames.ShouldNotBeEmpty();
+        var everyName = store.ListFiles(repoId)
+            .SelectMany(f => store.ListSymbolsByFile(f.Id).Select(s => s.Name))
+            .ToList();
+        foreach (var goName in goNames)
+        {
+            everyName.Count(n => n.Equals(goName, StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
+        }
+
+        // and the two residents that predates go keep their own names: python's 'load' is the only
+        // load-shaped row, javascript's 'serve' the only serve-shaped one
+        everyName.Count(n => n.Equals("load", StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
+        everyName.Count(n => n.Equals("serve", StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
     }
 
     [Fact]
@@ -682,12 +713,17 @@ public class TreeSitterRoutingTests
             def load(path):
                 return open(path).read()
             """);
+        // 'Listen', not 'Serve': tools/main.mjs already exports a function called 'serve', and
+        // RefLookup matches names with OrdinalIgnoreCase, so a go symbol that differs from a
+        // javascript one by case alone fans out into its answers — the trap review-023-01 F3 caught in
+        // the python/go pair (loader.py 'load' vs a go 'Load'), resolved here in the fixture rather
+        // than with a pin that would only notice after the fact
         WriteFile(workspace, "repo/cmd/server.go", """
             package main
 
             import "fmt"
 
-            func Serve(path string) string {
+            func Listen(path string) string {
                 fmt.Println(path)
                 return path
             }
