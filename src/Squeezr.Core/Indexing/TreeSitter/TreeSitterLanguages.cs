@@ -4,7 +4,8 @@ namespace Squeezr.Core.Indexing.TreeSitter;
 
 internal sealed record SymbolVocabulary(
     IReadOnlyDictionary<string, SymbolKind> Kinds,
-    IReadOnlySet<string> ContainerTypes);
+    IReadOnlySet<string> ContainerTypes,
+    string? DecoratorWrapper = null);
 
 internal sealed record ReferenceVocabulary(
     string Pool,
@@ -43,7 +44,10 @@ internal static class TreeSitterLanguages
     // measured on the grammars bundled with TreeSitter.DotNet (see TreeSitterSpikeTests): no *_item
     // appears in a js/ts tree and no *_declaration/method_definition appears in a rust tree, so the
     // type-keyed rules in the extractors are only ever reached by the language that owns the type.
-    // Proven for this pair, not for languages to come
+    // python extends the proof, not the assumption: function_definition / class_definition /
+    // decorated_definition / assignment appear in neither a js nor a go tree, where the near-miss
+    // names are assignment_expression (js) and assignment_statement + short_var_declaration (go)
+    // — so a python row keyed on 'assignment' cannot harvest another grammar's statements
     private static readonly SymbolVocabulary JsTsSymbols = new(
         new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
         {
@@ -90,6 +94,30 @@ internal static class TreeSitterLanguages
             "function_item",
         });
 
+    // measured on tree-sitter-python (TreeSitterSpikeTests.Python_*): 'async def' is still a
+    // function_definition with 'async' as a keyword inside it, and a decorator WRAPS the definition in
+    // a decorated_definition that carries no name field of its own — so the two definition kinds are
+    // keyed and the wrapper is only the span anchor. Keying the wrapper as a row of its own was tried
+    // and is inert rather than a double count: with no name field and no identifier child, NameOf
+    // answers null and no row is produced at all, which is the worse failure (a dead table entry that
+    // looks covered) — only the table-size pin in the registration tests would ever notice it.
+    // 'assignment' is python's binding statement and the closest thing to rust's const_item, but unlike
+    // rust it is also the shape of every write to a local, so the extractor keeps only a const-shaped
+    // target outside a function body
+    private static readonly SymbolVocabulary PythonSymbols = new(
+        new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+        {
+            ["function_definition"] = SymbolKind.Function,
+            ["class_definition"] = SymbolKind.Class,
+            ["assignment"] = SymbolKind.Field,
+        },
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "class_definition",
+            "function_definition",
+        },
+        DecoratorWrapper: "decorated_definition");
+
     private static readonly SymbolVocabulary NoSymbols = new(
         new Dictionary<string, SymbolKind>(StringComparer.Ordinal),
         new HashSet<string>(StringComparer.Ordinal));
@@ -113,9 +141,13 @@ internal static class TreeSitterLanguages
         [Tsx] = new LanguageSet(JsTsSymbols, JsTsReferences),
         [Rust] = new LanguageSet(RustSymbols, RustReferences),
 
-        // registered ahead of their vocabularies so the grammar arms, the pool names and this row are
-        // already in place when a symbol table lands; empty Kinds is what keeps them unrouted
-        [Python] = new LanguageSet(NoSymbols, null),
+        // python's symbol table is what routes the language — Routed is derived from it, so this row
+        // flipping is the whole flip; the reference rules and the pool stay out until T3, which makes
+        // python the first language in the home that is routed with no reference vocabulary
+        [Python] = new LanguageSet(PythonSymbols, null),
+
+        // registered ahead of its vocabulary so the grammar arms, the pool name and this row are
+        // already in place when a symbol table lands; empty Kinds is what keeps it unrouted
         [Go] = new LanguageSet(NoSymbols, null),
     };
 

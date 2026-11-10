@@ -211,29 +211,133 @@ public class TreeSitterRoutingTests
         bare[0].ToSymbolId.ShouldBeNull();
     }
 
-    [Theory]
-    [InlineData("src/loader.py", "python")]
-    [InlineData("cmd/server.go", "go")]
-    public void Index_PythonAndGoFiles_StayOnFallbackChunksUntilTheirVocabulariesLand(string path, string language)
+    [Fact]
+    public void Index_PythonFile_RoutesToTreeSitterSymbolsAndPerSymbolChunks()
     {
         var workspace = NewPolyglotWorkspace();
         new WorkspaceIndexer().Index(workspace);
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         var repoId = store.FindRepo("demo")!.Id;
-        var file = store.ListFiles(repoId).Single(f => f.Path == path);
+        var file = store.ListFiles(repoId).Single(f => f.Path == "src/loader.py");
 
-        // the tripwire T2/T4 convert: the grammar arms and the home row are in place, but no symbol
-        // vocabulary is, so the language must keep the sliding-window chunker. Convert each row into
-        // the per-symbol form when its vocabulary ships — deleting this test instead is a fail, and
-        // so is a file that leaves this run with no chunks at all (routed with an empty vocabulary)
-        file.Language.ShouldBe(language);
+        // the converted half of the T1 tripwire: the python vocabulary landed, so this file left the
+        // sliding-window chunker and its rows now come from python nodes. The go half stayed a
+        // tripwire below — converting a guard whose vocabulary has not shipped is the same fail as
+        // deleting it
+        file.Language.ShouldBe("python");
+        file.Kind.ShouldBe("code");
+
+        var symbols = store.ListSymbolsByFile(file.Id);
+        symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe([("load", "function", null)]);
+        symbols.Single(s => s.Name == "load").Signature.ShouldBe("def load(path):");
+
+        var chunks = store.ListChunksByFile(file.Id);
+        chunks.ShouldNotBeEmpty();
+        chunks.Count.ShouldBe(symbols.Count);
+        chunks.ShouldAllBe(c => c.SymbolId != null);
+        var load = symbols.Single(s => s.Name == "load");
+        chunks.ShouldAllBe(c => c.SymbolId == load.Id);
+        chunks[0].Text.ShouldContain("def load(path):");
+
+        // reference rules are T3: the language is routed with no pool, so no edge may appear for it
+        store.ListRefsByFile(file.Id).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Index_GoFile_StillOnFallbackChunksUntilItsVocabularyLands()
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var file = store.ListFiles(repoId).Single(f => f.Path == "cmd/server.go");
+
+        // the remaining tripwire row, unchanged in shape: grammar arms and the home row are in place,
+        // no symbol vocabulary is, so go must keep the sliding-window chunker. T4 converts this into
+        // the per-symbol form above — deleting it instead is a fail, and so is a file that leaves this
+        // run with no chunks at all (routed with an empty vocabulary)
+        file.Language.ShouldBe("go");
         file.Kind.ShouldBe("code");
         store.ListSymbolsByFile(file.Id).ShouldBeEmpty();
         store.ListRefsByFile(file.Id).ShouldBeEmpty();
         var chunks = store.ListChunksByFile(file.Id);
         chunks.ShouldNotBeEmpty();
         chunks.ShouldAllBe(c => c.SymbolId == null);
+    }
+
+    [Fact]
+    public void Index_PythonSymbolNamedLikeJsCallee_KeepsJsEdgesOnTheJsRow()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/mul.py", "def mul(a, b):\n    return a * b\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/mul.py");
+        var utilFile = store.ListFiles(repoId).Single(f => f.Path == "src/util.js");
+        var appFile = store.ListFiles(repoId).Single(f => f.Path == "src/app.js");
+
+        // the row has to exist before the wall is asserted against it, otherwise a silent zero-symbol
+        // python file would make this test green for the wrong reason
+        var pyMul = store.ListSymbolsByFile(pyFile.Id).ShouldHaveSingleItem();
+        pyMul.Name.ShouldBe("mul");
+        var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
+
+        // a python row that shares a name with a javascript callee stays out of reach: name matching
+        // happens inside a pool, and python has none, so app.js keeps binding both of its 'mul' edges
+        // to the javascript row instead of fanning out across grammars
+        var edges = store.ListRefsByFile(appFile.Id).Where(r => r.ToName == "mul").ToList();
+        edges.Count.ShouldBe(2);
+        edges.ShouldAllBe(r => r.FromSymbolId == jsMul.Id);
+        edges.ShouldNotContain(r => r.FromSymbolId == pyMul.Id);
+    }
+
+    [Fact]
+    public void Index_PythonSameSpanPair_AttributesEveryDuplicateChunkToTheOuterRow()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/config.py", "class Config: DEBUG = True\n\nX = Y = 1\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var file = store.ListFiles(repoId).Single(f => f.Path == "src/config.py");
+
+        // the store half of BUGS/022: four symbol rows on two lines, four chunk rows on the same two
+        // lines, and every chunk of a colliding pair attributed to the symbol that came first in source
+        // order — SymbolPersistence.FindContainingSymbol orders candidates by span width and LINQ's
+        // OrderBy is stable, so a class and the one-line const inside it (equal widths) never split the
+        // pair, and the inner symbol ends up with no chunk of its own
+        var symbols = store.ListSymbolsByFile(file.Id);
+        symbols.Count.ShouldBe(4);
+        symbols.ShouldContain(s => s.Name == "Config" && s.Kind == "class" && s.ContainerName == null);
+        symbols.ShouldContain(s => s.Name == "DEBUG" && s.Kind == "field" && s.ContainerName == "Config");
+        symbols.ShouldContain(s => s.Name == "X" && s.Kind == "field" && s.ContainerName == null);
+        symbols.ShouldContain(s => s.Name == "Y" && s.Kind == "field" && s.ContainerName == null);
+
+        // asserted unordered on purpose: ListSymbolsByFile is an unordered read — this very list came
+        // back X, Y, DEBUG, Config on the first run — while the attribution tie-break works on the
+        // persisted order, which is source order. The ids below are that proof, not the row order.
+        var config = symbols.Single(s => s.Name == "Config");
+        var debug = symbols.Single(s => s.Name == "DEBUG");
+        var chained = symbols.Single(s => s.Name == "X");
+        var chainedInner = symbols.Single(s => s.Name == "Y");
+        config.Id.ShouldBeLessThan(debug.Id);
+        chained.Id.ShouldBeLessThan(chainedInner.Id);
+
+        var chunks = store.ListChunksByFile(file.Id);
+        chunks.Count.ShouldBe(4);
+        chunks.Select(c => c.StartLine).Distinct().Count().ShouldBe(2);
+        chunks.Count(c => c.SymbolId == config.Id).ShouldBe(2);
+        chunks.Count(c => c.SymbolId == chained.Id).ShouldBe(2);
+
+        // the unreachable half of each pair, named so the day the collision is fixed this test is the
+        // one that flips — no chunk anywhere points at DEBUG or Y
+        chunks.ShouldNotContain(c => c.SymbolId == debug.Id);
+        chunks.ShouldNotContain(c => c.SymbolId == chainedInner.Id);
     }
 
     [Fact]

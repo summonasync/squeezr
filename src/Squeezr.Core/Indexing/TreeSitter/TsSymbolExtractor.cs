@@ -42,14 +42,23 @@ internal static class TsSymbolExtractor
             return false;
         }
 
-        var span = new CodeSpan(node.StartPosition.Row + 1, node.EndPosition.Row + 1);
+        // a decorator wraps its definition instead of annotating it, and the wrapper has no name field:
+        // the row stays the definition's — name, kind and signature from the def line — while its span
+        // grows to the whole item. The asymmetry is deliberate: a routed file is taken off the fallback
+        // chunker, so a decorator line left outside every symbol span would drop out of the index
+        // entirely, while a signature built from '@staticmethod' would lose the call shape agents read
+        var item = vocabulary.DecoratorWrapper is { } wrapper && node.Parent?.Type == wrapper
+            ? node.Parent
+            : node;
+
+        var span = new CodeSpan(item.StartPosition.Row + 1, item.EndPosition.Row + 1);
         symbol = new Symbol(
             name,
             KindOf(node, vocabulary),
             SignatureOf(node),
             span,
             ContainerOf(node, vocabulary),
-            DocCommentFor(node, comments));
+            DocCommentFor(item, comments));
         return true;
     }
 
@@ -60,8 +69,67 @@ internal static class TsSymbolExtractor
         // a parameter instead
         "function_expression" => node.GetChildForField("name") is not null,
         "variable_declarator" => node.NamedChildren.Any(c => c.Type == "arrow_function"),
+
+        // python has no const node: a module-level CONSTANT is the same 'assignment' statement as a
+        // write to a local, so the shape alone does not make it a declaration
+        "assignment" => IsConstantBinding(node),
         _ => true,
     };
+
+    // two guards reject a write that is not a declaration, and they overlap on purpose:
+    //  - the text test below, because UPPER_SNAKE is the convention that separates a module or class
+    //    constant from a working variable, and a dotted or subscripted target carries its punctuation
+    //    in the text ('CFG.MODE', 'ITEMS[0]') so it fails the same test;
+    //  - NameOf's identifier-only fallback, which answers null for those same attribute and subscript
+    //    forms — reached after this gate in TryCreateSymbol, so it is the second line of defence, not
+    //    the first.
+    // The redundancy is deliberate belt-and-braces, and it has a cost worth naming: a mutant that only
+    // loosens the punctuation side of the text test survives, because NameOf then refuses the node
+    // instead. What the tests pin is that no row appears, not which of the two guards refused it.
+    // Tuple targets are a known drop for the same reason: 'A, B = 1, 2' carries the comma in the
+    // target's text, so neither name becomes a row — unpacking a tuple of constants is not modelled as
+    // declarations, and the negative is pinned in Python_TupleTargets_AreNotRows_WhileABareAnnotationIs.
+    // The ancestor walk is the arm nothing else covers: an uppercase write inside a def body is the
+    // same statement shape at a smaller scope, and only this walk rejects it (mutant M12).
+    private static bool IsConstantBinding(Node node)
+    {
+        var target = node.GetChildForField("left");
+        if (target is null || !IsConstName(target.Text))
+        {
+            return false;
+        }
+
+        for (var current = node.Parent; current is not null; current = current.Parent)
+        {
+            if (current.Type == "function_definition")
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsConstName(string name)
+    {
+        var letters = 0;
+        foreach (var c in name)
+        {
+            if (c == '_' || char.IsDigit(c))
+            {
+                continue;
+            }
+
+            if (!char.IsUpper(c))
+            {
+                return false;
+            }
+
+            letters++;
+        }
+
+        return letters > 0;
+    }
 
     private static SymbolKind KindOf(Node node, SymbolVocabulary vocabulary)
     {
@@ -71,6 +139,11 @@ internal static class TsSymbolExtractor
             "method_definition" when NameOf(node) == "constructor" => SymbolKind.Constructor,
             "function_item" or "function_signature_item"
                 when InnermostContainer(node, vocabulary)?.Type is "impl_item" or "trait_item" => SymbolKind.Method,
+
+            // python has no method node: a def is a function_definition whose enclosing definition is a
+            // class, which is the same judgement rust makes through InnermostContainer
+            "function_definition"
+                when InnermostContainer(node, vocabulary)?.Type == "class_definition" => SymbolKind.Method,
             _ => kind,
         };
     }

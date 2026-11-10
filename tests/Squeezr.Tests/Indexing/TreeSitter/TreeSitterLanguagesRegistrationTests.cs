@@ -10,12 +10,13 @@ public class TreeSitterLanguagesRegistrationTests
     // Two axes that grow on different days, so they get two theories: a language joins this first list
     // the day its symbol vocabulary lands (python in T2, go in T4) — routing is derived from that row —
     // and only later the second, when its reference rules land (T3/T5). A routed language with no
-    // reference rules is a legal state, and that is exactly what the next task will leave behind.
+    // reference rules is a legal state, and python in this run is exactly that: routed, pool-less
     [Theory]
     [InlineData(TreeSitterLanguages.JavaScript)]
     [InlineData(TreeSitterLanguages.TypeScript)]
     [InlineData(TreeSitterLanguages.Tsx)]
     [InlineData(TreeSitterLanguages.Rust)]
+    [InlineData(TreeSitterLanguages.Python)]
     public void Routed_CarriesASymbolVocabulary(string language)
     {
         TreeSitterLanguages.Routed(language).ShouldBeTrue();
@@ -33,8 +34,9 @@ public class TreeSitterLanguagesRegistrationTests
         TreeSitterLanguages.ReferencePoolFor(language).ShouldNotBeNullOrEmpty();
     }
 
+    // python left this list when its table landed; go is the only language still registered ahead of
+    // its vocabulary, and it is the row the fallback tripwire in TreeSitterRoutingTests still guards
     [Theory]
-    [InlineData(TreeSitterLanguages.Python)]
     [InlineData(TreeSitterLanguages.Go)]
     public void RegisteredLanguage_IsNotRoutedAndCarriesNoRules(string language)
     {
@@ -48,11 +50,23 @@ public class TreeSitterLanguagesRegistrationTests
     }
 
     [Fact]
+    public void RoutedWithoutReferenceRules_IsTheStatePythonLandedIn()
+    {
+        // the two axes are independent, and that is worth pinning on its own now that a language
+        // actually sits in the middle state: routed symbols, no pool, so the phase must skip it for
+        // reference rows rather than fall through to another grammar's pool
+        TreeSitterLanguages.Routed(TreeSitterLanguages.Python).ShouldBeTrue();
+        TreeSitterLanguages.SymbolsFor(TreeSitterLanguages.Python).Kinds.Count.ShouldBe(3);
+        TreeSitterLanguages.ReferencesFor(TreeSitterLanguages.Python).ShouldBeNull();
+        TreeSitterLanguages.ReferencePoolFor(TreeSitterLanguages.Python).ShouldBeNull();
+    }
+
+    [Fact]
     public void UnroutedLanguageAnswersTheSameAsAnUnknownOne()
     {
-        TreeSitterLanguages.SymbolsFor(TreeSitterLanguages.Python).Kinds.Count
+        TreeSitterLanguages.SymbolsFor(TreeSitterLanguages.Go).Kinds.Count
             .ShouldBe(TreeSitterLanguages.SymbolsFor("csharp").Kinds.Count);
-        TreeSitterLanguages.ReferencesFor(TreeSitterLanguages.Go)
+        TreeSitterLanguages.ReferencesFor(TreeSitterLanguages.Python)
             .ShouldBe(TreeSitterLanguages.ReferencesFor("csharp"));
     }
 

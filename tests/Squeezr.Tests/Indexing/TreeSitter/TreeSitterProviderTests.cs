@@ -453,8 +453,8 @@ public class TreeSitterProviderTests
         chunks[^1].Span.EndLine.ShouldBe(symbol.Span.EndLine);
     }
 
+    // python left this list in T2 — its table landed, so it is no longer the empty-vocabulary shape
     [Theory]
-    [InlineData("src/main.py", "python", "def load(path):\n  return path\n")]
     [InlineData("cmd/server.go", "go", "package main\n\nfunc Load(path string) string {\n  return path\n}\n")]
     public void UnroutedButRegisteredLanguage_ParsesCleanlyAndYieldsNoRows(string path, string language, string source)
     {
@@ -470,6 +470,24 @@ public class TreeSitterProviderTests
         result.Symbols.ShouldBe([]);
         result.Refs.ShouldBe([]);
         result.Chunks.ShouldBe([]);
+    }
+
+    [Fact]
+    public void Python_RoutedWithSymbolsButNoReferenceRules_YieldsRowsWithoutEdges()
+    {
+        var provider = new TreeSitterProvider(Config);
+        var result = provider.Parse(
+            new FileRef("demo", "src/loader.py"),
+            Encoding.UTF8.GetBytes("def load(path):\n  return open(path).read()\n"));
+
+        // the middle state of the two axes, read through the provider: the symbol table is live, the
+        // reference vocabulary is still null, so rows are extracted and named from the real grammar
+        // while no edge is invented for a language that has no pool yet
+        provider.Warnings.ShouldBeEmpty();
+        result.Language.ShouldBe("python");
+        result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([("load", SymbolKind.Function)]);
+        result.Refs.ShouldBe([]);
+        result.Chunks.Count.ShouldBe(1);
     }
 
     [Fact]

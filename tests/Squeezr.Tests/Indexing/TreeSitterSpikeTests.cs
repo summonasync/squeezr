@@ -553,6 +553,169 @@ public class TreeSitterSpikeTests
             .ShouldContain("function_definition");
     }
 
+    // the shapes the python symbol table keys on, measured before the table existed: a decorator is a
+    // wrapper node with no name of its own, a module-level binding is a bare 'assignment' statement,
+    // and neither is a node kind another bundled grammar produces for the same source
+    private const string PythonVocabularySource = """
+        CONST = 3
+        lower = 4
+
+        @dataclass
+        class Box:
+            name: str
+            MAX_ITEMS: int = 5
+
+        @staticmethod
+        def decorated(b):
+            MAX_INSIDE = 1
+            double = lambda x: x * 2
+            return double(b)
+        """;
+
+    [Fact]
+    public void Python_DecoratedDefinition_WrapsTheItemAndCarriesNoNameOfItsOwn()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonVocabularySource);
+
+        var wrappers = CollectNodes(tree.RootNode!).Where(n => n.Type == "decorated_definition").ToList();
+        wrappers.Count.ShouldBe(2);
+        foreach (var wrapper in wrappers)
+        {
+            // no name field: a row keyed on the wrapper would have to reach through the inner item for
+            // its name anyway, so the inner definition is the keyed node and the wrapper is the span
+            wrapper.GetChildForField("name").ShouldBeNull();
+            var inner = wrapper.GetChildForField("definition");
+            inner.ShouldNotBeNull();
+            inner!.Type.ShouldBeOneOf("function_definition", "class_definition");
+
+            // relational on purpose: the wrapper starts above the definition it decorates, ends with it,
+            // and its first source line is the decorator text
+            wrapper.StartPosition.Row.ShouldBeLessThan(inner.StartPosition.Row);
+            wrapper.EndPosition.Row.ShouldBe(inner.EndPosition.Row);
+            wrapper.Text.Split('\n')[0].ShouldStartWith("@");
+
+            // exactly one definition under each wrapper, so one wrapper can stand for one item — and the
+            // name lives on that inner node only: keying the wrapper itself was tried and produced no
+            // row at all (NameOf answers null), a dead table entry rather than a double count
+            CollectNodes(wrapper).Count(n => n.Type is "function_definition" or "class_definition")
+                .ShouldBe(1);
+        }
+    }
+
+    [Fact]
+    public void Python_ModuleLevelBinding_IsAnAssignmentNodeWithNoNameField()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonVocabularySource);
+
+        var assignments = CollectNodes(tree.RootNode!).Where(n => n.Type == "assignment").ToList();
+
+        // CONST, lower, the bare annotation, MAX_ITEMS, and both assignments inside the def body share
+        // one node kind: the shape cannot tell a constant from a local write, so the table alone is not
+        // enough — the extractor gate (const-shaped target outside a def body) is what keeps noise out
+        assignments.Select(n => n.GetChildForField("left")?.Text)
+            .ShouldBe(["CONST", "lower", "name", "MAX_ITEMS", "MAX_INSIDE", "double"]);
+        assignments.Count(n => n.GetChildForField("name") is null).ShouldBe(assignments.Count);
+        assignments.Count(n => n.GetChildForField("left")?.Type == "identifier").ShouldBe(assignments.Count);
+
+        // the value field of a python assignment is named 'right', and a bare annotation carries none —
+        // which is how 'name: str' differs in shape from 'MAX_ITEMS: int = 5'
+        assignments.Where(n => n.GetChildForField("right") is null)
+            .Select(n => n.GetChildForField("left")?.Text).ShouldBe(["name"]);
+    }
+
+    [Fact]
+    public void Python_NodeKindNamesTheTableKeys_AreAbsentFromJsAndGoTrees()
+    {
+        using var python = new Language("Python");
+        using var pythonParser = new Parser(python);
+        using var pyTree = Parse(pythonParser, PythonVocabularySource);
+        var pythonTypes = CollectTypes(pyTree.RootNode!);
+
+        using var go = new Language("Go");
+        using var goParser = new Parser(go);
+        using var goTree = Parse(goParser, GoSource);
+        var goTypes = CollectTypes(goTree.RootNode!);
+
+        using var js = new Language("JavaScript");
+        using var jsParser = new Parser(js);
+        using var jsTree = Parse(jsParser, JsVocabularySource);
+        var jsTypes = CollectTypes(jsTree.RootNode!);
+
+        // the collision guard for the python row, measured on the trees the extractor actually walks:
+        // every kind the table keys on is absent from both foreign grammars, even though those grammars
+        // write the same concept under a near-miss name — go's 'r.items = append(...)' is an
+        // assignment_statement, javascript's 'ITEMS[0] = total' and 'this.items = []' are
+        // assignment_expressions. Key the pool on node kinds alone and both statements arrive as python
+        // constants; the js tree also carries class Holder and function run, which the python table has
+        // no name for, so a shared table would harvest nothing there either way
+        foreach (var kind in new[] { "function_definition", "class_definition", "decorated_definition", "assignment" })
+        {
+            goTypes.ShouldNotContain(kind);
+            jsTypes.ShouldNotContain(kind);
+            pythonTypes.ShouldContain(kind);
+        }
+
+        goTypes.ShouldContain("assignment_statement");
+        jsTypes.ShouldContain("assignment_expression");
+
+        // and the names repeat where the concept is the same, which is why pools stay per-language
+        goTypes.ShouldContain("function_declaration");
+        jsTypes.ShouldContain("function_declaration");
+    }
+
+    [Fact]
+    public void Python_Docstring_IsAStringNode_AndHashComment_IsACommentNode()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, """
+            # leading comment
+
+            '''
+            Module docstring.
+            '''
+
+            def load(path):
+                '''What it does.'''
+                return path
+            """);
+
+        var types = CollectTypes(tree.RootNode!);
+
+        // python documentation is a string expression, not a comment node, so the comment collector that
+        // rust and js reach never sees it — the fact the doc-capture fence in the python tests stands on
+        types.ShouldContain("string");
+        types.ShouldContain("comment");
+        types.ShouldNotContain("block_comment");
+        CollectNodes(tree.RootNode!).Where(n => n.Type == "string").Select(n => n.Text)
+            .ShouldBe(["'''\nModule docstring.\n'''", "'''What it does.'''"]);
+    }
+
+    private const string JsVocabularySource = """
+        import { mul } from './util';
+
+        const ITEMS = [1, 2];
+
+        export function run(items) {
+          let total = 0;
+          for (const item of items) {
+            total = mul(total, item);
+            ITEMS[0] = total;
+          }
+          return total;
+        }
+
+        export class Holder {
+          clear() {
+            this.items = [];
+          }
+        }
+        """;
+
     [Fact]
     public void Go_Parse_ProducesExpectedNodeTypes()
     {
