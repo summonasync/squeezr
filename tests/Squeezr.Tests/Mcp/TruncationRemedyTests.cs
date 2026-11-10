@@ -18,7 +18,8 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "code_search", new Dictionary<string, object?>
         {
-            ["query"] = "Add", ["maxTokens"] = 1,
+            ["query"] = "Add",
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
@@ -33,7 +34,8 @@ public class TruncationRemedyTests
 
         var envelope = await CallWarnings(harness, "code_search", new Dictionary<string, object?>
         {
-            ["query"] = "Add", ["maxTokens"] = 2000,
+            ["query"] = "Add",
+            ["maxTokens"] = 2000,
         });
 
         envelope.Warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(0);
@@ -47,7 +49,8 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "symbol_lookup", new Dictionary<string, object?>
         {
-            ["name"] = "Add", ["maxTokens"] = 1,
+            ["name"] = "Add",
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
@@ -62,7 +65,8 @@ public class TruncationRemedyTests
 
         var (envelope, warnings) = await CallWarnings(harness, "symbol_lookup", new Dictionary<string, object?>
         {
-            ["name"] = "Go", ["maxTokens"] = 20,
+            ["name"] = "Go",
+            ["maxTokens"] = 20,
         });
 
         warnings.Single(w => w.StartsWith("truncated: ")).ShouldBe(
@@ -110,7 +114,8 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "repo_map", new Dictionary<string, object?>
         {
-            ["depth"] = 3, ["maxTokens"] = 1,
+            ["depth"] = 3,
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
@@ -125,7 +130,10 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "expand_span", new Dictionary<string, object?>
         {
-            ["file"] = "src/Calc.cs", ["startLine"] = 1, ["endLine"] = 15, ["maxTokens"] = 1,
+            ["file"] = "src/Calc.cs",
+            ["startLine"] = 1,
+            ["endLine"] = 15,
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
