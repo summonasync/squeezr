@@ -695,6 +695,239 @@ public class TreeSitterSpikeTests
             .ShouldBe(["'''\nModule docstring.\n'''", "'''What it does.'''"]);
     }
 
+    // reference-class shapes measured on tree-sitter-python before the reference table existed. The
+    // source is deliberately one file with every shape the table keys on, and the assertions read fields
+    // relationally — a count here would only prove the fixture did not change
+    private const string PythonReferenceSource = """
+        import os
+        import os, sys
+        import a.b.c as abc
+        from typing import Dict, List as L
+        from os.path import join
+        from . import sibling
+        from ..pkg import thing
+        from typing import *
+
+        class Bare:
+            pass
+
+        @dataclass
+        @app.route("/x")
+        class Widget(Base, metaclass=ABCMeta):
+            def render(self, items):
+                funcs[0](1)
+                joined = os.path.join("a", "b").upper()
+                return helper(sum(items), Base(), items.map(lambda x: inner(x)))
+        """;
+
+    [Fact]
+    public void Python_CallCallee_VariantsExposeTheirNameThroughFields()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonReferenceSource);
+        var calls = CollectNodes(tree.RootNode!).Where(n => n.Type == "call").ToList();
+
+        // a python call is 'call' (never call_expression), its callee is field 'function' and its
+        // argument list is field 'arguments'
+        calls.Count(c => c.GetChildForField("arguments")?.Type == "argument_list").ShouldBe(calls.Count);
+        calls.Count(c => c.GetChildForField("function") is not null).ShouldBe(calls.Count);
+
+        // select by exact text: 'os.path.join("a", "b")' and 'os.path.join("a", "b").upper()' share a
+        // prefix, and the outer node of a chained call starts where the inner one does
+        var dotted = calls.Single(c => c.Text == "os.path.join(\"a\", \"b\")");
+        dotted.GetChildForField("function")!.Type.ShouldBe("attribute");
+        // an attribute chain nests to the LEFT and names to the right: 'os.path.join' is
+        // attribute(object=attribute('os.path'), attribute='join'), so the callee's last segment is the
+        // field named 'attribute' — javascript reaches the same judgement through
+        // member_expression.property and rust through field_expression.field, under three different
+        // node-kind names
+        var joinChain = dotted.GetChildForField("function")!;
+        joinChain.GetChildForField("attribute")!.Text.ShouldBe("join");
+        joinChain.GetChildForField("object")!.Text.ShouldBe("os.path");
+
+        // the chained form's own callee is an attribute whose object is a call: the name is still the
+        // member, never the receiver's chain
+        var chained = calls.Single(c => c.Text == "os.path.join(\"a\", \"b\").upper()");
+        var chainedCallee = chained.GetChildForField("function")!;
+        chainedCallee.Type.ShouldBe("attribute");
+        chainedCallee.GetChildForField("attribute")!.Text.ShouldBe("upper");
+        chainedCallee.GetChildForField("object")!.Type.ShouldBe("call");
+
+        // a bare identifier callee, and the subscript callee that has no name to read
+        calls.First(c => c.Text.StartsWith("sum(", StringComparison.Ordinal))
+            .GetChildForField("function")!.Type.ShouldBe("identifier");
+        var subscriptCallee = calls.First(c => c.Text.StartsWith("funcs[0](", StringComparison.Ordinal))
+            .GetChildForField("function")!;
+        subscriptCallee.Type.ShouldBe("subscript");
+        subscriptCallee.GetChildForField("value")!.Text.ShouldBe("funcs");
+    }
+
+    [Fact]
+    public void Python_ImportStatement_RepeatNameFieldsAndNestAliasesInTheirOwnNodes()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonReferenceSource);
+        var statements = CollectNodes(tree.RootNode!).Where(n => n.Type == "import_statement").ToList();
+        statements.Count.ShouldBe(3);
+
+        // 'import os, sys' repeats the name field: GetChildForField answers only 'os' while the node
+        // carries two dotted_name children — an emitter that reads the field would index half the file's
+        // imports and never say so
+        var multi = statements.Single(n => n.Text == "import os, sys");
+        multi.GetChildForField("name")!.Text.ShouldBe("os");
+        multi.NamedChildren.Where(c => c.Type == "dotted_name").Select(c => c.Text)
+            .ShouldBe(["os", "sys"]);
+
+        // an aliased import is its own node kind with both halves as fields, not a dotted_name plus text
+        var aliased = statements.Single(n => n.Text == "import a.b.c as abc");
+        var aliasNode = aliased.GetChildForField("name")!;
+        aliasNode.Type.ShouldBe("aliased_import");
+        aliasNode.GetChildForField("name")!.Text.ShouldBe("a.b.c");
+        aliasNode.GetChildForField("alias")!.Text.ShouldBe("abc");
+        statements.Single(n => n.Text == "import os").GetChildForField("name")!.Type.ShouldBe("dotted_name");
+    }
+
+    [Fact]
+    public void Python_ImportFromStatement_HoldsModuleOnLeftBindingsOnRightAndGlobHasNoBinding()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonReferenceSource);
+        var froms = CollectNodes(tree.RootNode!).Where(n => n.Type == "import_from_statement").ToList();
+        froms.Count.ShouldBe(5);
+
+        // the module lives in field 'module_name'; the bindings are the statement's dotted_name /
+        // aliased_import children — and the module node is itself a dotted_name child, so a collector
+        // that iterates dotted_name harvests 'typing' as a binding too
+        var typed = froms.Single(n => n.Text == "from typing import Dict, List as L");
+        typed.GetChildForField("module_name")!.Text.ShouldBe("typing");
+        typed.NamedChildren.Where(c => c.Type == "dotted_name").Select(c => c.Text)
+            .ShouldBe(["typing", "Dict"]);
+        typed.NamedChildren.Where(c => c.Type == "aliased_import").Select(c => c.Text)
+            .ShouldBe(["List as L"]);
+
+        // a relative import is a node kind of its own whose text is the dot prefix
+        froms.Single(n => n.Text == "from . import sibling")
+            .GetChildForField("module_name")!.Type.ShouldBe("relative_import");
+        var package = froms.Single(n => n.Text == "from ..pkg import thing")
+            .GetChildForField("module_name")!;
+        package.Type.ShouldBe("relative_import");
+        package.Text.ShouldBe("..pkg");
+
+        // 'from typing import *' has no binding field at all — only a wildcard_import child
+        var glob = froms.Single(n => n.Text == "from typing import *");
+        glob.GetChildForField("name").ShouldBeNull();
+        glob.NamedChildren.ShouldContain(c => c.Type == "wildcard_import");
+    }
+
+    [Fact]
+    public void Python_ClassSuperclasses_AreAnArgumentListMixingBasesAndKeywordArguments()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonReferenceSource);
+        var classes = CollectNodes(tree.RootNode!).Where(n => n.Type == "class_definition").ToList();
+
+        // a class without parentheses carries no superclasses field; with them the field is an
+        // argument_list, and 'metaclass=ABCMeta' is a keyword_argument child of the SAME list as the
+        // base — a reader that takes every child indexes a configuration option as a parent class
+        classes.Single(c => c.GetChildForField("name")!.Text == "Bare")
+            .GetChildForField("superclasses").ShouldBeNull();
+        var widget = classes.Single(c => c.GetChildForField("name")!.Text == "Widget")
+            .GetChildForField("superclasses")!;
+        widget.Type.ShouldBe("argument_list");
+        widget.NamedChildren.Where(c => c.Type != "keyword_argument").Select(c => c.Text).ShouldBe(["Base"]);
+        var keyword = widget.NamedChildren.Single(c => c.Type == "keyword_argument");
+        keyword.GetChildForField("name")!.Text.ShouldBe("metaclass");
+        keyword.GetChildForField("value")!.Text.ShouldBe("ABCMeta");
+    }
+
+    [Fact]
+    public void Python_DecoratorWrapsEitherACallOrABareExpression()
+    {
+        using var language = new Language("Python");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, PythonReferenceSource);
+        var decorators = CollectNodes(tree.RootNode!).Where(n => n.Type == "decorator").ToList();
+        decorators.Select(n => n.Text).ShouldBe(["@dataclass", "@app.route(\"/x\")"]);
+
+        // the call-shaped decorator is a real 'call' node inside the decorator, so a call rule reaches it
+        // the same way it reaches any call (and emits 'route'); a bare decorator carries only an
+        // identifier and produces nothing — the difference is node shape, not name
+        CollectTypes(decorators.First(n => n.Text == "@app.route(\"/x\")")).ShouldContain("call");
+        CollectTypes(decorators.First(n => n.Text == "@dataclass")).ShouldNotContain("call");
+    }
+
+    [Fact]
+    public void PythonReferenceKindNames_ExposeThreeCrossGrammarTwinsAndTwoSafeGates()
+    {
+        using var python = new Language("Python");
+        using var pythonParser = new Parser(python);
+        using var pyTree = Parse(pythonParser, PythonReferenceSource);
+        var pythonNames = CollectTypes(pyTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var js = new Language("JavaScript");
+        using var jsParser = new Parser(js);
+        using var jsTree = Parse(jsParser, JsVocabularySource);
+        var jsNames = CollectTypes(jsTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var rust = new Language("Rust");
+        using var rustParser = new Parser(rust);
+        using var rustTree = Parse(rustParser, """
+            #[derive(Debug)]
+            pub struct Registry {
+                entries: u32,
+            }
+
+            impl Registry {
+                pub fn lookup(&self, key: &str) -> u32 {
+                    self.entries.max(1)
+                }
+            }
+            """);
+        var rustNames = CollectTypes(rustTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var go = new Language("Go");
+        using var goParser = new Parser(go);
+        using var goTree = Parse(goParser, GoSource);
+        var goNames = CollectTypes(goTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        // THE twin that decides the design: python writes an import node named import_statement, exactly
+        // the name javascript uses, while the shape under it is nothing alike (js: 'source' +
+        // 'import_clause'; python: 'module_name' + dotted_name children). A dispatch keyed on the node
+        // kind would run the javascript reader over a python import, find no source field and emit zero
+        // references — silent, and green in every test that only checks 'no crash'
+        pythonNames.ShouldContain("import_statement");
+        jsNames.ShouldContain("import_statement");
+
+        // the second twin: rust's attribute node is the #[...] shape, an unrelated concept to python's
+        // dotted attribute — safe today only because the call rule never asks a rust node for its
+        // 'attribute' field, which is why the python call gate is keyed on a name rust does not use
+        pythonNames.ShouldContain("attribute");
+        rustNames.ShouldContain("attribute");
+
+        // the third: go's call argument list is argument_list too, the same name python gives it
+        pythonNames.ShouldContain("argument_list");
+        goNames.ShouldContain("argument_list");
+
+        // the two names the reference table gates on ARE disjoint: every other grammar spells a call
+        // call_expression, and a class is class_declaration (js) or type_declaration (go)
+        pythonNames.ShouldContain("call");
+        foreach (var names in new[] { jsNames, rustNames, goNames })
+        {
+            names.ShouldNotContain("call");
+            names.ShouldNotContain("class_definition");
+            names.ShouldContain("call_expression");
+        }
+
+        jsNames.ShouldNotContain("import_from_statement");
+        jsNames.ShouldNotContain("aliased_import");
+        rustNames.ShouldNotContain("import_from_statement");
+        goNames.ShouldNotContain("import_from_statement");
+    }
+
     private const string JsVocabularySource = """
         import { mul } from './util';
 

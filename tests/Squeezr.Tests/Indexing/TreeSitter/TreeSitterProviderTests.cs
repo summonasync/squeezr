@@ -473,21 +473,26 @@ public class TreeSitterProviderTests
     }
 
     [Fact]
-    public void Python_RoutedWithSymbolsButNoReferenceRules_YieldsRowsWithoutEdges()
+    public void Python_RoutedWithReferenceRules_EmitsCallAndImportRows()
     {
         var provider = new TreeSitterProvider(Config);
         var result = provider.Parse(
             new FileRef("demo", "src/loader.py"),
-            Encoding.UTF8.GetBytes("def load(path):\n  return open(path).read()\n"));
+            Encoding.UTF8.GetBytes("import os\n\ndef load(path):\n    return open(path).read()\n"));
 
-        // the middle state of the two axes, read through the provider: the symbol table is live, the
-        // reference vocabulary is still null, so rows are extracted and named from the real grammar
-        // while no edge is invented for a language that has no pool yet
+        // the T2 fence, flipped on schedule. That test pinned the in-between state — routed with symbols
+        // and deliberately no edges — and T3 was hired to end it, so the same source now answers with its
+        // rows: the import statement first, then the chained call's outer callee before the inner one,
+        // each named from inside 'load' because that function is the enclosing container
         provider.Warnings.ShouldBeEmpty();
         result.Language.ShouldBe("python");
         result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([("load", SymbolKind.Function)]);
-        result.Refs.ShouldBe([]);
-        result.Chunks.Count.ShouldBe(1);
+        result.Refs.Select(r => (r.ToSymbolId, r.ToName, r.Kind, r.Line, r.EnclosingName)).ShouldBe(
+        [
+            (null, "os", RefKind.Import, 1, null),
+            (null, "read", RefKind.Call, 4, "load"),
+            (null, "open", RefKind.Call, 4, "load"),
+        ]);
     }
 
     [Fact]

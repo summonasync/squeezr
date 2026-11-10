@@ -240,8 +240,18 @@ public class TreeSitterRoutingTests
         chunks.ShouldAllBe(c => c.SymbolId == load.Id);
         chunks[0].Text.ShouldContain("def load(path):");
 
-        // reference rules are T3: the language is routed with no pool, so no edge may appear for it
-        store.ListRefsByFile(file.Id).ShouldBeEmpty();
+        // the T1 tripwire row, converted by T2's symbol table and now carrying its reference half too:
+        // the file's edges are the import statement and the two callees of the chained read, all of them
+        // unresolved because nothing in this workspace is a python definition named os/open/read.
+        // Asserted per row rather than as a list: ListRefsByFile is an unordered read like every other
+        // per-file collection (this same store handed the three rows back as open, read, os), while the
+        // provider-level walk order is pinned in TreeSitterPythonReferenceTests
+        var edges = store.ListRefsByFile(file.Id);
+        edges.Count.ShouldBe(3);
+        edges.ShouldContain(r => r.Kind == "import" && r.ToName == "os" && r.Line == 1);
+        edges.ShouldContain(r => r.Kind == "call" && r.ToName == "read" && r.Line == 4);
+        edges.ShouldContain(r => r.Kind == "call" && r.ToName == "open" && r.Line == 4);
+        edges.ShouldAllBe(r => r.FromSymbolId == 0);
     }
 
     [Fact]
@@ -287,12 +297,94 @@ public class TreeSitterRoutingTests
         var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
 
         // a python row that shares a name with a javascript callee stays out of reach: name matching
-        // happens inside a pool, and python has none, so app.js keeps binding both of its 'mul' edges
-        // to the javascript row instead of fanning out across grammars
+        // happens inside a pool, and 'mul' in a .js file lives in the js-ts pool while the python row
+        // lives in python's own — so app.js keeps binding both of its 'mul' edges to the javascript row
+        // instead of fanning out across grammars
         var edges = store.ListRefsByFile(appFile.Id).Where(r => r.ToName == "mul").ToList();
         edges.Count.ShouldBe(2);
         edges.ShouldAllBe(r => r.FromSymbolId == jsMul.Id);
         edges.ShouldNotContain(r => r.FromSymbolId == pyMul.Id);
+    }
+
+    // The firewall half of T3, written before the reference vocabulary landed (the 111 sequence, where
+    // the reviewer found the pool hole after the fact): each direction gets its own test and every
+    // 'no edge' assertion ships with a control that resolves on the same name inside the owning pool, so
+    // an empty python reference list can never pass as a win.
+    [Fact]
+    public void Index_PythonCallToNameDefinedOnlyInJavascript_BindsNothingAcrossTheWall()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/caller.py", "def run(items):\n    return mul(1, 2)\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/caller.py");
+        var utilFile = store.ListFiles(repoId).Single(f => f.Path == "src/util.js");
+        var appFile = store.ListFiles(repoId).Single(f => f.Path == "src/app.js");
+
+        // the edge exists — python's call rule saw mul(1, 2) — and resolves to nothing, because javascript's
+        // 'mul' row lives in the js-ts pool and python's pool holds only python files
+        var call = store.ListRefsByFile(pyFile.Id).Single(r => r.Kind == "call" && r.ToName == "mul");
+        call.FromSymbolId.ShouldBe(0);
+        call.EnclosingSymbol.ShouldBe("run");
+
+        // the control: javascript reaches its own mul in both places it names it
+        var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
+        var jsEdges = store.ListRefsByFile(appFile.Id).Where(r => r.ToName == "mul").ToList();
+        jsEdges.Count.ShouldBe(2);
+        jsEdges.ShouldAllBe(r => r.FromSymbolId == jsMul.Id);
+    }
+
+    [Fact]
+    public void Index_JavascriptCallToNameDefinedOnlyInPython_BindsNothingAcrossTheWall()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/pymod.py",
+            "def pyonly_widget():\n    return 1\n\ndef use():\n    return pyonly_widget()\n");
+        WriteFile(workspace, "repo/src/probe.js", "export function go() {\n  return pyonly_widget();\n}\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/pymod.py");
+        var jsFile = store.ListFiles(repoId).Single(f => f.Path == "src/probe.js");
+
+        // javascript names a python function and gets an unresolved row: the name exists in the repository,
+        // but the row it would bind is in python's pool, and name matching never leaves a pool
+        store.ListRefsByFile(jsFile.Id).Single(r => r.Kind == "call" && r.ToName == "pyonly_widget")
+            .FromSymbolId.ShouldBe(0);
+
+        // the same name, the same call shape, one pool over: python binds its own row
+        var definition = store.ListSymbolsByFile(pyFile.Id).Single(s => s.Name == "pyonly_widget");
+        var edges = store.ListRefsByFile(pyFile.Id).Where(r => r.ToName == "pyonly_widget").ToList();
+        edges.Count.ShouldBe(1);
+        edges.ShouldAllBe(r => r.FromSymbolId == definition.Id);
+        edges[0].EnclosingSymbol.ShouldBe("use");
+    }
+
+    [Fact]
+    public void Index_RustCallToPythonOnlyName_KeepsTheRustRowUnresolvedWhilePythonBindsItsOwn()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/pymod.py",
+            "def pyonly_widget():\n    return 1\n\ndef use():\n    return pyonly_widget()\n");
+        WriteFile(workspace, "repo/src/calls.rs", "pub fn boot() -> u32 {\n    pyonly_widget();\n    0\n}\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/pymod.py");
+        var rustFile = store.ListFiles(repoId).Single(f => f.Path == "src/calls.rs");
+
+        // the third pool in the picture: rust's call rules found the name and could not bind it either, so
+        // python did not quietly join the rust pool when its own was created
+        store.ListRefsByFile(rustFile.Id).Single(r => r.Kind == "call" && r.ToName == "pyonly_widget")
+            .FromSymbolId.ShouldBe(0);
+
+        var definition = store.ListSymbolsByFile(pyFile.Id).Single(s => s.Name == "pyonly_widget");
+        store.ListRefsByFile(pyFile.Id).Single(r => r.ToName == "pyonly_widget")
+            .FromSymbolId.ShouldBe(definition.Id);
     }
 
     [Fact]

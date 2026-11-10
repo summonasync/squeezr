@@ -11,7 +11,23 @@ internal sealed record ReferenceVocabulary(
     string Pool,
     IReadOnlySet<string> CallTypes,
     IReadOnlySet<string> ImportTypes,
-    IReadOnlySet<string> TypeTargetTypes);
+    IReadOnlySet<string> TypeTargetTypes,
+    ReferenceReader Reader);
+
+// Which field names the import and class-target readers speak. Node-kind names are NOT a safe dispatch
+// key across grammars — python writes an import node called 'import_statement', the same name
+// javascript uses, and the shapes under it share nothing (js: 'source' + 'import_clause'; python:
+// 'module_name' + dotted_name children). Keying the emitter on the node kind would run the javascript
+// reader over a python import, find no source field and emit zero references — silently. The kinds the
+// walkers gate on (call / class_definition) are disjoint, measured per grammar, so only the field
+// readers need this tag. No default value on purpose: a new language row has to say which reader it
+// speaks instead of inheriting javascript's.
+internal enum ReferenceReader
+{
+    JsTs,
+    Rust,
+    Python,
+}
 
 // The single home of tree-sitter language knowledge: which languages are routed, which node types
 // each grammar contributes to symbols and to references, and which files may match each other's
@@ -126,13 +142,28 @@ internal static class TreeSitterLanguages
         JsTsPool,
         new HashSet<string>(StringComparer.Ordinal) { "call_expression" },
         new HashSet<string>(StringComparer.Ordinal) { "import_statement", "export_statement" },
-        new HashSet<string>(StringComparer.Ordinal));
+        new HashSet<string>(StringComparer.Ordinal),
+        ReferenceReader.JsTs);
 
     private static readonly ReferenceVocabulary RustReferences = new(
         RustPool,
         new HashSet<string>(StringComparer.Ordinal) { "call_expression", "macro_invocation" },
         new HashSet<string>(StringComparer.Ordinal) { "use_declaration" },
-        new HashSet<string>(StringComparer.Ordinal) { "impl_item" });
+        new HashSet<string>(StringComparer.Ordinal) { "impl_item" },
+        ReferenceReader.Rust);
+
+    // measured shapes (TreeSitterSpikeTests.Python_CallCallee_…, Python_ImportStatement_…,
+    // Python_ImportFromStatement_…, Python_ClassSuperclasses_…): a python call is 'call' with the callee in
+    // field 'function' (identifier, attribute chain, or a subscript nobody can name), an import is a
+    // statement whose bindings are dotted_name / aliased_import CHILDREN (the name field repeats, so a
+    // field read loses every name after the first), and a class target list is field 'superclasses' — an
+    // argument_list that mixes the bases with 'metaclass=ABCMeta' keyword arguments
+    private static readonly ReferenceVocabulary PythonReferences = new(
+        PythonPool,
+        new HashSet<string>(StringComparer.Ordinal) { "call" },
+        new HashSet<string>(StringComparer.Ordinal) { "import_statement", "import_from_statement" },
+        new HashSet<string>(StringComparer.Ordinal) { "class_definition" },
+        ReferenceReader.Python);
 
     private static readonly Dictionary<string, LanguageSet> Sets = new(StringComparer.Ordinal)
     {
@@ -141,10 +172,10 @@ internal static class TreeSitterLanguages
         [Tsx] = new LanguageSet(JsTsSymbols, JsTsReferences),
         [Rust] = new LanguageSet(RustSymbols, RustReferences),
 
-        // python's symbol table is what routes the language — Routed is derived from it, so this row
-        // flipping is the whole flip; the reference rules and the pool stay out until T3, which makes
-        // python the first language in the home that is routed with no reference vocabulary
-        [Python] = new LanguageSet(PythonSymbols, null),
+        // python's symbol table routes the language and its reference table gives it its own pool, so a
+        // python file can only ever match a python symbol; the pool name was reserved in T1 for exactly
+        // this row
+        [Python] = new LanguageSet(PythonSymbols, PythonReferences),
 
         // registered ahead of its vocabulary so the grammar arms, the pool name and this row are
         // already in place when a symbol table lands; empty Kinds is what keeps it unrouted
