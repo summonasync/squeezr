@@ -1,6 +1,6 @@
 # Squeezr.Tests — discipline notes
 
-Patterns below are load-flake lessons from full-suite serial runs (features 087, 092, 100). A new test that touches a live engine, a spawned process, or wall-clock ages should follow them before it joins the suite.
+Patterns below are load-flake lessons from full-suite serial runs (features 087, 092, 100, 107). A new test that touches a live engine, a spawned process, or wall-clock ages should follow them before it joins the suite.
 
 ## Patterns
 
@@ -39,6 +39,12 @@ Rule: a run failing at scale (hundreds at once, not one knife) is a box symptom 
 106's first post-reboot serial run expired `ServeEmbedDrainTests.NoEmbedWatch_PassIndexesEditsButPendingStays`'s full three-minute budget — the wait never saw its condition arrive — while the whole run was wall-clock-slow at low CPU load (watch tests 3-5x their warm durations), and `FleetDaemonsTests.Json_OldSingleFileBeat_StillAnswersAsOneProcess` failed beside it at 778ms; both were green on isolated reruns within minutes, no source change involved. A cold boot storms the disk and kernel resource pools, and a chain can freeze for its entire budget, which no multiple covers.
 
 Rule: a knife failing at its FULL budget with load low and the rest of the run slow is reproduced warm (isolated, a few times) before the budget or the code is touched — the budget comment's own contract ("a failure now reads as a real stall") stays true, and the stall's cause decides the fix, not the number.
+
+### 7. An exclusion window that spans CPU makes the writers it protects escape it — and an unsynchronised append is silently destructive
+
+107's CI knife (`Redact_ParallelAppendsDuringTheScrub`, 3–16 lines missing out of 161) was not the swap eating rows on its own: the scrub held `queries.lock` across the whole classification, every queued writer expired its `DefaultWait` and wrote anyway, and outside the lock the log cannot be written at all. `FileMode.Append` settles its write offset when the file is **opened**, so two handles that open before the other's bytes land overwrite one another — no exception, no partial write, just fewer lines (measured in `audits/107-gate-2026-11-09/probe-append-primitive.log`: eight writers released from a barrier go bad in all 200 trials, losing up to seven of eight rows, and `FileShare.Read`, `ReadWrite` and `Write` lose them the same way — the share mask is not the lever). Verifying after the write is not the lever either: another writer's flush can land after your check and clobber it, and searching for the raw text of a row the swap already redacted re-publishes the secret it cleaned.
+
+Rule: keep the exclusive window around the bytes (snapshot read → release → classify → take it again only to merge what arrived and rename), never around the parse — and when a writer misses the budget, make it wait a second, longer budget and write *inside* the lock; an unsynchronised write is the last resort after both budgets are gone, not the price of being late. Pin the interleaving through a seam inside that window (`RedactProtectedParams`'s `beforeTheSwap`, the same shape `Reset`'s `onLockHeld` uses) and pin the budget-crossing shape deterministically with a sleep longer than `DefaultWait` (`Redact_ClassificationOutlivesTheWriterBudget_LosesNoLine`) instead of hoping load reproduces it — a knife that only goes red on a busy runner is a knife that stays green while the product loses rows. Measured cross-process, so the residual is a number and not an argument (`audits/107-gate-2026-11-09/probe-procs-*.log`): four separate processes appending while a scrub classifies for 4 s lose nothing (0 of 80 rows over 5 trials), and with a foreign holder wedging the lock for 12 s — every writer past both budgets, writing unsynchronised — nothing is lost either (0 of 32 rows), because the natural open-write-close rhythm staggers the opens; the barrier is what makes the collision certain, and it is the shape the lock discipline exists to keep unreachable. The in-process gate still only serialises one process, so this is measured, not proven impossible.
 
 ## The gate
 

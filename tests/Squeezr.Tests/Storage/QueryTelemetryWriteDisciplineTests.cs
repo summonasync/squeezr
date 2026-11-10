@@ -6,9 +6,9 @@ using Squeezr.Core.Storage;
 namespace Squeezr.Tests.Storage;
 
 // queries.jsonl takes a line from every cli read and every mcp tool call while a compact pass rewrites the
-// whole file underneath them. The discipline is one writer at a time, and these pins force the interleaving
-// from inside the scrub rather than hoping a race shows up: the classifier runs between the snapshot read and
-// the move, so that is where a concurrent writer is released and where exclusivity is checked.
+// whole file underneath them. The discipline is one writer at a time across the swap: the pass reads the log
+// under the lock, classifies outside it, and takes the lock again only to rename. These pins force the
+// interleaving from inside those windows rather than hoping a race shows up.
 public class QueryTelemetryWriteDisciplineTests
 {
     private const string EnvPath = ".env";
@@ -16,11 +16,11 @@ public class QueryTelemetryWriteDisciplineTests
     private const int ReadsBeforeTheSwap = 40;
     private const int Writers = 8;
     private const int LinesPerWriter = 20;
-    private const int MidScrubLookbackMs = 250;
+    private const int MidSwapLookbackMs = 250;
     private const int SettleTimeoutMs = 30_000;
 
     [Fact]
-    public void Redact_AppendStartedMidScrub_IsHeldBackAndKeepsItsLine()
+    public void Redact_AppendStartedMidSwap_IsHeldBackAndKeepsItsLine()
     {
         var workspace = TelemetryStore();
         var log = SqueezrPaths.QueriesLogPath(workspace);
@@ -34,24 +34,24 @@ public class QueryTelemetryWriteDisciplineTests
             QueryTelemetry.Append(workspace, Entry("repo_map"));
         });
 
-        var lockWasFreeMidScrub = false;
-        var linesMidScrub = 0;
-        var lateWriteLandedMidScrub = false;
+        var lockWasFreeMidSwap = false;
+        var linesMidSwap = 0;
+        var lateWriteLandedMidSwap = false;
         var probed = false;
 
-        var redacted = QueryTelemetry.RedactProtectedParams(workspace, path =>
+        var redacted = QueryTelemetry.RedactProtectedParams(workspace, BuiltInsOnly, out _, () =>
         {
-            if (!probed)
+            if (probed)
             {
-                probed = true;
-                lateWrite.Start();
-                writerEntered.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
-                lockWasFreeMidScrub = WriterLockIsFree(workspace);
-                linesMidScrub = File.ReadAllLines(log).Length;
-                lateWriteLandedMidScrub = lateWrite.Join(MidScrubLookbackMs);
+                return;
             }
 
-            return BuiltInsOnly(path);
+            probed = true;
+            lateWrite.Start();
+            writerEntered.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            lockWasFreeMidSwap = WriterLockIsFree(workspace);
+            linesMidSwap = File.ReadAllLines(log).Length;
+            lateWriteLandedMidSwap = lateWrite.Join(MidSwapLookbackMs);
         });
 
         lateWrite.Join(SettleTimeoutMs).ShouldBeTrue();
@@ -64,9 +64,59 @@ public class QueryTelemetryWriteDisciplineTests
         lines[0].ShouldNotContain(EnvPath);
         lines[^1].ShouldContain("\"tool\":\"repo_map\"");
 
-        lockWasFreeMidScrub.ShouldBeFalse();
-        linesMidScrub.ShouldBe(2);
-        lateWriteLandedMidScrub.ShouldBeFalse();
+        lockWasFreeMidSwap.ShouldBeFalse();
+        linesMidSwap.ShouldBe(2);
+        lateWriteLandedMidSwap.ShouldBeFalse();
+    }
+
+    // A pass that outlives the append budget used to publish its snapshot over the rows written in the meantime —
+    // the loss PR #38's CI knife caught. Inside one process the append gate makes the clobbering shape
+    // unreachable, so what this pin actually guards is the swap's other half: everything that arrived during the
+    // classification has to be carried and scrubbed, and nothing may be republished from the stale snapshot
+    // (mutation-checked: dropping the arrived merge reddens it).
+    [Fact]
+    public async Task Redact_ClassificationOutlivesTheWriterBudget_LosesNoLine()
+    {
+        var workspace = TelemetryStore();
+        var log = SqueezrPaths.QueriesLogPath(workspace);
+        Record(workspace, "expand", new { file = EnvPath, startLine = 1 });
+
+        var released = new ManualResetEventSlim(false);
+        var appends = Enumerable.Range(0, Writers).Select(thread => Task.Run(() =>
+        {
+            released.Wait(TimeSpan.FromSeconds(5));
+            for (var line = 0; line < LinesPerWriter; line++)
+            {
+                QueryTelemetry.Append(workspace, Entry($"o{thread}-{line}"));
+            }
+        })).ToArray();
+
+        var entered = false;
+        var scrub = Task.Run(() => QueryTelemetry.RedactProtectedParams(workspace, path =>
+        {
+            if (!entered)
+            {
+                entered = true;
+                Thread.Sleep(TelemetryWriteLock.DefaultWait + TimeSpan.FromSeconds(1));
+            }
+
+            return BuiltInsOnly(path);
+        }));
+
+        released.Set();
+        (await Task.WhenAny(scrub, Task.Delay(SettleTimeoutMs))).ShouldBe(scrub);
+        var drained = Task.WhenAll(appends);
+        (await Task.WhenAny(drained, Task.Delay(SettleTimeoutMs))).ShouldBe(drained);
+        (await scrub).ShouldBe(1);
+        await drained;
+
+        var expected = 1 + (Writers * LinesPerWriter);
+        File.ReadAllLines(log).Length.ShouldBe(expected);
+        var tools = QueryTelemetry.ReadAll(workspace).Select(e => e.Tool).ToList();
+        tools.Count.ShouldBe(expected);
+        tools[0].ShouldBe("expand");
+        tools.Skip(1).OrderBy(tool => tool, StringComparer.Ordinal).ShouldBe(ExpectedWriterTools("o"));
+        File.ReadAllText(log).ShouldNotContain(EnvPath);
     }
 
     [Fact]
@@ -109,7 +159,43 @@ public class QueryTelemetryWriteDisciplineTests
         var tools = QueryTelemetry.ReadAll(workspace).Select(e => e.Tool).ToList();
         tools.Count.ShouldBe(expected);
         tools[0].ShouldBe("expand");
-        tools.Skip(1).OrderBy(tool => tool, StringComparer.Ordinal).ShouldBe(ExpectedWriterTools());
+        tools.Skip(1).OrderBy(tool => tool, StringComparer.Ordinal).ShouldBe(ExpectedWriterTools("w"));
+        File.ReadAllText(log).ShouldNotContain(EnvPath);
+    }
+
+    // The sweep is the last half of the swap: a row that lands after the arrived merge but before the rename sits
+    // in the inode the path is about to give up, and only a handle taken before the rename can still reach it.
+    // Written straight into the log here, outside the writer lock, exactly like a writer that ran out of patience.
+    // The row has to come back AND stay redacted — and on Windows this is also the canary for the share mask the
+    // sweep handle needs, because a destination held without FileShare.Delete cannot be renamed at all.
+    [Fact]
+    public void Redact_RowStrandedBetweenMergeAndMove_IsCarriedAndStaysRedacted()
+    {
+        var workspace = TelemetryStore();
+        var log = SqueezrPaths.QueriesLogPath(workspace);
+        Record(workspace, "expand", new { file = EnvPath, startLine = 3 });
+
+        var stranded = """
+            {"ts":"2026-11-09T00:00:00.0000000Z","sessionId":"2b8fb9f2-6d2b-4d54-a13f-3f0b1c9a7d31","tool":"code_search","params":{"file":".env","startLine":9},"tokensUsed":0,"truncated":false,"hits":0,"durationMs":1,"cacheHit":false,"indexAgeSeconds":null}
+            """ + '\n';
+
+        var planted = false;
+        var redacted = QueryTelemetry.RedactProtectedParams(workspace, BuiltInsOnly, out _, () =>
+        {
+            if (planted)
+            {
+                return;
+            }
+
+            planted = true;
+            File.AppendAllText(log, stranded);
+        });
+
+        redacted.ShouldBe(2);
+        var lines = File.ReadAllLines(log);
+        lines.Length.ShouldBe(2);
+        QueryTelemetry.ReadAll(workspace).Select(e => e.Tool).ToList().ShouldBe(["expand", "code_search"]);
+        lines[^1].ShouldContain(QueryTelemetry.RedactedPlaceholder);
         File.ReadAllText(log).ShouldNotContain(EnvPath);
     }
 
@@ -232,9 +318,9 @@ public class QueryTelemetryWriteDisciplineTests
 
     private static bool BuiltInsOnly(string path) => SecretGuard.IsProtected(path, []);
 
-    private static List<string> ExpectedWriterTools() =>
+    private static List<string> ExpectedWriterTools(string prefix) =>
         Enumerable.Range(0, Writers)
-            .SelectMany(thread => Enumerable.Range(0, LinesPerWriter).Select(line => $"w{thread}-{line}"))
+            .SelectMany(thread => Enumerable.Range(0, LinesPerWriter).Select(line => $"{prefix}{thread}-{line}"))
             .OrderBy(tool => tool, StringComparer.Ordinal)
             .ToList();
 
