@@ -60,6 +60,11 @@ public static class WatchdUnitGenerator
             $"# {unitName}.service — {ManagedByMarker}",
             "[Unit]",
             $"Description={UnitDescription}",
+            // systemd.unit(5) defaults the window to 10s, and a RestartSec=5 flap fits two starts in it —
+            // the limit never trips and the unit flaps forever instead of coming to rest in failed. Named
+            // explicitly so the start-limit step the install warning promises is a state that happens.
+            "StartLimitIntervalSec=60",
+            "StartLimitBurst=5",
             string.Empty,
             "[Service]",
             "Type=simple",

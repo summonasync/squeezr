@@ -23,6 +23,8 @@ public sealed class WatchdUnitGeneratorTests
             # squeezr-watchd.service — managed by squeezr, do not edit
             [Unit]
             Description=squeezr watch daemon
+            StartLimitIntervalSec=60
+            StartLimitBurst=5
 
             [Service]
             Type=simple
@@ -42,6 +44,8 @@ public sealed class WatchdUnitGeneratorTests
             # squeezr-watchd.service — managed by squeezr, do not edit
             [Unit]
             Description=squeezr watch daemon
+            StartLimitIntervalSec=60
+            StartLimitBurst=5
 
             [Service]
             Type=simple
@@ -53,6 +57,22 @@ public sealed class WatchdUnitGeneratorTests
             [Install]
             WantedBy=default.target
             """));
+    }
+
+    // The rate limit belongs to systemd's [Unit] section and to nothing else: launchd throttles on its
+    // own terms and schtasks has no start limit at all, so these two lines must never leak into the
+    // plist or the task command line, where they would be inert noise at best.
+    [Fact]
+    public void Generate_StartRateLimitIsCarriedOnlyByTheSystemdUnit()
+    {
+        var unit = WatchdUnitGenerator.Generate(AutostartPlatform.SystemdUser, Binary, Home);
+
+        unit.ShouldContain("StartLimitIntervalSec=60");
+        unit.ShouldContain("StartLimitBurst=5");
+        WatchdUnitGenerator.Generate(AutostartPlatform.LaunchAgent, Binary, Home)
+            .ShouldNotContain("StartLimit");
+        WatchdUnitGenerator.Generate(AutostartPlatform.WindowsScheduledTask, WindowsBinary, WindowsHome)
+            .ShouldNotContain("StartLimit");
     }
 
     [Fact]

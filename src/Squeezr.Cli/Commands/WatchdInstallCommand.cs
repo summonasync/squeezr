@@ -57,7 +57,7 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
         // its own watchd holds the lock and no read can tell that instance from one the operator started
         // by hand. The read is all this does — install takes nothing, steals nothing and kills nothing,
         // because whose instance should own the singleton is the operator's call, not this command's.
-        var lockPath = LockPathUnder(squeezrHome);
+        var lockPath = WatchdPaths.LockPathUnder(squeezrHome);
         var heldBy = LiveLockHolder(lockPath);
         await applier.InstallAsync(unitText, cancellationToken);
         if (heldBy is { } pid)
@@ -69,13 +69,6 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
         AnsiConsole.MarkupLine($"[green]watchd autostart installed[/] — {applier.ManagedTarget.EscapeMarkup()}{carried.EscapeMarkup()}");
         return 0;
     }
-
-    // The unit carries SQUEEZR_HOME whenever install was told one explicitly, so the file the new
-    // instance will open is the one under that home, not under whatever this shell happens to resolve.
-    private static string LockPathUnder(string? squeezrHome) =>
-        squeezrHome is null
-            ? WatchdPaths.LockPath
-            : Path.Combine(squeezrHome, WatchdPaths.DirName, WatchdPaths.LockFileName);
 
     private static int? LiveLockHolder(string lockPath)
     {

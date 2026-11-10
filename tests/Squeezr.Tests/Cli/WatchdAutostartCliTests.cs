@@ -156,9 +156,10 @@ public sealed class WatchdAutostartCliTests
     {
         var home = TestDirs.NewTempDir();
         var program = TestProgram.Executable("squeezr");
+        var unitDirectory = TestDirs.NewTempDir();
         var runner = new FakeAutostartProcessRunner();
-        var applier = new SystemdUserApplier(TestDirs.NewTempDir(), runner);
-        var lockPath = Path.Combine(home, WatchdPaths.DirName, WatchdPaths.LockFileName);
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        var lockPath = WatchdPaths.LockPathUnder(home);
         using var holder = new WatchdLock(lockPath);
         holder.TryAcquire().Acquired.ShouldBeTrue();
 
@@ -173,6 +174,11 @@ public sealed class WatchdAutostartCliTests
         notice.ShouldContain("Stop that instance and run install again");
         notice.ShouldContain("systemctl --user restart squeezr-watchd");
         result.StdOut.ToString().ShouldContain("watchd autostart installed");
+        // The notice promises a start limit, and the unit install just wrote has to be the one carrying
+        // it; "does not undo the install" is measured on disk here, not only through the exit code.
+        var unit = Directory.GetFiles(unitDirectory, "*.service").ShouldHaveSingleItem();
+        File.ReadAllText(unit).ShouldContain("StartLimitIntervalSec=60");
+        File.ReadAllText(unit).ShouldContain("StartLimitBurst=5");
         runner.Commands().ShouldBe(
         [
             "systemctl --user daemon-reload",
@@ -214,6 +220,29 @@ public sealed class WatchdAutostartCliTests
 
         result.Exit.ShouldBe(0);
         result.StdErr.ToString().ShouldBeEmpty();
+    }
+
+    // The read-before-apply order is the design, so it gets a pin a refactor cannot quietly step around:
+    // this applier claims the real lock from inside InstallAsync, which is exactly what the entry does
+    // once systemd brings it up. Install still says nothing, because it read the claim before applying
+    // anything — move that read after the apply and this case goes red while the two above stay green.
+    [Fact]
+    public async Task Install_WhenTheEntryTakesTheLockAsItIsApplied_LeavesStderrEmpty()
+    {
+        var home = TestDirs.NewTempDir();
+        var program = TestProgram.Executable("squeezr");
+        var unitDirectory = TestDirs.NewTempDir();
+        using var applier = new LockTakingApplier(
+            WatchdPaths.LockPathUnder(home),
+            new SystemdUserApplier(unitDirectory, new FakeAutostartProcessRunner()));
+
+        var result = await RunInstallAsync(AutostartPlatform.SystemdUser, program, home, applier);
+
+        result.Exit.ShouldBe(0);
+        result.StdErr.ToString().ShouldBeEmpty();
+        result.StdOut.ToString().ShouldContain("watchd autostart installed");
+        applier.Taken.ShouldBeTrue("the entry never claimed the lock, so this case measured nothing");
+        Directory.GetFiles(unitDirectory, "*.service").ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -894,5 +923,33 @@ public sealed class WatchdAutostartCliTests
                 target.AppendLine(line);
             }
         }
+    }
+
+    // Stands in for the instance the init system brings up: it takes the real lock at the moment the
+    // entry is applied and holds it until the case is over, so the only thing a green run can mean is
+    // that install looked at the lock before that moment.
+    private sealed class LockTakingApplier(string lockPath, IWatchdAutostartApplier inner)
+        : IWatchdAutostartApplier, IDisposable
+    {
+        private WatchdLock? _held;
+
+        public bool Taken => _held is not null;
+
+        public string ManagedTarget => inner.ManagedTarget;
+
+        public Task InstallAsync(string unitText, CancellationToken cancellationToken)
+        {
+            _held = new WatchdLock(lockPath);
+            _held.TryAcquire().Acquired.ShouldBeTrue("the fake entry could not claim its own lock");
+            return inner.InstallAsync(unitText, cancellationToken);
+        }
+
+        public Task<AutostartRemoval> UninstallAsync(CancellationToken cancellationToken) =>
+            inner.UninstallAsync(cancellationToken);
+
+        public Task<WatchdUnitProbe> ProbeAsync(CancellationToken cancellationToken) =>
+            inner.ProbeAsync(cancellationToken);
+
+        public void Dispose() => _held?.Dispose();
     }
 }
