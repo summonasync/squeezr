@@ -31,9 +31,11 @@ public sealed record ToolEnvelope(
         AnswerCost? cost = null,
         IReadOnlyList<FileFreshness>? fileFreshness = null)
     {
+        // a surface that measured its own cost owns the complete label: an answer that substituted a member
+        // map for a refused body lost nothing the caller asked for, and a recomputed flag would call it cut
         var resolved = cost ?? AnswerCost.Unknown(tokensUsed, !truncated);
         return new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [],
-            didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = !truncated }, fileFreshness);
+            didYouMean, definitions, resolved with { TokensUsed = tokensUsed }, fileFreshness);
     }
 
     public ToolEnvelope WithWarning(string? warning) =>

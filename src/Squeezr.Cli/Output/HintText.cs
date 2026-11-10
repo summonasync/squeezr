@@ -22,6 +22,9 @@ public static class HintText
 
     public static string ForMcp(this TruncationHint hint) => hint.Render(static parameter => parameter);
 
+    public static string BodyPriceRemedy(int refusedBodyTokens) =>
+        $"{RaiseMaxTokensRemedy} (the body alone needs ~{refusedBodyTokens} tokens)";
+
     public static string TruncationLine(int tokensUsed, int ceiling, string remedy, string? legs = null) =>
         $"truncated: {tokensUsed} of {ceiling} token ceiling — {remedy}"
         + (string.IsNullOrWhiteSpace(legs) ? string.Empty : $" ({legs})");

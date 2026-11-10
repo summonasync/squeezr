@@ -76,17 +76,19 @@ public sealed class SymbolLookupTool
                 result = lookup.Find(symbolName, repo, kind, budget, body: true);
             }
 
+            var clipped = result.State is AnswerState.Clipped;
+
             if (result.GuardWarnings is { } withheld)
             {
                 warnings.AddRange(withheld);
             }
 
-            if (result.Truncated)
+            if (clipped)
             {
                 warnings.Add(HintText.TruncationLine(
                     result.TokensUsed,
                     budget,
-                    result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
+                    RemedyFor(result)));
             }
 
             if (result.Matches.Count == 0 && result.DidYouMean is null && result.GuardWarnings is null)
@@ -99,11 +101,12 @@ public sealed class SymbolLookupTool
                 m.Members.Count == 0
                     ? null
                     : m.Members.Select(member => new SymbolMemberData(member.Name, member.Kind, member.Line)).ToList(),
-                m.MembersOmitted)).ToList();
+                m.MembersOmitted,
+                m.BodyOmitted)).ToList();
 
             var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
             var (cost, unknownBaselineFiles) = CostBaseline.Measure(
-                root, namedFiles, result.TokensUsed, !result.Truncated);
+                root, namedFiles, result.TokensUsed, !clipped);
             var fileFreshness = namedFiles.Count > 0
                 ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
                 : null;
@@ -117,7 +120,7 @@ public sealed class SymbolLookupTool
                     $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
             }
 
-            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale,
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, clipped, warnings, root, freshness.Stale,
                 result.DidYouMean, cost: cost, fileFreshness: fileFreshness);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
@@ -141,6 +144,13 @@ public sealed class SymbolLookupTool
             result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
             StaleLockWarningSink.ToStderr);
 
+    // a refused body with no member map to stand in for it is the one clipped case the caller can only weigh
+    // against a number: the hint the engine carries names rows to narrow, not what the gap costs
+    private static string RemedyFor(SymbolLookupResult result) =>
+        result.RefusedBodyTokens > 0 && result.Matches.All(static m => m.Members.Count == 0)
+            ? HintText.BodyPriceRemedy(result.RefusedBodyTokens)
+            : result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy;
+
     // the guard re-reads its widening patterns from the config on every call, so a cached answer is only
     // valid for the pattern set it was computed with
     private static object Params(
@@ -160,7 +170,9 @@ public sealed class SymbolLookupTool
         [property: JsonPropertyName("members"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<SymbolMemberData>? Members,
         [property: JsonPropertyName("membersOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        int MembersOmitted);
+        int MembersOmitted,
+        [property: JsonPropertyName("bodyOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool BodyOmitted);
 
     private sealed record SymbolMemberData(
         [property: JsonPropertyName("name")] string Name,
