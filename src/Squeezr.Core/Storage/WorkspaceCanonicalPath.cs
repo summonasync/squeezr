@@ -57,6 +57,32 @@ public static class WorkspaceCanonicalPath
         return current;
     }
 
+    // Identity guards compare the directory a path reaches, never the spelling that reached it: two link
+    // chains naming one store dir are one store, and a guard that reads them as two lets a pass take a
+    // lock on a directory it already holds, which fails naming its own pid.
+    public static bool SamePhysicalPath(string left, string right) =>
+        string.Equals(ResolveThroughLinks(left), ResolveThroughLinks(right), PhysicalComparison);
+
+    // Containment for paths that may not exist yet: the walk above stops at the first missing component
+    // and stays lexical from there, so a lane-relative candidate is compared as written.
+    public static bool IsInsidePhysicalDirectory(string directory, string candidate)
+    {
+        var container = ResolveThroughLinks(directory);
+        var path = ResolveThroughLinks(candidate);
+        if (string.Equals(container, path, PhysicalComparison))
+        {
+            return true;
+        }
+
+        var prefix = container.EndsWith(Path.DirectorySeparatorChar)
+            ? container
+            : container + Path.DirectorySeparatorChar;
+        return path.StartsWith(prefix, PhysicalComparison);
+    }
+
+    private static StringComparison PhysicalComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     private static string? FinalLinkTargetOf(string path)
     {
         try

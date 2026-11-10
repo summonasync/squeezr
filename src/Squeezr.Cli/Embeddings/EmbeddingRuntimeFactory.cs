@@ -61,6 +61,16 @@ public static class EmbeddingRuntimeFactory
         }
     }
 
+    // The copy path needs one fact from the embeddings configuration and nothing else: the model key this
+    // store would write. No provider and no vector store are constructed here — a copy that cannot name
+    // its model has to refuse before a byte moves, not after a connection was opened for the question.
+    public static string ResolveModelKey(string workspaceRoot, HttpMessageHandler? httpHandler = null)
+    {
+        var config = ConfigFile.Load(workspaceRoot);
+        var resolution = ResolveProvider(config.Embeddings, httpHandler);
+        return EmbeddingModelKey.From(config.Embeddings with { Provider = resolution.Provider });
+    }
+
     private static EmbeddingProviderResolution ResolveProvider(EmbeddingsConfig config, HttpMessageHandler? httpHandler)
     {
         try

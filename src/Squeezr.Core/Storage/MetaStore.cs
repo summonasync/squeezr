@@ -486,6 +486,11 @@ public sealed class MetaStore : IDisposable
     public void SaveIndexState(IndexStateDocument state) =>
         _db.GetCollection<IndexStateDocument>(IndexStateCollection).Upsert(state);
 
+    // A shared connection keeps its newest writes in the log file next to the data file, so a store read
+    // as a plain file before this call holds rows split across two places. The copy path flushes and then
+    // reads bytes; it never rebuilds, because a rebuild would rewrite the store someone else is serving.
+    public void Checkpoint() => _db.Checkpoint();
+
     // A delete in LiteDB frees a record slot; it does not hand the space back to the filesystem. Checkpoint
     // flushes what is pending, rebuild rewrites the file from live pages only — and rebuild moves the
     // pre-rebuild file aside under a '-backup' name: a second full copy of every byte the purge just retired.

@@ -22,9 +22,11 @@ public sealed record WorktreeInitReport(
     bool? ReconcilePending,
     string? Reason,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? RepairHint)
+    string? RepairHint,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    WorktreeFillReport? Fill)
 {
-    public static WorktreeInitReport From(WorktreeRegistrationOutcome outcome) =>
+    public static WorktreeInitReport From(WorktreeRegistrationOutcome outcome, WorktreeFillOutcome fill) =>
         new(
             State: outcome.State.ToString(),
             RootPath: outcome.RootPath,
@@ -39,5 +41,6 @@ public sealed record WorktreeInitReport(
             IsDetached: outcome.IsDetached,
             ReconcilePending: outcome.ReconcilePending,
             Reason: outcome.Reason,
-            RepairHint: outcome.RepairHint);
+            RepairHint: outcome.RepairHint,
+            Fill: WorktreeFillReport.From(fill));
 }
