@@ -98,6 +98,20 @@ public class SecretGuardSymbolLookupTests
         result.GuardWarnings.ShouldBeNull();
     }
 
+    [Fact]
+    public void Find_OnlyWithheldHit_ReportsCompleteStateBecauseTheGuardIsNotABudgetRefusal()
+    {
+        var workspace = SecretGuardFixture.NewIndexedWorkspace();
+        SecretGuardFixture.PlantSymbol(workspace, SecretGuardFixture.EnvPath, "OPENAI_API_KEY", "variable");
+
+        var result = new SymbolLookup(workspace).Find("OPENAI_API_KEY", null, null, 500, body: true);
+
+        result.Matches.ShouldBeEmpty();
+        result.Truncated.ShouldBeFalse();
+        result.RefusedBodyTokens.ShouldBe(0);
+        result.State.ShouldBe(AnswerState.Complete);
+    }
+
     private static string Withheld(SymbolLookupResult result) =>
         result.GuardWarnings.ShouldNotBeNull()
             .Single(w => w.StartsWith("secret guard:", StringComparison.Ordinal));
