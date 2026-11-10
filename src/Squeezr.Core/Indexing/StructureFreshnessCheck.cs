@@ -11,17 +11,25 @@ namespace Squeezr.Core.Indexing;
 public sealed record StructureFreshnessResult(
     int Checked,
     int Withheld,
+    // rows this pass could not stat because the manifest no longer resolves their repo root; counted inside
+    // the scope the caller asked for, so coverage the answer does not have never reads as coverage it has
     int Skipped,
     IReadOnlyList<string> Missing,
     IReadOnlyList<string> Changed)
 {
-    // both classes mean "the index no longer describes this row", which is what the envelope's staleFiles
-    // list carries today; the split stays visible to the caller because the two claims are not the same
+    // both classes mean "the index no longer describes this row", which is what an answer calls stale;
+    // the split stays visible to the caller because a vanished file and a lagging one are different claims,
+    // and no bound on what an answer carries reaches these lists
     public IReadOnlyList<string> Stale => [.. Missing, .. Changed];
 }
 
 public static class StructureFreshnessCheck
 {
+    // How many verdicts one answer may carry, not how many rows this pass looks at: coverage stays the whole
+    // scope while the caller projects a sample into the payload and says what it left out. A cap that moved
+    // here would shrink the claim; this one bounds bytes only.
+    public const int StaleSampleLimit = 50;
+
     private static readonly StructureFreshnessResult Unexamined =
         new(0, 0, 0, [], []);
 
@@ -68,7 +76,7 @@ public static class StructureFreshnessCheck
             {
                 var entry = manifest.Repos.FirstOrDefault(r =>
                     string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase));
-                var repoDoc = store.FindRepo(repoName);
+                var repoDoc = store.FindRepoIgnoringCase(repoName);
                 if (repoDoc is null)
                 {
                     continue;
@@ -76,14 +84,18 @@ public static class StructureFreshnessCheck
 
                 if (entry is null)
                 {
-                    skipped += store.CountFiles(repoDoc.Id);
+                    // the store still indexes this repo but the manifest no longer resolves a root for it —
+                    // nothing here can stat against it, so its rows are coverage the answer must not claim.
+                    // Counted inside the scope the caller asked for, or the denominator would read as a
+                    // whole-repo skip on a pass that was only ever handed a subtree.
+                    skipped += store.ListFiles(repoDoc.Id).Count(doc => InScope(normalizedPrefix, doc.Path));
                     continue;
                 }
 
                 var repoRoot = NavigationContext.ResolveRepoRoot(workspaceRoot, entry);
                 foreach (var doc in store.ListFiles(repoDoc.Id))
                 {
-                    if (normalizedPrefix is not null && !PathPrefix.Matches(normalizedPrefix, doc.Path))
+                    if (!InScope(normalizedPrefix, doc.Path))
                     {
                         continue;
                     }
@@ -145,6 +157,9 @@ public static class StructureFreshnessCheck
 
     private static DateTime AsUtc(DateTime value) =>
         value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
+
+    private static bool InScope(string? normalizedPrefix, string path) =>
+        normalizedPrefix is null || PathPrefix.Matches(normalizedPrefix, path);
 
     private static bool IsRecoverable(Exception ex) =>
         ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException;

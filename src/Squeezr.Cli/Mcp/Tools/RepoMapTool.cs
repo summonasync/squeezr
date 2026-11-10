@@ -18,22 +18,25 @@ public sealed class RepoMapTool
     private readonly ToolResponseCache? _cache;
     private readonly ClientIdentity _identity;
 
-    // the render stays a plain RepoMapper in production; the seam exists so a caller can count the maps one
-    // answer builds — the double render this shape replaced was invisible from the outside
-    private readonly Func<string, RepoMapper> _mapper;
+    // the render stays a plain RepoMapper in production; the seam is a whole render rather than a mapper
+    // construction so a caller counts the maps one answer builds — a second build is what this shape
+    // replaced, and it can be routed through a helper or a reused mapper without changing how many
+    // mappers get constructed
+    private readonly Func<string, string?, int, int, string?, RepoMapResult> _render;
 
     public RepoMapTool(
         McpWorkspace workspace,
         McpToolGate gate,
         ToolResponseCache? cache,
         ClientIdentity identity,
-        Func<string, RepoMapper>? mapperFactory = null)
+        Func<string, string?, int, int, string?, RepoMapResult>? renderer = null)
     {
         _workspace = workspace;
         _gate = gate;
         _cache = cache;
         _identity = identity;
-        _mapper = mapperFactory ?? (root => new RepoMapper(root));
+        _render = renderer ??
+                  ((root, repo, depth, maxTokens, prefix) => new RepoMapper(root).Build(repo, depth, maxTokens, prefix));
     }
 
     [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Pass prefix (e.g. \"src/Squeezr.Cli/\") to render only that subtree with prefix-relative directory labels — depth keeps its structural meaning. Lines come from the index: one structural pass over the indexed rows reports files missing from disk or changed by size or mtime in staleFiles, and nothing is reindexed on this call — expand_span reads code on coordinates from other tools.")]
@@ -64,7 +67,7 @@ public sealed class RepoMapTool
             var resolvedDepth = depth ?? RepoMapper.DefaultDepth;
             var resolvedMaxTokens = maxTokens ?? RepoMapper.DefaultMaxTokens;
 
-            var result = _mapper(root).Build(repo, resolvedDepth, resolvedMaxTokens, normalizedPrefix);
+            var result = _render(root, repo, resolvedDepth, resolvedMaxTokens, normalizedPrefix);
 
             // one structural pass over the rows this scope renders claims, against the disk as it is now;
             // the answer is not rebuilt behind it, so a dirty file costs a stat and not a second render
@@ -89,7 +92,17 @@ public sealed class RepoMapTool
                 "repo_map renders the tree structurally — per-file freshness is not attached to map lines; " +
                 "code_search or code_pack carries the verdict for a file you are about to open");
 
-            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root, freshness.Stale);
+            var sample = CarryStaleSample(freshness);
+            if (sample.Omitted > 0)
+            {
+                warnings.Add(
+                    $"structure pass covered {freshness.Checked} indexed rows and found " +
+                    $"{freshness.Missing.Count} missing + {freshness.Changed.Count} changed; staleFiles carries " +
+                    $"a sample of {sample.Carried} of them, {sample.Omitted} stale rows are not listed");
+            }
+
+            var envelope = ToolEnvelope.Wrap(
+                data, result.TokensUsed, result.Truncated, warnings, root, sample.Paths);
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
                 result.TokensUsed, result.Truncated, data.Count,
@@ -112,6 +125,32 @@ public sealed class RepoMapTool
         int? maxTokens,
         IReadOnlyList<string> secretGuardExtra) =>
         new { repo, prefix, depth, maxTokens, secretGuardExtra };
+
+    // The pass covers every row of the scope; an answer carries a bounded sample of its verdicts and names
+    // what it left out. Both classes get seats, so a subtree that is mostly vanished files cannot hide the
+    // rows that merely lag, and the leftover seats go to whichever class still has rows to show.
+    private static StaleSample CarryStaleSample(StructureFreshnessResult freshness)
+    {
+        var limit = StructureFreshnessCheck.StaleSampleLimit;
+        var missingSeats = Math.Min(limit / 2, freshness.Missing.Count);
+        var changedSeats = Math.Min(limit - missingSeats, freshness.Changed.Count);
+        missingSeats = Math.Min(freshness.Missing.Count, missingSeats + limit - missingSeats - changedSeats);
+
+        return new StaleSample(
+            [.. freshness.Missing.Take(missingSeats)],
+            [.. freshness.Changed.Take(changedSeats)],
+            freshness.Missing.Count + freshness.Changed.Count - missingSeats - changedSeats);
+    }
+
+    private sealed record StaleSample(
+        IReadOnlyList<string> Missing,
+        IReadOnlyList<string> Changed,
+        int Omitted)
+    {
+        public int Carried => Missing.Count + Changed.Count;
+
+        public IReadOnlyList<string> Paths => [.. Missing, .. Changed];
+    }
 
     private sealed record MapLineData(
         [property: JsonPropertyName("depth")] int Depth,

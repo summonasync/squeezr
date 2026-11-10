@@ -255,6 +255,140 @@ public class StructureFreshnessCheckTests
     }
 
     [Fact]
+    public void StaleRowsBeyondTheSampleBound_AreCarriedAsASample_AndSaidOutLoud()
+    {
+        var vanished = Enumerable.Range(0, 40).Select(i => ($"src/Vanish{i:00}.cs", Class($"Vanish{i:00}"))).ToArray();
+        var lagging = Enumerable.Range(0, 30).Select(i => ($"src/Lag{i:00}.cs", Class($"Lag{i:00}"))).ToArray();
+        var steady = Enumerable.Range(0, 10).Select(i => ($"src/Keep{i:00}.cs", Class($"Keep{i:00}"))).ToArray();
+        var workspace = IndexedWorkspace([.. vanished, .. lagging, .. steady]);
+        foreach (var (relative, _) in vanished)
+        {
+            File.Delete(IngestionWorkspaces.Full(workspace, relative));
+        }
+
+        foreach (var (relative, _) in lagging)
+        {
+            File.AppendAllText(IngestionWorkspaces.Full(workspace, relative), "// past the stamp\n");
+        }
+
+        var pass = StructureFreshnessCheck.Check(workspace, ["demo"]);
+        pass.Checked.ShouldBe(80);
+        pass.Missing.Count.ShouldBe(vanished.Length);
+        pass.Changed.Count.ShouldBe(lagging.Length,
+            "the bound sits on what an answer carries, never on what this pass walked");
+
+        var envelope = MapTool(workspace).Build().ShouldBeOfType<ToolEnvelope>();
+
+        envelope.StaleFiles.Count.ShouldBe(StructureFreshnessCheck.StaleSampleLimit);
+        envelope.StaleFiles.ShouldBe(pass.Missing.Take(25).Concat(pass.Changed.Take(25)),
+            "the sample is the head of each verdict list, not a reshuffle of it");
+        envelope.StaleFiles.Count(p => p.Contains("Vanish", StringComparison.Ordinal)).ShouldBe(25);
+        envelope.StaleFiles.Count(p => p.Contains("Lag", StringComparison.Ordinal)).ShouldBe(25);
+        SampleWarning(envelope).ShouldBe(
+            "structure pass covered 80 indexed rows and found 40 missing + 30 changed; " +
+            "staleFiles carries a sample of 50 of them, 20 stale rows are not listed");
+    }
+
+    [Fact]
+    public void StaleClassSmallerThanItsSeat_KeepsEveryRowInTheSample_WhileTheLargerTakesTheRest()
+    {
+        var vanished = Enumerable.Range(0, 60).Select(i => ($"src/Vanish{i:00}.cs", Class($"Vanish{i:00}"))).ToArray();
+        var lagging = Enumerable.Range(0, 2).Select(i => ($"src/Lag{i:00}.cs", Class($"Lag{i:00}"))).ToArray();
+        var workspace = IndexedWorkspace([.. vanished, .. lagging]);
+        foreach (var (relative, _) in vanished)
+        {
+            File.Delete(IngestionWorkspaces.Full(workspace, relative));
+        }
+
+        foreach (var (relative, _) in lagging)
+        {
+            File.AppendAllText(IngestionWorkspaces.Full(workspace, relative), "// past the stamp\n");
+        }
+
+        var envelope = MapTool(workspace).Build().ShouldBeOfType<ToolEnvelope>();
+
+        envelope.StaleFiles.Count.ShouldBe(StructureFreshnessCheck.StaleSampleLimit);
+        envelope.StaleFiles.Count(p => p.Contains("Lag", StringComparison.Ordinal)).ShouldBe(2,
+            "a short class never disappears behind a long one: both claims stay visible in the payload");
+        envelope.StaleFiles.Count(p => p.Contains("Vanish", StringComparison.Ordinal)).ShouldBe(48);
+        SampleWarning(envelope).ShouldBe(
+            "structure pass covered 62 indexed rows and found 60 missing + 2 changed; " +
+            "staleFiles carries a sample of 50 of them, 12 stale rows are not listed");
+    }
+
+    [Fact]
+    public void StaleRowsWithinTheBound_AreCarriedInFull_AndNothingIsSaidAboutSampling()
+    {
+        var files = Enumerable.Range(0, 7).Select(i => ($"src/Unit{i}.cs", Class($"Unit{i}"))).ToArray();
+        var workspace = IndexedWorkspace(files);
+        foreach (var (relative, _) in files.Take(4))
+        {
+            File.Delete(IngestionWorkspaces.Full(workspace, relative));
+        }
+
+        foreach (var (relative, _) in files.Skip(4))
+        {
+            File.AppendAllText(IngestionWorkspaces.Full(workspace, relative), "// past the stamp\n");
+        }
+
+        var pass = StructureFreshnessCheck.Check(workspace, ["demo"]);
+        pass.Stale.Count.ShouldBe(7);
+
+        var envelope = MapTool(workspace).Build().ShouldBeOfType<ToolEnvelope>();
+
+        envelope.StaleFiles.ShouldBe(pass.Stale,
+            "a verdict list the answer can carry whole is carried whole");
+        envelope.Warnings.ShouldNotContain(w => w.Contains("staleFiles carries", StringComparison.Ordinal),
+            "the sample line exists to say a list is short; saying it on a complete list is noise");
+    }
+
+    [Fact]
+    public void SkippedRowsOfAnUnresolvedRepo_AreScopedToThePrefix_ThePassWasGiven()
+    {
+        var workspace = IngestionWorkspaces.NewEmptyWorkspace();
+        IngestionWorkspaces.WriteFile(workspace, "src/Alpha.cs", Class("Alpha"));
+        var secondRoot = Path.Combine(workspace, "second");
+        Directory.CreateDirectory(Path.Combine(secondRoot, "docs"));
+        Directory.CreateDirectory(Path.Combine(secondRoot, "src"));
+        new WorkspaceManager(workspace).AddRepo("second", "extra");
+        File.WriteAllText(Path.Combine(secondRoot, "docs/Gamma.cs"), Class("Gamma"));
+        File.WriteAllText(Path.Combine(secondRoot, "src/Beta.cs"), Class("Beta"));
+        new WorkspaceIndexer().Index(workspace);
+
+        var manifest = WorkspaceManifestFile.Load(workspace);
+        WorkspaceManifestFile.Save(workspace, manifest with
+        {
+            Repos = [.. manifest.Repos.Where(r => r.Name != "extra")]
+        });
+
+        var whole = StructureFreshnessCheck.Check(workspace, ["demo", "extra"]);
+        whole.Checked.ShouldBe(1);
+        whole.Skipped.ShouldBe(2,
+            "the store still indexes a repo the manifest dropped: those rows are coverage this pass does not have");
+
+        var scoped = StructureFreshnessCheck.Check(workspace, ["demo", "extra"], "docs/");
+        scoped.Checked.ShouldBe(0);
+        scoped.Skipped.ShouldBe(1,
+            "a scoped pass may not report a whole-repo denominator for the rows it never reached");
+    }
+
+    [Fact]
+    public void RepoNamedInAnotherCase_StillWalksItsRows_InsteadOfCountingNothing()
+    {
+        var workspace = IndexedWorkspace(
+            ("src/Alpha.cs", Class("Alpha")),
+            ("src/Gone.cs", Class("Gone")));
+        File.Delete(IngestionWorkspaces.Full(workspace, "src/Gone.cs"));
+
+        var result = StructureFreshnessCheck.Check(workspace, ["DEMO"]);
+
+        result.Checked.ShouldBe(2,
+            "names resolve ignoring case everywhere else in this pass, so a call in another casing cannot find no repo at all");
+        result.Skipped.ShouldBe(0);
+        result.Missing.ShouldHaveSingleItem().ShouldEndWith("src/Gone.cs");
+    }
+
+    [Fact]
     public void MapSource_BuildsTheOnce_AndCarriesNeitherRefreshNorCap()
     {
         var toolSource = ReadSource("src/Squeezr.Cli/Mcp/Tools/RepoMapTool.cs");
@@ -282,11 +416,17 @@ public class StructureFreshnessCheckTests
             new McpToolGate(),
             null,
             new ClientIdentity(),
-            root =>
+            (root, repo, depth, maxTokens, prefix) =>
             {
                 onRender();
-                return new RepoMapper(root);
+                return new RepoMapper(root).Build(repo, depth, maxTokens, prefix);
             });
+
+    private static RepoMapTool MapTool(string workspace) =>
+        new(new McpWorkspace(workspace, workspace, null), new McpToolGate(), null, new ClientIdentity());
+
+    private static string SampleWarning(ToolEnvelope envelope) =>
+        envelope.Warnings.Single(w => w.Contains("staleFiles carries", StringComparison.Ordinal));
 
     private static IReadOnlyList<string> MapTexts(ToolEnvelope envelope) =>
         JsonSerializer.SerializeToElement(envelope).GetProperty("data").EnumerateArray()
