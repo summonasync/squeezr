@@ -72,7 +72,10 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
                 hits: 0,
                 durationMs: 0,
                 client: "hook",
-                clientVersion: AppVersion.Current);
+                clientVersion: AppVersion.Current,
+                // a pre-read nudge answers no budget question — it never read the file — so it records no state
+                // at all: the mapped key stays absent instead of borrowing a "not mapped" it cannot mean
+                mapped: null);
         }
         catch
         {

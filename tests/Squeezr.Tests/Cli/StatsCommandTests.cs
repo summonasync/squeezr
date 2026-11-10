@@ -296,6 +296,58 @@ public sealed class StatsCommandTests
     }
 
     [Fact]
+    public async Task StatsJson_KnownStateRows_GrowMappedRateAndUnsplitRowsLastInTheToolRow()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        (await RunCliAsync(root, "search", "alpha", "--json")).ExitCode.ShouldBe(0);
+        (await RunCliAsync(root, "expand", "src/Big.cs", "2")).ExitCode.ShouldBe(0);
+
+        var stats = await RunCliAsync(root, "stats", "--json");
+        stats.ExitCode.ShouldBe(0);
+
+        using var document = JsonDocument.Parse(stats.StdOut);
+        string.Join(',', document.RootElement.EnumerateObject().Select(p => p.Name))
+            .ShouldBe("totalRequests,byTool,savings,cache,period,agents,sessions");
+        var search = document.RootElement.GetProperty("byTool").EnumerateArray()
+            .Single(tool => tool.GetProperty("tool").GetString() == "search");
+        string.Join(',', search.EnumerateObject().Select(p => p.Name))
+            .ShouldBe("tool,count,avgTokensUsed,truncationRate,mappedRate,unsplitRows");
+        search.GetProperty("mappedRate").GetDouble().ShouldBe(0.0);
+        search.GetProperty("unsplitRows").GetInt32().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task StatsJson_PreSplitRow_IsNamedInsteadOfBeingAveragedIntoTheMappedRate()
+    {
+        var root = await NewIndexedCliWorkspaceAsync();
+        var preSplit = JsonSerializer.Serialize(new QueryTelemetryEntry(
+            new DateTime(2026, 9, 1, 10, 0, 0, DateTimeKind.Utc),
+            Guid.NewGuid(), "symbol_lookup", null, 164, true, 1, 5, false, null));
+        File.AppendAllText(SqueezrPaths.QueriesLogPath(root), preSplit + '\n');
+        (await RunCliAsync(root, "search", "alpha", "--json")).ExitCode.ShouldBe(0);
+
+        var stats = await RunCliAsync(root, "stats", "--json");
+        stats.ExitCode.ShouldBe(0);
+
+        using var document = JsonDocument.Parse(stats.StdOut);
+        var rows = document.RootElement.GetProperty("byTool").EnumerateArray().ToList();
+
+        var legacy = rows.Single(tool => tool.GetProperty("tool").GetString() == "symbol_lookup");
+        legacy.TryGetProperty("mappedRate", out _).ShouldBeFalse();
+        legacy.GetProperty("unsplitRows").GetInt32().ShouldBe(1);
+        legacy.GetProperty("truncationRate").GetDouble().ShouldBe(1.0);
+
+        var search = rows.Single(tool => tool.GetProperty("tool").GetString() == "search");
+        search.GetProperty("mappedRate").GetDouble().ShouldBe(0.0);
+        search.GetProperty("unsplitRows").GetInt32().ShouldBe(0);
+
+        var human = await RunCliAsync(root, "stats");
+        human.ExitCode.ShouldBe(0);
+        Regex.Replace(human.StdOut, @"\s+", " ")
+            .ShouldContain("row(s) carry no state, recorded before the clipped/mapped split");
+    }
+
+    [Fact]
     public async Task StatsReset_BusyTelemetryLock_RefusesWithAnErrorEnvelopeAndClearsNothing()
     {
         var root = await NewIndexedCliWorkspaceAsync();
