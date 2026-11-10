@@ -30,6 +30,80 @@ public class TreeSitterProviderTests
     }
 
     [Fact]
+    public void CanHandle_RustExtension_AcceptsRustHintsAndRejectsForeign()
+    {
+        var provider = new TreeSitterProvider(Config);
+
+        provider.CanHandle("app.rs", null).ShouldBeTrue();
+        provider.CanHandle("app.rs", "rust").ShouldBeTrue();
+        provider.CanHandle("app.rs", "rs").ShouldBeTrue();
+        provider.CanHandle("src/model.RS", "RUST").ShouldBeTrue();
+        provider.CanHandle("app.rs", "javascript").ShouldBeFalse();
+        provider.CanHandle("app.rs", "typescript").ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("src/app.js", "JavaScript", "javascript")]
+    [InlineData("src/app.jsx", "JavaScript", "javascript")]
+    [InlineData("tools/a.mjs", "JavaScript", "javascript")]
+    [InlineData("tools/b.cjs", "JavaScript", "javascript")]
+    [InlineData("src/store.ts", "TypeScript", "typescript")]
+    [InlineData("src/Badge.tsx", "TSX", "tsx")]
+    [InlineData("src/lib.rs", "Rust", "rust")]
+    [InlineData("src/LIB.RS", "Rust", "rust")]
+    [InlineData("notes.md", "JavaScript", "javascript")]
+    public void GrammarAndLanguageArms_PerExtension_ResolvesOffTheDefault(string path, string grammar, string language)
+    {
+        // both switches end in a JavaScript default, so every routed extension needs its own row here
+        TreeSitterProvider.GrammarName(path).ShouldBe(grammar);
+        TreeSitterProvider.LanguageName(path).ShouldBe(language);
+    }
+
+    [Fact]
+    public void Rust_Sample_ParsesThroughTheRustArmsWithoutWarnings()
+    {
+        var provider = new TreeSitterProvider(Config);
+        var result = provider.Parse(new FileRef("demo", "src/registry.rs"), Encoding.UTF8.GetBytes("""
+            use std::fmt;
+
+            pub struct Registry {
+                items: Vec<String>,
+            }
+
+            impl Registry {
+                pub fn render(&self) -> String {
+                    self.items.join(", ")
+                }
+            }
+
+            fn boot() -> Registry {
+                Registry { items: Vec::new() }
+            }
+            """));
+
+        // the extension arms are pinned by GrammarAndLanguageArms_PerExtension_ResolvesOffTheDefault;
+        // here the rust grammar has to actually reach the rust symbol vocabulary
+        result.Language.ShouldBe("rust");
+        provider.Warnings.ShouldBeEmpty();
+        result.Symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe(
+        [
+            ("Registry", SymbolKind.Class, null),
+            ("Registry", SymbolKind.Other, null),
+            ("render", SymbolKind.Method, "Registry"),
+            ("boot", SymbolKind.Function, null),
+        ]);
+        result.Refs.Select(r => (r.ToName, r.Kind, r.Line)).ShouldBe(
+        [
+            ("fmt", RefKind.Import, 1),
+            ("Registry", RefKind.Reference, 7),
+            ("join", RefKind.Call, 9),
+            ("new", RefKind.Call, 14),
+        ]);
+        result.Refs[0].ToSymbolId.ShouldBe("std");
+        result.Refs[2].EnclosingName.ShouldBe("Registry.render");
+    }
+
+    [Fact]
     public void CommonJsAssignment_NamedFunctionExpression_ExtractedAsFunction()
     {
         var result = Parse("module.cjs", "module.exports = function run() {\n  return 'ready';\n};\n");
@@ -357,6 +431,22 @@ public class TreeSitterProviderTests
         chunks[0].Text.ShouldStartWith("function big()\n");
         chunks.ShouldAllBe(c => c.Text.Contains("function big()"));
         chunks[^1].Span.EndLine.ShouldBe(symbol.Span.EndLine);
+    }
+
+    [Fact]
+    public void JavaScript_MemberExpressionCall_NamedAfterTheProperty()
+    {
+        var result = Parse("run.js", """
+            export function run(items, each) {
+              return items.map(each);
+            }
+            """);
+
+        var call = result.Refs.ShouldHaveSingleItem();
+        call.ToName.ShouldBe("map");
+        call.Kind.ShouldBe(RefKind.Call);
+        call.Line.ShouldBe(2);
+        call.EnclosingName.ShouldBe("run");
     }
 
     private static ParseResult Parse(string path, string text, SqueezrConfig? config = null) =>
