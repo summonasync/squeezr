@@ -4,7 +4,7 @@ public sealed class LaunchAgentApplier(
     string agentsDirectory,
     string launchDomain,
     IAutostartProcessRunner runner,
-    string unitName = WatchdUnitGenerator.DefaultUnitName) : IWatchdAutostartApplier
+    string unitName = WatchdUnitGenerator.LaunchAgentUnitName) : IWatchdAutostartApplier
 {
     private const string Launchctl = "launchctl";
 
@@ -16,6 +16,11 @@ public sealed class LaunchAgentApplier(
 
     private string ServiceRef => $"{launchDomain}/{unitName}";
 
+    // An install over an existing file writes the new plist first, then boots the loaded job out,
+    // then bootstraps — a job that is loaded stays loaded through a rewrite of its file, so the
+    // bootout is what makes bootstrap read the new text back. Its answer is dropped here: a plist
+    // that was written but never bootstrapped legitimately reports the job as unknown, and the
+    // bootstrap that follows is checked and is the step that has to succeed anyway.
     public async Task InstallAsync(string unitText, CancellationToken cancellationToken)
     {
         var replacing = File.Exists(PlistPath);
@@ -23,7 +28,7 @@ public sealed class LaunchAgentApplier(
         File.WriteAllText(PlistPath, unitText);
         if (replacing)
         {
-            await TakeDownAsync(cancellationToken);
+            await BootOutAsync(cancellationToken);
         }
 
         (await runner.RunAsync(
@@ -42,16 +47,25 @@ public sealed class LaunchAgentApplier(
             return AutostartRemoval.NothingManaged;
         }
 
-        await TakeDownAsync(cancellationToken);
+        // The bootout answer is checked on this side only: a job that refuses to boot out stays
+        // loaded until the next logoff, so the operator has to read that the daemon is still running
+        // even though the managed plist is gone. The removal itself stands — deleting the file is what
+        // ends the autostart for good.
+        var warnings = new List<string>();
+        try
+        {
+            (await BootOutAsync(cancellationToken))
+                .EnsureSuccess(Launchctl, "boot out the launch agent");
+        }
+        catch (AutostartException ex)
+        {
+            warnings.Add(ex.Message);
+        }
+
         File.Delete(PlistPath);
-        return AutostartRemoval.Removed();
+        return AutostartRemoval.Removed([.. warnings]);
     }
 
-    // An install over an existing file writes the new plist first, then boots the loaded job out,
-    // then bootstraps — a job that is loaded stays loaded through a rewrite of its file, so the
-    // bootout is what makes bootstrap read the new text back. The bootout answer is not checked: a
-    // plist that was written but never bootstrapped legitimately reports the job as unknown, and
-    // deleting the file is the step that actually ends the autostart.
-    private Task TakeDownAsync(CancellationToken cancellationToken) =>
+    private Task<AutostartProcessResult> BootOutAsync(CancellationToken cancellationToken) =>
         runner.RunAsync(Launchctl, ["bootout", ServiceRef], cancellationToken);
 }

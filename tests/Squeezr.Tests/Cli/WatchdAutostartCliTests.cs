@@ -15,8 +15,10 @@ public sealed class WatchdAutostartCliTests
     private const string Binary = "/opt/squeezr/squeezr";
     private const string Home = "/var/tmp/squeezr-home";
     private const string UnitFileName = "squeezr-watchd.service";
-    private const string WindowsBinary = @"C:\Program Files\Squeezr\squeezr.exe";
     private const string WindowsHome = @"D:\squeezr home";
+    private const string WindowsHomeWithQuote = @"D:\evil"" & calc & ""x";
+    private const string LaunchDomain = "gui/502";
+    private const string RemedyFragment = "installed squeezr binary";
 
     [Fact]
     public async Task WatchdHelp_ListsBothAutostartSubcommands()
@@ -111,16 +113,20 @@ public sealed class WatchdAutostartCliTests
         result.StdOut.ShouldNotContain("autostart installed");
     }
 
+    // The seam checks launchability before it generates anything, so the paths a test hands over have
+    // to be programs the guard can accept: an executable file for the unix branches, an existing
+    // '.exe' for the Windows branch, where the host file mode is not the question.
     [Fact]
     public async Task Install_SecondRun_KeepsOneUnitOnDiskAndCarriesTheNewHome()
     {
+        var program = TestProgram.Executable("squeezr");
         var unitDirectory = TestDirs.NewTempDir();
         var runner = new FakeAutostartProcessRunner();
         var applier = new SystemdUserApplier(unitDirectory, runner);
         var unit = Path.Combine(unitDirectory, UnitFileName);
 
-        var first = await RunInstallAsync(AutostartPlatform.SystemdUser, Binary, Home, applier);
-        var second = await RunInstallAsync(AutostartPlatform.SystemdUser, Binary, "/var/tmp/other-home", applier);
+        var first = await RunInstallAsync(AutostartPlatform.SystemdUser, program, Home, applier);
+        var second = await RunInstallAsync(AutostartPlatform.SystemdUser, program, "/var/tmp/other-home", applier);
 
         first.Exit.ShouldBe(0);
         second.Exit.ShouldBe(0);
@@ -134,11 +140,12 @@ public sealed class WatchdAutostartCliTests
     [Fact]
     public async Task Install_OnTheWindowsBranch_HandsOverTheGeneratedLineAndAddsOnlyForce()
     {
+        var program = TestProgram.Executable("squeezr.exe");
         var runner = new FakeAutostartProcessRunner();
         var applier = new WindowsScheduledTaskApplier(runner);
-        var line = WatchdUnitGenerator.Generate(AutostartPlatform.WindowsScheduledTask, WindowsBinary, WindowsHome);
+        var line = WatchdUnitGenerator.Generate(AutostartPlatform.WindowsScheduledTask, program, WindowsHome);
 
-        var result = await RunInstallAsync(AutostartPlatform.WindowsScheduledTask, WindowsBinary, WindowsHome, applier);
+        var result = await RunInstallAsync(AutostartPlatform.WindowsScheduledTask, program, WindowsHome, applier);
 
         result.Exit.ShouldBe(0);
         result.StdOut.ToString().ShouldContain("Task Scheduler task 'squeezr-watchd'");
@@ -151,17 +158,55 @@ public sealed class WatchdAutostartCliTests
     [Fact]
     public async Task Install_WhenTheGeneratorRefusesTheInput_ThrowsInsteadOfCleaningIt()
     {
+        var program = TestProgram.Executable("squeezr.exe");
         var runner = new FakeAutostartProcessRunner();
         var applier = new WindowsScheduledTaskApplier(runner);
 
         var error = await Should.ThrowAsync<ArgumentException>(() => WatchdInstallCommand.ApplyAsync(
             AutostartPlatform.WindowsScheduledTask,
-            @"C:\Program Files\sq""ueezr\squeezr.exe",
-            WindowsHome,
+            program,
+            WindowsHomeWithQuote,
             applier,
             CancellationToken.None));
 
-        error.ParamName.ShouldBe("binaryPath");
+        error.ParamName.ShouldBe("squeezrHome");
+        runner.Calls.ShouldBeEmpty();
+    }
+
+    // The guard now lives in the seam, so a caller that skips the command cannot skip it either: a
+    // program path the init system would refuse to exec never reaches the generator, the applier or
+    // the tool, and it leaves no half-written unit behind.
+    [Fact]
+    public async Task ApplyAsync_WhenTheProgramIsAbsent_RefusesBeforeWritingOrAskingTheTool()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var runner = new FakeAutostartProcessRunner();
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        var program = Path.Combine(TestDirs.NewTempDir(), "squeezr");
+
+        var error = await Should.ThrowAsync<AutostartException>(() => WatchdInstallCommand.ApplyAsync(
+            AutostartPlatform.SystemdUser, program, Home, applier, CancellationToken.None));
+
+        error.Message.ShouldContain("does not exist");
+        error.Message.ShouldContain(RemedyFragment);
+        Directory.GetFileSystemEntries(unitDirectory).ShouldBeEmpty();
+        runner.Calls.ShouldBeEmpty();
+    }
+
+    [LinuxFact]
+    public async Task ApplyAsync_WhenTheProgramCarriesNoExecuteBit_RefusesBeforeWritingOrAskingTheTool()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var runner = new FakeAutostartProcessRunner();
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        var program = TestProgram.NotExecutable("squeezr");
+
+        var error = await Should.ThrowAsync<AutostartException>(() => WatchdInstallCommand.ApplyAsync(
+            AutostartPlatform.SystemdUser, program, Home, applier, CancellationToken.None));
+
+        error.Message.ShouldContain("does not carry the execute bit");
+        error.Message.ShouldContain(RemedyFragment);
+        Directory.GetFileSystemEntries(unitDirectory).ShouldBeEmpty();
         runner.Calls.ShouldBeEmpty();
     }
 
@@ -226,6 +271,30 @@ public sealed class WatchdAutostartCliTests
         result.StdErr.ToString().ShouldContain(
             "warning: 'systemctl' failed to stop and unhook the watch daemon (exit 1)");
         result.StdErr.ToString().ShouldContain("Failed to connect to bus");
+    }
+
+    // The same channel on the launchd side: a job that refuses to boot out keeps running until the
+    // next logoff, and the operator reading "removed" with an empty stderr would never learn it.
+    [Fact]
+    public async Task Uninstall_Launchd_WhenBootoutRefusesToAnswer_RemovesThePlistSucceedsAndWarns()
+    {
+        var agentsDirectory = TestDirs.NewTempDir();
+        var runner = new FakeAutostartProcessRunner((_, arguments) => arguments.Contains("bootout")
+            ? new AutostartProcessResult(5, string.Empty, "Boot-out failed: 5: Input/output error")
+            : FakeAutostartProcessRunner.Ok);
+        var applier = new LaunchAgentApplier(agentsDirectory, LaunchDomain, runner);
+        var plist = applier.ManagedTarget;
+        Directory.CreateDirectory(agentsDirectory);
+        File.WriteAllText(plist, WatchdUnitGenerator.Generate(AutostartPlatform.LaunchAgent, Binary, Home));
+
+        var result = await RunUninstallAsync(applier);
+
+        result.Exit.ShouldBe(0);
+        File.Exists(plist).ShouldBeFalse();
+        result.StdOut.ToString().ShouldContain("watchd autostart removed");
+        result.StdErr.ToString().ShouldContain(
+            "warning: 'launchctl' failed to boot out the launch agent (exit 5)");
+        result.StdErr.ToString().ShouldContain("Boot-out failed: 5");
     }
 
     // The uninstall half of the same filter: the deletion of the managed file is raw filesystem work,

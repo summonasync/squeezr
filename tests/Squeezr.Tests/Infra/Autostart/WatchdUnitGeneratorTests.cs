@@ -13,6 +13,8 @@ public sealed class WatchdUnitGeneratorTests
     private const string WindowsBinaryWithQuote = @"C:\Program Files\sq""ueezr\squeezr.exe";
     private const string WindowsHomeWithQuote = @"D:\evil"" & calc & ""x";
     private const string WindowsUnitNameWithQuote = @"watchd"" & calc & ""lane";
+    private const string WindowsBinaryWithPercent = @"C:\Users\%USERNAME%\squeezr.exe";
+    private const string WindowsHomeWithPercent = @"D:\%PUBLIC% home";
 
     [Fact]
     public void Generate_SystemdUser_ReturnsUnitFileText()
@@ -82,7 +84,7 @@ public sealed class WatchdUnitGeneratorTests
             <plist version="1.0">
               <dict>
                 <key>Label</key>
-                <string>squeezr-watchd</string>
+                <string>dev.summonasync.squeezr-watchd</string>
                 <key>ProgramArguments</key>
                 <array>
                   <string>/opt/squeezr/squeezr</string>
@@ -111,7 +113,7 @@ public sealed class WatchdUnitGeneratorTests
             <plist version="1.0">
               <dict>
                 <key>Label</key>
-                <string>squeezr-watchd</string>
+                <string>dev.summonasync.squeezr-watchd</string>
                 <key>ProgramArguments</key>
                 <array>
                   <string>/opt/squeezr/squeezr</string>
@@ -261,26 +263,71 @@ public sealed class WatchdUnitGeneratorTests
     }
 
     [Theory]
-    [InlineData(AutostartPlatform.SystemdUser)]
-    [InlineData(AutostartPlatform.WindowsScheduledTask)]
-    [InlineData(AutostartPlatform.LaunchAgent)]
-    public void Generate_UnitNameOverride_IsNamedOnEveryPlatform(AutostartPlatform platform)
+    [InlineData(WindowsBinaryWithPercent, WindowsHome, null, "binaryPath")]
+    [InlineData(WindowsBinary, WindowsHomeWithPercent, null, "squeezrHome")]
+    [InlineData(WindowsBinary, "%", null, "squeezrHome")]
+    public void Generate_WindowsValueInsideTaskCommandWithPercent_Throws(
+        string binaryPath,
+        string squeezrHome,
+        string? unitName,
+        string expectedParameterName)
     {
-        var text = WatchdUnitGenerator.Generate(platform, Binary, unitName: "watchd-lane");
+        var error = Should.Throw<ArgumentException>(() => WatchdUnitGenerator.Generate(
+            AutostartPlatform.WindowsScheduledTask, binaryPath, squeezrHome, unitName));
 
-        text.ShouldContain("watchd-lane");
-        text.ShouldNotContain(WatchdUnitGenerator.DefaultUnitName);
+        error.ParamName.ShouldBe(expectedParameterName);
+        error.Message.ShouldContain("percent sign");
+    }
+
+    // /TN never reaches cmd: the task name is an argument for schtasks, so the percent rule stops at
+    // the two values that go inside /TR and a name that carries one still generates.
+    [Fact]
+    public void Generate_WindowsUnitNameWithPercent_GeneratesAndCarriesItIntoTheTaskName()
+    {
+        var text = WatchdUnitGenerator.Generate(
+            AutostartPlatform.WindowsScheduledTask, WindowsBinary, WindowsHome, @"watchd%lane");
+
+        text.ShouldBe(ArgLine("""
+            /Create /TN "watchd%lane" /SC ONLOGON /TR "cmd /c set \"SQUEEZR_HOME=D:\squeezr home\" && \"C:\Program Files\Squeezr\squeezr.exe\" watchd --autostart"
+            """));
     }
 
     [Theory]
     [InlineData(AutostartPlatform.SystemdUser)]
-    [InlineData(AutostartPlatform.WindowsScheduledTask)]
     [InlineData(AutostartPlatform.LaunchAgent)]
-    public void Generate_BlankUnitName_FallsBackToDefaultName(AutostartPlatform platform)
+    public void Generate_PercentOutsideTheWindowsBranch_IsEscapedNotRefused(AutostartPlatform platform)
+    {
+        var text = WatchdUnitGenerator.Generate(
+            platform, "/opt/%USERNAME%/squeezr", "/var/tmp/%PUBLIC% home");
+
+        text.ShouldContain("%");
+    }
+
+    [Theory]
+    [InlineData(AutostartPlatform.SystemdUser, WatchdUnitGenerator.DefaultUnitName)]
+    [InlineData(AutostartPlatform.WindowsScheduledTask, WatchdUnitGenerator.DefaultUnitName)]
+    [InlineData(AutostartPlatform.LaunchAgent, WatchdUnitGenerator.LaunchAgentUnitName)]
+    public void Generate_UnitNameOverride_IsNamedOnEveryPlatform(
+        AutostartPlatform platform,
+        string platformDefault)
+    {
+        var text = WatchdUnitGenerator.Generate(platform, Binary, unitName: "watchd-lane");
+
+        text.ShouldContain("watchd-lane");
+        text.ShouldNotContain(platformDefault);
+    }
+
+    [Theory]
+    [InlineData(AutostartPlatform.SystemdUser, WatchdUnitGenerator.DefaultUnitName)]
+    [InlineData(AutostartPlatform.WindowsScheduledTask, WatchdUnitGenerator.DefaultUnitName)]
+    [InlineData(AutostartPlatform.LaunchAgent, WatchdUnitGenerator.LaunchAgentUnitName)]
+    public void Generate_BlankUnitName_FallsBackToThePlatformDefault(
+        AutostartPlatform platform,
+        string platformDefault)
     {
         var text = WatchdUnitGenerator.Generate(platform, Binary, unitName: "  ");
 
-        text.ShouldContain(WatchdUnitGenerator.DefaultUnitName);
+        text.ShouldContain(platformDefault);
     }
 
     [Theory]

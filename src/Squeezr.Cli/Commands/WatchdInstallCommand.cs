@@ -25,7 +25,6 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
             SqueezrHome.RequireHabitableProfileHome();
             var platform = AutostartEnvironment.CurrentPlatform;
             var binaryPath = new DaemonLauncher().DaemonBinaryPath();
-            Launchability.Require(platform, binaryPath);
             return await ApplyAsync(
                 platform,
                 binaryPath,
@@ -40,6 +39,9 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
         }
     }
 
+    // The guard belongs to the seam, not to the verb: every caller that hands over a program path
+    // (the command, the checks T4/T9 build on top of this) gets the same check before a byte is
+    // written, and none can step around it.
     internal static async Task<int> ApplyAsync(
         AutostartPlatform platform,
         string binaryPath,
@@ -47,6 +49,7 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
         IWatchdAutostartApplier applier,
         CancellationToken cancellationToken)
     {
+        Launchability.Require(platform, binaryPath);
         var unitText = WatchdUnitGenerator.Generate(platform, binaryPath, squeezrHome);
         await applier.InstallAsync(unitText, cancellationToken);
         var carried = squeezrHome is null ? string.Empty : $" (with {SqueezrHome.HomeEnvironmentVariable}={squeezrHome})";

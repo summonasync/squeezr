@@ -6,6 +6,11 @@ namespace Squeezr.Core.Infra.Autostart;
 public static class WatchdUnitGenerator
 {
     public const string DefaultUnitName = "squeezr-watchd";
+
+    // launchd wants its labels reverse-DNS: the domain is what keeps one user's agents from colliding
+    // with another vendor's, and the plist file name has to match the label it carries.
+    public const string LaunchAgentUnitName = "dev.summonasync.squeezr-watchd";
+
     public const string WatchdVerb = "watchd";
     public const string AutostartFlag = "--autostart";
     public const string ManagedByMarker = "managed by squeezr, do not edit";
@@ -25,7 +30,7 @@ public static class WatchdUnitGenerator
         RejectLineBreaks(squeezrHome, nameof(squeezrHome));
         RejectLineBreaks(unitName, nameof(unitName));
 
-        var name = string.IsNullOrWhiteSpace(unitName) ? DefaultUnitName : unitName;
+        var name = string.IsNullOrWhiteSpace(unitName) ? DefaultUnitNameFor(platform) : unitName;
         var home = string.IsNullOrWhiteSpace(squeezrHome) ? null : squeezrHome;
 
         return platform switch
@@ -44,6 +49,9 @@ public static class WatchdUnitGenerator
         RejectLineBreaks(binaryPath, nameof(binaryPath));
         return new WatchdRunCommand(binaryPath, [WatchdVerb, AutostartFlag]);
     }
+
+    private static string DefaultUnitNameFor(AutostartPlatform platform) =>
+        platform == AutostartPlatform.LaunchAgent ? LaunchAgentUnitName : DefaultUnitName;
 
     private static string SystemdUnit(string unitName, string binaryPath, string? squeezrHome)
     {
@@ -79,6 +87,8 @@ public static class WatchdUnitGenerator
         RejectCmdQuote(unitName, nameof(unitName));
         RejectCmdQuote(binaryPath, nameof(binaryPath));
         RejectCmdQuote(squeezrHome, nameof(squeezrHome));
+        RejectCmdPercentExpansion(binaryPath, nameof(binaryPath));
+        RejectCmdPercentExpansion(squeezrHome, nameof(squeezrHome));
 
         var run = $"\"{binaryPath}\" {WatchdVerb} {AutostartFlag}";
         var taskCommand = squeezrHome is null
@@ -218,6 +228,22 @@ public static class WatchdUnitGenerator
         {
             throw new ArgumentException(
                 "The scheduled-task command is re-parsed by cmd.exe — the value must not carry a double quote.",
+                parameterName);
+        }
+    }
+
+    // cmd.exe resolves %VAR% when it builds the command line, and double quotes do not shield it — they
+    // only hold the metacharacters and the spaces. A value with a percent sign would therefore name one
+    // program at install time and possibly another one at logon, and there is no portable escape for it
+    // inside a one-line task command, so this is a refusal instead. unitName is exempt: it goes to /TN,
+    // which is schtasks' own argument and never reaches cmd.
+    private static void RejectCmdPercentExpansion(string? value, string parameterName)
+    {
+        if (value is not null && value.Contains('%', StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "The scheduled-task command is expanded by cmd.exe, which resolves %VAR% even inside " +
+                "double quotes — the value must not carry a percent sign.",
                 parameterName);
         }
     }

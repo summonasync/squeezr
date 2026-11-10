@@ -1,6 +1,7 @@
 using Shouldly;
 using Squeezr.Cli.Infra.Autostart;
 using Squeezr.Core.Infra.Autostart;
+using Squeezr.Tests.Infra.Autostart;
 
 namespace Squeezr.Tests.Cli;
 
@@ -11,9 +12,7 @@ public sealed class LaunchabilityTests
     [LinuxFact]
     public void Require_WhenTheProgramCarriesTheExecuteBit_AcceptsIt()
     {
-        var program = WriteProgram("squeezr", UnixFileMode.UserRead | UnixFileMode.UserWrite
-            | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
-            | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        var program = TestProgram.Executable("squeezr");
 
         Should.NotThrow(() => Launchability.Require(AutostartPlatform.SystemdUser, program));
     }
@@ -21,7 +20,7 @@ public sealed class LaunchabilityTests
     [LinuxFact]
     public void Require_OnTheLaunchAgentBranch_UsesTheSameExecuteBitRule()
     {
-        var program = WriteProgram("squeezr", UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var program = TestProgram.NotExecutable("squeezr");
 
         var error = Should.Throw<AutostartException>(
             () => Launchability.Require(AutostartPlatform.LaunchAgent, program));
@@ -32,7 +31,7 @@ public sealed class LaunchabilityTests
     [LinuxFact]
     public void Require_WhenTheProgramCarriesNoExecuteBit_RefusesNamingThePathAndTheRemedy()
     {
-        var program = WriteProgram("squeezr", UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var program = TestProgram.NotExecutable("squeezr");
 
         var error = Should.Throw<AutostartException>(
             () => Launchability.Require(AutostartPlatform.SystemdUser, program));
@@ -47,9 +46,7 @@ public sealed class LaunchabilityTests
     [LinuxFact]
     public void Require_WhenTheAssemblyCarriesTheExecuteBit_StillRefusesAsAManagedAssembly()
     {
-        var program = WriteProgram(
-            "squeezr.dll",
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var program = TestProgram.Write("squeezr.dll", TestProgram.UserReadWriteExecute);
 
         var error = Should.Throw<AutostartException>(
             () => Launchability.Require(AutostartPlatform.SystemdUser, program));
@@ -73,7 +70,7 @@ public sealed class LaunchabilityTests
     [Fact]
     public void Require_OnTheWindowsBranch_AcceptsAProgramExecutable()
     {
-        var program = WriteProgram("squeezr.exe", UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var program = TestProgram.NotExecutable("squeezr.exe");
 
         Should.NotThrow(() => Launchability.Require(AutostartPlatform.WindowsScheduledTask, program));
     }
@@ -83,8 +80,7 @@ public sealed class LaunchabilityTests
     [Fact]
     public void Require_OnTheWindowsBranch_RefusesACommandLineScript()
     {
-        var program = WriteProgram("squeezr.ps1", UnixFileMode.UserRead | UnixFileMode.UserWrite
-            | UnixFileMode.UserExecute);
+        var program = TestProgram.Executable("squeezr.ps1");
 
         var error = Should.Throw<AutostartException>(
             () => Launchability.Require(AutostartPlatform.WindowsScheduledTask, program));
@@ -92,17 +88,5 @@ public sealed class LaunchabilityTests
         error.Message.ShouldContain(program);
         error.Message.ShouldContain(".ps1");
         error.Message.ShouldContain(RemedyFragment);
-    }
-
-    private static string WriteProgram(string fileName, UnixFileMode mode)
-    {
-        var path = Path.Combine(TestDirs.NewTempDir(), fileName);
-        File.WriteAllText(path, "#!/bin/sh\nexit 0\n");
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path, mode);
-        }
-
-        return path;
     }
 }
