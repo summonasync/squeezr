@@ -46,9 +46,9 @@ public sealed class FindReferencesTool
             var parameters = Params(symbolName, repo, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("find_references", parameters, out var cached))
             {
-                var hit = (ToolEnvelope)cached!;
+                var hit = ((ToolEnvelope)cached!).MarkReplayed();
                 QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
-                    hit.TokensUsed, hit.Truncated, ((List<RefData>)hit.Data!).Count,
+                    hit.PaidTokens, hit.Truncated, ((List<RefData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
                     client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return hit;
@@ -78,9 +78,10 @@ public sealed class FindReferencesTool
             }
 
             var lagging = result.LaggingDeclarations ?? [];
-            if (lagging.Count > 0)
+            string? laggingLine = lagging.Count > 0 ? LaggingWarning(lagging) : null;
+            if (laggingLine is not null)
             {
-                warnings.Add(LaggingWarning(lagging));
+                warnings.Add(laggingLine);
             }
 
             var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
@@ -101,7 +102,8 @@ public sealed class FindReferencesTool
             }
 
             var carried = MergeStale(freshness.Stale, lagging);
-            if (AnswerFreshness.CoverageWarning(candidates.Count, namedUniverse.Count) is { } coverageLine)
+            var coverageLine = AnswerFreshness.CoverageWarning(candidates.Count, namedUniverse.Count);
+            if (coverageLine is not null)
             {
                 warnings.Add(coverageLine);
             }
@@ -112,10 +114,13 @@ public sealed class FindReferencesTool
                     checkedCandidates: candidates.Count,
                     namedFiles: namedUniverse.Count,
                     staleTotal: carried.Count,
-                    listed: carried.Count));
+                    listed: carried.Count,
+                    laggingFiles: AnswerFreshness.CountLaggingFiles(fileFreshness),
+                    stalePaths: carried,
+                    payloadLines: [laggingLine, coverageLine]));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
-                envelope.TokensUsed, false, data.Count,
+                envelope.PaidTokens, false, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,

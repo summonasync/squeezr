@@ -76,7 +76,7 @@ public class FreshnessPresenceTests
         Int(cleanClaim, "checked").ShouldBe(2, "a clean pass names nothing and still declares its coverage");
         Int(withheldClaim, "staleTotal").ShouldBe(0);
         Int(withheldClaim, "checked").ShouldBe(0);
-        Int(withheldClaim, "named").ShouldBe(2,
+        Int(withheldClaim, "scopeRows").ShouldBe(2,
             "the scope still speaks for two files this pass never reached — absence of a verdict, not a clean sheet");
         withheldEnvelope.GetProperty("staleFiles").EnumerateArray().ShouldBeEmpty();
         Warnings(cleanEnvelope).ShouldNotContain(w => w.Contains("answers structure, not content", StringComparison.Ordinal),
@@ -110,7 +110,7 @@ public class FreshnessPresenceTests
         var stale = envelope.GetProperty("staleFiles").EnumerateArray().Select(v => v.GetString()!).ToList();
 
         Int(claim, "checked").ShouldBe(75);
-        Int(claim, "named").ShouldBe(75);
+        Int(claim, "scopeRows").ShouldBe(75);
         Int(claim, "staleTotal").ShouldBe(70);
         Int(claim, "listed").ShouldBe(stale.Count);
         Int(claim, "missing").ShouldBe(40);
@@ -165,7 +165,7 @@ public class FreshnessPresenceTests
     }
 
     [Fact]
-    public async Task RepoMap_Description_SaysStaleFilesCarriesASample_NotTheFullVerdict()
+    public async Task RepoMap_Description_SaysStaleFilesCarriesASample_AndHowItsSeatsAreOrdered()
     {
         var workspace = IndexedWorkspace(("src/Alpha.cs", Class("Alpha")));
         await using var harness = await McpTestHarness.StartAsync(workspace);
@@ -176,6 +176,10 @@ public class FreshnessPresenceTests
         description.ShouldContain("staleFiles");
         description.ShouldContain("sample");
         description.ShouldContain("freshness");
+        // the schema has to say what listedMissing splits, or the number decodes only for a reader who
+        // already knows how the sample was seated
+        description.ShouldContain("listedMissing");
+        description.ShouldContain("the vanished rows come first");
     }
 
     [Fact]
@@ -192,11 +196,11 @@ public class FreshnessPresenceTests
         var named = Names(envelope);
 
         named.Count.ShouldBeGreaterThan(FreshCandidateCap);
-        Int(claim, "named").ShouldBe(named.Count);
+        Int(claim, "namedFiles").ShouldBe(named.Count);
         Int(claim, "checked").ShouldBe(FreshCandidateCap, "the cap is the coverage, and the cap does not move here");
         claim.GetProperty("check").GetString().ShouldBe("content");
         claim.EnumerateObject().Select(p => p.Name).ShouldBe(
-            ["check", "checked", "named", "staleTotal", "listed"],
+            ["check", "checked", "namedFiles", "staleTotal", "listed", "laggingFiles", "freshnessTokens"],
             "a content answer has no vanished-or-lagged split to claim");
         Warnings(envelope).ShouldContain(
             w => w.StartsWith($"content check covered {FreshCandidateCap} of the {named.Count} files", StringComparison.Ordinal));
@@ -214,7 +218,7 @@ public class FreshnessPresenceTests
             cancellationToken: CancellationToken.None));
         var claim = Freshness(envelope);
 
-        Int(claim, "checked").ShouldBe(Int(claim, "named"), "a covered answer says so with equal numbers");
+        Int(claim, "checked").ShouldBe(Int(claim, "namedFiles"), "a covered answer says so with equal numbers");
         Warnings(envelope).ShouldNotContain(w => w.Contains("content check covered", StringComparison.Ordinal));
         envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue(
             "the whole verdict list fits in the answer, so nothing was left out");
@@ -237,9 +241,11 @@ public class FreshnessPresenceTests
         {
             var envelope = ParseEnvelope(await harness.Client.CallToolAsync(
                 tool, args, cancellationToken: CancellationToken.None));
-            var check = Freshness(envelope).GetProperty("check").GetString();
-            check.ShouldBe(tool == "repo_map" ? "structure" : "content", tool);
+            var claim = Freshness(envelope);
+            claim.GetProperty("check").GetString().ShouldBe(tool == "repo_map" ? "structure" : "content", tool);
             envelope.GetProperty("staleFiles").ValueKind.ShouldBe(JsonValueKind.Array, tool);
+            Int(claim, "freshnessTokens").ShouldBeGreaterThan(0,
+                $"{tool}: a story that ships is a story the caller pays for, whatever the scope looks like");
         }
 
         var aggregate = new (string Tool, Dictionary<string, object?> Args)[]
@@ -259,17 +265,137 @@ public class FreshnessPresenceTests
     }
 
     [Fact]
-    public async Task RepoMap_TelemetryCarriesTheNumberTheAnswerDeclares()
+    public async Task RepoMap_NamingStaleRows_ShipsTheSeatPolicyInTheAnswer()
+    {
+        var vanished = Enumerable.Range(0, 40).Select(i => ($"src/Vanish{i:00}.cs", Class($"Vanish{i:00}"))).ToArray();
+        var lagged = Enumerable.Range(0, 30).Select(i => ($"src/Lag{i:00}.cs", Class($"Lag{i:00}"))).ToArray();
+        var workspace = IndexedWorkspace([.. vanished, .. lagged]);
+        foreach (var (relative, _) in vanished)
+        {
+            File.Delete(In(workspace, relative));
+        }
+
+        foreach (var (relative, _) in lagged)
+        {
+            File.AppendAllText(In(workspace, relative), "// past the stamp\n");
+        }
+
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+        var envelope = ParseEnvelope(await MapAsync(harness, 2));
+
+        // listedMissing decodes only against the seating order, so the order travels in shipped text — a C#
+        // comment is not something a reader of the answer can hold
+        var classLine = Warnings(envelope)
+            .Single(w => w.Contains("answers structure, not content", StringComparison.Ordinal));
+        classLine.ShouldContain("the vanished rows come first");
+        var stale = envelope.GetProperty("staleFiles").EnumerateArray().Select(v => v.GetString()!).ToList();
+        stale.Take(Int(Freshness(envelope), "listedMissing"))
+            .ShouldAllBe(p => p.Contains("Vanish", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RepoMap_ExactlyOneSampleOfStale_DeclaresWhatTheStoryCosts()
+    {
+        var lagged = Enumerable.Range(0, 50).Select(i => $"src/Lag{i:00}.cs").ToArray();
+        var files = lagged
+            .Select(p => (p, Class(Path.GetFileNameWithoutExtension(p))))
+            .Append(("src/Keep.cs", Class("Keep")))
+            .ToArray();
+        var workspace = IndexedWorkspace(files);
+        foreach (var relative in lagged)
+        {
+            File.AppendAllText(In(workspace, relative), "// past the stamp\n");
+        }
+
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+        var envelope = ParseEnvelope(await MapAsync(harness, 2));
+        var claim = Freshness(envelope);
+        var warnings = Warnings(envelope);
+
+        Int(claim, "staleTotal").ShouldBe(50);
+        Int(claim, "listed").ShouldBe(50);
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue(
+            "complete stays a claim about the verdict; the price of the story is a number, not a flag");
+        warnings.ShouldNotContain(w => w.Contains("stale rows are not listed", StringComparison.Ordinal),
+            "nothing was left out, so the sample line has nothing to say");
+
+        var declared = Int(claim, "freshnessTokens");
+        declared.ShouldBe(DeclaredByTheShippedBytes(envelope, claim, warnings),
+            "the declared price is the sample, the lines that explain the check and this block, on the wire basis");
+        declared.ShouldBeGreaterThan(500, "the fifty-path sample alone is most of the story");
+    }
+
+    [Fact]
+    public async Task RepoMap_CacheHit_MarksTheReplay_AndKeepsTheNumbersOfTheCallThatMadeThem()
+    {
+        var workspace = IndexedWorkspace(("src/Alpha.cs", Class("Alpha")), ("src/Beta.cs", Class("Beta")));
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var fresh = ParseEnvelope(await MapAsync(harness, 2));
+        var first = Freshness(fresh);
+        Int(first, "staleTotal").ShouldBe(0);
+        first.TryGetProperty("replayed", out _).ShouldBeFalse("a call that ran the pass does not wear the mark");
+
+        File.Delete(In(workspace, "src/Beta.cs"));
+
+        var replay = ParseEnvelope(await MapAsync(harness, 2));
+        var second = Freshness(replay);
+        second.GetProperty("replayed").GetBoolean().ShouldBeTrue(
+            "file mtimes move no cache generation, so this answer never looked at the disk");
+        Int(second, "staleTotal").ShouldBe(0,
+            "a replayed block describes the call that produced it — the mark is what tells the reader so");
+        replay.GetProperty("staleFiles").EnumerateArray().ShouldBeEmpty();
+        Int(second, "freshnessTokens").ShouldBe(
+            Int(first, "freshnessTokens") + WireTokens(second.GetRawText()) - WireTokens(first.GetRawText()),
+            "the mark ships bytes, and the declared price moves with the bytes that ship");
+
+        var rebuilt = ParseEnvelope(await MapAsync(harness, 1));
+        Int(Freshness(rebuilt), "staleTotal").ShouldBe(1, "one parameter away the same session runs its own check");
+        Freshness(rebuilt).TryGetProperty("replayed", out _).ShouldBeFalse();
+
+        QueryTelemetry.ReadAll(workspace).Single(e => e.CacheHit).TokensUsed.ShouldBe(
+            replay.GetProperty("tokensUsed").GetInt32() + Int(second, "freshnessTokens"),
+            "a replay costs what the replayed answer declares, not what the engine would have rebuilt");
+    }
+
+    [Fact]
+    public async Task CodeSearch_StatVerdicts_AreNumberedEvenWhenTheGuardRefusedNothing()
+    {
+        var workspace = IndexedWorkspace(("src/Alpha.cs", Class("Alpha")), ("src/Beta.cs", Class("Beta")));
+        // content untouched, clock moved: the hash guard calls both files fresh while the stat projection
+        // says one of them lags — the answer must not read as a clean verdict while naming it
+        File.SetLastWriteTimeUtc(In(workspace, "src/Beta.cs"), DateTime.UtcNow.AddDays(1));
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var envelope = ParseEnvelope(await harness.Client.CallToolAsync(
+            "code_search",
+            new Dictionary<string, object?> { ["query"] = "Value" },
+            cancellationToken: CancellationToken.None));
+        var claim = Freshness(envelope);
+        var verdicts = envelope.GetProperty("fileFreshness").EnumerateArray()
+            .Select(row => row.GetProperty("verdict").GetString()).ToList();
+
+        Int(claim, "staleTotal").ShouldBe(0);
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue();
+        verdicts.ShouldContain(verdict => verdict == "lagging");
+        Int(claim, "laggingFiles").ShouldBe(verdicts.Count(v => v == "lagging"),
+            "the stat verdicts are part of what this answer claims, so they are counted");
+    }
+
+    [Fact]
+    public async Task RepoMap_TelemetryRecordsTheNumberTheCallerActuallyPays()
     {
         var workspace = IndexedWorkspace(("src/Alpha.cs", Class("Alpha")), ("src/Gone.cs", Class("Gone")));
         File.Delete(In(workspace, "src/Gone.cs"));
         await using var harness = await McpTestHarness.StartAsync(workspace);
 
-        var envelope = ParseEnvelope(await harness.Client.CallToolAsync(
-            "repo_map", new Dictionary<string, object?> { ["depth"] = 2 }, cancellationToken: CancellationToken.None));
+        var envelope = ParseEnvelope(await MapAsync(harness, 2));
+        var declared = Int(Freshness(envelope), "freshnessTokens");
+        declared.ShouldBeGreaterThan(0);
 
         var entry = QueryTelemetry.ReadAll(workspace).Single(e => e.Tool == "repo_map");
-        entry.TokensUsed.ShouldBe(envelope.GetProperty("tokensUsed").GetInt32(),
+        entry.TokensUsed.ShouldBe(envelope.GetProperty("tokensUsed").GetInt32() + declared,
             "squeezr stats may not report a cheaper answer than the caller was charged for");
         entry.Truncated.ShouldBe(envelope.GetProperty("truncated").GetBoolean());
     }
@@ -449,6 +575,25 @@ public class FreshnessPresenceTests
         envelope.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!).ToList();
 
     private static JsonElement Freshness(JsonElement envelope) => envelope.GetProperty("freshness");
+
+    private static async Task<CallToolResult> MapAsync(McpTestHarness harness, int depth) =>
+        await harness.Client.CallToolAsync(
+            "repo_map", new Dictionary<string, object?> { ["depth"] = depth }, cancellationToken: CancellationToken.None);
+
+    // the answer re-measured from its own shipped bytes, on the basis the price claims to use: every quote
+    // that travels inside the MCP content string costs six, the product's estimator prices ceil(len/4*1.1),
+    // and each fragment is estimated on its own
+    private static int WireTokens(string json) =>
+        Math.Max(1, (int)Math.Ceiling((json.Length + 5 * json.Count(c => c == '\"')) / 4.0 * 1.1));
+
+    private static int DeclaredByTheShippedBytes(JsonElement envelope, JsonElement claim, IReadOnlyList<string> warnings)
+    {
+        var story = WireTokens(envelope.GetProperty("staleFiles").GetRawText()) + WireTokens(claim.GetRawText());
+        return warnings
+            .Where(w => w.Contains("answers structure, not content", StringComparison.Ordinal) ||
+                        w.Contains("stale rows are not listed", StringComparison.Ordinal))
+            .Aggregate(story, (total, line) => total + WireTokens("\"" + line + "\""));
+    }
 
     private static int Int(JsonElement claim, string key) => claim.GetProperty(key).GetInt32();
 

@@ -39,7 +39,7 @@ public sealed class RepoMapTool
                   ((root, repo, depth, maxTokens, prefix) => new RepoMapper(root).Build(repo, depth, maxTokens, prefix));
     }
 
-    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Pass prefix (e.g. \"src/Squeezr.Cli/\") to render only that subtree with prefix-relative directory labels — depth keeps its structural meaning. Lines come from the index: one structural pass over the indexed rows reports files missing from disk or changed by size or mtime in staleFiles — a bounded sample of what it found, never the full verdict, with the covered row count and the sample size in freshness — and nothing is reindexed on this call; expand_span reads code on coordinates from other tools.")]
+    [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Pass prefix (e.g. \"src/Squeezr.Cli/\") to render only that subtree with prefix-relative directory labels — depth keeps its structural meaning. Lines come from the index: one structural pass over the indexed rows reports files missing from disk or changed by size or mtime in staleFiles — a bounded sample of what it found, never the full verdict, with the covered row count and the sample size in freshness; the vanished rows come first in it, the first listedMissing of them, and the lagging rows after. Nothing is reindexed on this call; expand_span reads code on coordinates from other tools.")]
     [McpServerTool(Name = "repo_map", Title = "Repository map")]
     public object Build(string? repo = null, string? prefix = null, int? depth = null, int? maxTokens = null) =>
         _gate.Run(() => BuildCore(repo, prefix, depth, maxTokens));
@@ -55,9 +55,9 @@ public sealed class RepoMapTool
             var parameters = Params(repo, normalizedPrefix, depth, maxTokens, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("repo_map", parameters, out var cached))
             {
-                var hit = (ToolEnvelope)cached!;
+                var hit = ((ToolEnvelope)cached!).MarkReplayed();
                 QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
-                    hit.TokensUsed, hit.Truncated, ((List<MapLineData>)hit.Data!).Count,
+                    hit.PaidTokens, hit.Truncated, ((List<MapLineData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
                     client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
                 return hit;
@@ -90,41 +90,48 @@ public sealed class RepoMapTool
 
             // the answer carries per-file verdicts, so the line stops denying them and says which class of
             // check produced them instead — structure from a stat, never a content hash, never a refresh.
-            // It speaks only when a verdict ships: freshness already names the class when nothing did
+            // It speaks only when a verdict ships: freshness already names the class when nothing did. It also
+            // ships how the sample is seated, because listedMissing decodes only against that order
             var sample = CarryStaleSample(freshness);
-            if (sample.Carried > 0)
+            string? classLine = sample.Carried > 0
+                ? "repo_map answers structure, not content: staleFiles names indexed rows of this scope whose " +
+                  "file is gone or whose size or mtime no longer matches the stamp, with no content read " +
+                  "behind a verdict; the map lines themselves still come from the index, code_search and " +
+                  $"symbol_lookup carry the content check for one file, and '{RemedyText.IndexCommand}' " +
+                  "reconciles the rows; the vanished rows come first"
+                : null;
+            if (classLine is not null)
             {
-                warnings.Add(
-                    "repo_map answers structure, not content: staleFiles names indexed rows of this scope whose " +
-                    "file is gone or whose size or mtime no longer matches the stamp, with no content read " +
-                    "behind a verdict; the map lines themselves still come from the index, code_search and " +
-                    $"symbol_lookup carry the content check for one file, and '{RemedyText.IndexCommand}' " +
-                    "reconciles the rows");
+                warnings.Add(classLine);
             }
 
-            if (sample.Omitted > 0)
+            string? sampleLine = sample.Omitted > 0
+                ? $"structure pass covered {freshness.Checked} indexed rows and found " +
+                  $"{freshness.Missing.Count} missing + {freshness.Changed.Count} changed; staleFiles carries " +
+                  $"a sample of {sample.Carried} of them, {sample.Omitted} stale rows are not listed"
+                : null;
+            if (sampleLine is not null)
             {
-                warnings.Add(
-                    $"structure pass covered {freshness.Checked} indexed rows and found " +
-                    $"{freshness.Missing.Count} missing + {freshness.Changed.Count} changed; staleFiles carries " +
-                    $"a sample of {sample.Carried} of them, {sample.Omitted} stale rows are not listed");
+                warnings.Add(sampleLine);
             }
 
-            // named is the scope this answer speaks for, not the scope the pass reached: rows withheld or
-            // skipped above are claims without a verdict, so a pass that covered nothing cannot read as clean
+            // the scope this answer speaks for is not the scope the pass reached: rows withheld or skipped
+            // above are claims without a verdict, so a pass that covered nothing cannot read as clean
             var envelope = ToolEnvelope.Wrap(
                 data, result.TokensUsed, result.Truncated, warnings, root, sample.Paths,
                 freshness: AnswerFreshness.ForStructure(
                     checkedRows: freshness.Checked,
-                    namedRows: freshness.Checked + freshness.Withheld + freshness.Skipped,
+                    scopeRows: freshness.Checked + freshness.Withheld + freshness.Skipped,
                     staleTotal: freshness.Missing.Count + freshness.Changed.Count,
                     listed: sample.Carried,
                     listedMissing: sample.Missing.Count,
                     missing: freshness.Missing.Count,
-                    changed: freshness.Changed.Count));
+                    changed: freshness.Changed.Count,
+                    stalePaths: sample.Paths,
+                    payloadLines: [classLine, sampleLine]));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
-                envelope.TokensUsed, envelope.Truncated, data.Count,
+                envelope.PaidTokens, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null);

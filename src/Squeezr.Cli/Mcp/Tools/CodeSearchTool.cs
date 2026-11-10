@@ -75,9 +75,9 @@ public sealed class CodeSearchTool
             var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, kindFilter, rankExclusion, secretGuardExtra);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
-                var hit = (ToolEnvelope)cached!;
+                var hit = ((ToolEnvelope)cached!).MarkReplayed();
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
-                    hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
+                    hit.PaidTokens, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
                     client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                     baselineTokens: hit.Cost?.BaselineTokens);
@@ -143,7 +143,8 @@ public sealed class CodeSearchTool
             // the candidate cap bounds what the content check covered, not what the answer claims: when the
             // answer names more files than that, the answer says how many the check actually reached
             var namedCount = namedFiles.Distinct().Count();
-            if (AnswerFreshness.CoverageWarning(candidates.Count, namedCount) is { } coverageLine)
+            var coverageLine = AnswerFreshness.CoverageWarning(candidates.Count, namedCount);
+            if (coverageLine is not null)
             {
                 warnings.Add(coverageLine);
             }
@@ -154,10 +155,13 @@ public sealed class CodeSearchTool
                     checkedCandidates: candidates.Count,
                     namedFiles: namedCount,
                     staleTotal: freshness.Stale.Count,
-                    listed: freshness.Stale.Count));
+                    listed: freshness.Stale.Count,
+                    laggingFiles: AnswerFreshness.CountLaggingFiles(fileFreshness),
+                    stalePaths: freshness.Stale,
+                    payloadLines: [coverageLine]));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
-                envelope.TokensUsed, envelope.Truncated, data.Count,
+                envelope.PaidTokens, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,

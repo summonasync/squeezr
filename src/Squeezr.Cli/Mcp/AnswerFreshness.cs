@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Squeezr.Core.Indexing;
 
 namespace Squeezr.Cli.Mcp;
 
@@ -11,49 +12,100 @@ namespace Squeezr.Cli.Mcp;
 // confirm. Neither number says why a position came back stale: a store this call could not open collapses
 // every candidate into the same outcome, so an answer names coverage and counts, never a cause.
 //
-// `named` is the denominator the coverage claim needs. On the map it is the rows its own scope speaks for
-// (checked + withheld + skipped), so a pass that reached nothing cannot read as a clean sheet; on a query
-// tool it is the distinct files the answer names, of which the candidate cap may have covered fewer.
+// The denominator is named after the volume it divides, because the two volumes are not the same one:
+// `scopeRows` is everything a map scope speaks for (checked + withheld + skipped rows), `namedFiles` the
+// distinct files a query answer names. A pass that reached nothing must not read as a clean sheet.
+//
 // `listedMissing` splits the list the answer carries: staleFiles runs vanished rows first and lagging rows
-// after, so a reader can attribute every named file instead of reverse-engineering how the seats were filled.
+// after, so a reader can attribute every named file instead of reverse-engineering how the seats were
+// filled. That seat policy ships in repo_map's own text — the class line, the tool description and README —
+// and is deliberately not left as a note here.
+//
+// `freshnessTokens` prices what this story costs the caller and `tokensUsed` does not count: the staleFiles
+// sample, the lines that explain the check, and this block itself, on the wire basis. `tokensUsed` stays the
+// price of the content the caller's budget governs — folding the story into it would move a number three
+// pins hold to the budget. `replayed` marks an answer the cache handed back: its numbers describe the call
+// that produced the stored envelope, not this one, and file mtimes move no cache generation.
 public sealed record AnswerFreshness(
     [property: JsonPropertyName("check")] string Check,
     [property: JsonPropertyName("checked")] int Checked,
-    [property: JsonPropertyName("named")] int Named,
-    [property: JsonPropertyName("staleTotal")] int StaleTotal,
-    [property: JsonPropertyName("listed")] int Listed,
+    [property: JsonPropertyName("scopeRows"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? ScopeRows = null,
+    [property: JsonPropertyName("namedFiles"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? NamedFiles = null,
+    [property: JsonPropertyName("staleTotal")] int StaleTotal = 0,
+    [property: JsonPropertyName("listed")] int Listed = 0,
     [property: JsonPropertyName("listedMissing"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? ListedMissing = null,
     [property: JsonPropertyName("missing"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? Missing = null,
     [property: JsonPropertyName("changed"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    int? Changed = null)
+    int? Changed = null,
+    [property: JsonPropertyName("laggingFiles"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? LaggingFiles = null,
+    [property: JsonPropertyName("freshnessTokens")] int FreshnessTokens = 0,
+    [property: JsonPropertyName("replayed"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool Replayed = false)
 {
     public const string Structure = "structure";
     public const string Content = "content";
 
     // the answer names fewer stale positions than its own check found: a reader holding this cannot treat the
     // list as the verdict, and cost.complete says so in the field the envelope already uses for "not the whole
-    // story" — the unpriced bytes of the payload are the price of that honesty, not a separate claim
+    // story". Completeness is a claim about the verdict; the price of the story is freshnessTokens, not this
     [property: JsonIgnore]
     public bool CarriesWholeVerdict => Listed >= StaleTotal;
 
     public static AnswerFreshness ForStructure(
         int checkedRows,
-        int namedRows,
+        int scopeRows,
         int staleTotal,
         int listed,
         int listedMissing,
         int missing,
-        int changed) =>
-        new(Structure, checkedRows, namedRows, staleTotal, listed, listedMissing, missing, changed);
+        int changed,
+        IReadOnlyList<string> stalePaths,
+        IReadOnlyList<string?> payloadLines) =>
+        Priced(
+            new AnswerFreshness(
+                Structure, checkedRows, ScopeRows: scopeRows, StaleTotal: staleTotal, Listed: listed,
+                ListedMissing: listedMissing, Missing: missing, Changed: changed),
+            stalePaths,
+            payloadLines);
 
     public static AnswerFreshness ForContent(
         int checkedCandidates,
         int namedFiles,
         int staleTotal,
-        int listed) =>
-        new(Content, checkedCandidates, namedFiles, staleTotal, listed);
+        int listed,
+        int laggingFiles,
+        IReadOnlyList<string> stalePaths,
+        IReadOnlyList<string?> payloadLines) =>
+        Priced(
+            new AnswerFreshness(
+                Content, checkedCandidates, NamedFiles: namedFiles, StaleTotal: staleTotal, Listed: listed,
+                LaggingFiles: laggingFiles),
+            stalePaths,
+            payloadLines);
+
+    // an answer the cache handed back still carries the numbers of the call that made them; the mark rides in
+    // the block that makes the claim, and the block's own price moves with the bytes the mark adds
+    public AnswerFreshness MarkReplayed()
+    {
+        if (Replayed)
+        {
+            return this;
+        }
+
+        var marked = this with { Replayed = true };
+        return marked with { FreshnessTokens = Converge(marked, FreshnessTokens - FreshnessPrice.JsonTokens(this)) };
+    }
+
+    // A stat verdict is a claim too, and it is the cheaper one: the guard refuses what it could not confirm,
+    // while fileFreshness calls a file lagging on size or mtime alone. The count keeps an answer from shipping
+    // lagging names beside a verdict list that reads clean.
+    public static int CountLaggingFiles(IReadOnlyList<FileFreshness>? rows) =>
+        rows?.Count(row => row.Verdict == FreshnessVerdict.Lagging) ?? 0;
 
     // The cap sits on the candidates a check may reach, never on the files an answer names, so a wide answer
     // is a partially checked one. Said only when something was left out — a covered answer needs no apology.
@@ -61,6 +113,42 @@ public sealed record AnswerFreshness(
         checkedCount >= namedCount
             ? null
             : $"content check covered {checkedCount} of the {namedCount} files this answer names; staleFiles " +
-              "lists what it did not confirm fresh, and a file the check never reached carries only the " +
-              "stat verdict in fileFreshness";
+              "lists what it did not confirm fresh, a file the check never reached carries only the stat " +
+              "verdict in fileFreshness, and laggingFiles counts the files this answer names as lagging";
+
+    private static AnswerFreshness Priced(
+        AnswerFreshness claim,
+        IReadOnlyList<string> stalePaths,
+        IReadOnlyList<string?> payloadLines)
+    {
+        var shipped = FreshnessPrice.JsonTokens(stalePaths);
+        foreach (var line in payloadLines)
+        {
+            if (line is not null)
+            {
+                shipped += FreshnessPrice.LineTokens(line);
+            }
+        }
+
+        return claim with { FreshnessTokens = Converge(claim, shipped) };
+    }
+
+    // the block prices its own bytes and its own bytes grow with the digits of the number they carry; the
+    // loop settles upwards, so a declared price never comes back cheaper than what ships
+    private static int Converge(AnswerFreshness claim, int shippedPieces)
+    {
+        var declared = shippedPieces + 1;
+        for (var pass = 0; pass < 8; pass++)
+        {
+            var priced = shippedPieces + FreshnessPrice.JsonTokens(claim with { FreshnessTokens = declared });
+            if (priced == declared)
+            {
+                return priced;
+            }
+
+            declared = priced;
+        }
+
+        return declared;
+    }
 }

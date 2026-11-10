@@ -35,8 +35,9 @@ public sealed record ToolEnvelope(
         AnswerFreshness? freshness = null)
     {
         // one rule for every tool that declares a check: an answer that carries less of the verdict than it
-        // found is not complete. tokensUsed stays the price of the content the caller's budget governs — the
-        // freshness payload is declared by freshness itself and costs the answer its completeness instead
+        // found is not complete. tokensUsed stays the price of the content the caller's budget governs, and
+        // completeness stays a claim about the verdict — the bytes of the freshness story are priced by
+        // freshness.freshnessTokens, so the sample costs the caller a number instead of a constant noise flag
         var complete = !truncated && (freshness is null || freshness.CarriesWholeVerdict);
         var resolved = cost ?? AnswerCost.Unknown(tokensUsed, complete);
         return new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [],
@@ -46,6 +47,17 @@ public sealed record ToolEnvelope(
 
     public ToolEnvelope WithWarning(string? warning) =>
         warning is null ? this : this with { Warnings = [.. Warnings, warning] };
+
+    // what the caller actually pays for this answer: the budgeted content plus the freshness story the
+    // envelope ships beside it. telemetry reads the answer through this number, so stats cannot come out
+    // cheaper than the bytes that went down the pipe
+    [JsonIgnore]
+    public int PaidTokens => TokensUsed + (Freshness?.FreshnessTokens ?? 0);
+
+    // the stored envelope describes the call that produced it; a replay says so in the block that attests
+    // the check, and an answer with no check of its own has nothing to mark
+    public ToolEnvelope MarkReplayed() =>
+        Freshness is null ? this : this with { Freshness = Freshness.MarkReplayed() };
 
     private static TimeSpan? ResolveIndexAge(string? workspaceRoot)
     {

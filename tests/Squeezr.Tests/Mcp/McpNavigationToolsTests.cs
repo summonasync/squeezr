@@ -93,7 +93,10 @@ public class McpNavigationToolsTests
         var entry = QueryTelemetry.ReadAll(workspace).ShouldHaveSingleItem();
         entry.Tool.ShouldBe("symbol_lookup");
         entry.Hits.ShouldBe(0);
-        entry.TokensUsed.ShouldBe(envelope.GetProperty("tokensUsed").GetInt32());
+        entry.TokensUsed.ShouldBe(
+            envelope.GetProperty("tokensUsed").GetInt32() +
+            envelope.GetProperty("freshness").GetProperty("freshnessTokens").GetInt32(),
+            "stats records the number the caller pays — the budgeted content plus the freshness story it ships");
         entry.Truncated.ShouldBeFalse();
     }
 

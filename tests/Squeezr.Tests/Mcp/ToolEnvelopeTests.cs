@@ -154,8 +154,10 @@ public class ToolEnvelopeTests
         var envelope = ToolEnvelope.Wrap(
             new { hit = 1 }, 7, false, ["w1"], staleFiles: ["demo/a.cs", "demo/b.cs"],
             freshness: AnswerFreshness.ForStructure(
-                checkedRows: 75, namedRows: 75, staleTotal: 70, listed: 2, listedMissing: 1,
-                missing: 40, changed: 30));
+                checkedRows: 75, scopeRows: 75, staleTotal: 70, listed: 2, listedMissing: 1,
+                missing: 40, changed: 30,
+                stalePaths: ["demo/a.cs", "demo/b.cs"],
+                payloadLines: ["repo_map answers structure, not content"]));
 
         var json = JsonSerializer.Serialize(envelope);
         using var document = JsonDocument.Parse(json);
@@ -164,7 +166,8 @@ public class ToolEnvelopeTests
         root.EnumerateObject().Select(p => p.Name).ShouldBe(
             ["data", "tokensUsed", "truncated", "warnings", "indexAge", "staleFiles", "cost", "freshness"]);
         root.GetProperty("freshness").EnumerateObject().Select(p => p.Name).ShouldBe(
-            ["check", "checked", "named", "staleTotal", "listed", "listedMissing", "missing", "changed"]);
+            ["check", "checked", "scopeRows", "staleTotal", "listed", "listedMissing", "missing", "changed",
+                "freshnessTokens"]);
         root.GetProperty("freshness").GetProperty("check").GetString().ShouldBe("structure");
     }
 
@@ -174,15 +177,40 @@ public class ToolEnvelopeTests
         var envelope = ToolEnvelope.Wrap(
             new { hit = 1 }, 7, false,
             staleFiles: ["demo/a.cs"],
-            freshness: AnswerFreshness.ForContent(checkedCandidates: 1, namedFiles: 1, staleTotal: 1, listed: 1));
+            freshness: AnswerFreshness.ForContent(
+                checkedCandidates: 1, namedFiles: 1, staleTotal: 1, listed: 1, laggingFiles: 0,
+                stalePaths: ["demo/a.cs"], payloadLines: [null]));
 
         var json = JsonSerializer.Serialize(envelope);
         using var document = JsonDocument.Parse(json);
         var claim = document.RootElement.GetProperty("freshness");
 
         claim.EnumerateObject().Select(p => p.Name).ShouldBe(
-            ["check", "checked", "named", "staleTotal", "listed"]);
+            ["check", "checked", "namedFiles", "staleTotal", "listed", "laggingFiles", "freshnessTokens"]);
         claim.GetProperty("check").GetString().ShouldBe("content");
+        claim.TryGetProperty("scopeRows", out _).ShouldBeFalse(
+            "a content answer speaks for files it named, never for the rows of a scope it never walked");
+    }
+
+    [Fact]
+    public void Serialize_Freshness_ReplayedMarkIsLast_AndOnlyOnAnAnswerTheCacheHandedBack()
+    {
+        var fresh = AnswerFreshness.ForContent(
+            checkedCandidates: 1, namedFiles: 1, staleTotal: 0, listed: 0, laggingFiles: 0,
+            stalePaths: [], payloadLines: [null]);
+        var replayed = fresh.MarkReplayed();
+
+        var json = JsonSerializer.Serialize(ToolEnvelope.Wrap(new { hit = 1 }, 7, false, freshness: replayed));
+        using var document = JsonDocument.Parse(json);
+        var claim = document.RootElement.GetProperty("freshness");
+
+        claim.GetProperty("replayed").GetBoolean().ShouldBeTrue();
+        claim.EnumerateObject().Select(p => p.Name).Last().ShouldBe("replayed");
+        var freshJson = JsonSerializer.Serialize(ToolEnvelope.Wrap(new { hit = 1 }, 7, false, freshness: fresh));
+        freshJson.ShouldNotContain("replayed");
+        replayed.FreshnessTokens.ShouldBe(fresh.FreshnessTokens + 7,
+            "the mark is 26 wire bytes of answer, and the declared price moves with the bytes that ship");
+        fresh.FreshnessTokens.ShouldBe(54);
     }
 
     [Fact]
@@ -200,8 +228,9 @@ public class ToolEnvelopeTests
         var envelope = ToolEnvelope.Wrap(
             new { hit = 1 }, 962, false, staleFiles: ["demo/a.cs"],
             freshness: AnswerFreshness.ForStructure(
-                checkedRows: 12_000, namedRows: 12_000, staleTotal: 12_000, listed: 1, listedMissing: 1,
-                missing: 0, changed: 12_000));
+                checkedRows: 12_000, scopeRows: 12_000, staleTotal: 12_000, listed: 1, listedMissing: 1,
+                missing: 0, changed: 12_000,
+                stalePaths: ["demo/a.cs"], payloadLines: ["structure pass covered rows"]));
 
         envelope.Truncated.ShouldBeFalse("the content itself was cut by no budget");
         envelope.Cost!.Complete.ShouldBeFalse(
@@ -209,15 +238,19 @@ public class ToolEnvelopeTests
     }
 
     [Fact]
-    public void Wrap_WholeVerdictSample_StaysComplete()
+    public void Wrap_WholeVerdictSample_StaysComplete_AndStillDeclaresWhatTheStoryCosts()
     {
         var envelope = ToolEnvelope.Wrap(
             new { hit = 1 }, 962, false, staleFiles: ["demo/a.cs", "demo/b.cs"],
             freshness: AnswerFreshness.ForStructure(
-                checkedRows: 10, namedRows: 10, staleTotal: 2, listed: 2, listedMissing: 1,
-                missing: 1, changed: 1));
+                checkedRows: 10, scopeRows: 10, staleTotal: 2, listed: 2, listedMissing: 1,
+                missing: 1, changed: 1,
+                stalePaths: ["demo/a.cs", "demo/b.cs"], payloadLines: [null]));
 
         envelope.Cost!.Complete.ShouldBeTrue();
+        envelope.Freshness!.FreshnessTokens.ShouldBeGreaterThan(0,
+            "completeness is a claim about the verdict; the arm the reviewer measured (staleTotal == listed) " +
+            "ships its sample under a true flag, so the price has to ride beside it");
     }
 
     [Fact]
@@ -227,14 +260,36 @@ public class ToolEnvelopeTests
         var declared = ToolEnvelope.Wrap(
             new { hit = 1 }, 962, false, staleFiles: ["demo/a.cs"],
             freshness: AnswerFreshness.ForStructure(
-                checkedRows: 10, namedRows: 10, staleTotal: 1, listed: 1, listedMissing: 1,
-                missing: 1, changed: 0));
+                checkedRows: 10, scopeRows: 10, staleTotal: 1, listed: 1, listedMissing: 1,
+                missing: 1, changed: 0,
+                stalePaths: ["demo/a.cs"], payloadLines: [null]));
 
         // the pinned branch of the pricing decision: tokensUsed stays the price of the content the caller's
-        // budget governs, so the short verdict list costs the answer its completeness instead of its number
+        // budget governs, so the freshness story rides as its own declared number instead of moving it
         declared.TokensUsed.ShouldBe(plain.TokensUsed);
         declared.Cost!.TokensUsed.ShouldBe(plain.TokensUsed);
         declared.TokensUsed.ShouldBeLessThanOrEqualTo(2_000);
+    }
+
+    [Fact]
+    public void FreshnessTokens_AreTheWirePriceOfTheSampleTheLinesAndTheBlock()
+    {
+        // computed off the documented basis, not off the helper: the sample serialises to 25 bytes with four
+        // quotes (45 wire, 13 tokens), the line to 41 with two (51 wire, 15), and the block that carries the
+        // number prices its own digits too — the sum settles at 95, not at the 28 the pieces alone cost
+        var claim = AnswerFreshness.ForStructure(
+            checkedRows: 75, scopeRows: 75, staleTotal: 70, listed: 2, listedMissing: 1,
+            missing: 40, changed: 30,
+            stalePaths: ["demo/a.cs", "demo/b.cs"],
+            payloadLines: ["repo_map answers structure, not content"]);
+
+        claim.FreshnessTokens.ShouldBe(95);
+
+        var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 962, false, staleFiles: ["demo/a.cs", "demo/b.cs"],
+            freshness: claim);
+        envelope.PaidTokens.ShouldBe(1_057,
+            "the number a caller pays is the budgeted content plus the story it ships with");
+        envelope.Data.ShouldNotBeNull();
     }
 
     [Fact]
@@ -246,16 +301,17 @@ public class ToolEnvelopeTests
         var line = AnswerFreshness.CoverageWarning(50, 60)!;
         line.ShouldStartWith("content check covered 50 of the 60 files this answer names");
         line.ShouldContain("fileFreshness");
+        line.ShouldContain("laggingFiles");
     }
 
     [Fact]
     public void CarriesWholeVerdict_IsTheOneRuleEveryCheckedToolShares()
     {
-        AnswerFreshness.ForContent(50, 60, 3, 3).CarriesWholeVerdict.ShouldBeTrue(
+        AnswerFreshness.ForContent(50, 60, 3, 3, 0, [], [null]).CarriesWholeVerdict.ShouldBeTrue(
             "a content answer ships its whole list even when the cap covered part of the answer");
-        AnswerFreshness.ForStructure(12_000, 12_000, 12_000, 50, 25, 2, 11_998)
+        AnswerFreshness.ForStructure(12_000, 12_000, 12_000, 50, 25, 2, 11_998, [], [null])
             .CarriesWholeVerdict.ShouldBeFalse();
-        AnswerFreshness.ForStructure(3, 3, 0, 0, 0, 0, 0).CarriesWholeVerdict.ShouldBeTrue(
+        AnswerFreshness.ForStructure(3, 3, 0, 0, 0, 0, 0, [], [null]).CarriesWholeVerdict.ShouldBeTrue(
             "nothing stale and nothing listed is a whole verdict, not a clipped one");
     }
 }
