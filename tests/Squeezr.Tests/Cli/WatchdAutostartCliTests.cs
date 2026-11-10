@@ -147,6 +147,75 @@ public sealed class WatchdAutostartCliTests
         second.StdOut.ToString().ShouldContain("SQUEEZR_HOME=/var/tmp/other-home");
     }
 
+    // The manual-instance collision, warned about instead of decided for the operator (owner decision
+    // 2026-11-09). The holder here is a real WatchdLock taken by this process, which is exactly the
+    // shape of a watchd somebody started by hand: the pid and start time both answer live, so the
+    // notice has to name it — and the install itself has to stay byte-for-byte what T2 closed.
+    [Fact]
+    public async Task Install_WhenALiveWatchdHoldsTheLock_WarnsOnStderrAndStillInstalls()
+    {
+        var home = TestDirs.NewTempDir();
+        var program = TestProgram.Executable("squeezr");
+        var runner = new FakeAutostartProcessRunner();
+        var applier = new SystemdUserApplier(TestDirs.NewTempDir(), runner);
+        var lockPath = Path.Combine(home, WatchdPaths.DirName, WatchdPaths.LockFileName);
+        using var holder = new WatchdLock(lockPath);
+        holder.TryAcquire().Acquired.ShouldBeTrue();
+
+        var result = await RunInstallAsync(AutostartPlatform.SystemdUser, program, home, applier);
+
+        result.Exit.ShouldBe(0);
+        var notice = result.StdErr.ToString();
+        notice.ShouldContain($"warning: a live watchd (pid {Environment.ProcessId}) already holds {lockPath}");
+        notice.ShouldContain("refuse the lock");
+        notice.ShouldContain("start limit");
+        notice.ShouldContain("left failed");
+        notice.ShouldContain("Stop that instance and run install again");
+        notice.ShouldContain("systemctl --user restart squeezr-watchd");
+        result.StdOut.ToString().ShouldContain("watchd autostart installed");
+        runner.Commands().ShouldBe(
+        [
+            "systemctl --user daemon-reload",
+            "systemctl --user enable --now squeezr-watchd.service",
+        ]);
+    }
+
+    // The other half of the same line: nothing is claimed when the singleton is free, because the
+    // instance the entry starts is going to take the lock and run. The read is the only thing install
+    // does with the file, so an empty lock directory must leave stderr exactly as empty as it was.
+    [Fact]
+    public async Task Install_WithTheLockFree_LeavesStderrEmpty()
+    {
+        var home = TestDirs.NewTempDir();
+        var program = TestProgram.Executable("squeezr");
+        var applier = new SystemdUserApplier(TestDirs.NewTempDir(), new FakeAutostartProcessRunner());
+
+        var result = await RunInstallAsync(AutostartPlatform.SystemdUser, program, home, applier);
+
+        result.Exit.ShouldBe(0);
+        result.StdErr.ToString().ShouldBeEmpty();
+        result.StdOut.ToString().ShouldContain("watchd autostart installed");
+    }
+
+    // A lock file no reader can parse is stale by the rule UnparseableLockFile_DoesNotBlock pins: the
+    // instance the entry starts steals it and comes up, so warning about a collision that will not
+    // happen would be the lie, and silence is the honest answer.
+    [Fact]
+    public async Task Install_WhenTheLockFileCannotBeParsed_LeavesStderrEmpty()
+    {
+        var home = TestDirs.NewTempDir();
+        var program = TestProgram.Executable("squeezr");
+        var applier = new SystemdUserApplier(TestDirs.NewTempDir(), new FakeAutostartProcessRunner());
+        var lockDirectory = Path.Combine(home, WatchdPaths.DirName);
+        Directory.CreateDirectory(lockDirectory);
+        File.WriteAllText(Path.Combine(lockDirectory, WatchdPaths.LockFileName), "{ not json at all");
+
+        var result = await RunInstallAsync(AutostartPlatform.SystemdUser, program, home, applier);
+
+        result.Exit.ShouldBe(0);
+        result.StdErr.ToString().ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Install_OnTheWindowsBranch_HandsOverTheGeneratedLineAndAddsOnlyForce()
     {

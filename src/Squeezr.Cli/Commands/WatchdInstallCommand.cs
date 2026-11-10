@@ -3,6 +3,8 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Daemons;
 using Squeezr.Cli.Infra.Autostart;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Indexing.Watch;
+using Squeezr.Core.Indexing.Watch.Supervision;
 using Squeezr.Core.Infra.Autostart;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -51,9 +53,57 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
     {
         Launchability.Require(platform, binaryPath);
         var unitText = WatchdUnitGenerator.Generate(platform, binaryPath, squeezrHome);
+        // The lock is read before the entry is applied, not after: once the init system has the unit up,
+        // its own watchd holds the lock and no read can tell that instance from one the operator started
+        // by hand. The read is all this does — install takes nothing, steals nothing and kills nothing,
+        // because whose instance should own the singleton is the operator's call, not this command's.
+        var lockPath = LockPathUnder(squeezrHome);
+        var heldBy = LiveLockHolder(lockPath);
         await applier.InstallAsync(unitText, cancellationToken);
+        if (heldBy is { } pid)
+        {
+            Console.Error.WriteLine(ManualWatchdNotice(platform, lockPath, pid));
+        }
+
         var carried = squeezrHome is null ? string.Empty : $" (with {SqueezrHome.HomeEnvironmentVariable}={squeezrHome})";
         AnsiConsole.MarkupLine($"[green]watchd autostart installed[/] — {applier.ManagedTarget.EscapeMarkup()}{carried.EscapeMarkup()}");
         return 0;
     }
+
+    // The unit carries SQUEEZR_HOME whenever install was told one explicitly, so the file the new
+    // instance will open is the one under that home, not under whatever this shell happens to resolve.
+    private static string LockPathUnder(string? squeezrHome) =>
+        squeezrHome is null
+            ? WatchdPaths.LockPath
+            : Path.Combine(squeezrHome, WatchdPaths.DirName, WatchdPaths.LockFileName);
+
+    private static int? LiveLockHolder(string lockPath)
+    {
+        var watchd = FleetWatchdProbe.Probe(lockPath, DaemonHeartbeatReader.IsProcessAlive);
+        return watchd.Running ? watchd.Pid : null;
+    }
+
+    // The chain the operator would otherwise have to reconstruct from `systemctl --user status`: the
+    // singleton is taken, so the instance the entry starts refuses and leaves non-zero, and what the
+    // entry then does about that is written in the unit text install just generated.
+    private static string ManualWatchdNotice(AutostartPlatform platform, string lockPath, int pid) =>
+        $"warning: a live watchd (pid {pid}) already holds {lockPath} — {Collision(platform)} " +
+        $"Stop that instance and run install again{RestartHint(platform)}.";
+
+    private static string Collision(AutostartPlatform platform) => platform switch
+    {
+        AutostartPlatform.SystemdUser =>
+            "the unit starts now and its instance will refuse the lock, so systemd restarts it on " +
+            "failure until the start limit trips and the unit is left failed.",
+        AutostartPlatform.LaunchAgent =>
+            "the agent starts now and its instance will refuse the lock, so launchd respawns it on " +
+            "every unsuccessful exit.",
+        _ =>
+            "the task's instance will refuse the lock at every logon until it is gone.",
+    };
+
+    private static string RestartHint(AutostartPlatform platform) =>
+        platform == AutostartPlatform.SystemdUser
+            ? $", or restart the unit once it is gone: systemctl --user restart {WatchdUnitGenerator.DefaultUnitName}"
+            : string.Empty;
 }
