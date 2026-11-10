@@ -176,6 +176,51 @@ public class TreeSitterRustReferenceTests
     }
 
     [Fact]
+    public void Rust_ReferenceTypeTarget_IsUnwrappedToTheNamedType()
+    {
+        var refs = Parse("src/reffed.rs", """
+            impl fmt::Display for &Registry {
+                fn dump(&self) {
+                }
+            }
+            """).Refs;
+
+        // review-111-04 N-1: '&Registry' is a reference_type wrapping the type identifier; reading
+        // its text would put '&Registry' in the name column, and the type row would never answer
+        refs.Select(r => (r.ToName, r.Kind, r.Line)).ShouldBe(
+        [
+            ("Display", RefKind.Implement, 1),
+            ("Registry", RefKind.Reference, 1),
+        ]);
+        refs[0].ToSymbolId.ShouldBe("fmt");
+        refs[1].ToSymbolId.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Rust_GenericQualifiedTraitAndTarget_KeepTheirBareNamesWithQualifiedModules()
+    {
+        var refs = Parse("src/combo.rs", """
+            impl<T> serde::Serialize<T> for Holder<T> {
+                fn dump(&self) {
+                    String::new()
+                }
+            }
+            """).Refs;
+
+        // review-111-04 N-4: the generic and the qualifier land together on both columns, so the
+        // unwrap has to step out of generic_type before it reads the scoped name — doing only one
+        // side leaves 'Serialize<T>' or 'Holder<T>' in the name column and drops the edge silently
+        refs.Select(r => (r.ToName, r.Kind, r.Line)).ShouldBe(
+        [
+            ("Serialize", RefKind.Implement, 1),
+            ("Holder", RefKind.Reference, 1),
+            ("new", RefKind.Call, 3),
+        ]);
+        refs[0].ToSymbolId.ShouldBe("serde");
+        refs[1].ToSymbolId.ShouldBeNull();
+    }
+
+    [Fact]
     public void Rust_MacroInvocation_EmitsCallRefAndDefinitionBodyStaysQuiet()
     {
         var refs = Parse("src/macro.rs", MacroSource).Refs;

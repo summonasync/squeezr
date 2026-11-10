@@ -79,6 +79,17 @@ squeezr index --events
   `--events` streams machine-readable progress events instead of the interactive
   progress bar. Other switches: `--full` (complete rebuild), `--no-semantic`
   (literal-only), `--reembed` (re-embed everything after a model change).
+  Symbol-aware languages: C# through Roslyn; JavaScript, TypeScript, TSX and Rust
+  through tree-sitter. Rust answers with functions, structs, enums, unions, traits,
+  impl blocks, modules, type aliases, consts, statics and macro definitions as
+  symbols, and with `use` trees, calls, trait/impl targets and macro invocations as
+  references; its `impl<T> path::Type<T>` targets resolve by the bare type name, so a
+  generic or qualified impl block still lands on the row the struct owns. Trait-impl
+  blocks carry the composite row name `Trait for Type`, and `symbol_lookup` on a type
+  answers its struct row plus any inherent-impl rows of the same name — the impl is a
+  row, not a member of the struct row. Anything
+  else (Markdown, YAML, JSON, plain text) gets the sliding-window fallback chunker —
+  searchable, never symbol-aware.
 
 `squeezr status` shows per-repo file/symbol/chunk counts, the configured
 embeddings provider and Qdrant state.
