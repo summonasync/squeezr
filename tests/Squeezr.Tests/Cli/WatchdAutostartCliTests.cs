@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using Shouldly;
 using Spectre.Console;
 using Squeezr.Cli.Commands;
@@ -468,5 +470,211 @@ public sealed class WatchdAutostartCliTests
         await process.WaitForExitAsync();
 
         return (process.ExitCode, await stdoutTask, await stderrTask);
+    }
+
+    // The retirement whole: a watchd the platform started has to leave on its own once the file it
+    // runs from is replaced, because the entry — not the process — is what brings the new binary up.
+    // Code, lock and operator line are measured on a real child: none of the three has an existence
+    // one layer above, and the exit code is what Restart=on-failure actually keys on.
+    [LinuxFact]
+    public async Task Watchd_AutostartChild_RetiresAfterItsOwnBinaryIsReplaced()
+    {
+        var home = TestDirs.NewTempDir();
+        var own = TakeOwnBinary();
+        try
+        {
+            using var child = StartWatchdChild(home, "watchd", WatchdUnitGenerator.AutostartFlag);
+            await child.HoldsTheLockAsync();
+
+            UpgradeOwnBinary(own);
+            var retired = await child.ExitedWithinAsync(TimeSpan.FromSeconds(30));
+
+            retired.ShouldBeTrue("the autostarted watchd never retired after its binary was replaced");
+            child.ExitCode.ShouldBe(75);
+            File.Exists(child.LockPath).ShouldBeFalse("the retiring supervisor left its lock behind");
+            child.StdOut.ShouldContain("watchd is retiring after an upgrade");
+            child.StdOut.ShouldContain(own.Path);
+            child.StdErr.ShouldBeEmpty();
+        }
+        finally
+        {
+            RestoreOwnBinary(own);
+        }
+    }
+
+    // The manual path, argv tolerance included: a watchd somebody typed by hand never kills itself and
+    // says nothing it did not say before this feature existed — the flag has to be the thing that
+    // binds, not just any extra token on the command line.
+    [LinuxFact]
+    public async Task Watchd_ChildWithoutTheAutostartFlag_RunsOnThroughAnUpgrade()
+    {
+        var own = TakeOwnBinary();
+        string[][] shapes = [["watchd"], ["watchd", "--bogus-option"]];
+
+        try
+        {
+            foreach (var argv in shapes)
+            {
+                var home = TestDirs.NewTempDir();
+                using var child = StartWatchdChild(home, argv);
+                await child.HoldsTheLockAsync();
+
+                UpgradeOwnBinary(own);
+                await Task.Delay(SupervisorLoop.PollInterval * 4);
+
+                child.HasExited.ShouldBeFalse($"'{string.Join(' ', argv)}' retired like an autostarted daemon");
+                child.StdOut.ShouldBeEmpty();
+                child.StdErr.ShouldBeEmpty();
+            }
+        }
+        finally
+        {
+            RestoreOwnBinary(own);
+        }
+    }
+
+    // The upgrade is simulated on the real file the child runs from, and only after that child is up —
+    // the detector compares the file stamp against the process start. The stamp goes back afterwards:
+    // that dll is the shared build output every other CLI child in the run launches, and a stamp left
+    // ahead of a later process start reads as a pending upgrade to anything that compares it.
+    private static (string Path, DateTime ModifiedUtc) TakeOwnBinary()
+    {
+        var path = CliTestProcess.CliAssemblyPath;
+        return (path, File.GetLastWriteTimeUtc(path));
+    }
+
+    private static void UpgradeOwnBinary((string Path, DateTime ModifiedUtc) own) =>
+        File.SetLastWriteTimeUtc(own.Path, DateTime.UtcNow);
+
+    private static void RestoreOwnBinary((string Path, DateTime ModifiedUtc) own) =>
+        File.SetLastWriteTimeUtc(own.Path, own.ModifiedUtc);
+
+    private static WatchdChild StartWatchdChild(string squeezrHome, params string[] args) =>
+        new(
+            CliTestProcess.StartLiveChild(squeezrHome, TestDirs.NewTempDir(), args),
+            Path.Combine(squeezrHome, WatchdPaths.DirName, WatchdPaths.LockFileName));
+
+    // A daemon under test has to be watched while it runs, so both pipes drain into buffers instead of
+    // being awaited to the end, and the harness stops the child even when an assertion throws.
+    private sealed class WatchdChild : IDisposable
+    {
+        private static readonly TimeSpan Sweep = SupervisorLoop.PollInterval;
+
+        private readonly Process _process;
+        private readonly string _lockPath;
+        private readonly object _gate = new();
+        private readonly StringBuilder _stdout = new();
+        private readonly StringBuilder _stderr = new();
+
+        public WatchdChild(Process process, string lockPath)
+        {
+            _process = process;
+            _lockPath = lockPath;
+            process.OutputDataReceived += (_, e) => Append(_stdout, e.Data);
+            process.ErrorDataReceived += (_, e) => Append(_stderr, e.Data);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
+
+        public string LockPath => _lockPath;
+
+        public bool HasExited => _process.HasExited;
+
+        public int ExitCode => _process.ExitCode;
+
+        public string StdOut
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _stdout.ToString();
+                }
+            }
+        }
+
+        public string StdErr
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _stderr.ToString();
+                }
+            }
+        }
+
+        public async Task HoldsTheLockAsync()
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(_lockPath))
+                {
+                    return;
+                }
+
+                if (_process.HasExited)
+                {
+                    break;
+                }
+
+                await Task.Delay(200);
+            }
+
+            throw new InvalidOperationException(
+                $"watchd never took {_lockPath} ({State()}); stdout: {StdOut}stderr: {StdErr}");
+        }
+
+        public async Task<bool> ExitedWithinAsync(TimeSpan budget)
+        {
+            var deadline = DateTime.UtcNow + budget;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (_process.HasExited)
+                {
+                    _process.WaitForExit();
+                    return true;
+                }
+
+                await Task.Delay(200);
+            }
+
+            return _process.HasExited;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (!_process.HasExited)
+                {
+                    _process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            {
+            }
+
+            _process.WaitForExit();
+            _process.Dispose();
+        }
+
+        private string State() => _process.HasExited
+            ? $"it exited with {_process.ExitCode}"
+            : $"it is alive and well; the supervisor sweeps every {Sweep.TotalSeconds:F0} seconds";
+
+        private void Append(StringBuilder target, string? line)
+        {
+            if (line is null)
+            {
+                return;
+            }
+
+            lock (_gate)
+            {
+                target.AppendLine(line);
+            }
+        }
     }
 }

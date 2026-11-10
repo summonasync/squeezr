@@ -15,6 +15,7 @@ public sealed class SupervisorLoop
     private readonly Func<string, DateTime> _binaryModifiedUtc;
     private readonly Func<DateTime> _utcNow;
     private readonly TimeSpan _pollInterval;
+    private readonly SupervisorSelfCheck? _selfCheck;
     private readonly Dictionary<string, IWatchDaemonHandle> _managed = [];
 
     public SupervisorLoop(IWatchDaemonLauncher launcher)
@@ -22,7 +23,11 @@ public sealed class SupervisorLoop
     {
     }
 
-    public SupervisorLoop(IWatchDaemonLauncher launcher, SupervisionState state, CrashLoopGuard guard)
+    public SupervisorLoop(
+        IWatchDaemonLauncher launcher,
+        SupervisionState state,
+        CrashLoopGuard guard,
+        SupervisorSelfCheck? selfCheck = null)
         : this(
             launcher,
             state,
@@ -31,7 +36,8 @@ public sealed class SupervisorLoop
             storeDir => WatchStoreHealth.Probe(storeDir, DateTime.UtcNow),
             static path => File.GetLastWriteTimeUtc(path),
             static () => DateTime.UtcNow,
-            PollInterval)
+            PollInterval,
+            selfCheck)
     {
     }
 
@@ -43,7 +49,8 @@ public sealed class SupervisorLoop
         Func<string, WatchStoreHealth> health,
         Func<string, DateTime> binaryModifiedUtc,
         Func<DateTime> utcNow,
-        TimeSpan pollInterval)
+        TimeSpan pollInterval,
+        SupervisorSelfCheck? selfCheck = null)
     {
         _launcher = launcher;
         _state = state;
@@ -53,20 +60,36 @@ public sealed class SupervisorLoop
         _binaryModifiedUtc = binaryModifiedUtc;
         _utcNow = utcNow;
         _pollInterval = pollInterval;
+        _selfCheck = selfCheck;
     }
 
-    public void Run(CancellationToken cancellationToken, Action<SupervisorSweep>? onSweep = null)
+    public SupervisorExitReason Run(CancellationToken cancellationToken, Action<SupervisorSweep>? onSweep = null)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            onSweep?.Invoke(RunOnce());
+            var sweep = RunOnce();
+            onSweep?.Invoke(sweep);
+            if (sweep.OwnDrift is not null)
+            {
+                return SupervisorExitReason.OwnBinaryDrifted;
+            }
+
             cancellationToken.WaitHandle.WaitOne(_pollInterval);
         }
+
+        return SupervisorExitReason.Cancelled;
     }
 
     public SupervisorSweep RunOnce()
     {
         var now = _utcNow();
+        if (DetectOwnDrift() is { } drift)
+        {
+            // Retiring is the whole point of this sweep: touching the stores would hand work to a
+            // supervisor that is about to be replaced by the one the platform starts.
+            return new SupervisorSweep(now, [], OwnDrift: drift);
+        }
+
         PruneExited();
         IReadOnlyList<WorkspaceRegistryEntry> entries;
         try
@@ -199,6 +222,19 @@ public sealed class SupervisorLoop
         handle.StartedUtc is { } started
         && handle.BinaryPath is { } binary
         && VersionDriftDetector.IsDrifted(started, _binaryModifiedUtc(binary));
+
+    private OwnBinaryDrift? DetectOwnDrift()
+    {
+        if (_selfCheck is not { RestartsOnUnsuccessfulExit: true, ProcessStartUtc: { } started })
+        {
+            return null;
+        }
+
+        var modified = _binaryModifiedUtc(_selfCheck.BinaryPath);
+        return VersionDriftDetector.IsDrifted(started, modified)
+            ? new OwnBinaryDrift(_selfCheck.BinaryPath, started, modified)
+            : null;
+    }
 
     private void PruneExited()
     {
