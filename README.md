@@ -942,14 +942,21 @@ project — `.claude/settings.json`):
 |---|---|---|
 | `repo_map` | `repo?`, `prefix?`, `depth?` (2), `maxTokens?` (4000) | the repo tree: directories → files → members with signatures. No bodies, a map for navigation only. `prefix` (e.g. `"src/"`) narrows the output to a subtree — directory names render relative to the prefix, `depth` keeps its structural meaning (1 = directories, 2 = files, 3 = members) |
 | `code_search` | `query` (required), `repo?`, `prefix?`, `topK?`, `maxTokens?` (2000), `kind?` (`all`/`code`/`docs`, default `all`) | hybrid matches `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; snippets are capped previews — the matched-ish line plus a bounded window, ≤ ~200 chars, so one hit can no longer spend the whole `maxTokens` (`expand_span` reveals the body); bodies are never returned. One hit = one file: the best span wins, the file's other spans collapse into `alsoMatched` (the field appears only when ≥1), so `topK` bounds distinct files, not spans. `prefix` filters both arms (exact and semantic) by a directory subtree. Ranking honors the `indexing.rankExclude` config: excluded trees never surface but stay indexed. The hybrid branch gained an identifier-exact arm: multi-token queries with code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens (df ≤ 5% of docs) take a separate branch with `source=exact` — more precise than phrase-literal for compound names. The `repo`/`language`/`pathGlob`/`prefix`/rankExclude filters narrow that branch too — through the same `BuildFilter` as the phrase arm. Branch limitation: trigram case-expansion is capped (`CaseVariantCap = 64` divided across the token's trigrams, 8 variants per trigram), so a lowercase token longer than ~10 chars cannot reach a spelling that exists only in PascalCase and silently drops out of the discriminants — a quiet recall loss (the phrase arm in the same case goes to a FullScan over disk; single literals never lose). The cure is case-folded trigrams in the index: an index-format change with a rebuild, no backlog feature for it yet. `kind` filters what a hit can be: `all` (default) matches everything, `code` keeps program sources, `docs` keeps prose and config (markdown/text/json/yaml/toml/xml); it applies to both hybrid arms — Qdrant payload filter on the indexed `kind` field, meta.db file-kind join on the exact side — and unknown values are rejected with the allowed list instead of silently meaning `all`. Points without a `kind` payload (orphans, or points written by pre-057 binaries until the backfill converges them) match only `kind=all` |
-| `symbol_lookup` | `name` (required), `kind?`, `repo?`, `maxTokens?` (300) | the symbol's definition: signature, doc comment, `span`, body — if it fits the budget. When a type's body does not fit → `members` (name, kind, line) in the same budget + a `membersOmitted` counter: every line is a ready coordinate for `expand_span`, no more dead ends. Symbol not found → empty `data` + `didYouMean` (top-3 candidates by trigram-Jaccard, threshold 0.34), not an error |
+| `symbol_lookup` | `name` (required), `kind?`, `repo?`, `maxTokens?` (300) | the symbol's definition: signature, doc comment, `span`, body — if it fits the budget. When a type's body does not fit → `members` (name, kind, line) in the same budget + a `membersOmitted` counter: every line is a ready coordinate for `expand_span`, no more dead ends. A body that was refused **and replaced by the full member map** is the designed outcome, not a cut answer: `truncated: false`, `cost.complete: true`, no `truncated:` warning, and the hit says `bodyOmitted: true` — read the state through that flag, never through the absence of a `body` key (the JSON writer drops nulls, so a mapped hit has no `body` field at all). `truncated: true` means the answer really lost something (a dropped hit, `membersOmitted > 0`, a dropped `did you mean`, or a body no map can stand in for), and the warning then names which loss it was — the no-substitute case prices the body instead of offering to narrow a query that already lost its only hit: `… — raise maxTokens (the body alone needs ~N tokens)`. A member map is NOT authoritative while `truncated: true`: an empty map still reports nothing omitted (`BUGS/023`, open). Symbol not found → empty `data` + `didYouMean` (top-3 candidates by trigram-Jaccard, threshold 0.34), not an error |
 | `find_references` | `symbol` (required), `repo?` | every call site `{repo, file, line, kind, enclosingSymbol}` — `repo` on each row distinguishes byte-identical paths from different repositories (a checkout plus its worktree). Same-name definitions sharing one call list yield one row set, and the envelope carries additive `definitions` — `{repo, kind, file, startLine, endLine}` per declaration behind the collapsed rows (the same fields as `refs --json`). The field appears in exactly two cases: two or more same-name declarations share one call list, or the symbol has no calls at all (otherwise an empty `data` would say nothing about declarations); in other answers the field is absent and the envelope stays six-keyed. `definitions` is metadata of the collapsed rows: it does not count into `tokensUsed`, same as the CLI. enclosingSymbol is captured by Roslyn at index time (exact, partial classes included); for indexes built before capture the value is inferred from symbol spans (a fallback inference). Symbol not found → tool error (like `squeezr refs`, exit 1) |
-| `expand_span` | `file`, `startLine` (required), `endLine?`, `contextLines?` (3), `maxTokens?` (1000) | the span's lines + context from the live file on disk (sees edits made after indexing). The only tool that returns source lines |
-| `code_pack` | `name` (required), `repo?`, `kind?`, `maxTokens?` (2000) | the task-shaped front door: one call answers "what is this symbol and who touches it" — definition (signature, doc comment, `span`), the defining member's body (`bodyLines`, or the `members` mode for oversized types), every caller as `{repo, file, line, kind, enclosingSymbol}`, trust signals (`guardWarnings`, `laggingDeclarations`, `additionalMatches`), and the per-file `cost` block. Budget order: definition and body spend first, callers truncate — `withheldCallers` counts what did not fit, `complete:false` names it. Measured live on a 2.6k-file store: ~2.3× faster than the equivalent `symbol_lookup` → `expand_span` → `find_references` chain (one store session instead of three; the ratio narrows on bigger stores — the saved overhead is constant). Prefer the per-tool calls when you need only one of the three answers — the pack buys breadth, not depth |
+| `expand_span` | `file`, `startLine` (required), `endLine?`, `contextLines?` (3), `maxTokens?` (1500) | the span's lines + context from the live file on disk (sees edits made after indexing). The only tool that returns source lines |
+| `code_pack` | `name` (required), `repo?`, `kind?`, `maxTokens?` (2000) | the task-shaped front door: one call answers "what is this symbol and who touches it" — definition (signature, doc comment, `span`), the defining member's body (`bodyLines`, or the `members` mode for oversized types), every caller as `{repo, file, line, kind, enclosingSymbol}`, trust signals (`guardWarnings`, `laggingDeclarations`, `additionalMatches`), and the per-file `cost` block. Budget order: definition and body spend first, callers truncate — `withheldCallers` counts what did not fit, `complete:false` names it. `complete` follows the answer state, not the budget's mood: `complete = withheldCallers == 0 && the lookup was not clipped`, so a pack whose oversized type body was replaced by the full member map answers `complete: true` with `lookupTruncated: false` and `bodyOmitted: true` (the pack's own flag, read from the one hit it rendered — with several matches it describes the rendered pack, not every candidate), while `withheldCallers > 0` still answers `complete: false` with its own warning line. Measured live on a 2.6k-file store: ~2.3× faster than the equivalent `symbol_lookup` → `expand_span` → `find_references` chain (one store session instead of three; the ratio narrows on bigger stores — the saved overhead is constant). Prefer the per-tool calls when you need only one of the three answers — the pack buys breadth, not depth |
 | `index_status` | — | freshness: index age, per-repo file/symbol/chunk counters, the `kindChunks` block (chunk counts per kind: `code`/`docs`; the values sum to the per-repo chunks counts), the `ignored: { files, bySource }` block per repo (excluded files broken down by source: defaults/config/squeezrignore/gitignore; zero-count sources absent), pending embeddings and `embeddings.coverage` (the embedded share of chunks, 0..1; `null` when there is nothing to embed), Qdrant availability, the workspace `rootPath` (if it is not your project's root, this session is looking into a foreign workspace). When exclusions exist, `warnings` name the dominant source and how to turn it off. When ranking is curated, `warnings` list the active `indexing.rankExclude` patterns. **Additive (035 contract):** if the registry holds two or more workspaces, `data` carries `workspaces` — an array of `{ name, rootPath, storeKey, current, stale }` (at most 12 rows, the current session's row first; the rest counted in `workspacesOmitted`). With one workspace neither key exists, and the `data` output matches the old one byte for byte — existing fields are neither renamed nor removed |
 
-All tools have a default token budget (see the table); on `truncated: true`
-narrow the query (`repo`, `kind`) or raise `maxTokens` explicitly.
+All tools have a default token budget (see the table). `truncated: true` means
+the answer lost something it was asked for, and the warning then names the loss
+and the way out: narrow the query (`repo`, `kind`) when a hit was dropped,
+`expand_span` a member when map rows were cut, or raise `maxTokens` when the
+body price the line prints is worth paying. <removed 2026-11-10 — 115/T6>~~on
+`truncated: true` narrow the query (`repo`, `kind`) or raise `maxTokens`
+explicitly~~</removed> — one remedy for every refusal is what lied: it offered
+to narrow a query that had already lost its only hit, and it fired on answers
+that lost nothing at all. See **Budget states** under the envelope semantics.
 
 ### Freshness
 
@@ -985,8 +992,14 @@ Every tool answers in one envelope:
 { "data": ..., "tokensUsed": 42, "truncated": false, "warnings": [], "indexAge": "00:12:03", "staleFiles": [] }
 ```
 
-- `tokensUsed` / `truncated` — the actual cost of the answer. `truncated:
-  true` → narrow the query (`repo`, `kind`) or raise `maxTokens`.
+- `tokensUsed` / `truncated` — the actual cost of the answer. `truncated`
+  means "this answer lost something the caller asked for", not "the budget
+  refused at least once"; `cost.complete` means "the answer holds everything it
+  claims" — true for a whole answer and for a mapped one, false only when
+  something really went missing.
+  <removed 2026-11-10 — 115/T6>~~`truncated: true` → narrow the query (`repo`,
+  `kind`) or raise `maxTokens`~~</removed> — that rule conflated a substituted
+  body with a lost one. Read the three states below.
 - `warnings` — soft degradation (e.g. "vector store unavailable, falling back
   to exact search only" on a full outage, or "semantic coverage: 76% (3017
   chunks pending embedding)" in `code_search` when the semantic layer is not
@@ -996,6 +1009,83 @@ Every tool answers in one envelope:
   read; what could not be refreshed lands honestly in `staleFiles` — the
   agent sees the data for those files is stale and may suggest `squeezr
   index`. The final call on a reindex belongs to the workspace owner.
+
+**Budget states: complete, mapped, clipped.** `symbol_lookup` and `code_pack`
+spend their answers out of one `TokenBudget`, and since 115 the engine keeps
+the distinction instead of flattening it. Three states, the worst severity in
+the answer wins:
+
+| state | what happened | what the wire says |
+|---|---|---|
+| `complete` | nothing refused | `truncated: false`, `cost.complete: true`, no `truncated:` warning |
+| `mapped` | the type's body did not fit and the **full** member map stood in for it (no row omitted) — the designed outcome the tool description promises | `truncated: false`, `cost.complete: true`, no `truncated:` warning, and the hit carries `bodyOmitted: true` with no `body` key at all |
+| `clipped` | a hit was dropped, map rows were omitted (`membersOmitted > 0`), a `did you mean` was refused, or a body was refused with nothing to substitute for it | `truncated: true`, `cost.complete: false`, and one `truncated:` warning naming which loss it was |
+
+Read the state through `truncated` plus the hit's `bodyOmitted` / `members` /
+`membersOmitted`. `bodyOmitted: true` on its own is not `mapped` — a clipped
+no-substitute answer sets it too — and the flag, not the missing `body` key, is
+the discriminator (the JSON writer drops nulls, so "no body" and "no body
+field" are the same bytes). Surfaces with no mapped state (`code_search`,
+`repo_map`, `expand_span`, `find_references`, `index_status`) pass `!truncated`
+explicitly: a refusal there really does drop rows, so their pair stays as
+shipped.
+
+The warning keeps its declared shape `truncated: {used} of {ceiling} token
+ceiling — {remedy}` (plus the legs clause where a surface has one), and the
+remedy names what was refused. The symbol family — `symbol_lookup`, and the
+lookup leg of `code_pack` — prints these three over MCP:
+
+- a hit dropped → `narrow the query (repo, kind) or raise maxTokens`
+- map rows omitted → `read a member with expand_span or raise maxTokens`
+- body refused with nothing to substitute → `raise maxTokens (the body alone needs ~N tokens)`
+
+The CLI says the same three in flag vocabulary and puts them in `hint` rather
+than a warning line:
+
+- `narrow the query (--repo, --kind) or raise --max-tokens`
+- `read a member with expand <file> <line> or raise --max-tokens`
+- `raise --max-tokens (the body alone needs ~N tokens)`
+
+Two more texts exist outside that family, and this list is the symbol family's,
+not the whole wire: `expand_span` carries its own legs clause,
+`truncated: 1494 of 1500 token ceiling — raise maxTokens, or narrow the span (startLine/endLine)`
+(live, `audits/truncation-state-2026-11-10/raw/remedy-catalog-round4.jsonl`), and a
+zero-hit answer whose `did you mean` text itself did not fit has no hint to render,
+so both roads fall back to the bare `truncated: 0 of 1 token ceiling — raise maxTokens`
+(same carrier, calls #43/#44 — the suggestions are dropped and the answer is clipped).
+
+A mapped answer emits no truncation warning at all — the body price is the one
+case where the caller can only weigh the gap against a number. The price string
+has one home (`HintText.BodyPriceRemedy`); the two older texts still come from
+the engine's `TruncationHint`. One home for the *choice* between them is a
+target, not a fact: the no-substitute predicate is written at three sites today
+(`HintText.RemedyForCli`, `SymbolLookupTool.RemedyFor`,
+`CodePackTool.RemedyFor` — the pack's variant reads the pack, so it cannot
+collapse onto the result-typed CLI helper), and folding them into a single
+predicate-shaped helper is the named follow-up.
+
+`raise maxTokens` is a ceiling decision for a **new** call, not a promise about
+the session you are in: `symbol_lookup`'s response-cache key omits `maxTokens`,
+so asking the same name at a bigger ceiling in one serve session replays the
+stored envelope (`BUGS/024`, open — closing it is this feature's task 7);
+`code_pack` keys its cache with the budget and does re-run.
+
+The CLI json is not the envelope. `squeezr symbol --json` says the same thing
+in its own vocabulary: additive `state` (`complete`/`mapped`/`clipped`) as the
+last key, `truncated` narrowed with it, and `hint` emitted only on a clipped
+answer in `--flag` spelling (`raise --max-tokens (the body alone needs ~N
+tokens)`, `read a member with expand <file> <line> …`) — a script branching on
+the old `narrow the query (--repo, --kind) …` text for a no-substitute answer
+breaks, because that case now prints its price instead. `state` is CLI-only by
+design: spec requirement 4 forbids a new envelope key, while `cost` and
+`warnings` are envelope-only. `squeezr map --json` carries no `state` at all —
+`repo_map` has no mapped answer, a map that runs out of budget has lost rows.
+The human budget line follows the same split: `tokens: N` on a complete or
+mapped answer, `tokens: N, truncated — <remedy>` on a clipped one. One asymmetry
+to keep in mind while reading `complete`: `symbol_lookup` over MCP always asks
+for the body, while CLI `symbol` asks only with `--body` (or when exactly one
+symbol matches), so a multi-match `squeezr symbol` answer is `complete` with no
+bodies at all — `complete` means nothing was refused, not that a body came back.
 
 Repeat queries are nearly free: the expensive tools (`repo_map`,
 `code_search`, `symbol_lookup`, `find_references`) cache answers within a
@@ -1414,8 +1504,9 @@ remedies, nothing is ever changed.
 
 "But does it actually save?" — `squeezr stats` answers with numbers, not
 promises. Every navigation command (CLI: `search`/`symbol`/`refs`/`map`/
-`expand`; MCP: all six tools) appends one telemetry line to `queries.jsonl`
-in the workspace store, and stats rolls it into a summary. MCP answers
+`expand`; MCP: all seven tools; `hook pre-read` also writes a row) appends one
+telemetry line to `queries.jsonl` in the workspace store, and stats rolls it
+into a summary. MCP answers
 carry the same arithmetic in their own envelope: the additive `cost` block
 (`tokensUsed`, `baselineTokens`, `savedTokens`, `ratio`, `complete`) shows
 the whole-file price of the returned files at the moment of the call, and
@@ -1429,17 +1520,54 @@ squeezr stats --reset   # clear the telemetry
 ```
 
 ```
-Tool     Count  Avg tokens  Truncation
-expand   3      486.0       0.0 %
-search   1      7086.0      0.0 %
+Tool            Count  Avg tokens  Truncation  Mapped
+code_pack       4      249.5       50.0 %      100.0 %
+find_references 1      0.0         0.0 %       0.0 %
+map             1      147.0       0.0 %       0.0 %
+pre-read        1      0.0         0.0 %       n/a
+refs            1      0.0         0.0 %       n/a
+symbol          5      612.6       40.0 %      40.0 %
+symbol_lookup   15     464.6       53.3 %      77.8 %
 
-Savings: query cost 8544 · whole-file baseline 10617 · saved 2073 (×1.2)
-Cache hit-rate: no hits yet across 4 recorded session(s)
-Period: 2026-09-17 14:57 — 2026-09-17 14:58 (4 records)
+Mapped rate covers 18 of 28 row(s): 10 row(s) carry no state, recorded before the clipped/mapped split or by a surface that has none.
+Savings: query cost 11177 · whole-file baseline 189849 · saved 178672 (×17.0)
+Cache hit-rate: 10.0 % across 1 session(s) over 20 cache-eligible queries
+Period: 2026-11-10 18:39 — 2026-11-10 18:49 (28 records)
 ```
 
-- **The per-tool table** — calls, average `tokensUsed` and the share of
-  budget-truncated answers.
+- **The per-tool table** — calls, average `tokensUsed`, the share of clipped
+  answers and the share of mapped ones. `Truncation` divides ALL of the tool's
+  rows; `Mapped` divides only the rows that recorded a state, so the two
+  columns are not comparable row by row — the `symbol_lookup` row above is 8 of
+  15 clipped against 7 of 9 known mapped, and reading `100 %` as "nothing was
+  clipped" would be wrong. `n/a` means the tool has no known row at all (a rate
+  over an empty denominator would say "nothing was mapped" where the ledger
+  says "nothing is known"), and the grey footnote names how many rows sit
+  behind those cells. The same table renders in the interactive TUI stats view
+  — `TuiStatsView` calls the shared `StatsCommand.Render` — so one description
+  covers both surfaces. In `--json` the same numbers arrive as two more members
+  of each `byTool` row, last in the row: `mappedRate` (absent when the tool has
+  no known row — the `n/a` cell) and `unsplitRows` (always present, `0` in the
+  clean case). No new top-level member: the `stats --json` key list stays
+  `{totalRequests, byTool, savings, cache, period, agents, sessions}`.
+- **What `mapped` means in the ledger** — `queries.jsonl` rows gained an
+  additive `mapped` as their LAST key: `true` when the budget traded a body for
+  the full member map (the answer lost nothing), `false` when it did not. Every
+  `QueryTelemetry.Record` site in `src/` must name its state — omitting
+  `mapped:` fails the build (`QueryTelemetryRecordStateGuardTests`), so a
+  missing key on the wire never means "a call site forgot". A row with no
+  `mapped` key is **unsplittable**, and there are two origins for that: written
+  before the split shipped, or written by a surface that records no budget
+  state at all (`hook pre-read` passes `mapped: null` explicitly; CLI `refs`
+  names no state and is the guard's one declared exception — and the wire
+  cannot tell them apart, because a null is dropped on serialization). Known
+  asymmetry, not papered over: the MCP `find_references` row writes
+  `mapped: false` while the CLI `refs` row of the same logical query writes
+  nothing, so one surface has two ledger readings; the guard records that
+  choice, it does not fix it. One more denominator caveat, unrelated to the
+  split but true of every number on this page: a call that ends in an error
+  writes no row at all (`BUGS/026`), so these rates describe answers that
+  worked, never the traffic an agent actually generated.
 - **Savings** — a counterfactual against the whole-file baseline. The formula
   (unchanged since specs 021/050):
   - `actual` (query cost) = the sum of `tokensUsed` over all answers;

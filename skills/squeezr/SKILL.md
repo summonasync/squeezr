@@ -189,7 +189,10 @@ plain grep/read is correct, not a violation.
   `kind=all`.
 - `symbol_lookup` — exact symbol lookup: signature, doc-comment, file:span. When a
   type's body exceeds the token budget it returns the member list (name, kind, line)
-  as a mini-map instead — each line is an expand_span coordinate. When no symbol
+  as a mini-map instead — each line is an expand_span coordinate. That substitution
+  is a *mapped* answer, not a cut one: `truncated: false`, `cost.complete: true`, and
+  the hit says `bodyOmitted: true` (see Budgets below — do not re-ask at a bigger
+  ceiling for a body the map already replaced). When no symbol
   matches, returns `didYouMean` (top-3 candidates by trigram-Jaccard, threshold
   0.34) instead of a bare miss.
 - `find_references` — caller-side reference points for a symbol.
@@ -218,12 +221,48 @@ plain grep/read is correct, not a violation.
   A single-workspace machine gets neither key, and its `data` is byte-identical
   to the pre-`workspaces` payload.
 
-Budgets: every tool is token-budgeted; `code_search` defaults to maxTokens 2000
-and sets `truncated` when it overflows — narrow the query or adjust maxTokens
-instead of reading files. In big workspaces prefer `prefix` over raising
+Budgets: every tool is token-budgeted, and `truncated` now means what it says —
+the answer lost something you asked for. `symbol_lookup`/`code_pack` distinguish
+three states: **complete** (nothing refused), **mapped** (the type's body was too
+big and the full member map stood in for it — `truncated: false`,
+`cost.complete: true`, no warning, the hit carries `bodyOmitted: true`; this is
+the designed outcome, do NOT re-ask for a bigger ceiling to "get the body" — the
+body is what the map replaced, and a map row is an `expand_span` coordinate),
+and **clipped** (a hit dropped, map rows omitted, a `did you mean` refused, or a
+body refused with nothing to substitute — only this earns a `truncated:` warning
+naming the loss). The clipped warning line prints
+`truncated: {used} of {ceiling} token ceiling — {remedy}`, and for the symbol family
+(`symbol_lookup` plus the lookup leg of `code_pack`) the remedy is chosen
+by what was refused: `narrow the query (repo, kind) or raise maxTokens` (a hit
+dropped), `read a member with expand_span or raise maxTokens` (map rows omitted),
+`raise maxTokens (the body alone needs ~N tokens)` (body refused, no substitute).
+The CLI spells the same three in flags:
+`narrow the query (--repo, --kind) or raise --max-tokens`,
+`read a member with expand <file> <line> or raise --max-tokens`,
+`raise --max-tokens (the body alone needs ~N tokens)`.
+Outside that family two more texts exist: `expand_span` says
+`raise maxTokens, or narrow the span (startLine/endLine)`, and a zero-hit answer whose
+`did you mean` list did not fit falls back to the bare `raise maxTokens` (suggestions
+dropped, answer clipped).
+Read the state through `truncated` plus the hit's
+`bodyOmitted`/`members`/`membersOmitted`, never through the absence of a `body`
+key (nulls are dropped on serialization, so a mapped hit has no `body` field at
+all). `raise maxTokens` in a remedy is a ceiling choice for a NEW call, not a
+guarantee that your next call in the same session re-runs: `symbol_lookup`'s
+response cache key omits `maxTokens` (`BUGS/024`), so asking the same name at a
+bigger ceiling can still replay the stored envelope. `code_search` defaults to
+maxTokens 2000 and sets `truncated` when it overflows — narrow the query or
+adjust maxTokens instead of reading files. A member map is not authoritative
+while `truncated: true`: an empty map still reports nothing omitted
+(`BUGS/023`). In big workspaces prefer `prefix` over raising
 maxTokens: a scoped map or search usually fits the default budget. Pass `topK`
 to cap how many files come back when a few strong hits are enough — `code_search`
-returns one hit per file, so `topK` counts distinct files, not spans.
+returns one hit per file, so `topK` counts distinct files, not spans. The
+ledger records the split too (`mapped` on every `queries.jsonl` row that has a
+budget state): `squeezr stats` shows a `Mapped` column beside `Truncation`, the
+two rates divide different denominators (all rows vs rows with a known state),
+and a missing `mapped:` at a record site fails the build rather than silently
+adding an unsplittable row.
 
 Errors ride a second plane: when a call comes back `isError: true`, the machine
 contract is in `structuredContent` — `{code, message, rootPath, nextSteps,
