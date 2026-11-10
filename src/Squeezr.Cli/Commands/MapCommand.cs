@@ -57,7 +57,10 @@ public sealed class MapCommand : Command<MapCommand.Settings>
                     Console.WriteLine($"{new string(' ', line.Depth * 2)}{line.Text}");
                 }
 
-                SymbolCommand.WriteBudgetLine(result.TokensUsed, result.Truncated, result.Hint);
+                SymbolCommand.WriteBudgetLine(
+                    result.TokensUsed,
+                    result.Truncated ? AnswerState.Clipped : AnswerState.Complete,
+                    result.Hint?.ForCli());
             }
 
             return 0;

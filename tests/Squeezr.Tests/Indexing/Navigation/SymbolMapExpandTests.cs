@@ -260,6 +260,8 @@ public class SymbolMapExpandTests
             match.GetProperty("signature").GetString()!.ShouldContain("Add(int a, int b)");
             match.GetProperty("file").GetString().ShouldBe("src/Calc.cs");
             doc.RootElement.GetProperty("tokensUsed").GetInt32().ShouldBeGreaterThan(0);
+            doc.RootElement.GetProperty("state").GetString().ShouldBe("complete");
+            doc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeFalse();
         }
 
         var map = await RunCliAsync(root, "map", "--json");
