@@ -1,12 +1,17 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Shouldly;
 using Spectre.Console;
 using Squeezr.Cli.Commands;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra.Autostart;
 using Squeezr.Core.Indexing.Watch.Supervision;
+using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 using Squeezr.Tests.Infra.Autostart;
 
 namespace Squeezr.Tests.Cli;
@@ -16,11 +21,14 @@ public sealed class WatchdAutostartCliTests
 {
     private const string Binary = "/opt/squeezr/squeezr";
     private const string Home = "/var/tmp/squeezr-home";
+    private const string ManagedWorkspaceName = "retiree2e";
     private const string UnitFileName = "squeezr-watchd.service";
     private const string WindowsHome = @"D:\squeezr home";
     private const string WindowsHomeWithQuote = @"D:\evil"" & calc & ""x";
     private const string LaunchDomain = "gui/502";
     private const string RemedyFragment = "installed squeezr binary";
+    private const string RetirementFragment = "watchd is retiring after an upgrade";
+    private static readonly TimeSpan RetireLineBudget = TimeSpan.FromSeconds(15);
 
     [Fact]
     public async Task WatchdHelp_ListsBothAutostartSubcommands()
@@ -492,8 +500,8 @@ public sealed class WatchdAutostartCliTests
             retired.ShouldBeTrue("the autostarted watchd never retired after its binary was replaced");
             child.ExitCode.ShouldBe(75);
             File.Exists(child.LockPath).ShouldBeFalse("the retiring supervisor left its lock behind");
-            child.StdOut.ShouldContain("watchd is retiring after an upgrade");
-            child.StdOut.ShouldContain(own.Path);
+            var reason = await child.AwaitStdOutLineAsync(RetirementFragment, RetireLineBudget);
+            reason.ShouldContain(own.Path);
             child.StdErr.ShouldBeEmpty();
         }
         finally
@@ -533,6 +541,50 @@ public sealed class WatchdAutostartCliTests
         }
     }
 
+    // The fleet half of the retirement: a supervisor that steps aside must not take its managed watch
+    // daemon down with it, because until the entry brings the new binary up that daemon is the only
+    // thing keeping the store indexed. A real workspace is registered in a pinned home, the supervisor
+    // launches a real watch child and names its pid, and that pid has to outlive the exit 75.
+    [LinuxFact]
+    public async Task Watchd_AutostartChild_Retires_WhileItsManagedWatchDaemonKeepsRunning()
+    {
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var own = TakeOwnBinary();
+        int? managedPid = null;
+        try
+        {
+            var init = await CliTestProcess.RunWithHomeAsync(home, workspace, "init", "--name", ManagedWorkspaceName, "--json");
+            init.ExitCode.ShouldBe(0, init.StdErr);
+            PointScratchConfigAtDeadQdrant(home, ManagedWorkspaceName);
+
+            using var child = StartWatchdChild(home, "watchd", WatchdUnitGenerator.AutostartFlag);
+            await child.HoldsTheLockAsync();
+            managedPid = await child.ManagedWatchPidAsync(ManagedWorkspaceName);
+
+            UpgradeOwnBinary(own);
+            var retired = await child.ExitedWithinAsync(TimeSpan.FromSeconds(30));
+
+            retired.ShouldBeTrue("the autostarted watchd never retired with a managed child running");
+            child.ExitCode.ShouldBe(75);
+            File.Exists(child.LockPath).ShouldBeFalse("the retiring supervisor left its lock behind");
+            await child.AwaitStdOutLineAsync(RetirementFragment, RetireLineBudget);
+            child.StdOut.ShouldNotContain("restarted watch");
+            child.StdOut.ShouldNotContain("stopped watch");
+            using var managed = Process.GetProcessById(managedPid.Value);
+            managed.HasExited.ShouldBeFalse(
+                $"the retire took watch daemon {managedPid} down with it; supervisor said: {child.StdOut}");
+        }
+        finally
+        {
+            RestoreOwnBinary(own);
+            if (managedPid is { } pid)
+            {
+                StopManagedWatch(pid);
+            }
+        }
+    }
+
     // The upgrade is simulated on the real file the child runs from, and only after that child is up —
     // the detector compares the file stamp against the process start. The stamp goes back afterwards:
     // that dll is the shared build output every other CLI child in the run launches, and a stamp left
@@ -553,6 +605,44 @@ public sealed class WatchdAutostartCliTests
         new(
             CliTestProcess.StartLiveChild(squeezrHome, TestDirs.NewTempDir(), args),
             Path.Combine(squeezrHome, WatchdPaths.DirName, WatchdPaths.LockFileName));
+
+    // A scratch workspace that reaches a real Qdrant is a scratch workspace that writes where the
+    // developer works. The config lives in the scratch home's store dir, so it is rewritten there: the
+    // in-process path helpers resolve the suite's own home and would miss this one entirely.
+    private static void PointScratchConfigAtDeadQdrant(string squeezrHome, string workspaceName)
+    {
+        var rows = JsonSerializer.Deserialize<List<WorkspaceRegistryEntry>>(
+            File.ReadAllText(Path.Combine(squeezrHome, SqueezrPaths.RegistryFileName)),
+            SqueezrJson.FileOptions) ?? [];
+        var storeKey = rows.Single(row => row.Name == workspaceName).StoreKey;
+        var configPath = Path.Combine(
+            squeezrHome,
+            SqueezrPaths.WorkspacesDirName,
+            storeKey,
+            SqueezrPaths.ConfigFileName);
+        var config = JsonSerializer.Deserialize<SqueezrConfig>(
+            File.ReadAllText(configPath), SqueezrJson.FileOptions)!;
+        File.WriteAllText(
+            configPath,
+            JsonSerializer.Serialize(
+                config with { Qdrant = config.Qdrant with { Endpoint = TestWorkspaceConfig.DeadQdrantEndpoint } },
+                SqueezrJson.FileOptions));
+    }
+
+    // The case is precisely that the retire does not reap this child, so the harness owns the cleanup
+    // the product deliberately skipped.
+    private static void StopManagedWatch(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit(15_000);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        {
+        }
+    }
 
     // A daemon under test has to be watched while it runs, so both pipes drain into buffers instead of
     // being awaited to the end, and the harness stops the child even when an assertion throws.
@@ -626,6 +716,38 @@ public sealed class WatchdAutostartCliTests
                 $"watchd never took {_lockPath} ({State()}); stdout: {StdOut}stderr: {StdErr}");
         }
 
+        // The supervisor's own line is the witness that a child was managed at the retire moment — and
+        // the denominator: without a pid read here the case would pass on a fleet that never existed.
+        public async Task<int> ManagedWatchPidAsync(string workspaceName)
+        {
+            var marker = $"started watch {workspaceName} (pid ";
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+            while (DateTime.UtcNow < deadline)
+            {
+                var line = StdOut.Split('\n').FirstOrDefault(candidate => candidate.Contains(marker));
+                if (line is not null)
+                {
+                    var first = line.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+                    var last = line.IndexOf(')', first);
+                    if (last > first)
+                    {
+                        return int.Parse(line.AsSpan(first, last - first), CultureInfo.InvariantCulture);
+                    }
+                }
+
+                if (_process.HasExited)
+                {
+                    break;
+                }
+
+                await Task.Delay(200);
+            }
+
+            throw new InvalidOperationException(
+                $"the supervisor never reported a managed watch for '{workspaceName}' ({State()}); " +
+                $"stdout: {StdOut}stderr: {StdErr}");
+        }
+
         public async Task<bool> ExitedWithinAsync(TimeSpan budget)
         {
             var deadline = DateTime.UtcNow + budget;
@@ -633,7 +755,10 @@ public sealed class WatchdAutostartCliTests
             {
                 if (_process.HasExited)
                 {
-                    _process.WaitForExit();
+                    // Bounded on purpose. The parameterless WaitForExit also waits for the redirected
+                    // pipes to reach EOF, and a managed watch grandchild inherits the write end of this
+                    // child's stdout and keeps it open long after watchd is gone — EOF never comes.
+                    _process.WaitForExit(5000);
                     return true;
                 }
 
@@ -641,6 +766,30 @@ public sealed class WatchdAutostartCliTests
             }
 
             return _process.HasExited;
+        }
+
+        // The last lines a retiring supervisor wrote can still be in flight once its process is gone, and
+        // with a live grandchild holding the pipe there is no EOF to wait for: poll the buffer instead.
+        public async Task<string> AwaitStdOutLineAsync(string fragment, TimeSpan budget)
+        {
+            var deadline = DateTime.UtcNow + budget;
+            while (true)
+            {
+                var line = StdOut.Split('\n').FirstOrDefault(candidate => candidate.Contains(fragment));
+                if (line is not null)
+                {
+                    return line.Trim();
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new InvalidOperationException(
+                        $"watchd stdout never carried '{fragment}' within {budget.TotalSeconds:F0}s; " +
+                        $"stdout: {StdOut}stderr: {StdErr}");
+                }
+
+                await Task.Delay(200);
+            }
         }
 
         public void Dispose()
@@ -656,7 +805,7 @@ public sealed class WatchdAutostartCliTests
             {
             }
 
-            _process.WaitForExit();
+            _process.WaitForExit(10_000);
             _process.Dispose();
         }
 

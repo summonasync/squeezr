@@ -241,7 +241,8 @@ public sealed class SupervisorLoopTests : IDisposable
         Func<int, bool>? isProcessAlive = null,
         Func<string, DateTime>? binaryModifiedUtc = null,
         Func<string, WatchStoreHealth>? health = null,
-        SupervisorSelfCheck? selfCheck = null) =>
+        SupervisorSelfCheck? selfCheck = null,
+        TimeSpan? pollInterval = null) =>
         NewLoop(
             [workspace.Entry],
             workspace.State,
@@ -250,7 +251,8 @@ public sealed class SupervisorLoopTests : IDisposable
             binaryModifiedUtc,
             health,
             registry: null,
-            selfCheck);
+            selfCheck,
+            pollInterval);
 
     private SupervisorLoop NewLoop(
         IReadOnlyList<WorkspaceRegistryEntry> entries,
@@ -260,7 +262,8 @@ public sealed class SupervisorLoopTests : IDisposable
         Func<string, DateTime>? binaryModifiedUtc = null,
         Func<string, WatchStoreHealth>? health = null,
         Func<IReadOnlyList<WorkspaceRegistryEntry>>? registry = null,
-        SupervisorSelfCheck? selfCheck = null) =>
+        SupervisorSelfCheck? selfCheck = null,
+        TimeSpan? pollInterval = null) =>
         new(
             launcher ?? new FakeLauncher(),
             state ?? new SupervisionState(),
@@ -269,17 +272,20 @@ public sealed class SupervisorLoopTests : IDisposable
             health ?? (storeDir => WatchStoreHealth.Probe(storeDir, Now, isProcessAlive ?? (_ => false))),
             binaryModifiedUtc ?? (_ => Now),
             () => Now,
-            SupervisorLoop.PollInterval,
+            pollInterval ?? SupervisorLoop.PollInterval,
             selfCheck);
 
     [Fact]
     public void OwnBinaryNewerThanTheSupervisorStart_RetiresTheSweep_AndTouchesNoStore()
     {
-        var workspace = NewWorkspace("demo");
+        var launcher = new FakeLauncher();
         var loop = NewLoop(
-            workspace,
-            binaryModifiedUtc: OwnThen(Now, Now.AddHours(-2)),
+            [],
+            launcher: launcher,
+            binaryModifiedUtc: OwnThen(Now, Now),
             selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        loop.RunOnce().OwnDrift.ShouldBeNull();
 
         var sweep = loop.RunOnce();
 
@@ -289,7 +295,100 @@ public sealed class SupervisorLoopTests : IDisposable
         drift.BinaryModifiedUtc.ShouldBe(Now);
         sweep.Stores.ShouldBeEmpty();
         sweep.Fault.ShouldBeNull();
-        workspace.Launcher.Roots.ShouldBeEmpty();
+        launcher.Roots.ShouldBeEmpty();
+    }
+
+    // review-110-08 BLOCKER-1: children survive the retire by omission — nothing on that path calls
+    // Stop() — so this is the pin that fails if somebody adds a stop-all to the exit path.
+    [Fact]
+    public void OwnBinaryDrift_RetiresWithALiveManagedChild_AndNeverStopsIt()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(id: 1001, startedUtc: Now.AddHours(-1));
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now, Now.AddHours(-2)),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        loop.RunOnce().Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+        var child = workspace.Launcher.Handle;
+
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldNotBeNull();
+        child.StopCalled.ShouldBeFalse();
+        sweep.Stores.ShouldBeEmpty();
+        workspace.Launcher.Roots.ShouldBe([workspace.RootPath]);
+    }
+
+    // review-110-08 WARN-1, measured 3/3: Process.StartTime is floored on Linux, so a stamp a few
+    // milliseconds ahead of the start is not evidence of an upgrade. The first tick has to do its
+    // sweep instead of exiting, and only the next one may retire.
+    [Fact]
+    public void OwnBinaryFiveMillisecondsAheadOfTheStart_SupervisesTheFirstTick_AndRetiresOnTheSecond()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now.AddMilliseconds(5), Now),
+            selfCheck: OwnCheck(Now, restartsOnUnsuccessfulExit: true));
+
+        var first = loop.RunOnce();
+
+        first.OwnDrift.ShouldBeNull("a stamp ahead by milliseconds retired a supervisor that saw no fleet");
+        first.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+
+        var second = loop.RunOnce();
+
+        var drift = second.OwnDrift.ShouldNotBeNull();
+        drift.ProcessStartUtc.ShouldBe(Now);
+        drift.BinaryModifiedUtc.ShouldBe(Now.AddMilliseconds(5));
+    }
+
+    [Fact]
+    public void OwnBinaryStampExactlyAtTheSupervisorStart_KeepsSupervisingTheFleet()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now, Now),
+            selfCheck: OwnCheck(Now, restartsOnUnsuccessfulExit: true));
+
+        loop.RunOnce();
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.LeftRunning);
+        workspace.Launcher.Roots.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void RegistryFault_DoesNotCountAsTheSweepThatUnlocksTheRetirement()
+    {
+        var workspace = NewWorkspace("demo");
+        var failing = true;
+        var loop = NewLoop(
+            [workspace.Entry],
+            registry: () =>
+            {
+                if (failing)
+                {
+                    throw new IOException("registry is unreadable");
+                }
+
+                return [workspace.Entry];
+            },
+            binaryModifiedUtc: OwnThen(Now, Now),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        var broken = loop.RunOnce();
+        broken.Fault.ShouldBe("registry is unreadable");
+        broken.OwnDrift.ShouldBeNull();
+
+        failing = false;
+        loop.RunOnce().Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+
+        loop.RunOnce().OwnDrift.ShouldNotBeNull();
     }
 
     [Fact]
@@ -383,17 +482,21 @@ public sealed class SupervisorLoopTests : IDisposable
         var workspace = NewWorkspace("demo");
         var loop = NewLoop(
             workspace,
-            binaryModifiedUtc: OwnThen(Now, Now.AddHours(-2)),
-            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+            binaryModifiedUtc: OwnThen(Now, Now),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true),
+            pollInterval: TimeSpan.FromMilliseconds(10));
         var sweeps = new List<SupervisorSweep>();
         using var never = new CancellationTokenSource();
 
         var reason = loop.Run(never.Token, sweeps.Add);
 
         reason.ShouldBe(SupervisorExitReason.OwnBinaryDrifted);
-        var sweep = sweeps.ShouldHaveSingleItem();
-        sweep.OwnDrift.ShouldNotBeNull();
-        workspace.Launcher.Roots.ShouldBeEmpty();
+        sweeps[0].OwnDrift.ShouldBeNull();
+        sweeps[0].Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+        var retiring = sweeps[1];
+        retiring.OwnDrift.ShouldNotBeNull();
+        retiring.Stores.ShouldBeEmpty();
+        workspace.Launcher.Roots.Count.ShouldBe(1);
     }
 
     [Fact]

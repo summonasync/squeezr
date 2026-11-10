@@ -9,7 +9,7 @@ public sealed class OwnBinaryDriftTests
     private static readonly DateTime Replaced = new(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public void Reason_NamesTheRetirementTheBinaryAndBothStamps()
+    public void Reason_NamesTheBinaryAndBothStamps_WhenRetiring()
     {
         var drift = new OwnBinaryDrift("/opt/squeezr/squeezr", Started, Replaced);
 

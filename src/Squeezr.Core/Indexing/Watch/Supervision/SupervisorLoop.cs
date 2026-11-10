@@ -17,6 +17,7 @@ public sealed class SupervisorLoop
     private readonly TimeSpan _pollInterval;
     private readonly SupervisorSelfCheck? _selfCheck;
     private readonly Dictionary<string, IWatchDaemonHandle> _managed = [];
+    private bool _hasSweptTheFleet;
 
     public SupervisorLoop(IWatchDaemonLauncher launcher)
         : this(launcher, new SupervisionState(), new CrashLoopGuard())
@@ -105,7 +106,9 @@ public sealed class SupervisorLoop
             return new SupervisorSweep(now, [], ex.Message);
         }
 
-        return new SupervisorSweep(now, entries.Select(entry => Supervise(entry, now)).ToList());
+        var stores = entries.Select(entry => Supervise(entry, now)).ToList();
+        _hasSweptTheFleet = true;
+        return new SupervisorSweep(now, stores);
     }
 
     private StoreSupervision Supervise(WorkspaceRegistryEntry entry, DateTime now)
@@ -225,7 +228,14 @@ public sealed class SupervisorLoop
 
     private OwnBinaryDrift? DetectOwnDrift()
     {
-        if (_selfCheck is not { RestartsOnUnsuccessfulExit: true, ProcessStartUtc: { } started })
+        // Invariant: the first tick never retires. Linux floors Process.StartTime, so a binary written
+        // milliseconds before exec reads as an upgrade that postdates this start, and an instance that
+        // has supervised nothing would exit before it showed the fleet anything. Unlocking on the first
+        // fault-free pass over the registry also bounds a genuinely future-ahead stamp: every
+        // incarnation does a full sweep of real work before stepping aside, so a flap costs restarts
+        // instead of idling the fleet.
+        if (!_hasSweptTheFleet
+            || _selfCheck is not { RestartsOnUnsuccessfulExit: true, ProcessStartUtc: { } started })
         {
             return null;
         }
