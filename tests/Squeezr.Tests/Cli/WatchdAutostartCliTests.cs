@@ -6,6 +6,7 @@ using System.Text.Json;
 using Shouldly;
 using Spectre.Console;
 using Squeezr.Cli.Commands;
+using Squeezr.Cli.Infra.Autostart;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra.Autostart;
 using Squeezr.Core.Indexing.Watch.Supervision;
@@ -27,6 +28,7 @@ public sealed class WatchdAutostartCliTests
     private const string WindowsHomeWithQuote = @"D:\evil"" & calc & ""x";
     private const string LaunchDomain = "gui/502";
     private const string RemedyFragment = "installed squeezr binary";
+    private const string StaleRemedyFragment = "no muxer in front";
     private const string RetirementFragment = "watchd is retiring after an upgrade";
     private static readonly TimeSpan RetireLineBudget = TimeSpan.FromSeconds(15);
 
@@ -75,29 +77,72 @@ public sealed class WatchdAutostartCliTests
         Directory.GetFiles(configHome, "*" + UnitFileName, SearchOption.AllDirectories).ShouldBeEmpty();
     }
 
-    // The shape hard-review 110-03 measured: a muxer-launched CLI resolves its own program to the
-    // entry assembly, and a unit naming it dies at exec with 126 while looking installed. The control
-    // is the test above — the same refusal harness launched from the apphost gets past this guard and
-    // reaches the generator, so a guard that refused everything would not leave that one green.
+    // The live proof of the pair, measured on a real child in both launch shapes. 'dotnet squeezr.dll
+    // watchd install' is how this build is run out of a repo, and the unit it writes has to be the one
+    // systemd can exec: the muxer as the program, the assembly as the argument behind it (the shape
+    // hard-review 110-03 measured as broken before T9 — a unit naming the assembly alone dies at exec
+    // with 126 while looking installed). The apphost arm drives the same install in the same harness,
+    // so a resolver that always picked one of the two shapes could not leave both arms green. systemctl
+    // is a PATH shim recording every argv it saw, so the ledger says exactly what install asked the bus.
     [LinuxFact]
-    public async Task Install_Child_WhenTheResolvedProgramIsAMuxerAssembly_RefusesAndWritesNoUnit()
+    public async Task Install_Child_WhenRunThroughTheMuxer_WritesAUnitThePlatformCanExec()
     {
         var configHome = TestDirs.NewTempDir();
+        var ledgerPath = Path.Combine(TestDirs.NewTempDir(), "systemctl.ledger");
         var cliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
+        var shimDirectory = WriteSystemctlShim(ledgerPath);
 
         var result = await RunMuxedCliAsync(
             configHome,
             TestDirs.NewTempDir(),
             TestDirs.NewTempDir(),
-            ["watchd", "install"]);
+            ["watchd", "install"],
+            shimDirectory);
 
-        result.ExitCode.ShouldBe(1);
-        result.StdErr.ShouldContain(cliDll);
-        result.StdErr.ShouldContain("managed assembly");
-        result.StdErr.ShouldContain("installed squeezr binary");
-        result.StdOut.ShouldNotContain("autostart installed");
-        Directory.Exists(Path.Combine(configHome, "systemd")).ShouldBeFalse();
-        Directory.GetFiles(configHome, "*", SearchOption.AllDirectories).ShouldBeEmpty();
+        result.ExitCode.ShouldBe(0, result.StdErr);
+        result.StdOut.ShouldContain("watchd autostart installed");
+        var unit = ManagedUnitText(configHome);
+        var command = WatchdUnitProgram.Read(AutostartPlatform.SystemdUser, unit);
+        command.ShouldNotBeNull();
+        Path.GetFileName(command.Executable).ShouldBe("dotnet");
+        command.Executable.ShouldNotBe(cliDll);
+        Launchability.Refusal(AutostartPlatform.SystemdUser, command.Executable).ShouldBeNull();
+        command.Arguments.ShouldBe(
+            [cliDll, WatchdUnitGenerator.WatchdVerb, WatchdUnitGenerator.AutostartFlag]);
+        unit.ShouldContain($"""ExecStart="{command.Executable}" "{cliDll}" watchd --autostart""");
+        ReadLedger(ledgerPath).ShouldBe(
+        [
+            "--user daemon-reload",
+            "--user enable --now squeezr-watchd.service",
+        ]);
+    }
+
+    [LinuxFact]
+    public async Task Install_Child_WhenRunFromTheAppHost_WritesAUnitNamingThatProgramAlone()
+    {
+        var configHome = TestDirs.NewTempDir();
+        var ledgerPath = Path.Combine(TestDirs.NewTempDir(), "systemctl.ledger");
+        var shimDirectory = WriteSystemctlShim(ledgerPath);
+
+        var result = await RunInstalledCliAsync(
+            configHome,
+            TestDirs.NewTempDir(),
+            TestDirs.NewTempDir(),
+            ["watchd", "install"],
+            shimDirectory);
+
+        result.ExitCode.ShouldBe(0, result.StdErr);
+        var unit = ManagedUnitText(configHome);
+        var command = WatchdUnitProgram.Read(AutostartPlatform.SystemdUser, unit);
+        command.ShouldNotBeNull();
+        Path.GetFileName(command.Executable).ShouldBe("squeezr");
+        command.Arguments.ShouldBe([WatchdUnitGenerator.WatchdVerb, WatchdUnitGenerator.AutostartFlag]);
+        unit.ShouldContain($"""ExecStart="{command.Executable}" watchd --autostart""");
+        ReadLedger(ledgerPath).ShouldBe(
+        [
+            "--user daemon-reload",
+            "--user enable --now squeezr-watchd.service",
+        ]);
     }
 
     // The escaping IOException class is the operator's error channel: unfiltered it leaves the CLI as
@@ -173,6 +218,11 @@ public sealed class WatchdAutostartCliTests
         notice.ShouldContain("left failed");
         notice.ShouldContain("Stop that instance and run install again");
         notice.ShouldContain("systemctl --user restart squeezr-watchd");
+        // Both exits sit behind the start limit the unit declares: a plain restart inside the window can
+        // be refused, so the line has to name the window and the flush that gets around it (110-11
+        // WARN-1). These are substring asserts — the notice is one wrapped sentence, not a fixed line.
+        notice.ShouldContain("systemctl --user reset-failed squeezr-watchd");
+        notice.ShouldContain("60-second window");
         result.StdOut.ToString().ShouldContain("watchd autostart installed");
         // The notice promises a start limit, and the unit install just wrote has to be the one carrying
         // it; "does not undo the install" is measured on disk here, not only through the exit code.
@@ -272,7 +322,7 @@ public sealed class WatchdAutostartCliTests
 
         var error = await Should.ThrowAsync<ArgumentException>(() => WatchdInstallCommand.ApplyAsync(
             AutostartPlatform.WindowsScheduledTask,
-            program,
+            WatchdUnitGenerator.LaunchPair(program),
             WindowsHomeWithQuote,
             applier,
             CancellationToken.None));
@@ -293,7 +343,11 @@ public sealed class WatchdAutostartCliTests
         var program = Path.Combine(TestDirs.NewTempDir(), "squeezr");
 
         var error = await Should.ThrowAsync<AutostartException>(() => WatchdInstallCommand.ApplyAsync(
-            AutostartPlatform.SystemdUser, program, Home, applier, CancellationToken.None));
+            AutostartPlatform.SystemdUser,
+            WatchdUnitGenerator.LaunchPair(program),
+            Home,
+            applier,
+            CancellationToken.None));
 
         error.Message.ShouldContain("does not exist");
         error.Message.ShouldContain(RemedyFragment);
@@ -310,12 +364,67 @@ public sealed class WatchdAutostartCliTests
         var program = TestProgram.NotExecutable("squeezr");
 
         var error = await Should.ThrowAsync<AutostartException>(() => WatchdInstallCommand.ApplyAsync(
-            AutostartPlatform.SystemdUser, program, Home, applier, CancellationToken.None));
+            AutostartPlatform.SystemdUser,
+            WatchdUnitGenerator.LaunchPair(program),
+            Home,
+            applier,
+            CancellationToken.None));
 
         error.Message.ShouldContain("does not carry the execute bit");
         error.Message.ShouldContain(RemedyFragment);
         Directory.GetFileSystemEntries(unitDirectory).ShouldBeEmpty();
         runner.Calls.ShouldBeEmpty();
+    }
+
+    // T9 moved the assembly behind a muxer instead of leaving it in front of one, so the guard speaks
+    // about the program token of the pair. What the operator is told has to match what the product now
+    // does: naming "no muxer in front of it" as the defect would recommend against the very shape a
+    // muxed install writes today (review-110-05 SUGGESTION-3).
+    [LinuxFact]
+    public async Task ApplyAsync_WhenTheProgramIsAManagedAssembly_RefusesAndNamesTheMuxerShape()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var runner = new FakeAutostartProcessRunner();
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        var assembly = TestProgram.Executable("squeezr.dll");
+
+        var error = await Should.ThrowAsync<AutostartException>(() => WatchdInstallCommand.ApplyAsync(
+            AutostartPlatform.SystemdUser,
+            WatchdUnitGenerator.LaunchPair(assembly),
+            Home,
+            applier,
+            CancellationToken.None));
+
+        error.Message.ShouldContain("managed assembly");
+        error.Message.ShouldContain(RemedyFragment);
+        error.Message.ShouldContain("dotnet muxer");
+        error.Message.ShouldNotContain(StaleRemedyFragment);
+        Directory.GetFileSystemEntries(unitDirectory).ShouldBeEmpty();
+        runner.Calls.ShouldBeEmpty();
+    }
+
+    // The payload is never exec'ed, so the guard has nothing to say about it: an assembly with no
+    // execute bit behind a muxer that has one is exactly the unit a muxed install writes, and it has
+    // to reach the disk rather than be refused as if the dll were the program.
+    [LinuxFact]
+    public async Task ApplyAsync_WhenThePairCarriesAnAssemblyPayload_GuardsOnlyTheProgram()
+    {
+        var unitDirectory = TestDirs.NewTempDir();
+        var runner = new FakeAutostartProcessRunner();
+        var applier = new SystemdUserApplier(unitDirectory, runner);
+        var muxer = TestProgram.Executable("dotnet");
+        var payload = TestProgram.NotExecutable("squeezr.dll");
+
+        var result = await RunInstallAsync(
+            AutostartPlatform.SystemdUser,
+            WatchdUnitGenerator.LaunchPair(muxer, payload),
+            Home,
+            applier);
+
+        result.Exit.ShouldBe(0);
+        var unit = Directory.GetFiles(unitDirectory, "*.service").ShouldHaveSingleItem();
+        File.ReadAllText(unit)
+            .ShouldContain($"""ExecStart="{muxer}" "{payload}" watchd --autostart""");
     }
 
     [Fact]
@@ -449,7 +558,16 @@ public sealed class WatchdAutostartCliTests
         string binaryPath,
         string? squeezrHome,
         IWatchdAutostartApplier applier) =>
-        RunUnitAsync(ct => WatchdInstallCommand.ApplyAsync(platform, binaryPath, squeezrHome, applier, ct));
+        RunInstallAsync(platform, WatchdUnitGenerator.LaunchPair(binaryPath), squeezrHome, applier);
+
+    // The seam takes the launch pair install writes, so a test can hand over either launch shape: the
+    // apphost alone, or the muxer with the assembly behind it.
+    private static Task<(int Exit, StringWriter StdOut, StringWriter StdErr)> RunInstallAsync(
+        AutostartPlatform platform,
+        WatchdRunCommand launch,
+        string? squeezrHome,
+        IWatchdAutostartApplier applier) =>
+        RunUnitAsync(ct => WatchdInstallCommand.ApplyAsync(platform, launch, squeezrHome, applier, ct));
 
     private static Task<(int Exit, StringWriter StdOut, StringWriter StdErr)> RunUninstallAsync(
         IWatchdAutostartApplier applier) =>
@@ -487,38 +605,56 @@ public sealed class WatchdAutostartCliTests
     // nothing was applied. Both XDG_CONFIG_HOME and HOME go to temp dirs, so the child could not
     // reach the real unit path even if it got past the refusal.
     //
-    // Two launch shapes matter and are both driven: the apphost is what an installed squeezr is and
-    // what the executability guard accepts, 'dotnet <assembly>' is the shape the guard refuses — a
-    // unit naming a managed assembly dies at exec with 126 while looking installed.
+    // Two launch shapes matter and both are driven: the apphost is what an installed squeezr is, and
+    // 'dotnet <assembly>' is how a repo build is run — since T9 the second one installs too, naming the
+    // muxer as the program and the assembly as its argument instead of refusing.
     private static Task<(int ExitCode, string StdOut, string StdErr)> RunInstalledCliAsync(
         string configHome,
         string squeezrHome,
         string workingDir,
-        string[] args) =>
-        RunCliAsync(AppHostPath(), null, configHome, squeezrHome, workingDir, args);
+        string[] args,
+        string? pathShimDirectory = null) =>
+        RunCliAsync(AppHostPath(), null, configHome, squeezrHome, workingDir, args, pathShimDirectory);
 
     private static Task<(int ExitCode, string StdOut, string StdErr)> RunMuxedCliAsync(
         string configHome,
         string squeezrHome,
         string workingDir,
-        string[] args)
+        string[] args,
+        string? pathShimDirectory = null)
     {
         var cliDll = Path.Combine(AppContext.BaseDirectory, "squeezr.dll");
 
-        return RunCliAsync("dotnet", $"\"{cliDll}\"", configHome, squeezrHome, workingDir, args);
+        return RunCliAsync("dotnet", $"\"{cliDll}\"", configHome, squeezrHome, workingDir, args, pathShimDirectory);
     }
 
     private static string AppHostPath() =>
         Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "squeezr.exe" : "squeezr");
 
+    // The unit the child wrote, read back from the temp config root install was pointed at.
+    private static string ManagedUnitText(string configHome) =>
+        File.ReadAllText(Path.Combine(configHome, "systemd", "user", UnitFileName));
+
+    // A ledger that never appeared means the shim was never asked — and then the arm that reads it
+    // would be green on an install that did nothing at all, so the absence is the failure, named.
+    private static string[] ReadLedger(string ledgerPath)
+    {
+        File.Exists(ledgerPath).ShouldBeTrue(
+            "install never asked systemctl anything, so the ledger arm measured nothing");
+        return File.ReadAllLines(ledgerPath);
+    }
+
     // The child must never reach a real bus: the shim answers every systemctl verb with success and is
     // placed first on the child's PATH, so the only thing a test can measure through it is what the
-    // CLI did before or after asking the tool.
-    private static string WriteSystemctlShim()
+    // CLI did before or after asking the tool. With a ledger path it also records every argv it saw.
+    private static string WriteSystemctlShim(string? ledgerPath = null)
     {
         var shimDirectory = TestDirs.NewTempDir();
         var shim = Path.Combine(shimDirectory, "systemctl");
-        File.WriteAllText(shim, "#!/bin/sh\nexit 0\n");
+        var record = ledgerPath is null
+            ? string.Empty
+            : $"printf '%s\\n' \"$*\" >> '{ledgerPath}'\n";
+        File.WriteAllText(shim, $"#!/bin/sh\n{record}exit 0\n");
         SetOwnerMode(
             shim,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute

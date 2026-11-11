@@ -15,6 +15,12 @@ public static class WatchdUnitGenerator
     public const string AutostartFlag = "--autostart";
     public const string ManagedByMarker = "managed by squeezr, do not edit";
 
+    // The start-limit window the systemd unit declares and how many starts may fit inside it. The
+    // install warning quotes the window back at the operator, so the number has one owner instead of
+    // two that can drift apart.
+    public const int StartLimitWindowSeconds = 60;
+    public const int StartLimitBurst = 5;
+
     private const string UnitDescription = "squeezr watch daemon";
     private const string PlistDoctype =
         "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">";
@@ -25,36 +31,63 @@ public static class WatchdUnitGenerator
         string? squeezrHome = null,
         string? unitName = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(binaryPath);
+        RequireText(binaryPath, nameof(binaryPath));
         RejectLineBreaks(binaryPath, nameof(binaryPath));
+        return Generate(platform, new WatchdRunCommand(binaryPath, []), squeezrHome, unitName, nameof(binaryPath));
+    }
+
+    public static string Generate(
+        AutostartPlatform platform,
+        WatchdRunCommand launch,
+        string? squeezrHome = null,
+        string? unitName = null) =>
+        Generate(platform, launch, squeezrHome, unitName, nameof(launch));
+
+    private static string Generate(
+        AutostartPlatform platform,
+        WatchdRunCommand launch,
+        string? squeezrHome,
+        string? unitName,
+        string launchParameterName)
+    {
+        ArgumentNullException.ThrowIfNull(launch);
         RejectLineBreaks(squeezrHome, nameof(squeezrHome));
         RejectLineBreaks(unitName, nameof(unitName));
 
+        var tokens = LaunchTokens(launch, launchParameterName);
         var name = string.IsNullOrWhiteSpace(unitName) ? DefaultUnitNameFor(platform) : unitName;
         var home = string.IsNullOrWhiteSpace(squeezrHome) ? null : squeezrHome;
 
         return platform switch
         {
-            AutostartPlatform.SystemdUser => SystemdUnit(name, binaryPath, home),
-            AutostartPlatform.WindowsScheduledTask => SchtasksArguments(name, binaryPath, home),
-            AutostartPlatform.LaunchAgent => LaunchAgentPlist(name, binaryPath, home),
+            AutostartPlatform.SystemdUser => SystemdUnit(name, tokens, home),
+            AutostartPlatform.WindowsScheduledTask => SchtasksArguments(name, tokens, home, launchParameterName),
+            AutostartPlatform.LaunchAgent => LaunchAgentPlist(name, tokens, home),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(platform), platform, $"Unknown autostart platform {(int)platform}."),
         };
     }
 
-    public static WatchdRunCommand RunCommand(string binaryPath)
+    public static WatchdRunCommand LaunchPair(string binaryPath, string? payloadPath = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(binaryPath);
+        RequireText(binaryPath, nameof(binaryPath));
         RejectLineBreaks(binaryPath, nameof(binaryPath));
-        return new WatchdRunCommand(binaryPath, [WatchdVerb, AutostartFlag]);
+        if (payloadPath is null)
+        {
+            return new WatchdRunCommand(binaryPath, []);
+        }
+
+        RequireText(payloadPath, nameof(payloadPath));
+        RejectLineBreaks(payloadPath, nameof(payloadPath));
+        return new WatchdRunCommand(binaryPath, [payloadPath]);
     }
 
     private static string DefaultUnitNameFor(AutostartPlatform platform) =>
         platform == AutostartPlatform.LaunchAgent ? LaunchAgentUnitName : DefaultUnitName;
 
-    private static string SystemdUnit(string unitName, string binaryPath, string? squeezrHome)
+    private static string SystemdUnit(string unitName, IReadOnlyList<string> launchTokens, string? squeezrHome)
     {
+        var exec = string.Join(' ', launchTokens.Select(token => SystemdQuote(token, escapeDollarSign: true)));
         var lines = new List<string>
         {
             $"# {unitName}.service — {ManagedByMarker}",
@@ -63,8 +96,8 @@ public static class WatchdUnitGenerator
             // systemd.unit(5) defaults the window to 10s, and a RestartSec=5 flap fits two starts in it —
             // the limit never trips and the unit flaps forever instead of coming to rest in failed. Named
             // explicitly so the start-limit step the install warning promises is a state that happens.
-            "StartLimitIntervalSec=60",
-            "StartLimitBurst=5",
+            $"StartLimitIntervalSec={StartLimitWindowSeconds}",
+            $"StartLimitBurst={StartLimitBurst}",
             string.Empty,
             "[Service]",
             "Type=simple",
@@ -77,7 +110,7 @@ public static class WatchdUnitGenerator
 
         lines.AddRange(
         [
-            $"ExecStart={SystemdQuote(binaryPath, escapeDollarSign: true)} {WatchdVerb} {AutostartFlag}",
+            $"ExecStart={exec} {WatchdVerb} {AutostartFlag}",
             "Restart=on-failure",
             "RestartSec=5",
             string.Empty,
@@ -87,22 +120,35 @@ public static class WatchdUnitGenerator
         return FileText(lines);
     }
 
-    private static string SchtasksArguments(string unitName, string binaryPath, string? squeezrHome)
+    private static string SchtasksArguments(
+        string unitName,
+        IReadOnlyList<string> launchTokens,
+        string? squeezrHome,
+        string launchParameterName)
     {
         RejectCmdQuote(unitName, nameof(unitName));
-        RejectCmdQuote(binaryPath, nameof(binaryPath));
+        foreach (var token in launchTokens)
+        {
+            RejectCmdQuote(token, launchParameterName);
+        }
+
         RejectCmdQuote(squeezrHome, nameof(squeezrHome));
-        RejectCmdPercentExpansion(binaryPath, nameof(binaryPath));
+        foreach (var token in launchTokens)
+        {
+            RejectCmdPercentExpansion(token, launchParameterName);
+        }
+
         RejectCmdPercentExpansion(squeezrHome, nameof(squeezrHome));
 
-        var run = $"\"{binaryPath}\" {WatchdVerb} {AutostartFlag}";
+        var quotedTokens = string.Join(' ', launchTokens.Select(token => $"\"{token}\""));
+        var run = $"{quotedTokens} {WatchdVerb} {AutostartFlag}";
         var taskCommand = squeezrHome is null
             ? run
             : $"cmd /c set \"{SqueezrHome.HomeEnvironmentVariable}={squeezrHome}\" && {run}";
         return $"/Create /TN {CmdToken(unitName)} /SC ONLOGON /TR {CmdToken(taskCommand)}";
     }
 
-    private static string LaunchAgentPlist(string unitName, string binaryPath, string? squeezrHome)
+    private static string LaunchAgentPlist(string unitName, IReadOnlyList<string> launchTokens, string? squeezrHome)
     {
         var lines = new List<string>
         {
@@ -115,11 +161,18 @@ public static class WatchdUnitGenerator
             $"    <string>{XmlText(unitName)}</string>",
             "    <key>ProgramArguments</key>",
             "    <array>",
-            $"      <string>{XmlText(binaryPath)}</string>",
+        };
+        foreach (var token in launchTokens)
+        {
+            lines.Add($"      <string>{XmlText(token)}</string>");
+        }
+
+        lines.AddRange(
+        [
             $"      <string>{XmlText(WatchdVerb)}</string>",
             $"      <string>{XmlText(AutostartFlag)}</string>",
             "    </array>",
-        };
+        ]);
         if (squeezrHome is not null)
         {
             lines.AddRange(
@@ -148,6 +201,40 @@ public static class WatchdUnitGenerator
     }
 
     private static string FileText(IEnumerable<string> lines) => string.Join('\n', lines) + '\n';
+
+    // The pair is the program and whatever the program needs in front of the verb — the assembly under
+    // the muxer, nothing at all behind an apphost. The generator appends the verb and the autostart
+    // flag itself, so a caller that hands over the whole tail gets a refusal instead of a unit that
+    // execs 'watchd --autostart watchd --autostart'.
+    private static List<string> LaunchTokens(WatchdRunCommand launch, string parameterName)
+    {
+        RequireText(launch.Executable, parameterName);
+        RejectLineBreaks(launch.Executable, parameterName);
+        RejectCarriedTail(launch, parameterName);
+        List<string> tokens = [launch.Executable];
+        foreach (var argument in launch.Arguments)
+        {
+            RequireText(argument, parameterName);
+            RejectLineBreaks(argument, parameterName);
+            tokens.Add(argument);
+        }
+
+        return tokens;
+    }
+
+    private static void RejectCarriedTail(WatchdRunCommand launch, string parameterName)
+    {
+        var arguments = launch.Arguments;
+        if (arguments.Count >= 2 &&
+            arguments[^2] == WatchdVerb &&
+            arguments[^1] == AutostartFlag)
+        {
+            throw new ArgumentException(
+                "The unit appends 'watchd --autostart' to the launch pair — the arguments carry the " +
+                "tokens that come before it, not the verb and the flag themselves.",
+                parameterName);
+        }
+    }
 
     // systemd.exec(5): ExecStart expands both variables ($) and specifiers (%), Environment= expands
     // specifiers only — a "$" there is literal and doubling it would corrupt the path the process sees.
@@ -215,6 +302,14 @@ public static class WatchdUnitGenerator
             .Replace("<", "&lt;", StringComparison.Ordinal)
             .Replace(">", "&gt;", StringComparison.Ordinal);
 
+    private static void RequireText(string? value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"The value cannot be null or white space: {parameterName}.", parameterName);
+        }
+    }
+
     private static void RejectLineBreaks(string? value, string parameterName)
     {
         if (value is not null &&
@@ -227,6 +322,8 @@ public static class WatchdUnitGenerator
 
     // One level of argv escaping cannot protect a value that cmd.exe parses again: a quote here would
     // close the wrapper and the rest of the line would run as commands. "&" is safe inside the quotes.
+    // Every token of the launch pair sits inside /TR, so the rule covers the muxer and its payload the
+    // same way it covers a lone apphost.
     private static void RejectCmdQuote(string? value, string parameterName)
     {
         if (value is not null && value.Contains('"', StringComparison.Ordinal))

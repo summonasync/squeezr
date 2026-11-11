@@ -3,11 +3,12 @@ using Squeezr.Core.Infra.Autostart;
 namespace Squeezr.Cli.Infra.Autostart;
 
 // A unit names a program the init system execs on its own, with nobody in front of it to read a
-// managed assembly or to honour a shell alias. DaemonBinaryPath is not an executable resolver: it
-// answers with the entry assembly whenever the CLI runs through the muxer, and that file is a
-// library the platform will refuse. Install therefore checks what it is about to bake in and
-// refuses rather than rewriting the command with a muxer prefix — a unit that starts a different
-// program than the one the operator ran is a worse lie than an error line.
+// managed assembly or to honour a shell alias. Install therefore resolves a pair, not a path: when the
+// CLI itself runs through the dotnet muxer the entry names the muxer and carries the assembly as the
+// argument it loads, and when it runs from an apphost the entry names that apphost with no argument
+// behind it. This guard is the last line for the cases the resolver cannot fix, and it speaks about
+// the program token of that pair only — an assembly behind the muxer is a legal argument and is never
+// exec'ed, while an assembly in front of it is the unlaunchable unit the guard exists to stop.
 //
 // The rules live in Refusal, which answers with the reason instead of throwing: 'watchd installed'
 // reads the same verdict about a unit that is already on the machine, and a diagnostic has to report
@@ -60,7 +61,8 @@ internal static class Launchability
     }
 
     private static AutostartException Refused(string programPath, string reason) =>
-        new($"Cannot install autostart: '{programPath}' {reason}. " +
-            "Run 'squeezr watchd install' from the installed squeezr binary — the unit starts this " +
-            "program directly, with no muxer in front of it.");
+        new($"Cannot install autostart: '{programPath}' {reason}. The entry execs the first token of its " +
+            "command, and install puts the dotnet muxer in that position whenever squeezr itself runs " +
+            "through one — the assembly belongs behind it as an argument, never in front. Run 'squeezr " +
+            "watchd install' from the installed squeezr binary.");
 }

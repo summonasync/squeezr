@@ -9,6 +9,8 @@ public sealed class WatchdUnitProgramTests
     private const string Home = "/var/tmp/squeezr-home";
     private const string WindowsBinary = @"C:\Program Files\Squeezr\squeezr.exe";
     private const string WindowsHome = @"D:\squeezr home";
+    private const string WindowsDotnet = @"C:\Program Files\dotnet\dotnet.exe";
+    private const string WindowsPayload = @"C:\Program Files\Squeezr\squeezr.dll";
 
     // The task-XML shape for a task install created: schtasks stores the /TR payload as the action, and
     // cmd carries the env assignment in front of the program. Hand-written from the schema, and tied to
@@ -19,6 +21,12 @@ public sealed class WatchdUnitProgramTests
 
     private const string WrappedWholeLine =
         "cmd /c set \"SQUEEZR_HOME=D:\\squeezr home\" && \"C:\\Program Files\\Squeezr\\squeezr.exe\" watchd --autostart";
+
+    // The same wrapper around the pair T9 writes: the program the task starts is cmd, the program the
+    // entry runs is the muxer behind it, and the assembly is an argument neither of them execs.
+    private const string MuxedCmdPayload =
+        "/c set \"SQUEEZR_HOME=D:\\squeezr home\" && \"C:\\Program Files\\dotnet\\dotnet.exe\" " +
+        "\"C:\\Program Files\\Squeezr\\squeezr.dll\" watchd --autostart";
 
     [Theory]
     [InlineData(AutostartPlatform.SystemdUser)]
@@ -34,6 +42,28 @@ public sealed class WatchdUnitProgramTests
         command.ShouldNotBeNull();
         command.Executable.ShouldBe(program);
         command.Arguments.ShouldBe(["watchd", "--autostart"]);
+    }
+
+    // The T9 round trip on the shape install now writes from a muxed run: two quoted tokens on the
+    // ExecStart line, and the reader still answers with the program the init system execs — the muxer —
+    // with the assembly it loads as the argument in front of the verb. A reader that took the whole
+    // quoted run as one command would report the assembly as the program, which is the lie T9 ends.
+    [Theory]
+    [InlineData(AutostartPlatform.SystemdUser)]
+    [InlineData(AutostartPlatform.LaunchAgent)]
+    public void GenerateThenRead_MuxerPair_NamesTheMuxerAndCarriesTheAssembly(AutostartPlatform platform)
+    {
+        var muxer = TestProgram.Executable("dotnet");
+        var payload = Path.Combine(TestDirs.NewTempDir(), "squeezr.dll");
+        var launch = WatchdUnitGenerator.LaunchPair(muxer, payload);
+
+        var command = WatchdUnitProgram.Read(
+            platform,
+            WatchdUnitGenerator.Generate(platform, launch, Home));
+
+        command.ShouldNotBeNull();
+        command.Executable.ShouldBe(muxer);
+        command.Arguments.ShouldBe([payload, WatchdUnitGenerator.WatchdVerb, WatchdUnitGenerator.AutostartFlag]);
     }
 
     [Fact]
@@ -65,6 +95,22 @@ public sealed class WatchdUnitProgramTests
 
         command.ShouldNotBeNull();
         command.Executable.ShouldBe(WindowsBinary);
+    }
+
+    [Fact]
+    public void Read_OnWindows_UnwrapsTheCmdWrapperAroundTheMuxerPair()
+    {
+        var carried = $"""
+            <Task version="1.2">
+              <Actions><Exec><Command>cmd.exe</Command><Arguments>{Xml(MuxedCmdPayload)}</Arguments></Exec></Actions>
+            </Task>
+            """;
+
+        var command = WatchdUnitProgram.Read(AutostartPlatform.WindowsScheduledTask, carried);
+
+        command.ShouldNotBeNull();
+        command.Executable.ShouldBe(WindowsDotnet);
+        command.Arguments.ShouldBe([WindowsPayload, "watchd", "--autostart"]);
     }
 
     [Fact]
@@ -249,16 +295,23 @@ public sealed class WatchdUnitProgramTests
         File.Exists(gone).ShouldBeFalse();
     }
 
-    // The tie between the reader's fixtures and the writer's bytes: the cmd payload the tests above
-    // hand over is the same string install puts inside /TR, quoted the way the generator quotes it.
+    // The tie between the reader's fixtures and the writer's bytes: the cmd payload the tests above hand
+    // over is the same string install puts inside /TR, quoted the way the generator quotes it — both for
+    // the apphost form and for the pair.
     [Fact]
     public void GeneratorAndReader_AgreeOnTheCmdPayloadTheWindowsBranchWrites()
     {
         var line = WatchdUnitGenerator.Generate(AutostartPlatform.WindowsScheduledTask, WindowsBinary, WindowsHome);
+        var muxed = WatchdUnitGenerator.Generate(
+            AutostartPlatform.WindowsScheduledTask,
+            WatchdUnitGenerator.LaunchPair(WindowsDotnet, WindowsPayload),
+            WindowsHome);
 
         line.ShouldContain("""
             /TR "cmd /c set \"SQUEEZR_HOME=D:\squeezr home\" && \"C:\Program Files\Squeezr\squeezr.exe\" watchd --autostart"
             """);
+        var expectedTrToken = $"/TR \"cmd {MuxedCmdPayload.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+        muxed.ShouldContain(expectedTrToken);
     }
 
     private static string Xml(string value) =>

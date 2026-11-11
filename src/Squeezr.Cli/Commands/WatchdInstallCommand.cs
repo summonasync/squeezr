@@ -26,10 +26,9 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
         {
             SqueezrHome.RequireHabitableProfileHome();
             var platform = AutostartEnvironment.CurrentPlatform;
-            var binaryPath = new DaemonLauncher().DaemonBinaryPath();
             return await ApplyAsync(
                 platform,
-                binaryPath,
+                new DaemonLauncher().WatchdLaunchPair(),
                 AutostartEnvironment.ExplicitSqueezrHome(),
                 AutostartEnvironment.CreateApplier(platform, new AutostartProcessRunner()),
                 cancellationToken);
@@ -41,18 +40,19 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
         }
     }
 
-    // The guard belongs to the seam, not to the verb: every caller that hands over a program path
-    // (the command, the checks T4/T9 build on top of this) gets the same check before a byte is
-    // written, and none can step around it.
+    // The guard belongs to the seam, not to the verb: every caller that hands over a launch pair (the
+    // command, the checks T4/T9 build on top of this) gets the same check on the program it is about to
+    // bake in, and none can step around it. The payload token is not guarded — the init system never
+    // execs it, the program it sits behind loads it.
     internal static async Task<int> ApplyAsync(
         AutostartPlatform platform,
-        string binaryPath,
+        WatchdRunCommand launch,
         string? squeezrHome,
         IWatchdAutostartApplier applier,
         CancellationToken cancellationToken)
     {
-        Launchability.Require(platform, binaryPath);
-        var unitText = WatchdUnitGenerator.Generate(platform, binaryPath, squeezrHome);
+        Launchability.Require(platform, launch.Executable);
+        var unitText = WatchdUnitGenerator.Generate(platform, launch, squeezrHome);
         // The lock is read before the entry is applied, not after: once the init system has the unit up,
         // its own watchd holds the lock and no read can tell that instance from one the operator started
         // by hand. The read is all this does — install takes nothing, steals nothing and kills nothing,
@@ -95,8 +95,21 @@ public sealed class WatchdInstallCommand : AsyncCommand<WatchdInstallCommand.Set
             "the task's instance will refuse the lock at every logon until it is gone.",
     };
 
-    private static string RestartHint(AutostartPlatform platform) =>
-        platform == AutostartPlatform.SystemdUser
-            ? $", or restart the unit once it is gone: systemctl --user restart {WatchdUnitGenerator.DefaultUnitName}"
-            : string.Empty;
+    // Restarting is not free once the limit has tripped: systemd keeps refusing the start as "Start
+    // request repeated too quickly" until the window the unit declares has passed, and reset-failed
+    // flushes that counter instead of waiting (systemd.unit(5)). The line names both, because an exit
+    // the very next second refuses is not an exit the operator can use.
+    private static string RestartHint(AutostartPlatform platform)
+    {
+        if (platform != AutostartPlatform.SystemdUser)
+        {
+            return string.Empty;
+        }
+
+        var unit = WatchdUnitGenerator.DefaultUnitName;
+        var window = WatchdUnitGenerator.StartLimitWindowSeconds;
+        return $", or restart the unit once it is gone: systemctl --user reset-failed {unit} && " +
+               $"systemctl --user restart {unit} — until the {window}-second window the unit declares " +
+               "has passed, the limit keeps refusing the start";
+    }
 }

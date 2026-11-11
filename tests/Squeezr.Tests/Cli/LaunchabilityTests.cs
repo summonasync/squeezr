@@ -8,6 +8,7 @@ namespace Squeezr.Tests.Cli;
 public sealed class LaunchabilityTests
 {
     private const string RemedyFragment = "installed squeezr binary";
+    private const string StaleRemedyFragment = "no muxer in front";
 
     [LinuxFact]
     public void Require_WhenTheProgramCarriesTheExecuteBit_AcceptsIt()
@@ -15,6 +16,17 @@ public sealed class LaunchabilityTests
         var program = TestProgram.Executable("squeezr");
 
         Should.NotThrow(() => Launchability.Require(AutostartPlatform.SystemdUser, program));
+    }
+
+    // The head of the pair install writes when it runs through the muxer: the host is an ordinary
+    // executable, so the guard that refuses a bare assembly has to accept the muxer in front of it —
+    // the assembly it loads is an argument and never reaches this check at all.
+    [LinuxFact]
+    public void Require_WhenTheProgramIsTheDotnetMuxer_AcceptsIt()
+    {
+        var muxer = TestProgram.Executable("dotnet");
+
+        Should.NotThrow(() => Launchability.Require(AutostartPlatform.SystemdUser, muxer));
     }
 
     [LinuxFact]
@@ -42,7 +54,9 @@ public sealed class LaunchabilityTests
     }
 
     // The execute bit alone is not enough: an assembly that was chmod'ed anyway still cannot be the
-    // program a unit names, and the guard says so before the bit is ever read.
+    // program a unit names, and the guard says so before the bit is ever read. The advice beside the
+    // reason is the half that changed in T9 — the pair shape is supported now, so the line has to
+    // describe the muxer install puts in front of an assembly instead of blaming its absence.
     [LinuxFact]
     public void Require_WhenTheAssemblyCarriesTheExecuteBit_StillRefusesAsAManagedAssembly()
     {
@@ -53,6 +67,9 @@ public sealed class LaunchabilityTests
 
         error.Message.ShouldContain(program);
         error.Message.ShouldContain("managed assembly");
+        error.Message.ShouldContain("dotnet muxer");
+        error.Message.ShouldContain(RemedyFragment);
+        error.Message.ShouldNotContain(StaleRemedyFragment);
     }
 
     [Fact]

@@ -83,6 +83,34 @@ public sealed class WatchdInstalledCliTests
                                                 line.Contains(InstallHint, StringComparison.Ordinal));
     }
 
+    // The T9 shape read back: the entry can be sound about its program and broken about the payload it
+    // loads. systemd starts the muxer, the muxer refuses a missing assembly and exits non-zero — so a
+    // reader that only looked at the first token would call this 'installed' while the unit crash-loops.
+    [Fact]
+    public async Task Installed_WhenTheMuxerIsThereButTheAssemblyItLoadsIsGone_SaysBinaryMissing()
+    {
+        var muxer = TestProgram.Executable("dotnet");
+        var gone = Path.Combine(TestDirs.NewTempDir(), "2.0.0", "squeezr.dll");
+        var unit = WatchdUnitGenerator.Generate(
+            AutostartPlatform.SystemdUser, WatchdUnitGenerator.LaunchPair(muxer, gone));
+        File.Exists(gone).ShouldBeFalse();
+        var applier = Applier(Entry(
+            WatchdUnitAnswer.Yes, WatchdUnitAnswer.Yes, WatchdUnitAnswer.No, WatchdUnitAnswer.Yes, unit));
+
+        var result = await RunAsync(applier);
+
+        result.Exit.ShouldBe(WatchdInstalledVerdict.Broken);
+        Lines(result.Out).ShouldContain("status=installed-but-binary-missing");
+        Lines(result.Out).ShouldContain($"program={muxer}");
+        Lines(result.Out).ShouldContain($"arguments={gone} watchd --autostart");
+        // The complaint names the payload, not the head: the muxer passed the same launchability rules
+        // install applies, so the missing assembly is the only thing this entry can be broken about.
+        Lines(result.Out).ShouldContain(
+            $"program-state=the path '{gone}' the entry passes to the program does not exist");
+        Lines(result.Out).ShouldContain(line => line.StartsWith("hint=", StringComparison.Ordinal) &&
+                                                line.Contains(InstallHint, StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Installed_WhenTheManagerReportsTheEntryFailed_SaysUnitFailedAndNotMissing()
     {

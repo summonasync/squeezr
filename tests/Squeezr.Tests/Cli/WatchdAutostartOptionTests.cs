@@ -43,7 +43,13 @@ public sealed class WatchdAutostartOptionTests
                      AutostartPlatform.WindowsScheduledTask,
                  })
         {
+            // Both launch shapes: the apphost alone, and the muxer pair T9 adds a token in front of the
+            // verb — the flag the supervisor binds on has to survive either way.
             WatchdUnitGenerator.Generate(platform, "/opt/squeezr/squeezr")
+                .ShouldContain(WatchdUnitGenerator.AutostartFlag);
+            WatchdUnitGenerator.Generate(
+                    platform,
+                    WatchdUnitGenerator.LaunchPair("/usr/bin/dotnet", "/opt/squeezr/squeezr.dll"))
                 .ShouldContain(WatchdUnitGenerator.AutostartFlag);
         }
     }
