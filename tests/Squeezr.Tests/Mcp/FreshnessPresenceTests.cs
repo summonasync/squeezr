@@ -227,8 +227,14 @@ public class FreshnessPresenceTests
     // The answer-level shape of the refresh budget: files the check reached and the call refused to re-read
     // arrive named, counted, priced and still stale. Which of the two caps bound first is a wall-clock
     // property of the machine running the test, so this pins the band both caps imply, never one exact split.
-    [Fact]
-    public async Task CodeSearch_WhereTheBudgetRefusedAReRead_NamesIt_CountsIt_AndPricesIt()
+    // The pin was authored against code_search (017/T4, review-017-06 NB-4); all three content tools run
+    // the same capped guard and ship the same budget line, so the shape is pinned over the trio, not held
+    // by reading for two of them.
+    [Theory]
+    [InlineData("code_search")]
+    [InlineData("symbol_lookup")]
+    [InlineData("find_references")]
+    public async Task WhereTheBudgetRefusedAReRead_NamesIt_CountsIt_AndPricesIt(string tool)
     {
         var stale = RefreshBudget.MaxFilesReRead + 2;
         var workspace = WideIndexedWorkspace(stale);
@@ -239,9 +245,7 @@ public class FreshnessPresenceTests
 
         await using var harness = await McpTestHarness.StartAsync(workspace);
         var envelope = ParseEnvelope(await harness.Client.CallToolAsync(
-            "code_search",
-            new Dictionary<string, object?> { ["query"] = "Add" },
-            cancellationToken: CancellationToken.None));
+            tool, BudgetRefusalArgs(tool), cancellationToken: CancellationToken.None));
         var claim = Freshness(envelope);
         var warnings = Warnings(envelope);
 
@@ -259,8 +263,20 @@ public class FreshnessPresenceTests
         Int(claim, "staleTotal").ShouldBe(unrefreshed,
             "no re-read failed on this fixture, so every stale row is a refusal and the two counts must agree");
         Int(claim, "listed").ShouldBe(unrefreshed);
-        Int(claim, "laggingFiles").ShouldBe(unrefreshed,
-            "a row the budget refused is lagging in fileFreshness too — the answer loses nothing");
+        // the per-file lag claim only exists where the answer carries per-file rows: find_references over
+        // uncalled definitions ships a data set with no file verdicts at all, and there a lagging count of
+        // zero is the honest shape — an answer may only tally the files it actually calls lagging
+        if (envelope.TryGetProperty("fileFreshness", out var verdicts) && verdicts.ValueKind == JsonValueKind.Array)
+        {
+            Int(claim, "laggingFiles").ShouldBe(unrefreshed,
+                "a row the budget refused is lagging in fileFreshness too — the answer loses nothing");
+        }
+        else
+        {
+            Int(claim, "laggingFiles").ShouldBe(0,
+                $"{tool}: no shipped fileFreshness verdicts means nothing is claimed as lagging");
+        }
+
         envelope.GetProperty("staleFiles").EnumerateArray().Count().ShouldBe(unrefreshed);
         envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue(
             "complete is a claim about the verdict, and the verdict is named whole here — the budget is not a " +
@@ -275,6 +291,15 @@ public class FreshnessPresenceTests
         Int(claim, "freshnessTokens").ShouldBe(DeclaredByTheShippedBytes(envelope, claim, warnings),
             "the budget line is a shipped line, so it rides in the declared price like every other one");
     }
+
+    // every tool names the same six Add definitions, so one symbol answers all three and the candidate
+    // sets — and therefore the refusal counts — are identical across the trio
+    private static Dictionary<string, object?> BudgetRefusalArgs(string tool) => tool switch
+    {
+        "symbol_lookup" => new() { ["name"] = "Add" },
+        "find_references" => new() { ["symbol"] = "Add" },
+        _ => new() { ["query"] = "Add" },
+    };
 
     [Fact]
     public async Task CheckedTools_DeclareTheirClass_AggregateToolsDeclareNothing()
