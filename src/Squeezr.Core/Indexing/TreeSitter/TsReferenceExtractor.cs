@@ -52,8 +52,9 @@ internal static class TsReferenceExtractor
     // quietly read javascript's fields
     //
     // the price, paid on purpose: an enum switch expression without a default arm also reports CS8524
-    // forever, because a reader value could in principle be an unnamed one — '(ReferenceReader)3' — that
-    // no named arm covers, so this line and the type-target line below are two permanent warnings in
+    // forever, because a reader value could in principle be an unnamed one — the compiler names the value
+    // just past the last declared reader — that no named arm covers, so this line and the type-target line
+    // below are two permanent warnings in
     // every build (the solution baseline moved 37 -> 39 with them). Do not 'fix' that with a default arm:
     // a default swallows the one compile-time signal this design exists to get, and a new language would
     // silently read somebody else's node fields again — the day a reader value really arrives unnamed, the
@@ -62,6 +63,7 @@ internal static class TsReferenceExtractor
         rules.Reader switch
         {
             ReferenceReader.Python => PythonImportRefs(node, fromPath, refs),
+            ReferenceReader.Go => GoImportRefs(node, fromPath, refs),
             ReferenceReader.Rust => RustUseRefs(node, fromPath, refs),
             ReferenceReader.JsTs => node.Type switch
             {
@@ -127,6 +129,145 @@ internal static class TsReferenceExtractor
 
         return true;
     }
+
+    // go's import shapes read from go: a spec's path is the identity of the package it pulls in, and the
+    // name the file can type is the LAST element of that path unless the spec says otherwise —
+    // 'import "net/http"' gives 'http'. An alias (a package_identifier in the name field) wins outright;
+    // a dot-import ('. "strings"') binds every export of the package under their own names, so no single
+    // name can be recorded and the row anchors on the package the way a rust globbed use and a python
+    // 'from x import *' do; and a blank name ('_ "database/sql"') is a side-effect import that binds
+    // NOTHING, so it emits no row at all — the same refusal go's symbol table applies to the blank
+    // identifier. Unlike python, where a dotted path binds its FIRST element, the module column here
+    // keeps the whole quoted path because that path is what the import statement actually resolved
+    private static bool GoImportRefs(Node node, string fromPath, List<SymbolRef> refs)
+    {
+        var line = node.StartPosition.Row + 1;
+        foreach (var spec in GoImportSpecs(node))
+        {
+            var path = TrimImportPath(spec.GetChildForField("path")?.Text);
+            if (path is null)
+            {
+                continue;
+            }
+
+            var declared = spec.GetChildForField("name");
+            if (declared?.Type == "blank_identifier")
+            {
+                continue;
+            }
+
+            var binding = declared?.Type switch
+            {
+                null => GoPackageOf(path),
+                "package_identifier" => declared.Text,
+                "dot" => GoPackageOf(path),
+                _ => null,
+            };
+            if (binding is not null)
+            {
+                refs.Add(new SymbolRef(path, binding, RefKind.Import, line, fromPath));
+            }
+        }
+
+        return true;
+    }
+
+    // a single 'import "os"' hangs its spec off the declaration directly; the parenthesised form wraps
+    // them in an import_spec_list
+    private static IEnumerable<Node> GoImportSpecs(Node importDeclaration) =>
+        importDeclaration.NamedChildren.Any(c => c.Type == "import_spec_list")
+            ? importDeclaration.NamedChildren.Where(c => c.Type == "import_spec_list")
+                .SelectMany(list => list.NamedChildren.Where(c => c.Type == "import_spec"))
+            : importDeclaration.NamedChildren.Where(c => c.Type == "import_spec");
+
+    private static string? TrimImportPath(string? quoted) =>
+        quoted is null ? null : quoted.Trim('"');
+
+    private static string GoPackageOf(string path)
+    {
+        var slash = path.LastIndexOf('/');
+        return slash < 0 ? path : path[(slash + 1)..];
+    }
+
+    // go's type relations, all read from the positions that name a type rather than define one:
+    //  - a struct field with no name field EMBEDS its type — go's inheritance — and gets RefKind.Inherit
+    //    the way a python base class does; a named field is a use, RefKind.Reference. A field whose name
+    //    is the blank discards the slot: it binds nothing and embeds nothing, so no edge is signed for it
+    //    (the symbol side refuses the same blank — B-1). Two names for one type ('a, b Base') is ONE edge,
+    //    not two: the grammar's name field is only the first identifier, and a per-name reading would sign
+    //    the same span twice — the multi-name refusal the symbol row already makes (B-2), applied to a use
+    //  - an interface's embedded element is inheritance too, read as a type_elem whose PARENT is the
+    //    interface_type: measured over a file with both an embedded element and a generic instantiation
+    //    ('Store' in an interface, 'int' in 'Generic[int]'), tree-sitter-go spells both as type_elem, so
+    //    the parent is the only thing separating 'embeds a type' from 'instantiates with one' — and the
+    //    instantiation argument is an aggregate-position use, out of scope like the others above
+    //  - a type_spec or type_alias whose assigned type is another named type is a use, while
+    //    'type T struct{…}' and 'type T interface{…}' DEFINE and produce no edge of their own — their
+    //    fields and elements are read on their own account.
+    // Deliberately out of scope, and pinned as a fence rather than left implied: element types inside
+    // aggregates ('[]Measure', 'map[string]Item', 'chan Signal') and inside function types, because a
+    // field of type 'map[string]int' is not a use of 'int' in the sense a reader of the struct wants, and
+    // unwrapping them would fill the pool with builtin names. Composite literals ('Store{}', the shape go
+    // reaches for where rust writes 'Registry { … }' and javascript 'new Ledger()') stay edge-less for the
+    // same reason the other two do — construction is not a reference
+    private static List<SymbolRef> GoTypeTargetRows(Node node, string fromPath)
+    {
+        var rows = new List<SymbolRef>();
+        var line = node.StartPosition.Row + 1;
+        switch (node.Type)
+        {
+            case "field_declaration":
+                var name = node.GetChildForField("name");
+                if (name?.Text == "_")
+                {
+                    break;
+                }
+
+                // no name field at all means the field IS the embedded type
+                AddGoTypeTarget(rows, node.GetChildForField("type"),
+                    name is null ? RefKind.Inherit : RefKind.Reference, line, fromPath);
+                break;
+            case "type_elem" when node.Parent?.Type == "interface_type":
+                AddGoTypeTarget(rows, node.NamedChildren.FirstOrDefault(), RefKind.Inherit, line, fromPath);
+                break;
+            case "type_spec" or "type_alias":
+                // 'type T struct{}' defines; 'type T Measure' and 'type Alias = Store' name something else
+                if (node.GetChildForField("type")?.Type is not ("struct_type" or "interface_type"))
+                {
+                    AddGoTypeTarget(rows, node.GetChildForField("type"), RefKind.Reference, line, fromPath);
+                }
+
+                break;
+        }
+
+        return rows;
+    }
+
+    private static void AddGoTypeTarget(List<SymbolRef> rows, Node? type, RefKind kind, int line, string fromPath)
+    {
+        var (module, name) = GoTypeName(type);
+        if (name is null)
+        {
+            return;
+        }
+
+        rows.Add(new SymbolRef(module, name, kind, line, fromPath));
+    }
+
+    // the nameable shapes, per the measured fields: type_identifier names itself, qualified_type keeps
+    // its package in the module column ('http.Handler' → package 'http', type 'Handler'), pointer_type
+    // wraps a named type through its last named child (pointer_type has no 'type' field, measured) and
+    // generic_type through its 'type' field. Anything else — the aggregates and function types — is
+    // reported as nameless so no edge is invented for it
+    private static (string? Module, string? Name) GoTypeName(Node? type) => type?.Type switch
+    {
+        "type_identifier" => (null, type.Text),
+        "qualified_type" when type.GetChildForField("name") is { } qualified =>
+            (type.NamedChildren.FirstOrDefault()?.Text, qualified.Text),
+        "pointer_type" => GoTypeName(type.NamedChildren.LastOrDefault()),
+        "generic_type" => GoTypeName(type.GetChildForField("type")),
+        _ => (null, null),
+    };
 
     private static bool IsPythonBindingNode(Node child) =>
         child.Type is "dotted_name" or "aliased_import";
@@ -305,6 +446,7 @@ internal static class TsReferenceExtractor
         refs.AddRange(rules.Reader switch
         {
             ReferenceReader.Python => PythonClassTargetRows(node, fromPath),
+            ReferenceReader.Go => GoTypeTargetRows(node, fromPath),
             ReferenceReader.Rust => RustImplTargetRows(node, fromPath),
             // javascript declares no type targets (its TypeTargetTypes is empty), and saying so is what
             // keeps the row honest in the home rather than inherited from an arm it never reaches
@@ -435,6 +577,11 @@ internal static class TsReferenceExtractor
             // is only reached through a python call
             { Type: "attribute" } fn => fn.GetChildForField("attribute")?.Text,
             { Type: "field_expression" } fn => fn.GetChildForField("field")?.Text,
+            // go's qualified callee: 'fmt.Println' is selector_expression(operand='fmt', field='Println'),
+            // so the name is the member — go's own field spelling, which differs from javascript's
+            // 'property' on member_expression even though all three grammars call the call node
+            // call_expression. The receiver's identity is not part of the name, exactly as in the others
+            { Type: "selector_expression" } fn => fn.GetChildForField("field")?.Text,
             { Type: "scoped_identifier" } fn => fn.GetChildForField("name")?.Text,
             _ => null,
         },
@@ -466,6 +613,15 @@ internal static class TsReferenceExtractor
             if (TsSymbolExtractor.NameOf(current) is { } name)
             {
                 names.Insert(0, name);
+
+                // go's method owner hangs on the method as a field, not as an enclosing node, so the walk
+                // above cannot see it: without this a call inside 'func (s *Store) Put' would enclose as
+                // bare 'Put' while the symbol row it stands in reads ContainerName 'Store' + Name 'Put'
+                if (current.Type == "method_declaration"
+                    && TsSymbolExtractor.GoMethodOwnerName(current) is { } owner)
+                {
+                    names.Insert(0, owner);
+                }
             }
         }
 

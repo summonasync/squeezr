@@ -27,6 +27,7 @@ internal enum ReferenceReader
     JsTs,
     Rust,
     Python,
+    Go,
 }
 
 // The single home of tree-sitter language knowledge: which languages are routed, which node types
@@ -170,6 +171,29 @@ internal static class TreeSitterLanguages
             "method_declaration",
         });
 
+    // read off tree-sitter-go itself (TreeSitterSpikeTests.Go_CallExpressions_…, Go_ImportSpecs_…,
+    // Go_EmbeddedFieldsAndElements_…, Go_CallExpressionIsSharedWithJavascriptAndRust_…): a call is a
+    // 'call_expression' — the SAME kind name javascript and rust use for theirs — with the callee in field
+    // 'function', which is either an identifier or a selector_expression whose member sits in field
+    // 'field' (go's answer to javascript's 'property' and rust's field_expression). An import is an
+    // 'import_declaration' whose specs carry a quoted path and, only when the file writes one, a name
+    // field whose KIND names the form: package_identifier (alias), dot ('.' import) or blank_identifier
+    // (side-effect). Type relations are the positions where a declaration names another type: a struct
+    // field (named = a use, nameless = go's embedding), an interface's embedded element, and the type a
+    // type_spec or type_alias assigns
+    private static readonly ReferenceVocabulary GoReferences = new(
+        GoPool,
+        new HashSet<string>(StringComparer.Ordinal) { "call_expression" },
+        new HashSet<string>(StringComparer.Ordinal) { "import_declaration" },
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "field_declaration",
+            "type_elem",
+            "type_spec",
+            "type_alias",
+        },
+        ReferenceReader.Go);
+
     private static readonly SymbolVocabulary NoSymbols = new(
         new Dictionary<string, SymbolKind>(StringComparer.Ordinal),
         new HashSet<string>(StringComparer.Ordinal));
@@ -213,11 +237,9 @@ internal static class TreeSitterLanguages
         // this row
         [Python] = new LanguageSet(PythonSymbols, PythonReferences),
 
-        // go's symbol table is the flip — Routed derives from it — and it lands alone: the reference
-        // rules and the pool are T5's, which puts go back in the middle state python passed through in
-        // T2 (routed, pool-less), so that state is occupied again and pinned as such in the registration
-        // tests rather than being a historical footnote
-        [Go] = new LanguageSet(GoSymbols, null),
+        // go's symbol table is the flip and its reference table gives it its own pool, the fourth in the
+        // home: a go file's edges can only ever bind go symbols, which is what the firewall tests read
+        [Go] = new LanguageSet(GoSymbols, GoReferences),
     };
 
     // routing is 'has a symbol vocabulary', not 'has a row here': a routed file is taken off the

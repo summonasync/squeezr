@@ -456,9 +456,10 @@ public class TreeSitterProviderTests
     // T1's two placeholder arms are both gone: python took its table in T2 and go in T4, so no
     // registered language answers with an empty vocabulary any more. What the tripwire was protecting
     // — 'a registered language that is not routed keeps the fallback chunker' — is now pinned against
-    // an unknown label in the registration tests, and this file pins the state go is actually in
+    // an unknown label in the registration tests. The go row below is the T4 fence flipped on schedule:
+    // same source, same symbol row, and now the two edges T5 was hired to sign
     [Fact]
-    public void Go_RoutedWithSymbolsButNoReferenceRules_YieldsRowsWithoutEdges()
+    public void Go_RoutedWithReferenceRules_EmitsImportAndQualifiedCallRows()
     {
         var provider = new TreeSitterProvider(Config);
         var result = provider.Parse(
@@ -466,14 +467,19 @@ public class TreeSitterProviderTests
             Encoding.UTF8.GetBytes(
                 "package main\n\nimport \"fmt\"\n\nfunc Serve(path string) string {\n  fmt.Println(path)\n  return path\n}\n"));
 
-        // the middle state read through the provider: the symbol table is live (so rows and per-symbol
-        // chunks appear) and the reference vocabulary is still null, so a real call in the file body
-        // emits no edge — T5 fills the second half and this test flips to its rows, the way python's
-        // equivalent flipped in T3
         provider.Warnings.ShouldBeEmpty();
         result.Language.ShouldBe("go");
         result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([("Serve", SymbolKind.Function)]);
-        result.Refs.ShouldBe([]);
+
+        // the import names the package the file can now type ('fmt', read off the last element of the
+        // quoted path) and keeps that path in the module column; the qualified call names its MEMBER,
+        // 'Println', because 'fmt' is the package and a member is what an agent searches for. Both sit
+        // inside 'Serve' the way the python rows sit inside 'load' above
+        result.Refs.Select(r => (r.ToSymbolId, r.ToName, r.Kind, r.Line, r.EnclosingName)).ShouldBe(
+        [
+            ("fmt", "fmt", RefKind.Import, 3, null),
+            (null, "Println", RefKind.Call, 6, "Serve"),
+        ]);
         result.Chunks.Count.ShouldBe(1);
     }
 

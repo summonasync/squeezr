@@ -4,17 +4,21 @@ using Squeezr.Core.Indexing.TreeSitter;
 namespace Squeezr.Tests.Indexing.TreeSitter;
 
 // Registration-only state: this class pins the line between 'known' and 'handled' that each language
-// crosses on two separate days. python crossed both (symbol table in T2, references in T3); go crossed
-// the first in T4 and is now the resident of the middle state — routed, and with no reference pool until
-// T5. No language is left registered ahead of its vocabulary, which the last test in this file states
-// as an invariant because it is what keeps the zero-chunk trap unwritable.
+// crosses on two separate days. python crossed both (symbol table in T2, references in T3) and go after
+// it (T4, T5). What that leaves is worth saying out loud: the middle state — routed, pool-less — no
+// longer has a resident, so the two-axis design can no longer be pinned by pointing at a language that
+// sits in it. It is pinned instead by the shape both axes still have to agree on: four grammars, four
+// pools, and each row naming its own reader. No language is registered ahead of its vocabulary either,
+// which the last test in this file states as an invariant because it is what keeps the zero-chunk trap
+// unwritable.
 public class TreeSitterLanguagesRegistrationTests
 {
     // Two axes that grow on different days, so they get two theories: a language joins this first list
     // the day its symbol vocabulary lands (python in T2, go in T4) — routing is derived from that row —
-    // and only later the second, when its reference rules land (python in T3, go in T5). A routed language
-    // with no reference rules is a legal state, and go is in it right now; the second list below is what
-    // says whether a language is still there
+    // and only later the second, when its reference rules land (python in T3, go in T5). The second theory
+    // is where that lag shows: with both languages caught up, every routed language is pool-bearing, so
+    // the lists below are equal — and stay worth keeping apart, because the state they separate is the
+    // one the next language will be born in
     [Theory]
     [InlineData(TreeSitterLanguages.JavaScript)]
     [InlineData(TreeSitterLanguages.TypeScript)]
@@ -34,18 +38,19 @@ public class TreeSitterLanguagesRegistrationTests
     [InlineData(TreeSitterLanguages.Tsx)]
     [InlineData(TreeSitterLanguages.Rust)]
     [InlineData(TreeSitterLanguages.Python)]
+    [InlineData(TreeSitterLanguages.Go)]
     public void PoolBearingLanguage_CarriesAReferencePool(string language)
     {
         TreeSitterLanguages.ReferencesFor(language).ShouldNotBeNull();
         TreeSitterLanguages.ReferencePoolFor(language).ShouldNotBeNullOrEmpty();
     }
 
-    // go took the routing flip in T4 by landing a symbol table, and the reference rules are T5's, so
-    // this is the state python passed through in T2 — the proof that the two axes really are separate
-    // rows, now with a live resident instead of a historical note. It also replaces T1's
-    // 'registered-but-unrouted' case, whose subject disappeared when the last placeholder row filled
+    // go's two rows in one place, because T5 is the day they stopped being one-sided: the symbol table
+    // landed in T4 and keeps its shape, and the reference row now names a fourth pool plus a fourth
+    // reader. Both halves are asserted here so a later edit that hands go somebody else's pool has to
+    // pass through this test
     [Fact]
-    public void GoSymbols_LandedAlone_RoutedWithoutReferenceRules()
+    public void GoReferenceRules_LandedInItsOwnPool_WithItsOwnReader()
     {
         TreeSitterLanguages.Routed(TreeSitterLanguages.Go).ShouldBeTrue();
 
@@ -56,10 +61,24 @@ public class TreeSitterLanguagesRegistrationTests
         TreeSitterLanguages.SymbolsFor(TreeSitterLanguages.Go).ContainerTypes
             .ShouldBe(["type_spec", "type_alias", "function_declaration", "method_declaration"], ignoreOrder: true);
 
-        // no pool yet, and — the part that matters for T5 — no borrowing one either: the phase has to
-        // skip this language for reference rows rather than fall through to a neighbour's pool
-        TreeSitterLanguages.ReferencesFor(TreeSitterLanguages.Go).ShouldBeNull();
-        TreeSitterLanguages.ReferencePoolFor(TreeSitterLanguages.Go).ShouldBeNull();
+        var rules = TreeSitterLanguages.ReferencesFor(TreeSitterLanguages.Go);
+        rules.ShouldNotBeNull();
+        rules!.Pool.ShouldBe(TreeSitterLanguages.GoPool);
+        rules.Reader.ShouldBe(ReferenceReader.Go);
+        rules.CallTypes.ShouldBe(["call_expression"], ignoreOrder: true);
+        rules.ImportTypes.ShouldBe(["import_declaration"], ignoreOrder: true);
+        rules.TypeTargetTypes.ShouldBe(
+            ["field_declaration", "type_elem", "type_spec", "type_alias"], ignoreOrder: true);
+
+        // four grammars, four pools: a go file's edges may only ever bind go symbols
+        var pools = new[]
+        {
+            TreeSitterLanguages.ReferencePoolFor(TreeSitterLanguages.JavaScript),
+            TreeSitterLanguages.ReferencePoolFor(TreeSitterLanguages.Rust),
+            TreeSitterLanguages.ReferencePoolFor(TreeSitterLanguages.Python),
+            TreeSitterLanguages.ReferencePoolFor(TreeSitterLanguages.Go),
+        };
+        pools.Distinct().Count().ShouldBe(4);
     }
 
     [Fact]

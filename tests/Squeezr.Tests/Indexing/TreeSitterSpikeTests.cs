@@ -1241,6 +1241,306 @@ public class TreeSitterSpikeTests
         pyTree.RootNode!.Type.ShouldBe("module");
     }
 
+    // the reference-class shapes of tree-sitter-go, measured before GoReferences was written; like the
+    // python block above, nothing here is inferred from another grammar's names
+    private const string GoReferenceSource = """
+        package registry
+
+        import (
+            "fmt"
+            http "net/http"
+            . "strings"
+            _ "database/sql"
+        )
+        import "os"
+
+        type Store struct {
+            handler http.Handler
+            items   map[string]Item
+            list    []Measure
+            ptr     *Widget
+            emb
+        }
+
+        type Set interface {
+            Store
+            Do() error
+        }
+
+        type Alias = Store
+
+        func (s *Store) Put(key string) error {
+            fmt.Println(key)
+            http.HandleFunc("/", nil)
+            helper(1)
+            s2 := &Store{}
+            return nil
+        }
+
+        func helper(n int) int {
+            return n
+        }
+        """;
+
+    [Fact]
+    public void Go_CallExpressions_NameTheFieldOfTheSelector()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoReferenceSource);
+        var calls = CollectNodes(tree.RootNode!).Where(n => n.Type == "call_expression").ToList();
+
+        // go's call node is called call_expression — the SAME name javascript and rust use — while the
+        // member name lives in a field none of the others have: go says 'field', javascript says
+        // 'property' on member_expression, rust says 'field' on field_expression. Three grammars, one
+        // judgement, three field names, and one shared node kind for the call itself
+        calls.Count(c => c.GetChildForField("function") is not null).ShouldBe(calls.Count);
+        var qualified = calls.Single(c => c.Text == "fmt.Println(key)");
+        var selector = qualified.GetChildForField("function")!;
+        selector.Type.ShouldBe("selector_expression");
+        selector.GetChildForField("field")!.Text.ShouldBe("Println");
+        selector.GetChildForField("operand")!.Text.ShouldBe("fmt");
+
+        var bare = calls.Single(c => c.Text == "helper(1)");
+        bare.GetChildForField("function")!.Type.ShouldBe("identifier");
+        bare.GetChildForField("function")!.Text.ShouldBe("helper");
+
+        // a method call on a variable is a selector like any other, so 's.Put' inside a method body would
+        // name 'Put' — the same best-effort javascript and rust make of a member call
+        calls.ShouldContain(c => c.Text == "http.HandleFunc(\"/\", nil)");
+
+        // and a composite literal is NOT a call: it has its own kind with an addressable type name, so
+        // leaving it edge-less is a decision the extractor makes, not something the grammar forces
+        var literal = CollectNodes(tree.RootNode!).Single(n => n.Type == "composite_literal");
+        literal.GetChildForField("type")!.Text.ShouldBe("Store");
+    }
+
+    [Fact]
+    public void Go_ImportSpecs_BindTheLastPathElementUnlessNamed()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoReferenceSource);
+        var specs = CollectNodes(tree.RootNode!).Where(n => n.Type == "import_spec").ToList();
+        specs.Count.ShouldBe(5);
+
+        // the path is a quoted literal and the spec's 'name' field is present ONLY when the file writes
+        // one, and its kind says which of the three special forms it is: an alias (package_identifier),
+        // a dot-import ('.' as a node of kind dot), or a side-effect import (blank_identifier). Nothing in
+        // the node kind distinguishes them from each other except by these kinds, so the reader has to
+        // look at three names, not one
+        specs.Select(s => (s.GetChildForField("name")?.Type ?? "none")).ShouldBe(
+            ["none", "package_identifier", "dot", "blank_identifier", "none"]);
+        specs.Select(s => s.GetChildForField("path")!.Text).ShouldBe(
+            ["\"fmt\"", "\"net/http\"", "\"strings\"", "\"database/sql\"", "\"os\""]);
+        specs.Single(s => s.Text.Contains("http \"", StringComparison.Ordinal))
+            .GetChildForField("name")!.Text.ShouldBe("http");
+
+        // the form the binding rule exists for, measured on its own: an un-aliased multi-element path carries
+        // NO name field, so the reader must derive the binding from the path text — and the file can only
+        // ever type the LAST element ('json.Marshal'), the exact inverse of python's top-package rule
+        // (BLOCKER-1 read from the other side of the wall). The selector node is the evidence that 'json'
+        // is the name in scope, not a guess from the path string
+        using var bareParser = new Parser(new Language("Go"));
+        using var bareTree = Parse(bareParser, """
+            package p
+
+            import "encoding/json"
+
+            func Use() {
+                json.Marshal(1)
+            }
+            """);
+        var bareSpec = CollectNodes(bareTree.RootNode!).Single(n => n.Type == "import_spec");
+        bareSpec.GetChildForField("name").ShouldBeNull();
+        bareSpec.GetChildForField("path")!.Text.ShouldBe("\"encoding/json\"");
+        var selector = CollectNodes(bareTree.RootNode!).Single(n => n.Type == "selector_expression");
+        selector.GetChildForField("operand")!.Text.ShouldBe("json");
+        selector.GetChildForField("field")!.Text.ShouldBe("Marshal");
+
+        // two container shapes: the parenthesised group wraps its specs in import_spec_list, the single
+        // 'import "os"' form hangs the spec directly off import_declaration
+        CollectNodes(tree.RootNode!).Count(n => n.Type == "import_spec_list").ShouldBe(1);
+        CollectNodes(tree.RootNode!).Single(n => n.Text == "import \"os\"")
+            .NamedChildren.Single().Type.ShouldBe("import_spec");
+    }
+
+    [Fact]
+    public void Go_EmbeddedFieldsAndElements_CarryNoNameField()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, GoReferenceSource);
+
+        // embedding is go's inheritance, and the grammar marks it by ABSENCE: an embedded struct field
+        // and an embedded interface element are the same node kinds as their named cousins minus the name
+        // field, so a reader that took every field_declaration or type_elem as a reference would name the
+        // base as a mere user of the type
+        var embedded = CollectNodes(tree.RootNode!).Where(n =>
+            n.Type == "field_declaration" && n.GetChildForField("name") is null).ToList();
+        embedded.Select(n => n.GetChildForField("type")!.Text).ShouldBe(["emb"]);
+        var named = CollectNodes(tree.RootNode!).Where(n =>
+            n.Type == "field_declaration" && n.GetChildForField("name") is not null).ToList();
+        named.Select(n => n.GetChildForField("name")!.Text).ShouldBe(["handler", "items", "list", "ptr"]);
+
+        var elements = CollectNodes(tree.RootNode!).Where(n => n.Type == "type_elem").ToList();
+        elements.ShouldHaveSingleItem();
+        elements[0].GetChildForField("name").ShouldBeNull();
+        elements[0].NamedChildren.Single().Type.ShouldBe("type_identifier");
+        elements[0].Text.ShouldBe("Store");
+
+        // where the kind actually lives: measured over a file with unnamed parameters and a grouped
+        // import, an unnamed parameter is a parameter_declaration with no name field — not a type_elem —
+        // and every type_elem here sat directly in an interface_type. The parent check is not decoration:
+        // the next block shows the same kind reused for generic instantiation arguments
+        using var shapeParser = new Parser(new Language("Go"));
+        using var shapeTree = Parse(shapeParser, """
+            package p
+
+            type Iface interface {
+                Reader
+                Do() error
+            }
+
+            type Reader struct{}
+
+            func Take(fn func(int) error, _ string) (n int, err error) {
+                _ = fn
+                return 0, nil
+            }
+            """);
+        var everyElem = CollectNodes(shapeTree.RootNode!).Where(n => n.Type == "type_elem").ToList();
+        everyElem.Select(e => e.Text).ShouldBe(["Reader"]);
+        everyElem.ShouldAllBe(e => e.Parent!.Type == "interface_type");
+        CollectNodes(shapeTree.RootNode!).Where(n => n.Type == "parameter_declaration")
+            .Count(n => n.GetChildForField("name") is null).ShouldBeGreaterThan(0);
+
+        // type_elem has a SECOND home, and this is the measurement that decides the reader's parent guard:
+        // an instantiated generic writes its type arguments as type_elem children of a type_arguments node,
+        // so 'Generic[int]' contains a type_elem exactly like an interface's embedded element does. Two
+        // meanings, one kind name, no name field on either — the parent is the only discriminator
+        using var genericParser = new Parser(new Language("Go"));
+        using var genericTree = Parse(genericParser, """
+            package p
+
+            type Store struct{}
+
+            type Box interface {
+                Store
+            }
+
+            func Use(b Box[int]) {}
+            """);
+        var genericElements = CollectNodes(genericTree.RootNode!).Where(n => n.Type == "type_elem").ToList();
+        genericElements.Select(e => (e.Text, e.Parent!.Type))
+            .ShouldBe([("Store", "interface_type"), ("int", "type_arguments")]);
+        CollectNodes(genericTree.RootNode!).Single(n => n.Type == "generic_type")
+            .GetChildForField("type")!.Text.ShouldBe("Box");
+
+        // and the type positions do not agree on a field name: qualified_type has 'name' (with the
+        // package as an unnamed sibling), generic_type has 'type', pointer_type has NO field at all, and
+        // each aggregate names its element differently
+        var qualified = CollectNodes(tree.RootNode!).Single(n => n.Type == "qualified_type");
+        qualified.GetChildForField("name")!.Text.ShouldBe("Handler");
+        var pointer = CollectNodes(tree.RootNode!).Single(n => n.Text == "*Widget");
+        pointer.NamedChildren.Single().Type.ShouldBe("type_identifier");
+        CollectNodes(tree.RootNode!).Where(n => n.Type == "pointer_type")
+            .Count(p => p.GetChildForField("type") is not null).ShouldBe(0);
+        CollectNodes(tree.RootNode!).Single(n => n.Type == "map_type").GetChildForField("value")!.Text.ShouldBe("Item");
+        CollectNodes(tree.RootNode!).Single(n => n.Type == "slice_type").GetChildForField("element")!.Text.ShouldBe("Measure");
+    }
+
+    [Fact]
+    public void Go_ThreeFieldNamesLookAlikeAndOnlyOneOfThemBindsAnything()
+    {
+        using var language = new Language("Go");
+        using var parser = new Parser(language);
+        using var tree = Parse(parser, """
+            package p
+
+            type T struct {
+                emb
+                _ int
+                a, b Base
+                svc http.Handler
+            }
+
+            type Base struct{}
+            """);
+
+        // the discriminator a reader has to get right, measured in one file: an embedded field has NO name
+        // field, a blank field has a name field whose TEXT is '_', and a two-name field repeats the name
+        // field with only the first one reachable through GetChildForField. Absence, text and repetition
+        // are three different facts and each answers a different question — embed, discard, or use once
+        var fields = CollectNodes(tree.RootNode!).Where(n => n.Type == "field_declaration").ToList();
+        fields.ShouldAllBe(f => f.Parent!.Type == "field_declaration_list");
+        fields.Count(f => f.GetChildForField("name") is null).ShouldBe(1);
+
+        var blank = fields.Single(f => f.GetChildForField("name")?.Text == "_");
+        blank.GetChildForField("name")!.Type.ShouldBe("field_identifier");
+
+        var multi = fields.Single(f => f.Text.Contains("a, b", StringComparison.Ordinal));
+        multi.GetChildForField("name")!.Text.ShouldBe("a");
+        multi.NamedChildren.Count(c => c.Type == "field_identifier").ShouldBe(2);
+        multi.NamedChildren.Last().Type.ShouldBe("type_identifier");
+
+        // so a reader keyed on the name field's presence alone would call the discarded blank a use, and a
+        // reader keyed per name would sign the same span twice for 'a, b' — the two refusals the extractor
+        // makes, measured here rather than argued
+        fields.Count(f => f.GetChildForField("type") is not null).ShouldBe(fields.Count);
+        fields.Where(f => f.GetChildForField("name")?.Text != "_")
+            .Select(f => f.GetChildForField("type")!.Text).ShouldBe(["emb", "Base", "http.Handler"]);
+    }
+
+    [Fact]
+    public void Go_CallExpressionIsSharedWithJavascriptAndRust_OnTheReferenceSideToo()
+    {
+        using var go = new Language("Go");
+        using var goParser = new Parser(go);
+        using var goTree = Parse(goParser, GoReferenceSource);
+        var goNames = CollectTypes(goTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var js = new Language("JavaScript");
+        using var jsParser = new Parser(js);
+        using var jsTree = Parse(jsParser, JsVocabularySource);
+        var jsNames = CollectTypes(jsTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        using var rust = new Language("Rust");
+        using var rustParser = new Parser(rust);
+        using var rustTree = Parse(rustParser, RustVocabularySource);
+        var rustNames = CollectTypes(rustTree.RootNode!).ToHashSet(StringComparer.Ordinal);
+
+        // the second shared kind in the feature, on the reference side: go, javascript and rust all name
+        // their call node call_expression, while python keeps 'call' to itself. So the per-language gate
+        // buys nothing here by ITSELF — what keeps the grammars apart is that each one's gate is consulted
+        // only for its own label, and the callee field names (field / property / field-on-
+        // field_expression) never collide because the callee node kinds do
+        goNames.ShouldContain("call_expression");
+        jsNames.ShouldContain("call_expression");
+        rustNames.ShouldContain("call_expression");
+        goNames.ShouldNotContain("member_expression");
+        jsNames.ShouldNotContain("selector_expression");
+        rustNames.ShouldNotContain("import_declaration");
+        jsNames.ShouldNotContain("import_declaration");
+        // a FOURTH shared kind, and the one that would have been easy to assume wrong: rust spells its
+        // struct fields 'field_declaration' exactly as go does, so the only thing keeping rust's fields
+        // out of go's type-target reading — and go's out of rust's — is that the reader is chosen by the
+        // language row and the gate is consulted per label. Two grammars, same kind name, different
+        // meanings: go's embedded field has no name field, rust's never has one either but its shape is
+        // name+type, so a merged reader would mis-read both
+        rustNames.ShouldContain("field_declaration");
+        goNames.ShouldContain("field_declaration");
+        jsNames.ShouldNotContain("type_spec");
+        goNames.ShouldNotContain("use_declaration");
+        goNames.ShouldNotContain("import_statement");
+
+        // go's import container shares no name with python/javascript's import_statement, which is the
+        // reason the import READER could stay a per-grammar arm and only the statement kinds overlap
+        goNames.ShouldContain("import_declaration");
+        jsNames.ShouldContain("import_statement");
+        goNames.ShouldNotContain("import_statement");
+    }
+
     [Fact]
     public void Go_Parse_ProducesExpectedNodeTypes()
     {

@@ -283,9 +283,20 @@ public class TreeSitterRoutingTests
         chunks.ShouldAllBe(c => c.SymbolId == listen.Id);
         chunks[0].Text.ShouldContain("func Listen(path string) string");
 
-        // references are T5's: go is routed with no pool, so nothing may be emitted for it yet — the
-        // same middle state python held between T2 and T3
-        store.ListRefsByFile(file.Id).ShouldBeEmpty();
+        // the reference half T5 signed: the import binds the package name the file can type, and the
+        // qualified call binds the member. Asserted per row like python's three above — ListRefsByFile is
+        // unordered — with the counts pinned so a dropped row cannot hide inside a ShouldContain
+        var goEdges = store.ListRefsByFile(file.Id);
+        goEdges.Count.ShouldBe(2);
+        goEdges.ShouldContain(r => r.Kind == "import" && r.ToName == "fmt" && r.Line == 3);
+        var listenCall = goEdges.Single(r => r.Kind == "call");
+        listenCall.ToName.ShouldBe("Println");
+        listenCall.Line.ShouldBe(6);
+        listenCall.EnclosingSymbol.ShouldBe("Listen");
+
+        // and both stay unresolved: nothing in this workspace is a go definition named 'fmt' or 'Println',
+        // which is the honest reading — the wall holds by having nothing to bind to, not by refusing
+        goEdges.ShouldAllBe(r => r.FromSymbolId == 0);
 
         // the F3 name collision, checked where it would bite: symbol_lookup and RefLookup match names
         // case-insensitively, so any name one language contributes must not be contributed by another

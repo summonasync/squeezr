@@ -304,7 +304,7 @@ internal static class TsSymbolExtractor
         // Add' sits directly in source_file, so the owner comes out of the 'receiver' field. The string
         // is the base type without pointer or type arguments, which is exactly what the type's own row is
         // named — so symbol_lookup pairs 'Registry' with 'Add' the way it pairs a rust impl with its fn
-        if (node.Type == "method_declaration" && GoReceiverType(node) is { } owner)
+        if (node.Type == "method_declaration" && GoMethodOwnerName(node) is { } owner)
         {
             return owner;
         }
@@ -329,7 +329,12 @@ internal static class TsSymbolExtractor
     // type_identifier ('v V'), pointer_type ('*P' — no field on it, the type is its named child), or
     // generic_type ('Generic[T]', field 'type' plus a type_arguments node that names no type of its own).
     // A receiver may be unnamed ('func (*P) M()'), which is why the parameter's name is never read here
-    private static string? GoReceiverType(Node methodDeclaration) =>
+    // the type a go method belongs to, named by its receiver. Single seam for both readers of that fact:
+    // ContainerOf above signs it onto the symbol row, and the reference walker prefixes it onto the
+    // method's own name so an edge written inside 'func (r *Registry) Add' reads 'Registry.Add' byte for
+    // byte with the row it stands in. No ancestor chain is involved either way — a method_declaration is
+    // package-level in go — which is why this is a field read rather than a walk
+    internal static string? GoMethodOwnerName(Node methodDeclaration) =>
         UnwrapGoType(methodDeclaration.GetChildForField("receiver")?.NamedChildren
             .FirstOrDefault(c => c.Type == "parameter_declaration")?.GetChildForField("type"));
 
