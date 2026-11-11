@@ -92,6 +92,15 @@ public sealed class SupervisorLoop
         }
 
         PruneExited();
+        var supervision = _state.Read();
+        if (supervision.Status == SupervisionStateStatus.Unreadable)
+        {
+            // Fail closed: the operator's will is unknown, so nobody is started from desires. Live
+            // watchers keep running — stopping them would be an action taken on a file we cannot read.
+            return new SupervisorSweep(now, [], StateWarning: UnreadableStateWarning(supervision));
+        }
+
+        _guard.SyncWedged(supervision.Wedged);
         IReadOnlyList<WorkspaceRegistryEntry> entries;
         try
         {
@@ -106,16 +115,16 @@ public sealed class SupervisorLoop
             return new SupervisorSweep(now, [], ex.Message);
         }
 
-        var stores = entries.Select(entry => Supervise(entry, now)).ToList();
+        var stores = entries.Select(entry => Supervise(entry, supervision, now)).ToList();
         _hasSweptTheFleet = true;
         return new SupervisorSweep(now, stores);
     }
 
-    private StoreSupervision Supervise(WorkspaceRegistryEntry entry, DateTime now)
+    private StoreSupervision Supervise(WorkspaceRegistryEntry entry, SupervisionSnapshot supervision, DateTime now)
     {
         try
         {
-            return SuperviseStore(entry, now);
+            return SuperviseStore(entry, supervision, now);
         }
         catch (OperationCanceledException)
         {
@@ -125,7 +134,7 @@ public sealed class SupervisorLoop
         {
             return Report(
                 entry,
-                _state.DesireOf(entry.StoreKey),
+                supervision.DesireOf(entry.StoreKey),
                 null,
                 WatchIndexerState.None,
                 SupervisionAction.ProbeFailed,
@@ -133,9 +142,9 @@ public sealed class SupervisorLoop
         }
     }
 
-    private StoreSupervision SuperviseStore(WorkspaceRegistryEntry entry, DateTime now)
+    private StoreSupervision SuperviseStore(WorkspaceRegistryEntry entry, SupervisionSnapshot supervision, DateTime now)
     {
-        var desire = _state.DesireOf(entry.StoreKey);
+        var desire = supervision.DesireOf(entry.StoreKey);
         if (!WorkspaceStorePaths.IsSingleSegmentKey(entry.StoreKey) || !Directory.Exists(entry.RootPath))
         {
             return Report(entry, desire, null, WatchIndexerState.None, SupervisionAction.SkippedRoot,
@@ -269,4 +278,9 @@ public sealed class SupervisorLoop
 
     private static string WedgedDetail() =>
         $"restarts stopped after {CrashLoopGuard.RestartLimit} starts inside {CrashLoopGuard.Window.TotalMinutes:F0} minutes";
+
+    private static string UnreadableStateWarning(SupervisionSnapshot supervision) =>
+        $"supervision state '{supervision.FilePath}' {supervision.Fault}; nothing is started from the recorded " +
+        "desires and running watchers are left alone — repair the JSON, or move the file away to start " +
+        "supervision from the running default";
 }

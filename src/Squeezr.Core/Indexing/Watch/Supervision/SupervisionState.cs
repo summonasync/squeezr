@@ -14,37 +14,113 @@ public sealed class SupervisionState
 
     internal SupervisionState(string path) => _path = path;
 
-    public WatchDesire DesireOf(string storeKey) =>
-        Load().TryGetValue(storeKey, out var desire) ? desire : WatchDesire.Running;
+    public WatchDesire DesireOf(string storeKey)
+    {
+        var snapshot = Read();
+        return snapshot.Status == SupervisionStateStatus.Unreadable
+            ? WatchDesire.Running
+            : snapshot.DesireOf(storeKey);
+    }
 
     public void SetDesire(string storeKey, WatchDesire desire)
     {
-        var stores = Load();
-        stores[storeKey] = desire;
-        Save(stores);
+        var snapshot = ReadForWrite();
+        var desires = new Dictionary<string, WatchDesire>(snapshot.Desires, StringComparer.Ordinal);
+        desires[storeKey] = desire;
+        Save(desires, snapshot.Wedged);
     }
 
-    private Dictionary<string, WatchDesire> Load()
+    public SupervisionSnapshot Read()
     {
+        string text;
         try
         {
-            var file = JsonSerializer.Deserialize<WatchdStateFile>(File.ReadAllText(_path), SqueezrJson.FileOptions);
-            return file?.Stores is { } stores
-                ? stores.Where(pair => pair.Value is not null)
-                    .ToDictionary(pair => pair.Key, pair => Parse(pair.Value!), StringComparer.Ordinal)
-                : [];
+            text = File.ReadAllText(_path);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
-            return [];
+            return new SupervisionSnapshot(
+                SupervisionStateStatus.Absent,
+                _path,
+                new Dictionary<string, WatchDesire>(StringComparer.Ordinal),
+                new HashSet<string>(StringComparer.Ordinal));
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Unreadable($"could not be read ({ex.Message})");
+        }
+
+        WatchdStateFile? file;
+        try
+        {
+            file = JsonSerializer.Deserialize<WatchdStateFile>(text, SqueezrJson.FileOptions);
+        }
+        catch (JsonException ex)
+        {
+            return Unreadable($"is not valid JSON ({ex.Message})");
+        }
+
+        var desires = new Dictionary<string, WatchDesire>(StringComparer.Ordinal);
+        foreach (var pair in file?.Stores ?? [])
+        {
+            if (pair.Value is { } value)
+            {
+                desires[pair.Key] = Parse(value);
+            }
+        }
+
+        var wedged = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var storeKey in file?.Wedged ?? [])
+        {
+            wedged.Add(storeKey);
+        }
+
+        return new SupervisionSnapshot(SupervisionStateStatus.Valid, _path, desires, wedged);
     }
 
-    private void Save(Dictionary<string, WatchDesire> stores)
+    public void SetWedged(string storeKey, bool wedged)
+    {
+        var snapshot = ReadForWrite();
+        if (snapshot.IsWedged(storeKey) == wedged)
+        {
+            return;
+        }
+
+        var markers = new HashSet<string>(snapshot.Wedged, StringComparer.Ordinal);
+        if (wedged)
+        {
+            markers.Add(storeKey);
+        }
+        else
+        {
+            markers.Remove(storeKey);
+        }
+
+        Save(snapshot.Desires, markers);
+    }
+
+    private SupervisionSnapshot ReadForWrite()
+    {
+        var snapshot = Read();
+        return snapshot.Status == SupervisionStateStatus.Unreadable
+            ? throw new SupervisionStateUnreadableException(snapshot)
+            : snapshot;
+    }
+
+    private SupervisionSnapshot Unreadable(string fault) =>
+        new(
+            SupervisionStateStatus.Unreadable,
+            _path,
+            new Dictionary<string, WatchDesire>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.Ordinal),
+            fault);
+
+    private void Save(IReadOnlyDictionary<string, WatchDesire> stores, IReadOnlySet<string> wedged)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var file = new WatchdStateFile(
-            stores.ToDictionary(pair => pair.Key, pair => pair.Value.ToString(), StringComparer.Ordinal));
+            stores.ToDictionary(pair => pair.Key, pair => pair.Value.ToString(), StringComparer.Ordinal),
+            wedged.Count == 0 ? null : wedged.OrderBy(storeKey => storeKey, StringComparer.Ordinal).ToArray());
         var tempPath = $"{_path}.{Guid.NewGuid():N}.tmp";
         File.WriteAllText(tempPath, JsonSerializer.Serialize(file, SqueezrJson.FileOptions));
         File.Move(tempPath, _path, overwrite: true);
@@ -53,5 +129,9 @@ public sealed class SupervisionState
     private static WatchDesire Parse(string value) =>
         Enum.TryParse<WatchDesire>(value, ignoreCase: true, out var desire) ? desire : WatchDesire.Running;
 
-    private sealed record WatchdStateFile(Dictionary<string, string>? Stores);
+    // Wedged is the additive per-store marker of 113/R1: a file written before it stays readable (the
+    // property is simply absent), and a file carrying it stays readable by older binaries, which ignore
+    // unknown properties. It is null rather than empty when nothing is wedged, so a clean fleet writes
+    // byte-for-byte the pre-113 shape.
+    private sealed record WatchdStateFile(Dictionary<string, string>? Stores, string[]? Wedged);
 }
