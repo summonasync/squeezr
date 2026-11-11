@@ -1331,6 +1331,166 @@ watchers wait that window out (`--await-claim`) and take over when it expires,
 so kill→respawn converges within ~30s. A manual `squeezr watch` started inside
 the window declines immediately, as before.
 
+### Autostart: `watchd install` / `uninstall` / `installed`
+
+A manually started watchd lives and dies with the shell that started it. Three
+verbs hand its lifetime to the operating system, take it back, and report what
+actually happened:
+
+```bash
+squeezr watchd install     # register autostart for this account (idempotent)
+squeezr watchd installed   # read-only verdict: is it registered, and will it start?
+squeezr watchd uninstall   # remove the entry squeezr manages; a no-op when there is none
+```
+
+What `install` writes, per platform:
+
+| Platform | The entry | Start semantics |
+|---|---|---|
+| Linux | `~/.config/systemd/user/squeezr-watchd.service` (an absolute `XDG_CONFIG_HOME` moves it, same as systemd does) | `systemctl --user enable --now` at install; `Restart=on-failure`, `RestartSec=5` in the unit |
+| macOS | `~/Library/LaunchAgents/dev.summonasync.squeezr-watchd.plist` | `launchctl bootstrap gui/<uid>` at install; `RunAtLoad` + `KeepAlive`/`SuccessfulExit=false` in the plist |
+| Windows | a Task Scheduler task `squeezr-watchd` created with `/SC ONLOGON` (deliberately an ONLOGON task, not a service) | fires at the next logon and nothing else — no restart-on-exit semantics at all |
+
+The command line baked into every entry ends with `watchd --autostart`. The
+flag is a declared option of the `watchd` command that tells the supervisor the
+init system started it and will bring it back; that pair is what makes the
+upgrade policy below possible. A manually started `squeezr watchd` (without the
+flag) never retires itself.
+
+**Upgrade retire.** Under `--autostart`, once per sweep the supervisor compares
+the modification time of its own binary against its own process start time.
+When the disk is newer — an upgrade landed — it finishes one full fleet sweep
+first, prints `watchd is retiring after an upgrade: <path> changed at <stamp>,
+this process started at <stamp>`, and exits **75**. 75 is sysexits'
+`EX_TEMPFAIL`: a temporary failure the starter is invited to retry, and
+`Restart=on-failure` (systemd) and `KeepAlive`+`SuccessfulExit=false` (launchd)
+both bring the process back on any non-zero exit. The number cannot be 0 —
+that reads as "finished cleanly, don't restart", and the fleet freezes on the
+old code — and cannot be 1/2/3, because those steps belong to the
+`watchd installed` verdict ladder. On Windows the retire question does not
+arise: `/SC ONLOGON` never brings a process back, so the policy refuses
+self-exit there and the running supervisor keeps its binary until the next
+logon.
+
+**What an upgrade does to the supervised daemons.** The generated systemd unit
+leaves `KillMode` at the systemd default — `control-group` — so retiring the
+supervisor stops its whole cgroup: every supervised watch daemon takes a
+fleet-wide SIGTERM, roughly 5–10 seconds pass (`RestartSec=5` plus the 2 s
+sweep cadence of the new instance before it relaunches everyone), and the whole
+fleet comes up on the new binary. On launchd the children survive the retire
+(the default `AbandonProcessGroup` keeps them), and the new supervisor reads
+them as `SkippedLiveOwner` — `watch <store> is managed elsewhere (pid N)` — and
+does not restart children it does not own: the fleet runs a mix of old and new
+daemons until each survivor dies on its own. Both shapes are deliberate
+(review-110-08 owner rulings), not accidents. One practical consequence: during
+that 5–10 s idle window a starting `squeezr serve` can see the store's stale
+watch claim and print `warning: watch claim held by wedged pid N, store under
+watchd supervision` — its own advice there is "if the supervisor does not clear
+it, run `squeezr fleet restart`", and during this window the supervisor does:
+wait a few seconds, the incoming watchd relaunches the daemon itself. The same
+notice outside the window (a genuinely wedged, blocked store) is exactly what
+that manual `fleet restart` is for.
+
+**Trap 1: linger on a headless machine.** A systemd *user* manager exists only
+while the account has a session: without more, the unit will not start at boot
+at all — it waits for the first login, and a logout takes the user manager (and
+watchd) down with it. On a server you only reach over ssh, enable lingering
+once:
+
+```bash
+loginctl enable-linger $USER
+```
+
+The account's units then start at boot and survive logout. (Platform behaviour;
+owner-verifiable on the target box — after a reboot, `squeezr watchd installed`
+should read `watchd=running`.) On macOS and Windows the entry is a plain
+login-time agent/task and there is nothing to enable.
+
+**Trap 2: the start limit parks a failing unit.** The unit names its own
+window — `StartLimitIntervalSec=60` plus `StartLimitBurst=5` in `[Unit]`
+(systemd's 10 s default cannot count a `RestartSec=5` flap) — so a binary that
+dies at start is retried every 5 s, and after five starts inside 60 s systemd
+stops trying: the unit comes to rest in `failed` instead of flapping forever.
+That parked state is a *feature* against a broken binary — the crash loop has a
+full stop. `squeezr watchd installed` reads it as `status=unit-failed` with
+`failed=yes` and exit 2, and the hint says to look it up with the platform
+tool. To recover: fix or replace the binary, then
+
+```bash
+systemctl --user reset-failed squeezr-watchd && systemctl --user restart squeezr-watchd
+```
+
+`reset-failed` flushes the counter instead of waiting for the declared 60 s
+window to pass — until it does (or you reset), systemd keeps refusing the start
+with "Start request repeated too quickly". Re-running `squeezr watchd install`
+also works: it rewrites the unit and `enable --now` starts it again.
+
+**`installed` is the instrument panel.** One `key=value` line per dimension —
+byte-stable, scriptable — plus the exit-code ladder:
+
+| Exit | `status=` | Means |
+|---|---|---|
+| 0 | `installed` | the entry is registered, hooked, and names a program this platform can exec |
+| 1 | `not-installed` | nothing is registered |
+| 2 | `installed-but-binary-missing` / `unit-failed` / `present-but-not-enabled` | registered, and it will not start the daemon as it stands |
+| 3 | `probe-unsupported` / `probe-unknown` | the platform refused to answer, or has no question to ask here |
+
+The other lines answer the neighbouring questions: `platform=`, `unit=` (where
+the entry lives), `present=`/`enabled=`/`failed=`/`loaded=` (each `yes`, `no`,
+`couldn't-ask` where the tool would not talk, or `not-supported` where the
+platform has no such question — launchd for `failed=`, Windows for `loaded=`),
+`program=`/`arguments=`/`program-state=` (what the entry execs and whether it
+can), `watchd=running`/`watchd=not-running` with `pid=` (the singleton lock —
+registered and running are two facts, and a linger-less box after a reboot is
+exactly where they disagree). `install` and `installed` deliberately stay
+separate: the status command never fixes anything on its way past.
+
+**`install` over a live manual watchd.** Before applying the entry, install
+reads `~/.squeezr/watchd/watchd.lock` and warns (stderr) when a live instance
+holds it — install takes nothing, steals nothing and kills nothing, because
+whose instance owns the singleton is the operator's call. The warning names
+what the entry will then do about the refusing instance: systemd restarts it on
+failure until the start limit parks the unit in `failed`; launchd respawns it on
+every unsuccessful exit; the Windows task's instance refuses at every logon.
+Stop that instance and run install again. The success line is
+`watchd autostart installed — <target>`, plus `(with SQUEEZR_HOME=<path>)` when
+the installing shell had `SQUEEZR_HOME` explicitly set — only then is the
+variable baked into the entry (the default home is whatever the account
+resolves at logon anyway). `uninstall` prints `watchd autostart removed —
+<target>`; nothing of ours to remove is not a failure either — it says `warning:
+no squeezr watchd autostart entry at <target>; nothing was removed.` on stderr
+and still exits 0.
+
+**The release path.** Upgrading through `scripts/install-release.sh` keeps
+autostart honest: the script restamps the unpacked binary with `touch` (a
+published tar carries archived mtimes, and an unstamped file gives the drift
+detector nothing to see), asks the new build `watchd installed`, and when
+autostart is registered it rewrites the entry onto the new tag and restarts the
+supervisor (`systemctl --user restart` on Linux, `launchctl kickstart -k` on
+macOS). The step closes with a machine-readable line:
+`autostart=rewritten+restarted` when the handover completed;
+`autostart=rewired+restart-failed` when the entry moved but the restart was
+refused (stderr names the manual restart commands); `autostart=touched` when
+the probe gave no verdict, so the entry stays pointed where it was; and
+`autostart=skipped:<reason>` (`no-new-build`, `touch-failed`,
+`autostart-not-installed`, `install-failed`) when nothing needed rewiring.
+Upgrading by unpacking a release tar by hand is the blind case — no restamp,
+archived mtime preserved, so drift may never fire and the old supervisor runs
+the old binary until you act: run `squeezr watchd install` from the new binary
+(it re-points the entry — the unit names the concrete install path, not the
+`~/.local/bin` symlink) and restart the entry yourself.
+
+**Legacy LaunchAgent name.** During the pre-release drafts of this feature the
+macOS file was `squeezr-watchd.plist`; current tooling writes and manages only
+the reverse-DNS `dev.summonasync.squeezr-watchd.plist`. A machine that ran the
+drafts can still carry the old file in `~/Library/LaunchAgents`, and neither
+`uninstall` nor `install` touches it — it loads a second supervisor every login
+(whose instance refuses the lock; launchd then respawns the refuser). If that
+is your machine: `launchctl bootout gui/$(id -u)/squeezr-watchd`, delete the
+old plist, re-run install. No released version ever wrote the legacy name, so
+this paragraph is almost certainly not you. (Owner-verifiable on a macOS box
+that ran feature-branch builds.)
+
 ## Vector hygiene: `squeezr vectors reconcile`
 
 Routine cleanup is done by indexing: a file's chunk set changed — its old
