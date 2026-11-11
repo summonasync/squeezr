@@ -25,6 +25,8 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
             ".ts" => MatchesHint(languageHint, TreeSitterLanguages.TypeScript, "ts"),
             ".tsx" => MatchesHint(languageHint, TreeSitterLanguages.TypeScript, "tsx", "ts"),
             ".rs" => MatchesHint(languageHint, TreeSitterLanguages.Rust, "rs"),
+            ".py" => MatchesHint(languageHint, TreeSitterLanguages.Python, "py"),
+            ".go" => MatchesHint(languageHint, TreeSitterLanguages.Go),
             _ => false,
         };
     }
@@ -62,6 +64,8 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
             ".ts" => "TypeScript",
             ".tsx" => "TSX",
             ".rs" => "Rust",
+            ".py" => "Python",
+            ".go" => "Go",
             _ => "JavaScript",
         };
 
@@ -72,6 +76,8 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
             ".tsx" => TreeSitterLanguages.Tsx,
             ".jsx" or ".mjs" or ".cjs" => TreeSitterLanguages.JavaScript,
             ".rs" => TreeSitterLanguages.Rust,
+            ".py" => TreeSitterLanguages.Python,
+            ".go" => TreeSitterLanguages.Go,
             _ => TreeSitterLanguages.JavaScript,
         };
 }

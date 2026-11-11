@@ -79,15 +79,35 @@ squeezr index --events
   `--events` streams machine-readable progress events instead of the interactive
   progress bar. Other switches: `--full` (complete rebuild), `--no-semantic`
   (literal-only), `--reembed` (re-embed everything after a model change).
-  Symbol-aware languages: C# through Roslyn; JavaScript, TypeScript, TSX and Rust
-  through tree-sitter. Rust answers with functions, structs, enums, unions, traits,
+  Symbol-aware languages: C# through Roslyn; JavaScript, TypeScript, TSX, Rust, Python and
+  Go through tree-sitter. Rust answers with functions, structs, enums, unions, traits,
   impl blocks, modules, type aliases, consts, statics and macro definitions as
   symbols, and with `use` trees, calls, trait/impl targets and macro invocations as
   references; its `impl<T> path::Type<T>` targets resolve by the bare type name, so a
   generic or qualified impl block still lands on the row the struct owns. Trait-impl
   blocks carry the composite row name `Trait for Type`, and `symbol_lookup` on a type
   answers its struct row plus any inherent-impl rows of the same name — the impl is a
-  row, not a member of the struct row. Anything
+  row, not a member of the struct row. Python answers with functions (an `async def` is
+  one function row that keeps the keyword in its signature), classes, methods and
+  UPPER_SNAKE module or class constants; a decorator belongs to the definition under it,
+  so the row's span starts at the `@` line while its signature stays on the `def` line.
+  Its references are imports, calls and base classes, and the import rule is python's
+  own: `import a.b.c` binds the TOP package `a` and keeps the whole path in the module
+  column, `import a.b.c as d` binds `d`, `from a.b import c` binds `c`, `from x import *`
+  binds the module `x` itself and no individual names behind the star, and a relative
+  form keeps its column (`from .text import x` says `.text`) — so grepping the leaf of a
+  dotted import finds nothing, because the importing file never has that name. Go answers
+  with functions, methods, structs, interfaces, type declarations, aliases and
+  package-level consts and vars, and a method is named by its receiver: `func (r *Registry)
+  Add` is owned by `Registry`, which is also how `symbol_lookup` pairs the two rows — the
+  same for an unnamed receiver (`func (*Registry) All`) and a generic one
+  (`func (g *Generic[T]) Get` → `Generic.Get`). Its references are imports, calls, type
+  uses and embedded fields, and `import "net/http"` binds the LAST element (`http`) with
+  an explicit alias winning over it, so the two grammars keep separate import rules
+  instead of one shared guess. What the three do not ship: a go blank identifier (`_`), a
+  multi-name const/var spec, a go const or var written inside a function body, and doc
+  comments — rust `///`, python docstrings and go `//` are indexed as text, not as
+  documentation. Anything
   else (Markdown, YAML, JSON, plain text) gets the sliding-window fallback chunker —
   searchable, never symbol-aware.
 
