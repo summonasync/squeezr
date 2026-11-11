@@ -1065,7 +1065,7 @@ Every tool answers in one envelope:
     `fileFreshness`. What the budget buys is the caller's wall time — a
     re-measured `code_search` over a repo naming 24 stale files spent 46.7 s of
     inline re-reads before the budget existed and 5.9 s after it (at 12 stale
-    files, 28.0 s → 6.0 s; medians of ten cold `squeezr serve` runs per arm,
+    files, 27.9 s → 6.0 s; medians of ten cold `squeezr serve` runs per arm,
     harness `scripts/bench-guard-017.sh`), and the 23 rows it left unread are
     named in the answer instead of being silent. `tokensUsed` did not move
     between those arms — 815 before, 815 after — while `freshnessTokens` rose
