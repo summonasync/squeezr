@@ -21,9 +21,10 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
     {
         return Path.GetExtension(path).ToLowerInvariant() switch
         {
-            ".js" or ".jsx" or ".mjs" or ".cjs" => MatchesHint(languageHint, "javascript", "js"),
-            ".ts" => MatchesHint(languageHint, "typescript", "ts"),
-            ".tsx" => MatchesHint(languageHint, "typescript", "tsx", "ts"),
+            ".js" or ".jsx" or ".mjs" or ".cjs" => MatchesHint(languageHint, TreeSitterLanguages.JavaScript, "js"),
+            ".ts" => MatchesHint(languageHint, TreeSitterLanguages.TypeScript, "ts"),
+            ".tsx" => MatchesHint(languageHint, TreeSitterLanguages.TypeScript, "tsx", "ts"),
+            ".rs" => MatchesHint(languageHint, TreeSitterLanguages.Rust, "rs"),
             _ => false,
         };
     }
@@ -40,8 +41,8 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
                              ?? throw new InvalidOperationException($"tree-sitter returned no tree for '{file.Path}'");
             var root = tree.RootNode
                        ?? throw new InvalidOperationException($"tree-sitter returned no root for '{file.Path}'");
-            var symbols = TsSymbolExtractor.Extract(root);
-            var refs = TsReferenceExtractor.Extract(root, file.Path);
+            var symbols = TsSymbolExtractor.Extract(root, language);
+            var refs = TsReferenceExtractor.Extract(root, language, file.Path);
             var chunks = TsSymbolChunkBuilder.Build(symbols, text, _config.Chunking);
             return new ParseResult(language, symbols, refs, chunks);
         }
@@ -55,20 +56,22 @@ public sealed class TreeSitterProvider : IParsingProviderWithWarnings
     private static bool MatchesHint(string? languageHint, params string[] accepted) =>
         languageHint is null || accepted.Any(h => h.Equals(languageHint, StringComparison.OrdinalIgnoreCase));
 
-    private static string GrammarName(string path) =>
+    internal static string GrammarName(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".ts" => "TypeScript",
             ".tsx" => "TSX",
+            ".rs" => "Rust",
             _ => "JavaScript",
         };
 
-    private static string LanguageName(string path) =>
+    internal static string LanguageName(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {
-            ".ts" => "typescript",
-            ".tsx" => "tsx",
-            ".jsx" or ".mjs" or ".cjs" => "javascript",
-            _ => "javascript",
+            ".ts" => TreeSitterLanguages.TypeScript,
+            ".tsx" => TreeSitterLanguages.Tsx,
+            ".jsx" or ".mjs" or ".cjs" => TreeSitterLanguages.JavaScript,
+            ".rs" => TreeSitterLanguages.Rust,
+            _ => TreeSitterLanguages.JavaScript,
         };
 }

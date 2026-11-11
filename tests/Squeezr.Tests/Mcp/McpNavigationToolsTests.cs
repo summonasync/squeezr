@@ -52,6 +52,8 @@ public class McpNavigationToolsTests
         result.IsError.ShouldNotBe(true);
         var envelope = ParseEnvelope(result);
         envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.GetProperty("data").EnumerateArray().ShouldBeEmpty();
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
         envelope.GetRawText().ShouldNotContain("--");
         envelope.GetProperty("warnings").EnumerateArray()
             .Select(w => w.GetString()!)

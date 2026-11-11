@@ -13,6 +13,8 @@ public class ConstructorMembersTests
     private const int MembersBudget = 140;
     private const int MethodCount = 10;
     private const int CtorLine = 6;
+    private const int HeaderRefusedBudget = 90;
+    private const int NoSubstituteBudget = 30;
 
     [Fact]
     public void Symbol_OversizedGenericType_ListsTheCtorAsAMemberOfItsOwnType()
@@ -90,6 +92,44 @@ public class ConstructorMembersTests
         pretty.StdOut.ShouldContain("body: omitted (budget) — members:");
         pretty.StdOut.ShouldContain($"Box (constructor) :{CtorLine}");
         pretty.StdOut.ShouldNotContain("public (method)");
+    }
+
+    [Fact]
+    public void Symbol_MappedHitThenRefusedHeader_ClippedBeatsMappedInOneAnswer()
+    {
+        var workspace = NewIndexedWorkspace();
+        var lookup = new SymbolLookup(workspace);
+
+        var wide = lookup.Find("Box", null, null, SymbolLookup.DefaultMaxTokens, body: true);
+        wide.Matches.Count.ShouldBe(2);
+        wide.State.ShouldBe(AnswerState.Mapped);
+
+        var tight = lookup.Find("Box", null, null, HeaderRefusedBudget, body: true);
+        var hit = tight.Matches.ShouldHaveSingleItem();
+        hit.BodyOmitted.ShouldBeTrue();
+        hit.Members.ShouldNotBeEmpty();
+        hit.MembersOmitted.ShouldBe(0);
+        tight.State.ShouldBe(AnswerState.Clipped);
+        tight.Hint.ShouldNotBeNull().Render(p => p)
+            .ShouldBe("read a member with expand_span or raise maxTokens");
+    }
+
+    [Fact]
+    public void Symbol_NonTypeBodyOverBudget_NoMemberSubstitute_ReportsClippedState()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace)
+            .Find("Box", null, "constructor", NoSubstituteBudget, body: true);
+
+        var hit = result.Matches.ShouldHaveSingleItem();
+        hit.Kind.ShouldBe("constructor");
+        hit.BodyOmitted.ShouldBeTrue();
+        hit.Members.ShouldBeEmpty();
+        result.State.ShouldBe(AnswerState.Clipped);
+        result.RefusedBodyTokens.ShouldBe(16);
+        result.Hint.ShouldNotBeNull().Render(p => p)
+            .ShouldBe("narrow the query (repo, kind) or raise maxTokens");
     }
 
     private static string NewIndexedWorkspace()

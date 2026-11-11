@@ -34,12 +34,13 @@ public sealed record ToolEnvelope(
         IReadOnlyList<FileFreshness>? fileFreshness = null,
         AnswerFreshness? freshness = null)
     {
-        // one rule for every tool that declares a check: an answer that carries less of the verdict than it
-        // found is not complete. tokensUsed stays the price of the content the caller's budget governs, and
-        // completeness stays a claim about the verdict — the bytes of the freshness story are priced by
-        // freshness.freshnessTokens, so the sample costs the caller a number instead of a constant noise flag
-        var complete = !truncated && (freshness is null || freshness.CarriesWholeVerdict);
-        var resolved = cost ?? AnswerCost.Unknown(tokensUsed, complete);
+        // a surface that measured its own cost owns the complete label: an answer that substituted a member
+        // map for a refused body lost nothing the caller asked for, and a recomputed flag would call it cut.
+        // The freshness rule therefore only ever withholds completeness — a check that found more of the
+        // verdict than this answer names is not a whole claim — and never restores it from `truncated`, so
+        // the three states 115 froze and the coverage rule 017 froze compose instead of undoing each other
+        var resolved = cost ?? AnswerCost.Unknown(tokensUsed, !truncated);
+        var complete = resolved.Complete && (freshness is null || freshness.CarriesWholeVerdict);
         return new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [],
             didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = complete }, fileFreshness,
             freshness);

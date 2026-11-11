@@ -50,7 +50,7 @@ public sealed class ExpandCommand : Command<ExpandCommand.Settings>
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "expand",
                 new { file = settings.File, startLine = settings.StartLine, endLine = settings.EndLine, context = settings.Context },
                 result.TokensUsed, result.Truncated, result.Span.Count,
-                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
+                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot), mapped: false);
 
             if (settings.Json)
             {

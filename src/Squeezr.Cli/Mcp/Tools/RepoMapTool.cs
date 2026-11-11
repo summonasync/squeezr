@@ -59,7 +59,7 @@ public sealed class RepoMapTool
                 QueryTelemetry.Record(root, _workspace.SessionId, "repo_map", parameters,
                     hit.PaidTokens, hit.Truncated, ((List<MapLineData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version);
+                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version, mapped: false);
                 return hit;
             }
 
@@ -134,7 +134,7 @@ public sealed class RepoMapTool
                 envelope.PaidTokens, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null);
+                cacheInvalidated: invalidated is not null, mapped: false);
             _cache?.Put("repo_map", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }

@@ -11,6 +11,7 @@ namespace Squeezr.Tests.Mcp;
 public class McpSymbolMembersTests
 {
     private const int MembersFitBudget = 120;
+    private const int MembersPartialBudget = 40;
     private const int MethodCount = 12;
 
     [Fact]
@@ -32,11 +33,41 @@ public class McpSymbolMembersTests
         members[0].GetProperty("name").GetString().ShouldBe("Method01");
         members[0].GetProperty("kind").GetString().ShouldBe("method");
         members[0].GetProperty("line").GetInt32().ShouldBe(5);
+        hit.TryGetProperty("body", out _).ShouldBeFalse();
+        hit.GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
+        hit.TryGetProperty("membersOmitted", out _).ShouldBeFalse();
+
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue();
+        envelope.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!)
+            .ShouldNotContain(w => w.StartsWith("truncated: "));
+    }
+
+    [Fact]
+    public async Task SymbolLookup_PartialMemberMap_StaysClippedAndNamesTheMemberRemedy()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "symbol_lookup",
+            new Dictionary<string, object?> { ["name"] = "Huge", ["maxTokens"] = MembersPartialBudget },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        var hit = envelope.GetProperty("data").EnumerateArray().ShouldHaveSingleItem();
+        var members = hit.GetProperty("members").EnumerateArray().ToList();
+        members.Count.ShouldBeGreaterThan(0);
+        members.Count.ShouldBeLessThan(MethodCount);
+        hit.GetProperty("membersOmitted").GetInt32().ShouldBe(MethodCount - members.Count);
+        hit.GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
 
         envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
         envelope.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!)
-            .ShouldContain(w => w.StartsWith("truncated: ")
-                && w.EndsWith("read a member with expand_span or raise maxTokens"));
+            .ShouldContain(w => w ==
+                "truncated: 36 of 40 token ceiling — read a member with expand_span or raise maxTokens");
     }
 
     [Fact]

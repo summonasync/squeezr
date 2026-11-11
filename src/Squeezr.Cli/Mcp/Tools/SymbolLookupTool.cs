@@ -50,20 +50,16 @@ public sealed class SymbolLookupTool
             var symbolName = SymbolParamAlias.Resolve("symbol_lookup", name, symbol, "name", "symbol");
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
-            var parameters = Params(symbolName, kind, repo, SecretGuardReader.Load(root).ExtraPatterns);
+            var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
+            var parameters = Params(symbolName, kind, repo, budget, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("symbol_lookup", parameters, out var cached))
             {
                 var hit = ((ToolEnvelope)cached!).MarkReplayed();
-                QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
-                    hit.PaidTokens, hit.Truncated, ((List<SymbolHitData>)hit.Data!).Count,
-                    sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
-                    client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                    baselineTokens: hit.Cost?.BaselineTokens);
+                RecordLedger(root, parameters, hit, sw, cacheHit: true, cacheInvalidated: false);
                 return hit;
             }
 
             var warnings = new List<string>();
-            var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
             var lookup = new SymbolLookup(root);
 
             var result = lookup.Find(symbolName, repo, kind, budget, body: true);
@@ -75,17 +71,19 @@ public sealed class SymbolLookupTool
                 result = lookup.Find(symbolName, repo, kind, budget, body: true);
             }
 
+            var clipped = result.State is AnswerState.Clipped;
+
             if (result.GuardWarnings is { } withheld)
             {
                 warnings.AddRange(withheld);
             }
 
-            if (result.Truncated)
+            if (clipped)
             {
                 warnings.Add(HintText.TruncationLine(
                     result.TokensUsed,
                     budget,
-                    result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy));
+                    RemedyFor(result)));
             }
 
             if (result.Matches.Count == 0 && result.DidYouMean is null && result.GuardWarnings is null)
@@ -98,11 +96,12 @@ public sealed class SymbolLookupTool
                 m.Members.Count == 0
                     ? null
                     : m.Members.Select(member => new SymbolMemberData(member.Name, member.Kind, member.Line)).ToList(),
-                m.MembersOmitted)).ToList();
+                m.MembersOmitted,
+                m.BodyOmitted)).ToList();
 
             var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
             var (cost, unknownBaselineFiles) = CostBaseline.Measure(
-                root, namedFiles, result.TokensUsed, !result.Truncated);
+                root, namedFiles, result.TokensUsed, !clipped);
             var fileFreshness = namedFiles.Count > 0
                 ? FreshnessVerdict.Classify(root, namedFiles, guardStaleKeys: freshness.Stale)
                 : null;
@@ -129,7 +128,7 @@ public sealed class SymbolLookupTool
                 warnings.Add(budgetLine);
             }
 
-            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, result.Truncated, warnings, root,
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, clipped, warnings, root,
                 freshness.Stale, result.DidYouMean, cost: cost, fileFreshness: fileFreshness,
                 freshness: AnswerFreshness.ForContent(
                     checkedCandidates: candidates.Count,
@@ -141,12 +140,7 @@ public sealed class SymbolLookupTool
                     payloadLines: [coverageLine, budgetLine],
                     unrefreshedFiles: freshness.Unrefreshed.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
-            QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
-                envelope.PaidTokens, envelope.Truncated, data.Count,
-                sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
-                client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                cacheInvalidated: invalidated is not null,
-                baselineTokens: envelope.Cost?.BaselineTokens);
+            RecordLedger(root, parameters, envelope, sw, cacheHit: false, cacheInvalidated: invalidated is not null);
             _cache?.Put("symbol_lookup", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
@@ -165,14 +159,50 @@ public sealed class SymbolLookupTool
     private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string File)> candidates) =>
         FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
 
+    // both roads write through here, reading the state off the envelope the caller is about to receive: a fresh
+    // call and the cache hit that replays it carry one answer, so one answer cannot be two rows in the ledger
+    private void RecordLedger(
+        string root,
+        object parameters,
+        ToolEnvelope answer,
+        Stopwatch sw,
+        bool cacheHit,
+        bool cacheInvalidated)
+    {
+        QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup", parameters,
+            answer.TokensUsed, answer.Truncated, Hits(answer).Count, sw.ElapsedMilliseconds,
+            cacheHit: cacheHit, indexAge: answer.IndexAge,
+            client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
+            cacheInvalidated: cacheInvalidated,
+            baselineTokens: answer.Cost?.BaselineTokens,
+            mapped: MappedOf(answer));
+    }
+
+    // an untruncated answer that still reports a body it left out is the mapped case: the map stood in, nothing
+    // went missing — the same reading on both roads, because both roads only look at the envelope
+    private static bool MappedOf(ToolEnvelope answer) =>
+        !answer.Truncated && Hits(answer).Any(static hit => hit.BodyOmitted);
+
+    private static List<SymbolHitData> Hits(ToolEnvelope answer) => (List<SymbolHitData>)answer.Data!;
+
+    // a refused body with no member map to stand in for it is the one clipped case the caller can only weigh
+    // against a number: the hint the engine carries names rows to narrow, not what the gap costs
+    private static string RemedyFor(SymbolLookupResult result) =>
+        result.RefusedBodyTokens > 0 && result.Matches.All(static m => m.Members.Count == 0)
+            ? HintText.BodyPriceRemedy(result.RefusedBodyTokens)
+            : result.Hint?.ForMcp() ?? HintText.RaiseMaxTokensRemedy;
+
     // the guard re-reads its widening patterns from the config on every call, so a cached answer is only
-    // valid for the pattern set it was computed with
+    // valid for the pattern set it was computed with. The ceiling belongs in the same key: the answer is
+    // shaped by it, and an envelope stored at 300 that replays for a request at 2000 makes the documented
+    // "raise maxTokens" unre-runnable inside the session it was recommended in
     private static object Params(
         string name,
         string? kind,
         string? repo,
+        int maxTokens,
         IReadOnlyList<string> secretGuardExtra) =>
-        new { name, kind, repo, secretGuardExtra };
+        new { name, kind, repo, maxTokens, secretGuardExtra };
 
     private sealed record SymbolHitData(
         [property: JsonPropertyName("repo")] string Repo,
@@ -184,7 +214,9 @@ public sealed class SymbolLookupTool
         [property: JsonPropertyName("members"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<SymbolMemberData>? Members,
         [property: JsonPropertyName("membersOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        int MembersOmitted);
+        int MembersOmitted,
+        [property: JsonPropertyName("bodyOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool BodyOmitted);
 
     private sealed record SymbolMemberData(
         [property: JsonPropertyName("name")] string Name,

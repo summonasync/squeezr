@@ -146,6 +146,33 @@ public class SymbolDidYouMeanTests
         didYouMean.GetArrayLength().ShouldBeGreaterThan(0);
     }
 
+    [Fact]
+    public void DidYouMean_SuggestionTextOverBudget_ReportsClippedState()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find(
+            "MaterializationServce", null, null, 15, body: false);
+
+        result.Truncated.ShouldBeTrue();
+        result.DidYouMean.ShouldBeNull();
+        result.Hint.ShouldBeNull();
+        result.State.ShouldBe(AnswerState.Clipped);
+    }
+
+    [Fact]
+    public void DidYouMean_SuggestionFitsWithinBudget_ReportsCompleteState()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find(
+            "MaterializationServce", null, null, 20, body: false);
+
+        result.Truncated.ShouldBeFalse();
+        result.DidYouMean.ShouldNotBeNull();
+        result.State.ShouldBe(AnswerState.Complete);
+    }
+
     private static string NewIndexedWorkspace()
     {
         var workspace = TestDirs.NewTempDir();

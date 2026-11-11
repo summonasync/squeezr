@@ -161,6 +161,107 @@ public class QueryTelemetryTests
         QueryTelemetry.ReadAll(root).Single().CacheInvalidated.ShouldBeTrue();
     }
 
+    [Fact]
+    public void Record_MappedAnswer_WritesTruncatedFalseMappedTrueLastInTheLine()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", null, 164, false, 1, 5, mapped: true);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        raw.ShouldContain("\"truncated\":false");
+        raw.ShouldContain("\"mapped\":true");
+        Keys(raw).ShouldBe(
+            "ts,sessionId,tool,params,tokensUsed,truncated,hits,durationMs,cacheHit,indexAgeSeconds,client,mapped");
+        QueryTelemetry.ReadAll(root).Single().Mapped.ShouldBe(true);
+    }
+
+    [Fact]
+    public void Record_ClippedAnswer_WritesTruncatedTrueMappedFalse()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", null, 40, true, 1, 5, mapped: false);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        raw.ShouldContain("\"truncated\":true");
+        raw.ShouldContain("\"mapped\":false");
+        raw.ShouldEndWith(",\"mapped\":false}\n");
+        QueryTelemetry.ReadAll(root).Single().Mapped.ShouldBe(false);
+    }
+
+    [Fact]
+    public void Record_FullyPopulatedEntry_WritesMappedLastRightAfterBaselineTokens()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", new { name = "Huge" }, 85, false, 1, 6,
+            cacheHit: true, indexAge: TimeSpan.FromSeconds(12), client: "qwen", clientVersion: "1.2.3",
+            cacheInvalidated: true, baselineTokens: 1100, mapped: true);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        Keys(raw).ShouldBe(
+            "ts,sessionId,tool,params,tokensUsed,truncated,hits,durationMs,cacheHit,indexAgeSeconds," +
+            "client,clientVersion,cacheInvalidated,baselineTokens,mapped");
+        raw.ShouldEndWith("\"baselineTokens\":1100,\"mapped\":true}\n");
+    }
+
+    [Fact]
+    public void Record_WithoutState_OmitsTheMappedKeySoTheRowStaysUnsplittable()
+    {
+        var root = TestDirs.NewTempDir();
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "pre-read", null, 0, false, 0, 0, mapped: null);
+
+        var raw = File.ReadAllText(SqueezrPaths.QueriesLogPath(root));
+        raw.ShouldNotContain("mapped");
+        QueryTelemetry.ReadAll(root).Single().Mapped.ShouldBeNull();
+    }
+
+    [Fact]
+    public void ReadAll_PreSplitLine_StillParsesAndReadsAsNullMapped_WhileMappedFalseRowReadsAsFalse()
+    {
+        var root = TestDirs.NewTempDir();
+        Directory.CreateDirectory(SqueezrPaths.StoreDir(root));
+        const string preSplit = """{"ts":"2026-10-01T10:00:00Z","sessionId":"00000000-0000-0000-0000-000000000000","tool":"symbol_lookup","params":null,"tokensUsed":164,"truncated":true,"hits":1,"durationMs":5,"cacheHit":false,"indexAgeSeconds":null,"client":"cli"}""";
+        File.WriteAllText(SqueezrPaths.QueriesLogPath(root), preSplit + '\n');
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup", null, 164, false, 1, 5, mapped: false);
+
+        var rows = QueryTelemetry.ReadAll(root);
+
+        rows.Count.ShouldBe(2);
+        rows[0].Mapped.ShouldBeNull();
+        rows[0].Truncated.ShouldBeTrue();
+        rows[1].Mapped.ShouldBe(false);
+        rows[1].Truncated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ReadAll_SymbolLookupRowFromBeforeTheBudgetKey_StillParsesWithoutIt()
+    {
+        // 115/T7 put the resolved ceiling into symbol_lookup's recorded params: an additive key, so a row
+        // written by an older build has to keep loading with the key simply absent instead of failing the line
+        var root = TestDirs.NewTempDir();
+        Directory.CreateDirectory(SqueezrPaths.StoreDir(root));
+        const string beforeBudgetKey = """{"ts":"2026-11-01T10:00:00Z","sessionId":"00000000-0000-0000-0000-000000000000","tool":"symbol_lookup","params":{"name":"Huge","kind":null,"repo":null,"secretGuardExtra":[]},"tokensUsed":36,"truncated":true,"hits":1,"durationMs":5,"cacheHit":false,"indexAgeSeconds":null,"client":"cli","mapped":false}""";
+        File.WriteAllText(SqueezrPaths.QueriesLogPath(root), beforeBudgetKey + '\n');
+
+        QueryTelemetry.Record(root, Guid.NewGuid(), "symbol_lookup",
+            new { name = "Huge", kind = (string?)null, repo = (string?)null, maxTokens = 600, secretGuardExtra = Array.Empty<string>() },
+            237, false, 1, 6, mapped: false);
+
+        var rows = QueryTelemetry.ReadAll(root);
+
+        rows.Count.ShouldBe(2);
+        var legacyParams = (JsonElement)rows[0].Params!;
+        legacyParams.TryGetProperty("maxTokens", out _).ShouldBeFalse();
+        legacyParams.GetProperty("name").GetString().ShouldBe("Huge");
+        ((JsonElement)rows[1].Params!).GetProperty("maxTokens").GetInt32().ShouldBe(600);
+    }
+
+    private static string Keys(string line) =>
+        string.Join(',', JsonDocument.Parse(line).RootElement.EnumerateObject().Select(p => p.Name));
+
     private static QueryTelemetryEntry Entry(string tool) =>
         new(DateTime.UtcNow, Guid.NewGuid(), tool, null, 0, false, 0, 1, false, null);
 }
