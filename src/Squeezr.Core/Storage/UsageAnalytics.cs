@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Squeezr.Core.Storage;
 
 public sealed record WorkspaceUsage(
@@ -7,7 +9,13 @@ public sealed record WorkspaceUsage(
     bool Stale,
     IReadOnlyList<AgentStats> Agents);
 
-public sealed record SessionAdoption(int McpSessions, int HookSessions)
+public sealed record HookToolSessions(string Tool, int Sessions);
+
+public sealed record SessionAdoption(
+    int McpSessions,
+    int HookSessions,
+    IReadOnlyList<HookToolSessions>? HookSessionsByTool = null,
+    int HookSessionsWithoutTool = 0)
 {
     public double? Ratio => HookSessions == 0 ? null : Math.Round((double)McpSessions / HookSessions, 2);
 }
@@ -76,13 +84,59 @@ public static class UsageAnalytics
             .Where(id => id != Guid.Empty)
             .Distinct()
             .Count();
-        var hook = entries
+        var hookEntries = entries
             .Where(e => string.Equals(e.Client, "hook", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var hook = hookEntries
             .Select(e => e.SessionId)
             .Where(id => id != Guid.Empty)
             .Distinct()
             .Count();
-        return new SessionAdoption(mcp, hook);
+
+        // one bucket per verbatim recorded value, never a normalised or inferred one: a session that read
+        // through two tools lands in both buckets, so the buckets count what each name was seen doing while
+        // HookSessions stays the distinct total the ratio divides by.
+        var sessions = hookEntries
+            .Select(e => (Tool: RecordedTool(e.Params), e.SessionId))
+            .Where(x => x.SessionId != Guid.Empty)
+            .ToList();
+        var byTool = sessions
+            .Where(x => x.Tool is not null)
+            .GroupBy(x => x.Tool!, StringComparer.Ordinal)
+            .Select(group => new HookToolSessions(group.Key, group.Select(x => x.SessionId).Distinct().Count()))
+            .OrderBy(bucket => bucket.Tool, StringComparer.Ordinal)
+            .ToList();
+        var withoutTool = sessions
+            .Where(x => x.Tool is null)
+            .Select(x => x.SessionId)
+            .Distinct()
+            .Count();
+
+        return new SessionAdoption(mcp, hook, byTool, withoutTool);
+    }
+
+    private static string? RecordedTool(object? parameters)
+    {
+        if (parameters is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(parameters));
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("tool", out var tool))
+            {
+                return null;
+            }
+
+            return tool.ValueKind == JsonValueKind.String && tool.GetString() is { Length: > 0 } name ? name : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static IReadOnlyList<QueryTelemetryEntry> Filter(
