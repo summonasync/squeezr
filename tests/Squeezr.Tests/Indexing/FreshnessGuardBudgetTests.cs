@@ -156,6 +156,20 @@ public class FreshnessGuardBudgetTests
             "promised not to leave in the code");
     }
 
+    // the wrapper is the only place where the budget meets a real stopwatch and the real index route, and the
+    // spy-driven tests above cannot see either: swap the clock for a constant or drop the takeover forwarding
+    // there and every other test in this class still passes. No test exercises onStaleTakeover through the
+    // public overload, which is why the route half is pinned here rather than behaviourally.
+    [Fact]
+    public void PublicWrapper_WiresTheRealClock_AndForwardsTheReindexRoute()
+    {
+        var wrapper = PublicWrapperBody(Read("src/Squeezr.Core/Indexing/FreshnessGuard.cs"));
+        wrapper.ShouldContain("Stopwatch.StartNew()");
+        wrapper.ShouldContain("() => clock.Elapsed");
+        wrapper.ShouldNotContain("TimeSpan.Zero");
+        wrapper.ShouldContain("IndexFile(root, repo, path, onStaleTakeover: takeover)");
+    }
+
     private static FreshnessResult CheckWithBudget(
         string workspace,
         SpyReindex spy,
@@ -219,6 +233,18 @@ public class FreshnessGuardBudgetTests
         [.. Regex.Matches(source, @"(?<![\w.])\d+[\d_]*(?![\w.])")
             .Select(m => m.Value.Replace("_", string.Empty))
             .Distinct()];
+
+    private static string PublicWrapperBody(string source)
+    {
+        const string open = "public static FreshnessResult CheckAndRefresh(";
+        const string close = "internal static FreshnessResult CheckAndRefresh(";
+        var from = source.IndexOf(open, StringComparison.Ordinal);
+        from.ShouldBeGreaterThan(-1, $"the guard no longer has the '{open}' wrapper this pin reads");
+        var to = source.IndexOf(close, StringComparison.Ordinal);
+        to.ShouldBeGreaterThan(from,
+            $"the seam overload ('{close}') must stay below the public wrapper — this pin reads the block between them");
+        return source[from..to];
+    }
 
     private static string CandidateLoopBody(string source)
     {
