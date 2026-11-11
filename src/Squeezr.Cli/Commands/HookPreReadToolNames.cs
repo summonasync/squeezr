@@ -5,7 +5,7 @@ namespace Squeezr.Cli.Commands;
 // stay the unmeasured ids they are.
 public static class HookPreReadToolNames
 {
-    public static readonly string[] ReadIds = ["Read", "read_file", "ReadFile"];
+    private static readonly string[] ReadIds = ["Read", "read_file", "ReadFile"];
 
     public static bool IsReadTool(string? toolName) =>
         toolName is not null && ReadIds.Contains(toolName, StringComparer.Ordinal);
