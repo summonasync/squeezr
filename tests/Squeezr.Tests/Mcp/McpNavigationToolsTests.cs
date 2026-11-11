@@ -95,10 +95,15 @@ public class McpNavigationToolsTests
         var entry = QueryTelemetry.ReadAll(workspace).ShouldHaveSingleItem();
         entry.Tool.ShouldBe("symbol_lookup");
         entry.Hits.ShouldBe(0);
+        // The answer still ships a freshness story worth its own bytes, and this tool's ledger row does not
+        // carry them: symbol_lookup records the content price (main's basis, pinned by 115's
+        // SymbolLookupBudgetCacheKeyTests) while code_search, find_references and repo_map record the paid
+        // price. Asserting the story exists is what keeps that split visible in the suite instead of quietly
+        // halving symbol_lookup's share of stats — the row gains its own freshnessTokens in b932094d.
+        envelope.GetProperty("freshness").GetProperty("freshnessTokens").GetInt32().ShouldBeGreaterThan(0);
         entry.TokensUsed.ShouldBe(
-            envelope.GetProperty("tokensUsed").GetInt32() +
-            envelope.GetProperty("freshness").GetProperty("freshnessTokens").GetInt32(),
-            "stats records the number the caller pays — the budgeted content plus the freshness story it ships");
+            envelope.GetProperty("tokensUsed").GetInt32(),
+            "provisional basis: the row mirrors the declared content price; the paid number arrives with the additive row field (b932094d)");
         entry.Truncated.ShouldBeFalse();
     }
 
