@@ -1359,9 +1359,12 @@ flag) never retires itself.
 
 **Upgrade retire.** Under `--autostart`, once per sweep the supervisor compares
 the modification time of its own binary against its own process start time.
-When the disk is newer — an upgrade landed — it finishes one full fleet sweep
-first, prints `watchd is retiring after an upgrade: <path> changed at <stamp>,
-this process started at <stamp>`, and exits **75**. 75 is sysexits'
+When the disk is newer — an upgrade landed — the drift check is the first
+thing the next sweep runs: it prints `watchd is retiring after an upgrade:
+<path> changed at <stamp>, this process started at <stamp>`, and exits **75**
+at the top of that sweep without touching the fleet; the retire only unlocks
+once at least one full useful fleet sweep has already completed in this
+process's lifetime. 75 is sysexits'
 `EX_TEMPFAIL`: a temporary failure the starter is invited to retry, and
 `Restart=on-failure` (systemd) and `KeepAlive`+`SuccessfulExit=false` (launchd)
 both bring the process back on any non-zero exit. The number cannot be 0 —
@@ -1375,21 +1378,26 @@ logon.
 **What an upgrade does to the supervised daemons.** The generated systemd unit
 leaves `KillMode` at the systemd default — `control-group` — so retiring the
 supervisor stops its whole cgroup: every supervised watch daemon takes a
-fleet-wide SIGTERM, roughly 5–10 seconds pass (`RestartSec=5` plus the 2 s
-sweep cadence of the new instance before it relaunches everyone), and the whole
-fleet comes up on the new binary. On launchd the children survive the retire
+fleet-wide SIGTERM, roughly 5–10 seconds pass (`RestartSec=5`, then the new
+instance's first sweep, which runs immediately at start — the 2 s cadence
+never waits before relaunching; on launchd the default throttle caps the same
+window at 10 s), and the whole fleet comes up on the new binary. On launchd
+the children survive the retire
 (the default `AbandonProcessGroup` keeps them), and the new supervisor reads
 them as `SkippedLiveOwner` — `watch <store> is managed elsewhere (pid N)` — and
 does not restart children it does not own: the fleet runs a mix of old and new
 daemons until each survivor dies on its own. Both shapes are deliberate
 (review-110-08 owner rulings), not accidents. One practical consequence: during
-that 5–10 s idle window a starting `squeezr serve` can see the store's stale
-watch claim and print `warning: watch claim held by wedged pid N, store under
-watchd supervision` — its own advice there is "if the supervisor does not clear
-it, run `squeezr fleet restart`", and during this window the supervisor does:
-wait a few seconds, the incoming watchd relaunches the daemon itself. The same
-notice outside the window (a genuinely wedged, blocked store) is exactly what
-that manual `fleet restart` is for.
+that 5–10 s idle window a starting `squeezr serve` sees the retired supervisor
+as gone — the watchd lock is released and the claim's owner pid is not alive —
+so it prints the plain no-indexer warning and asks the operator to run
+`squeezr watch` by hand. That is the trap to know: the incoming supervisor
+relaunches the daemon on its own within seconds, so the manual `watch` is
+unnecessary here. The wedged-under-supervision warning (advice: "if the
+supervisor does not clear it, run `squeezr fleet restart`") needs a live
+supervisor and a live wedged owner, so it belongs to a genuinely wedged,
+blocked store outside this window — and there that manual `fleet restart` is
+exactly what it is for.
 
 **Trap 1: linger on a headless machine.** A systemd *user* manager exists only
 while the account has a session: without more, the unit will not start at boot
@@ -1438,7 +1446,11 @@ byte-stable, scriptable — plus the exit-code ladder:
 The other lines answer the neighbouring questions: `platform=`, `unit=` (where
 the entry lives), `present=`/`enabled=`/`failed=`/`loaded=` (each `yes`, `no`,
 `couldn't-ask` where the tool would not talk, or `not-supported` where the
-platform has no such question — launchd for `failed=`, Windows for `loaded=`),
+platform has no such question — launchd for `failed=`, Windows for `loaded=`;
+`failed=` also prints `not-supported` where the question exists but the
+platform has no answer yet: a Windows task that never ran has no run outcome
+to read, and systemd answers exit 4 for a unit its running manager has not
+read),
 `program=`/`arguments=`/`program-state=` (what the entry execs and whether it
 can), `watchd=running`/`watchd=not-running` with `pid=` (the singleton lock —
 registered and running are two facts, and a linger-less box after a reboot is
