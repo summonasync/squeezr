@@ -96,6 +96,7 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
                 $"   headless: {Markup.Escape(entry.HeadlessStatus ?? "n/a")}");
             RenderIndexRemedy(entry);
             RenderStale(entry);
+            RenderHook(entry);
             foreach (var warning in entry.Warnings)
             {
                 AnsiConsole.MarkupLine($"  [yellow]warning:[/] {Markup.Escape(warning)}");
@@ -182,6 +183,14 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
             AnsiConsole.MarkupLine(
                 $"  [yellow]stale (project):[/] registered={Markup.Escape(entry.ProjectCommand ?? "")} → expected={Markup.Escape(expected)}");
             AnsiConsole.MarkupLine($"  [yellow]repair:[/] {Markup.Escape(RemedyText.McpInstallRepair(entry.Client))}");
+        }
+    }
+
+    private static void RenderHook(McpClientDiagnostics entry)
+    {
+        if (entry.HookStatus is { } status)
+        {
+            AnsiConsole.MarkupLine($"  hook pre-read: {Markup.Escape(status)}");
         }
     }
 
