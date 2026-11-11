@@ -321,9 +321,10 @@ public sealed class SupervisorLoopTests : IDisposable
         workspace.Launcher.Roots.ShouldBe([workspace.RootPath]);
     }
 
-    // review-110-08 WARN-1, measured 3/3: Process.StartTime is floored on Linux, so a stamp a few
-    // milliseconds ahead of the start is not evidence of an upgrade. The first tick has to do its
-    // sweep instead of exiting, and only the next one may retire.
+    // review-110-08 WARN-1, measured 3/3: the start stamp read from a live process via its StartTime
+    // property is floored on Linux, so a stamp a few milliseconds ahead of the start is not evidence
+    // of an upgrade. The first tick has to do its sweep instead of exiting, and only the next one
+    // may retire.
     [Fact]
     public void OwnBinaryFiveMillisecondsAheadOfTheStart_SupervisesTheFirstTick_AndRetiresOnTheSecond()
     {
