@@ -149,7 +149,7 @@ public class TreeSitterLanguagesRegistrationTests
     }
 
     [Fact]
-    public void PoolNamesAreDistinctPerGrammarAndReservedForPythonAndGo()
+    public void PoolNamesAreDistinctPerGrammarAndLiveForPythonAndGo()
     {
         var pools = new[]
         {

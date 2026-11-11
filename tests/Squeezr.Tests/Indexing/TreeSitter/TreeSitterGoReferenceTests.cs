@@ -284,6 +284,35 @@ public class TreeSitterGoReferenceTests
     }
 
     [Fact]
+    public void Go_DoublePointerType_UnwrapsEveryLevelToTheSameNamedType()
+    {
+        var refs = Extract("cmd/double.go", """
+            package p
+
+            type Holder struct {
+                direct  *Store
+                doubled **Store
+                generic *Generic[Store]
+            }
+            """).ToList();
+
+        // review-023-07 N1, taken as a literal pin instead of as a recursion argument. pointer_type carries
+        // no 'type' field, so the reader walks its last named child — and a pointer to a pointer nests the
+        // same node one level deeper, which is the only way '**Store' could answer with nothing or with the
+        // wrong name. Both fields name 'Store': the depth is not part of the identity go gives a type use
+        refs.Where(r => r.Line == 4 || r.Line == 5).Select(r => (r.ToSymbolId, r.ToName, r.Kind)).ShouldBe(
+        [
+            (null, "Store", RefKind.Reference),
+            (null, "Store", RefKind.Reference),
+        ]);
+
+        // the pointer wrapped around an instantiation unwraps in the other order — pointer_type first, then
+        // the generic's own 'type' field — and lands on the aggregate, not on its argument, so 'Store'
+        // appears once per line that names it and 'Generic' is what line 6 answers with
+        refs.Single(r => r.Line == 6).ToName.ShouldBe("Generic");
+    }
+
+    [Fact]
     public void Go_CompositeLiteralsAndBlankFields_EmitNothing_WhileNamedNeighboursDo()
     {
         var refs = Extract(FixtureSource).ToList();

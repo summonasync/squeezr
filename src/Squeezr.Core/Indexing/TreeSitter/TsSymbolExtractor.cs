@@ -120,7 +120,7 @@ internal static class TsSymbolExtractor
 
         for (var current = node.Parent; current is not null; current = current.Parent)
         {
-            if (current.Type is "function_declaration" or "method_declaration" or "func_literal")
+            if (IsGoScopeBoundary(current))
             {
                 return false;
             }
@@ -128,6 +128,13 @@ internal static class TsSymbolExtractor
 
         return true;
     }
+
+    // the kinds that put a node inside a body rather than at package level. This list is the SAME test
+    // MethodOwnerName runs on its way out to a type name — an interface element under a function has no
+    // owner for the same reason a const under a function is not package-level — so it lives here once and
+    // a fifth body kind is added in one place instead of two (review-023-06 named the pair, T6 closed it)
+    private static bool IsGoScopeBoundary(Node node) =>
+        node.Type is "function_declaration" or "method_declaration" or "func_literal";
 
     // two guards reject a write that is not a declaration, and they overlap on purpose:
     //  - the text test below, because UPPER_SNAKE is the convention that separates a module or class
@@ -349,9 +356,9 @@ internal static class TsSymbolExtractor
     // answers 'is this method_elem owned by a type that has a name?', and TryCreateSymbol's refusal is
     // its ONLY caller — the container of an owned method_elem comes from the ordinary ancestor walk in
     // ContainerOf (DeclarationName finds the same type_spec/type_alias), not from here. Merging the two
-    // into one owner lookup is a refactor this round deliberately does not do; the duplication to know
-    // about is the boundary kind list: function/method/func_literal appear here and in
-    // IsGoPackageLevelBinding, and a fifth container-ish kind would have to be added in both.
+    // into one owner lookup stays a refactor this task does not do: the walks answer different questions
+    // (one wants a name, one wants a scope verdict) and share only the boundary list, which now lives in
+    // IsGoScopeBoundary.
     // An interface under a type_spec or type_alias has a name to inherit — anywhere in the file,
     // including inside a function body — and under a var_spec or a parameter it has none, which is the
     // anonymous case refused
@@ -359,7 +366,7 @@ internal static class TsSymbolExtractor
     {
         for (var current = methodElem.Parent; current is not null; current = current.Parent)
         {
-            if (current.Type is "function_declaration" or "method_declaration" or "func_literal")
+            if (IsGoScopeBoundary(current))
             {
                 return null;
             }

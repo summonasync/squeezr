@@ -179,6 +179,34 @@ public class TreeSitterRustSymbolTests
     }
 
     [Fact]
+    public void Rust_BlockLevelConstAndStatic_KeepTheirRowsUnderTheFunctionThatHoldsThem()
+    {
+        var result = Parse("src/block.rs", """
+            fn main() {
+                const K: u32 = 1;
+                static S: u32 = 2;
+                let scratch = 3;
+            }
+            """);
+
+        // the fact this class measured in its carrier and never pinned: rust's const_item and static_item
+        // sit inside a block as happily as at module scope, and the table keys them wherever they are
+        // found, so a block-level binding is a row. Go reads the same shape the other way on purpose
+        // (Go_BodyLevelBindings_AreNotRows_WhilePackageLevelOnesAre) — a divergence chosen per language,
+        // and a divergence is only worth something once both sides of it carry a pin
+        result.Symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe(
+        [
+            ("main", SymbolKind.Function, null),
+            ("K", SymbolKind.Field, "main"),
+            ("S", SymbolKind.Field, "main"),
+        ]);
+
+        // 'let' is the block-level form rust spells differently and the table does not key, so a local
+        // binding stays a local and yields no row of its own
+        result.Symbols.ShouldNotContain(s => s.Name == "scratch");
+    }
+
+    [Fact]
     public void Rust_Chunks_AreBuiltPerSymbolWithMatchingSpans()
     {
         var result = Parse("src/lib.rs", ItemsSource);

@@ -224,9 +224,26 @@ that is the deal.
   aliases, import graph; Rust gets that same layer over its own vocabulary —
   functions, structs, enums, unions, traits, impl blocks, modules, type
   aliases, consts, statics and macro definitions, with `use` trees, calls,
-  trait/impl targets and macro invocations as its reference graph; every other
+  trait/impl targets and macro invocations as its reference graph; Python gets
+  it over functions, async functions, classes, methods, module and class
+  constants, with imports (plain, aliased, `from`, relative, wildcard), calls
+  and base classes as its reference graph — and a dotted `import a.b.c` binds
+  the top package `a`, never the leaf; Go gets it over functions, methods
+  named by their receiver (`Store.Put`), structs, interfaces, type aliases,
+  type declarations and package-level consts and vars, with imports, calls,
+  type uses and embedded fields as its reference graph — and `import
+  "net/http"` binds the last element `http`, so the two grammars keep their
+  own import rule instead of sharing one; every other
   text (Markdown, YAML, JSON…) is indexed by a sliding-window fallback chunker
   — searchable, but not symbol-aware.
+- **Per-language reference pools, because the same name is not the same
+  thing.** `mul` in JavaScript and `mul` in Rust are unrelated symbols, so a
+  reference edge is name-matched only inside its own language pool — js/ts/tsx
+  share one, and rust, python and go each got their own. No language is
+  declared a symbol source before its own vocabulary lands in the index home
+  (`TreeSitterLanguages`), and the refusals are stated rather than smoothed
+  over: a go blank identifier and a multi-name const/var spec name nothing, and
+  rust, python and go capture no doc comments yet — js/ts keep theirs.
 - **Adoption is the hard part, not the tech.** Agents must be *allowed* to
   call it. Tool allowlists and flow gates decide whether the index gets used
   at all.
