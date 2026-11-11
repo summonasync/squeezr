@@ -1,10 +1,18 @@
+using System.Diagnostics;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Indexing;
 
-public sealed record FreshnessResult(IReadOnlyList<string> Refreshed, IReadOnlyList<string> Stale);
+// Unrefreshed is the budget's own tally: every key it holds is also in Stale, and it names the part of that
+// list this call refused to re-read because the budget was gone. The two early returns below hand back an
+// empty Unrefreshed on purpose — a call that never reached the candidates left nothing behind at a budget,
+// it reached nothing, and the reason a caller reads must not be allowed to collapse into the budget shape.
+public sealed record FreshnessResult(
+    IReadOnlyList<string> Refreshed,
+    IReadOnlyList<string> Stale,
+    IReadOnlyList<string> Unrefreshed);
 
 public static class FreshnessGuard
 {
@@ -17,8 +25,26 @@ public static class FreshnessGuard
         IReadOnlyList<(string Repo, string Path)> candidates,
         Action<string>? onStaleTakeover = null)
     {
+        var clock = Stopwatch.StartNew();
+        return CheckAndRefresh(
+            workspaceRoot,
+            candidates,
+            onStaleTakeover,
+            (root, repo, path, takeover) =>
+                new WorkspaceIndexer().IndexFile(root, repo, path, onStaleTakeover: takeover),
+            () => clock.Elapsed);
+    }
+
+    internal static FreshnessResult CheckAndRefresh(
+        string workspaceRoot,
+        IReadOnlyList<(string Repo, string Path)> candidates,
+        Action<string>? onStaleTakeover,
+        ReindexFile reindex,
+        Func<TimeSpan> elapsed)
+    {
         var refreshed = new List<string>();
         var stale = new List<string>();
+        var unrefreshed = new List<string>();
         var guard = SecretGuardIngestion.Load(workspaceRoot);
 
         WorkspaceManifest manifest;
@@ -28,7 +54,7 @@ public static class FreshnessGuard
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            return new FreshnessResult([], candidates.Select(Key).ToList());
+            return new FreshnessResult([], candidates.Select(Key).ToList(), []);
         }
 
         var store = OpenStore(workspaceRoot);
@@ -37,12 +63,13 @@ public static class FreshnessGuard
             // candidates used to fail this one at a time, each open throwing inside its own probe:
             // every non-protected path goes to stale and nothing is refreshed
             return new FreshnessResult(
-                [], candidates.Where(c => !guard.IsProtected(c.Path)).Select(Key).ToList());
+                [], candidates.Where(c => !guard.IsProtected(c.Path)).Select(Key).ToList(), []);
         }
 
         using (store)
         {
             var sources = new Dictionary<string, CandidateSource?>(StringComparer.Ordinal);
+            var reReads = 0;
             foreach (var candidate in candidates)
             {
                 try
@@ -60,8 +87,21 @@ public static class FreshnessGuard
                         continue;
                     }
 
-                    new WorkspaceIndexer().IndexFile(
-                        workspaceRoot, candidate.Repo, candidate.Path, onStaleTakeover: onStaleTakeover);
+                    // the deterministic point: a re-read that has not started yet is the only thing the budget
+                    // can refuse, and it is refused as itself, never as a check that came back bad. The first
+                    // one is never refused — a call that found a stale file heals at least one — so the wall
+                    // bound reads as "start another", and a slow store open cannot empty the call
+                    if (reReads >= RefreshBudget.MaxFilesReRead ||
+                        (reReads > 0 && elapsed().TotalMilliseconds >= RefreshBudget.MaxWallClockMillis))
+                    {
+                        var refused = Key(candidate);
+                        stale.Add(refused);
+                        unrefreshed.Add(refused);
+                        continue;
+                    }
+
+                    reReads++;
+                    reindex(workspaceRoot, candidate.Repo, candidate.Path, onStaleTakeover);
                     refreshed.Add(Key(candidate));
                 }
                 catch (Exception ex) when (IsRecoverable(ex))
@@ -71,7 +111,7 @@ public static class FreshnessGuard
             }
         }
 
-        return new FreshnessResult(refreshed, stale);
+        return new FreshnessResult(refreshed, stale, unrefreshed);
     }
 
     private static MetaStore? OpenStore(string workspaceRoot)

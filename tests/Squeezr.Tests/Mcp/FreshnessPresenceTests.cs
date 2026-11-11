@@ -224,6 +224,58 @@ public class FreshnessPresenceTests
             "the whole verdict list fits in the answer, so nothing was left out");
     }
 
+    // The answer-level shape of the refresh budget: files the check reached and the call refused to re-read
+    // arrive named, counted, priced and still stale. Which of the two caps bound first is a wall-clock
+    // property of the machine running the test, so this pins the band both caps imply, never one exact split.
+    [Fact]
+    public async Task CodeSearch_WhereTheBudgetRefusedAReRead_NamesIt_CountsIt_AndPricesIt()
+    {
+        var stale = RefreshBudget.MaxFilesReRead + 2;
+        var workspace = WideIndexedWorkspace(stale);
+        for (var i = 0; i < stale; i++)
+        {
+            File.AppendAllText(In(workspace, $"src/Unit{i:00}.cs"), "// past the stamp\n");
+        }
+
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+        var envelope = ParseEnvelope(await harness.Client.CallToolAsync(
+            "code_search",
+            new Dictionary<string, object?> { ["query"] = "Add" },
+            cancellationToken: CancellationToken.None));
+        var claim = Freshness(envelope);
+        var warnings = Warnings(envelope);
+
+        Int(claim, "checked").ShouldBe(stale, "the budget stops re-reads, never examination");
+        Int(claim, "namedFiles").ShouldBe(stale);
+        var unrefreshed = Int(claim, "unrefreshedFiles");
+        unrefreshed.ShouldBeGreaterThan(0,
+            $"{stale} dirty candidates against a {RefreshBudget.MaxFilesReRead}-file cap cannot all be re-read");
+        unrefreshed.ShouldBeInRange(
+            stale - RefreshBudget.MaxFilesReRead, stale - 1,
+            $"the count cap allows at most {RefreshBudget.MaxFilesReRead} re-reads, and the floor never refuses " +
+            "the first one — a remainder outside this band is either a budget that does not mean what it says " +
+            "or a re-read that threw, and this fixture has no reason to throw");
+
+        Int(claim, "staleTotal").ShouldBe(unrefreshed,
+            "no re-read failed on this fixture, so every stale row is a refusal and the two counts must agree");
+        Int(claim, "listed").ShouldBe(unrefreshed);
+        Int(claim, "laggingFiles").ShouldBe(unrefreshed,
+            "a row the budget refused is lagging in fileFreshness too — the answer loses nothing");
+        envelope.GetProperty("staleFiles").EnumerateArray().Count().ShouldBe(unrefreshed);
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeTrue(
+            "complete is a claim about the verdict, and the verdict is named whole here — the budget is not a " +
+            "withheld row, it is a refused re-read");
+
+        claim.EnumerateObject().Select(p => p.Name).ShouldBe(
+            ["check", "checked", "namedFiles", "staleTotal", "listed", "laggingFiles", "unrefreshedFiles",
+                "freshnessTokens"]);
+        warnings.ShouldContain(w => w.StartsWith(
+            $"refresh budget ({RefreshBudget.MaxFilesReRead} files / {RefreshBudget.MaxWallClockMillis} ms per call)",
+            StringComparison.Ordinal));
+        Int(claim, "freshnessTokens").ShouldBe(DeclaredByTheShippedBytes(envelope, claim, warnings),
+            "the budget line is a shipped line, so it rides in the declared price like every other one");
+    }
+
     [Fact]
     public async Task CheckedTools_DeclareTheirClass_AggregateToolsDeclareNothing()
     {
@@ -591,7 +643,8 @@ public class FreshnessPresenceTests
         var story = WireTokens(envelope.GetProperty("staleFiles").GetRawText()) + WireTokens(claim.GetRawText());
         return warnings
             .Where(w => w.Contains("answers structure, not content", StringComparison.Ordinal) ||
-                        w.Contains("stale rows are not listed", StringComparison.Ordinal))
+                        w.Contains("stale rows are not listed", StringComparison.Ordinal) ||
+                        w.Contains("refresh budget", StringComparison.Ordinal))
             .Aggregate(story, (total, line) => total + WireTokens("\"" + line + "\""));
     }
 

@@ -998,16 +998,21 @@ Every tool answers in one envelope:
   the verdict of a structure pass (a row whose file is gone, or whose size or
   mtime moved — no content is read there and nothing is refreshed), on
   `code_search` / `symbol_lookup` / `find_references` it is the content guard
-  (modified files refresh inline on read; what could not be refreshed lands
-  honestly in `staleFiles`). Either way the agent sees the data behind those
-  files is not confirmed and may suggest `squeezr index`. The final call on a
-  reindex belongs to the workspace owner.
+  (modified files refresh inline on read, inside a per-call budget — a file
+  count and a wall bound, both named by the warning line that appears when a
+  re-read was refused; `RefreshBudget` is the one place they are declared).
+  Whatever could not be refreshed — refused by that budget, or attempted and
+  failed — lands honestly in `staleFiles`, and `unrefreshedFiles` says how
+  many of them the budget refused. Either way the agent sees the data behind
+  those files is not confirmed and may suggest `squeezr index`. The final call
+  on a reindex belongs to the workspace owner.
 - `freshness` — the attestation of a check, carried by the four tools that run
   one (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) on every
   answer they produce, and additive over the core keys above:
   `{check, checked, scopeRows | namedFiles, staleTotal, listed,
   freshnessTokens}`, plus `listedMissing`, `missing` and `changed` on the map's
-  structure pass and `laggingFiles` on the content tools. A stored answer that
+  structure pass and `laggingFiles` and `unrefreshedFiles` on the content
+  tools. A stored answer that
   the cache hands back keeps the block it was produced with and marks itself
   (`replayed`, third sub-bullet): the block attests a check, and on a replay the
   check ran in the earlier call. It says which class of check ran
@@ -1029,6 +1034,23 @@ Every tool answers in one envelope:
     `fileFreshness`. Those are stat verdicts (size or mtime against the stamp,
     never a content read), so a `staleTotal` of `0` says nothing about them and
     the answer no longer reads as a clean verdict while naming them.
+  - `unrefreshedFiles` counts the stale files this call examined and then
+    refused to re-read because the inline-refresh budget was spent. The budget
+    is two numbers declared once, in `RefreshBudget` — a count of re-reads a
+    call may start and a wall bound read between candidates — and the
+    `warnings` line that appears with it says both. Absent means the budget
+    never bound: either nothing was stale, or the call never reached a
+    candidate (a store it could not open collapses every candidate and
+    attributes no cause, and that shape is never charged to the budget). A
+    refused row costs the answer nothing extra: it is still named in
+    `staleFiles`, still counted in `staleTotal`, still `lagging` in
+    `fileFreshness`. What the budget buys is the caller's wall time — one
+    measured `code_search` over a repo naming 24 stale files spent 55.9 s of
+    inline re-reads before the budget existed and 6.9 s after it (at 12 stale
+    files, 32.5 s → 7.0 s), and the 23 rows it left unread are named in the
+    answer instead of being silent. `tokensUsed` did not move between those
+    arms — 815 before, 815 after — while `freshnessTokens` rose from 127 to
+    601, which is exactly what disclosure costs.
   - `replayed: true` appears **only** on an answer the response cache handed
     back (see below). File mtimes move no cache generation, so on a replay the
     numbers in this block — and `staleFiles` and `indexAge` beside them —

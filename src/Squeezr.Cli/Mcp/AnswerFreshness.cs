@@ -9,8 +9,9 @@ namespace Squeezr.Cli.Mcp;
 // The two classes never share a vocabulary. `structure` is the map's stat-only pass — a row whose file is
 // gone, or whose size or mtime no longer matches the stamp; it reads no content and refreshes nothing.
 // `content` is the guard's hash-checked path, which reindexes what it can and reports what it could not
-// confirm. Neither number says why a position came back stale: a store this call could not open collapses
-// every candidate into the same outcome, so an answer names coverage and counts, never a cause.
+// confirm. A stale count says nothing about why: a store this call could not open collapses every candidate
+// into the same outcome, so an answer names coverage and counts, never that kind of cause. The one cause the
+// guard owns outright is the refresh budget, and it ships as its own number — see `unrefreshedFiles`.
 //
 // The denominator is named after the volume it divides, because the two volumes are not the same one:
 // `scopeRows` is everything a map scope speaks for (checked + withheld + skipped rows), `namedFiles` the
@@ -43,6 +44,8 @@ public sealed record AnswerFreshness(
     int? Changed = null,
     [property: JsonPropertyName("laggingFiles"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? LaggingFiles = null,
+    [property: JsonPropertyName("unrefreshedFiles"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? UnrefreshedFiles = null,
     [property: JsonPropertyName("freshnessTokens")] int FreshnessTokens = 0,
     [property: JsonPropertyName("replayed"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     bool Replayed = false)
@@ -80,11 +83,12 @@ public sealed record AnswerFreshness(
         int listed,
         int laggingFiles,
         IReadOnlyList<string> stalePaths,
-        IReadOnlyList<string?> payloadLines) =>
+        IReadOnlyList<string?> payloadLines,
+        int unrefreshedFiles = 0) =>
         Priced(
             new AnswerFreshness(
                 Content, checkedCandidates, NamedFiles: namedFiles, StaleTotal: staleTotal, Listed: listed,
-                LaggingFiles: laggingFiles),
+                LaggingFiles: laggingFiles, UnrefreshedFiles: NullWhenZero(unrefreshedFiles)),
             stalePaths,
             payloadLines);
 
@@ -115,6 +119,18 @@ public sealed record AnswerFreshness(
             : $"content check covered {checkedCount} of the {namedCount} files this answer names; staleFiles " +
               "lists what it did not confirm fresh, a file the check never reached carries only the stat " +
               "verdict in fileFreshness, and laggingFiles counts the files this answer names as lagging";
+
+    // The budget is the one reason a stale row may be named out loud: the check reached the file and the call
+    // chose not to re-read it. Said only when a re-read was refused — never about rows the call never
+    // examined, which arrive with an empty tally of their own and no claim attached.
+    public static string? BudgetWarning(int unrefreshedCount) =>
+        unrefreshedCount == 0
+            ? null
+            : $"refresh budget ({RefreshBudget.MaxFilesReRead} files / {RefreshBudget.MaxWallClockMillis} ms per call) spent; " +
+              $"{unrefreshedCount} stale file(s) this answer names were not re-read — staleFiles lists them " +
+              "and their rows still describe the content that was indexed";
+
+    private static int? NullWhenZero(int value) => value == 0 ? null : value;
 
     private static AnswerFreshness Priced(
         AnswerFreshness claim,

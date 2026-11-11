@@ -149,6 +149,12 @@ public sealed class CodeSearchTool
                 warnings.Add(coverageLine);
             }
 
+            var budgetLine = AnswerFreshness.BudgetWarning(freshness.Unrefreshed.Count);
+            if (budgetLine is not null)
+            {
+                warnings.Add(budgetLine);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
                 freshness.Stale, cost: cost, fileFreshness: fileFreshness,
                 freshness: AnswerFreshness.ForContent(
@@ -158,7 +164,8 @@ public sealed class CodeSearchTool
                     listed: freshness.Stale.Count,
                     laggingFiles: AnswerFreshness.CountLaggingFiles(fileFreshness),
                     stalePaths: freshness.Stale,
-                    payloadLines: [coverageLine]));
+                    payloadLines: [coverageLine, budgetLine],
+                    unrefreshedFiles: freshness.Unrefreshed.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                 envelope.PaidTokens, envelope.Truncated, data.Count,

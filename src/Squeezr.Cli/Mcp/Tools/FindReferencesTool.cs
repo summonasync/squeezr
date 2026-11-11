@@ -108,6 +108,12 @@ public sealed class FindReferencesTool
                 warnings.Add(coverageLine);
             }
 
+            var budgetLine = AnswerFreshness.BudgetWarning(freshness.Unrefreshed.Count);
+            if (budgetLine is not null)
+            {
+                warnings.Add(budgetLine);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root, carried,
                 definitions: definitions, cost: cost, fileFreshness: fileFreshness,
                 freshness: AnswerFreshness.ForContent(
@@ -117,7 +123,8 @@ public sealed class FindReferencesTool
                     listed: carried.Count,
                     laggingFiles: AnswerFreshness.CountLaggingFiles(fileFreshness),
                     stalePaths: carried,
-                    payloadLines: [laggingLine, coverageLine]));
+                    payloadLines: [laggingLine, coverageLine, budgetLine],
+                    unrefreshedFiles: freshness.Unrefreshed.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references", parameters,
                 envelope.PaidTokens, false, data.Count,

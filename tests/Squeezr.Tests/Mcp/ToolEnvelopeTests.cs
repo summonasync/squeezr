@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Cli.Mcp;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests.Mcp;
@@ -302,6 +303,21 @@ public class ToolEnvelopeTests
         line.ShouldStartWith("content check covered 50 of the 60 files this answer names");
         line.ShouldContain("fileFreshness");
         line.ShouldContain("laggingFiles");
+    }
+
+    [Fact]
+    public void BudgetWarning_NamesTheBudgetOnlyWhereAReReadWasRefused()
+    {
+        AnswerFreshness.BudgetWarning(0).ShouldBeNull(
+            "a call that refused nothing has nothing to say, and a collapsed store never reaches a refusal");
+
+        var line = AnswerFreshness.BudgetWarning(3)!;
+        line.ShouldStartWith(
+            $"refresh budget ({RefreshBudget.MaxFilesReRead} files / {RefreshBudget.MaxWallClockMillis} ms per call) spent");
+        // the wording is the finding: 'not re-read' is the budget's own reason, never a failed read, an
+        // unreadable file or a row the call never examined
+        line.ShouldContain("3 stale file(s) this answer names were not re-read");
+        line.ShouldContain("staleFiles lists them");
     }
 
     [Fact]
