@@ -378,6 +378,44 @@ public sealed class ManagedHooksWriterTests
         }
     }
 
+    [Theory]
+    [InlineData("/opt/squeezr/bin/squeezr hook pre-read", true)]
+    [InlineData("squeezr hook pre-read", true)]
+    [InlineData("squeezr.exe hook pre-read", true)]
+    [InlineData("\"squeezr.exe\" hook pre-read", true)]
+    [InlineData("/x/y/squeezr hook pre-read", true)]
+    [InlineData("Squeezr hook pre-read", true)]
+    [InlineData("other-tool hook pre-read", false)]
+    [InlineData("squeezr hook post-edit", false)]
+    // The double-space form is NOT managed — a hand edit that swallows the separator reads as a foreign
+    // entry and a re-install would add a second hook. Pinned as-is; changing it is a deliberate design act.
+    [InlineData("squeezr  hook pre-read", false)]
+    public void Owns_AcceptsTheReadmeSnippetFormsAndRejectsNeighbours(string candidate, bool expected)
+    {
+        BlockFor(McpClientId.Qwen).Owns(candidate).ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task Upsert_SecondEventBlock_LivesBesidePreToolUse_RemoveRestoresBytes()
+    {
+        var path = ScratchPath();
+        var preRead = BlockFor(McpClientId.Qwen);
+        await UpsertAsync(path, preRead);
+        var afterPreRead = File.ReadAllText(path);
+        var sessionStart = new HooksBlock("SessionStart", "startup", "session", "/opt/squeezr/bin/squeezr hook session");
+
+        (await UpsertAsync(path, sessionStart)).ShouldBeTrue();
+
+        var hooks = JsonNode.Parse(File.ReadAllText(path))!["hooks"]!.AsObject();
+        hooks.ContainsKey("PreToolUse").ShouldBeTrue();
+        hooks.ContainsKey("SessionStart").ShouldBeTrue();
+        ManagedPreToolEntries(path).Count(entry => EntryCarriesManaged(entry, preRead)).ShouldBe(1);
+
+        (await ManagedHooksWriter.RemoveAsync(path, sessionStart, CancellationToken.None)).ShouldBeTrue();
+        File.ReadAllText(path).ShouldBe(afterPreRead);
+        (await ManagedHooksWriter.IsArmedAsync(path, preRead, CancellationToken.None)).ShouldBeTrue();
+    }
+
     private static string ScratchPath() => Path.Combine(TestDirs.NewTempDir(), "settings.json");
 
     private static Task<bool> UpsertAsync(string path, HooksBlock block) =>
