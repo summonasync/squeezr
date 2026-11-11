@@ -1,20 +1,50 @@
+using System.Diagnostics;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Indexing;
 
-public sealed record FreshnessResult(IReadOnlyList<string> Refreshed, IReadOnlyList<string> Stale);
+// Unrefreshed is the budget's own tally: every key it holds is also in Stale, and it names the part of that
+// list this call refused to re-read because the budget was gone. The two early returns below hand back an
+// empty Unrefreshed on purpose — a call that never reached the candidates left nothing behind at a budget,
+// it reached nothing, and the reason a caller reads must not be allowed to collapse into the budget shape.
+public sealed record FreshnessResult(
+    IReadOnlyList<string> Refreshed,
+    IReadOnlyList<string> Stale,
+    IReadOnlyList<string> Unrefreshed);
 
 public static class FreshnessGuard
 {
+    // the cap is a contract with the read surfaces, not a tuning knob: raising it buys a linear
+    // price hike on every response and a wider leak window for the protected-path tally
+    public const int CandidateLimit = 50;
+
     public static FreshnessResult CheckAndRefresh(
         string workspaceRoot,
         IReadOnlyList<(string Repo, string Path)> candidates,
         Action<string>? onStaleTakeover = null)
     {
+        var clock = Stopwatch.StartNew();
+        return CheckAndRefresh(
+            workspaceRoot,
+            candidates,
+            onStaleTakeover,
+            (root, repo, path, takeover) =>
+                new WorkspaceIndexer().IndexFile(root, repo, path, onStaleTakeover: takeover),
+            () => clock.Elapsed);
+    }
+
+    internal static FreshnessResult CheckAndRefresh(
+        string workspaceRoot,
+        IReadOnlyList<(string Repo, string Path)> candidates,
+        Action<string>? onStaleTakeover,
+        ReindexFile reindex,
+        Func<TimeSpan> elapsed)
+    {
         var refreshed = new List<string>();
         var stale = new List<string>();
+        var unrefreshed = new List<string>();
         var guard = SecretGuardIngestion.Load(workspaceRoot);
 
         WorkspaceManifest manifest;
@@ -24,67 +54,102 @@ public static class FreshnessGuard
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            return new FreshnessResult([], candidates.Select(Key).ToList());
+            return new FreshnessResult([], candidates.Select(Key).ToList(), []);
         }
 
-        foreach (var candidate in candidates)
+        var store = OpenStore(workspaceRoot);
+        if (store is null)
         {
-            try
-            {
-                // a protected path is never re-read from here: the row it would refresh may only exist in a
-                // store that predates the guard, and this route is how such a secret comes straight back.
-                // A skip, not a withholding — the tally belongs to the pass that refuses entry.
-                if (guard.IsProtected(candidate.Path))
-                {
-                    continue;
-                }
+            // candidates used to fail this one at a time, each open throwing inside its own probe:
+            // every non-protected path goes to stale and nothing is refreshed
+            return new FreshnessResult(
+                [], candidates.Where(c => !guard.IsProtected(c.Path)).Select(Key).ToList(), []);
+        }
 
-                if (IsFresh(workspaceRoot, manifest, candidate))
-                {
-                    continue;
-                }
-
-                new WorkspaceIndexer().IndexFile(
-                    workspaceRoot, candidate.Repo, candidate.Path, onStaleTakeover: onStaleTakeover);
-                refreshed.Add(Key(candidate));
-            }
-            catch (Exception ex) when (IsRecoverable(ex))
+        using (store)
+        {
+            var sources = new Dictionary<string, CandidateSource?>(StringComparer.Ordinal);
+            var reReads = 0;
+            foreach (var candidate in candidates)
             {
-                stale.Add(Key(candidate));
+                try
+                {
+                    // a protected path is never re-read from here: the row it would refresh may only exist in a
+                    // store that predates the guard, and this route is how such a secret comes straight back.
+                    // A skip, not a withholding — the tally belongs to the pass that refuses entry.
+                    if (guard.IsProtected(candidate.Path))
+                    {
+                        continue;
+                    }
+
+                    if (IsFresh(workspaceRoot, manifest, store, sources, candidate))
+                    {
+                        continue;
+                    }
+
+                    // the deterministic point: a re-read that has not started yet is the only thing the budget
+                    // can refuse, and it is refused as itself, never as a check that came back bad. The first
+                    // one is never refused — a call that found a stale file heals at least one — so the wall
+                    // bound reads as "start another", and a slow store open cannot empty the call
+                    if (reReads >= RefreshBudget.MaxFilesReRead ||
+                        (reReads > 0 && elapsed().TotalMilliseconds >= RefreshBudget.MaxWallClockMillis))
+                    {
+                        var refused = Key(candidate);
+                        stale.Add(refused);
+                        unrefreshed.Add(refused);
+                        continue;
+                    }
+
+                    reReads++;
+                    reindex(workspaceRoot, candidate.Repo, candidate.Path, onStaleTakeover);
+                    refreshed.Add(Key(candidate));
+                }
+                catch (Exception ex) when (IsRecoverable(ex))
+                {
+                    stale.Add(Key(candidate));
+                }
             }
         }
 
-        return new FreshnessResult(refreshed, stale);
+        return new FreshnessResult(refreshed, stale, unrefreshed);
+    }
+
+    private static MetaStore? OpenStore(string workspaceRoot)
+    {
+        try
+        {
+            return new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            return null;
+        }
     }
 
     private static bool IsFresh(
         string workspaceRoot,
         WorkspaceManifest manifest,
+        MetaStore store,
+        Dictionary<string, CandidateSource?> sources,
         (string Repo, string Path) candidate)
     {
-        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot));
-        var entry = manifest.Repos.FirstOrDefault(r =>
-            string.Equals(r.Name, candidate.Repo, StringComparison.OrdinalIgnoreCase));
-        if (entry is null)
+        var source = ResolveSource(manifest, store, sources, candidate.Repo);
+        if (source is null)
         {
             return false;
         }
 
-        var repoDoc = store.FindRepo(candidate.Repo);
-        if (repoDoc is null)
-        {
-            return false;
-        }
-
-        var doc = store.ListFiles(repoDoc.Id)
-            .FirstOrDefault(f => string.Equals(f.Path, candidate.Path, StringComparison.Ordinal));
-        if (doc is null)
+        var doc = store.FindFile(source.RepoId, candidate.Path);
+        // the path index answers case-insensitively (LiteDB collation), the scan this lookup replaced
+        // filtered Ordinal — without this guard a repo holding both 'a.cs' and 'A.cs' with identical
+        // content could be called fresh against the other file's row and never get its own row written
+        if (doc is null || !string.Equals(doc.Path, candidate.Path, StringComparison.Ordinal))
         {
             return false;
         }
 
         var fullPath = Path.Combine(
-            NavigationContext.ResolveRepoRoot(workspaceRoot, entry),
+            NavigationContext.ResolveRepoRoot(workspaceRoot, source.Entry),
             candidate.Path.Replace('/', Path.DirectorySeparatorChar));
 
         // the size comparison below is no filter: a channel reports st_size 0, so it matches an indexed
@@ -104,8 +169,31 @@ public static class FreshnessGuard
         return sha256 == doc.Sha256;
     }
 
+    // a candidate list is repo-homogeneous in practice, so the name → (manifest entry, store row) pair
+    // is resolved once per distinct name instead of once per candidate
+    private static CandidateSource? ResolveSource(
+        WorkspaceManifest manifest,
+        MetaStore store,
+        Dictionary<string, CandidateSource?> sources,
+        string repo)
+    {
+        if (sources.TryGetValue(repo, out var known))
+        {
+            return known;
+        }
+
+        var entry = manifest.Repos.FirstOrDefault(r =>
+            string.Equals(r.Name, repo, StringComparison.OrdinalIgnoreCase));
+        var repoDoc = entry is null ? null : store.FindRepo(repo);
+        var source = repoDoc is null ? null : new CandidateSource(entry!, repoDoc.Id);
+        sources[repo] = source;
+        return source;
+    }
+
     private static bool IsRecoverable(Exception ex) =>
         ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException;
 
     private static string Key((string Repo, string Path) candidate) => $"{candidate.Repo}/{candidate.Path}";
+
+    private sealed record CandidateSource(RepoEntry Entry, uint RepoId);
 }

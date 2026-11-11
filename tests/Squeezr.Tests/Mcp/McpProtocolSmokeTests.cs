@@ -101,7 +101,9 @@ public class McpProtocolSmokeTests
         foreach (var envelope in envelopes)
         {
             envelope.EnumerateObject().Select(p => p.Name)
-                .Where(n => n != "fileFreshness")
+                // fileFreshness and freshness are the optional halves of the contract (035 additive): they
+                // ride only on answers that name files or ran a check, never on the aggregate ones
+                .Where(n => n is not ("fileFreshness" or "freshness"))
                 .OrderBy(n => n, StringComparer.Ordinal)
                 .ShouldBe(expectedKeys);
             envelope.GetProperty("data").ValueKind.ShouldNotBe(JsonValueKind.Null);

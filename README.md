@@ -987,8 +987,11 @@ guard stays the content-exact authority — a file it refreshed inline reads
 `fresh` afterwards, and one whose inline refresh failed stays `lagging` even
 when its mtime reads young. A live watcher on the store is named in the same
 answer (`active writer on this store: pid N, watch beat Ns old`) so a verdict
-about to flip is never mistaken for a settled one; `index_status` and
-`repo_map` aggregate rather than name files and say so in `warnings`.
+about to flip is never mistaken for a settled one. `index_status` aggregates
+rather than names files and says so in `warnings`; `repo_map` names a bounded
+sample of up to 50 rows of its own scope in `staleFiles` and declares what it
+left out in `freshness` — the vanished rows are listed first (`listedMissing`
+of them), the lagging rows after.
 
 ### Navigation flow
 
@@ -1013,7 +1016,10 @@ Every tool answers in one envelope:
   means "this answer lost something the caller asked for", not "the budget
   refused at least once"; `cost.complete` means "the answer holds everything it
   claims" — true for a whole answer and for a mapped one, false only when
-  something really went missing.
+  something really went missing, and an answer that carries less of its own
+  freshness verdict than its check found is not holding everything it claims.
+  The freshness story an answer ships beside its content is priced separately,
+  in `freshness.freshnessTokens`.
   <removed 2026-11-10 — 115/T6>~~`truncated: true` → narrow the query (`repo`,
   `kind`) or raise `maxTokens`~~</removed> — that rule conflated a substituted
   body with a lost one. Read the three states below.
@@ -1022,10 +1028,71 @@ Every tool answers in one envelope:
   chunks pending embedding)" in `code_search` when the semantic layer is not
   fully pumped — at 100% the line is absent), trimming hints, and "cache:
   invalidated (index changed)" — the cache-death mark (see below).
-- `indexAge` / `staleFiles` — freshness. Modified files refresh inline on
-  read; what could not be refreshed lands honestly in `staleFiles` — the
-  agent sees the data for those files is stale and may suggest `squeezr
-  index`. The final call on a reindex belongs to the workspace owner.
+- `indexAge` / `staleFiles` — freshness. `staleFiles` names indexed rows the
+  answer can no longer vouch for, in one of two classes: on `repo_map` it is
+  the verdict of a structure pass (a row whose file is gone, or whose size or
+  mtime moved — no content is read there and nothing is refreshed), on
+  `code_search` / `symbol_lookup` / `find_references` it is the content guard
+  (modified files refresh inline on read, inside a per-call budget — a file
+  count and a wall bound, both named by the warning line that appears when a
+  re-read was refused; `RefreshBudget` is the one place they are declared).
+  Whatever could not be refreshed — refused by that budget, or attempted and
+  failed — lands honestly in `staleFiles`, and `unrefreshedFiles` says how
+  many of them the budget refused. Either way the agent sees the data behind
+  those files is not confirmed and may suggest `squeezr index`. The final call
+  on a reindex belongs to the workspace owner.
+- `freshness` — the attestation of a check, carried by the four tools that run
+  one (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) on every
+  answer they produce, and additive over the core keys above:
+  `{check, checked, scopeRows | namedFiles, staleTotal, listed,
+  freshnessTokens}`, plus `listedMissing`, `missing` and `changed` on the map's
+  structure pass and `laggingFiles` and `unrefreshedFiles` on the content
+  tools. A stored answer that
+  the cache hands back keeps the block it was produced with and marks itself
+  (`replayed`, third sub-bullet): the block attests a check, and on a replay the
+  check ran in the earlier call. It says which class of check ran
+  (`structure` or `content`), how many positions it examined against the volume
+  the answer speaks for (`scopeRows` — the rows of a map scope, withheld and
+  unresolvable ones included; `namedFiles` — the distinct files a query answer
+  names), how many came back stale, and how many of those the answer actually
+  lists. An empty `staleFiles` with `checked: 0` means nothing was examined, not
+  that everything is fine; a `listed` below `staleTotal` means the answer
+  carries a sample, and `cost.complete` says so.
+  - `freshnessTokens` is what this story costs the caller and `tokensUsed`
+    does not count: the `staleFiles` sample, the `warnings` lines that explain
+    the check, and this block itself, measured on the wire basis (a quote
+    travelling inside the MCP content string costs six bytes, and the product's
+    own estimator prices those bytes). Folding them into `tokensUsed` was
+    rejected — that number is what the caller's budget governs — so telemetry
+    records `tokensUsed + freshnessTokens`, the number actually paid.
+  - `laggingFiles` counts the files this answer calls `lagging` in
+    `fileFreshness`. Those are stat verdicts (size or mtime against the stamp,
+    never a content read), so a `staleTotal` of `0` says nothing about them and
+    the answer no longer reads as a clean verdict while naming them.
+  - `unrefreshedFiles` counts the stale files this call examined and then
+    refused to re-read because the inline-refresh budget was spent. The budget
+    is two numbers declared once, in `RefreshBudget` — a count of re-reads a
+    call may start and a wall bound read between candidates — and the
+    `warnings` line that appears with it says both. Absent means the budget
+    never bound: either nothing was stale, or the call never reached a
+    candidate (a store it could not open collapses every candidate and
+    attributes no cause, and that shape is never charged to the budget). A
+    refused row costs the answer nothing extra: it is still named in
+    `staleFiles`, still counted in `staleTotal`, still `lagging` in
+    `fileFreshness`. What the budget buys is the caller's wall time — a
+    re-measured `code_search` over a repo naming 24 stale files spent 46.7 s of
+    inline re-reads before the budget existed and 5.9 s after it (at 12 stale
+    files, 27.9 s → 6.0 s; medians of ten cold `squeezr serve` runs per arm,
+    harness `scripts/bench-guard-017.sh`), and the 23 rows it left unread are
+    named in the answer instead of being silent. `tokensUsed` did not move
+    between those arms — 815 before, 815 after — while `freshnessTokens` rose
+    from 127 to 601, which is exactly what disclosure costs.
+  - `replayed: true` appears **only** on an answer the response cache handed
+    back (see below). File mtimes move no cache generation, so on a replay the
+    numbers in this block — and `staleFiles` and `indexAge` beside them —
+    describe the call that produced the stored envelope, not this one. A
+    replayed answer attests no check of its own; the mark is how the reader
+    knows.
 
 **Budget states: complete, mapped, clipped.** `symbol_lookup` and `code_pack`
 spend their answers out of one `TokenBudget`, and since 115 the engine keeps
@@ -1115,7 +1182,12 @@ and `repo_map` key the value as it was passed, so leaving `maxTokens` out and
 passing the default are two different entries there. An
 identical query in the same session = an instant replay of the stored
 envelope; telemetry marks it `cacheHit: true` (and it shows in the hit-rate
-of `squeezr stats`). Any reindex — a watch pass or an external `squeezr index`
+of `squeezr stats`). A replayed answer says so in its own block —
+`freshness.replayed: true`, present only on hits and costing 15 text bytes (26
+on the wire, which `freshnessTokens` re-prices) — because the generation is
+the mtime pair of `meta.db` and `config.json`: files that changed on disk, or
+vanished from it, never invalidate a stored answer, so the numbers a replay
+carries describe the call that produced it. Any reindex — a watch pass or an external `squeezr index`
 — changes the cache generation (mtime of meta.db): dead entries are dropped
 immediately, not left for LRU eviction, and the first answer after the change
 carries `cache: invalidated (index changed)` in `warnings` — once per
@@ -1533,7 +1605,13 @@ carry the same arithmetic in their own envelope: the additive `cost` block
 (`tokensUsed`, `baselineTokens`, `savedTokens`, `ratio`, `complete`) shows
 the whole-file price of the returned files at the moment of the call, and
 telemetry records that same per-call `baselineTokens`, so the dashboard
-and the transcript cannot disagree:
+and the transcript cannot disagree. `tokensUsed` there is the content the
+`maxTokens` budget governs; the freshness story shipped beside it prices
+itself in `freshness.freshnessTokens`, and the telemetry line records the sum.
+`complete` is a claim about the verdict, not about the budget: it reads false
+when `staleFiles` carries a sample of a bigger verdict, and a reader who sees
+`complete: false` with `truncated: false` should go to `freshness`, not raise
+`maxTokens`:
 
 ```bash
 squeezr stats           # per-tool table + savings + cache

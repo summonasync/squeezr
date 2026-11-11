@@ -72,7 +72,7 @@ public class McpPrefixScopeTests
     }
 
     [Fact]
-    public async Task RepoMap_CaseMismatchedPrefix_StillRefreshesInline()
+    public async Task RepoMap_CaseMismatchedPrefix_StillScopesTheStructuralPass()
     {
         var workspace = NewIndexedWorkspace();
         WriteFile(workspace, "repo/src/Core/Alpha.cs", """
@@ -93,8 +93,13 @@ public class McpPrefixScopeTests
 
         result.IsError.ShouldNotBe(true);
         var envelope = ParseEnvelope(result);
-        envelope.GetProperty("staleFiles").EnumerateArray().ShouldBeEmpty();
-        DataTexts(envelope).ShouldContain(t => t.Contains("Sum(int a, int b)"));
+
+        // the prefix arrives in another case than the stored paths, and the pass reads rows, not rendered
+        // labels — so the changed file is still found, and it is named in the casing the store holds
+        envelope.GetProperty("staleFiles").EnumerateArray()
+            .Select(s => s.GetString()!)
+            .ShouldBe(["demo/src/Core/Alpha.cs"]);
+        DataTexts(envelope).ShouldNotContain(t => t.Contains("Sum(int a, int b)"));
     }
 
     [Fact]
