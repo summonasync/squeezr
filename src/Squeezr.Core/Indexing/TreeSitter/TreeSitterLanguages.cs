@@ -51,8 +51,9 @@ internal static class TreeSitterLanguages
     internal const string JsTsPool = "js-ts";
     internal const string RustPool = "rust";
 
-    // reserved now so a grammar's pool name is not invented mid-extraction later: python and go are
-    // registered below without reference rules, and these are the names their rows will carry
+    // reserved before the grammars landed so a pool name would not be invented mid-extraction;
+    // python took its pool with T3 and go with T5, so both names are live now and each pool
+    // carries only its own grammar's edges (the cross-grammar twin kinds are the reason)
     internal const string PythonPool = "python";
     internal const string GoPool = "go";
 
@@ -150,8 +151,9 @@ internal static class TreeSitterLanguages
     // body is a divergence chosen for go, not a rule inherited from the others: rust's const_item and
     // static_item DO sit inside blocks and rust ships rows for them (measured — a 'const K' and a
     // 'static S' in an fn body arrive as Field rows under container 'main'). A method's owner is not an
-    // ancestor either: it is the 'receiver' field, so the container is read from that field
-    // (GoReceiverType) and the kind comes straight from this row
+    // ancestor either: it is the 'receiver' field, so the container is read from that field through
+    // GoMethodOwnerName — the same seam the reference extractor walks for EnclosingName, which is why
+    // a go reference and its symbol row name the owner identically — and the kind comes from this row
     private static readonly SymbolVocabulary GoSymbols = new(
         new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
         {
