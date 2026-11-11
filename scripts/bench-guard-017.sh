@@ -618,8 +618,12 @@ foreach (var line in mismatches.Take(10))
     Console.WriteLine($"  MISMATCH {line}");
 }
 
-var sample = rows[0].Path;
+// the swap has to land on a letter: rows[0] on the real stand is ".gitignore", and upper-casing a dot
+// returns the same string — the demo then measures nothing and even prints File.Exists: true for the
+// untouched path. Pick the first row that actually starts with a letter and name the sample in the log.
+var sample = rows.First(r => r.Path.Length > 1 && char.IsLetter(r.Path[0])).Path;
 var swapped = char.IsUpper(sample[0]) ? char.ToLowerInvariant(sample[0]) + sample[1..] : char.ToUpperInvariant(sample[0]) + sample[1..];
+Console.WriteLine($"collation: sample row '{sample}' swapped to '{swapped}'");
 Console.WriteLine($"collation: FindFile('{swapped}') returned {(store.FindFile(repoId, swapped) is null ? "null (case-sensitive)" : "a row (case-insensitive)")}");
 Console.WriteLine($"collation: File.Exists for the case-swapped path on disk: {File.Exists(Path.Combine(NavigationContext.ResolveRepoRoot(root, repo), swapped))}");
 return mismatches.Count == 0 ? 0 : 1;
