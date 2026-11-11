@@ -93,7 +93,8 @@ squeezr index --events
   so the row's span starts at the `@` line while its signature stays on the `def` line.
   Its references are imports, calls and base classes, and the import rule is python's
   own: `import a.b.c` binds the TOP package `a` and keeps the whole path in the module
-  column, `import a.b.c as d` binds `d`, `from a.b import c` binds `c`, and a relative
+  column, `import a.b.c as d` binds `d`, `from a.b import c` binds `c`, `from x import *`
+  binds the module `x` itself and no individual names behind the star, and a relative
   form keeps its column (`from .text import x` says `.text`) — so grepping the leaf of a
   dotted import finds nothing, because the importing file never has that name. Go answers
   with functions, methods, structs, interfaces, type declarations, aliases and
