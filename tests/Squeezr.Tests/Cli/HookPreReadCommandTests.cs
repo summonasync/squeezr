@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Cli.Commands;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing;
@@ -220,6 +221,95 @@ public sealed class HookPreReadCommandTests
         result.StdOut.ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData("Read", true)]
+    [InlineData("read_file", true)]
+    [InlineData("ReadFile", true)]
+    [InlineData("Grep", false)]
+    [InlineData("glob", false)]
+    [InlineData("write_file", false)]
+    [InlineData("read", false)]
+    [InlineData("READ_FILE", false)]
+    [InlineData("Read_File", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsReadTool_DeclaredOrOffName_AnswersAsDeclared(string? toolName, bool expected) =>
+        HookPreReadToolNames.IsReadTool(toolName).ShouldBe(expected);
+
+    [Theory]
+    [InlineData("Read")]
+    [InlineData("read_file")]
+    [InlineData("ReadFile")]
+    public async Task WideRange_AcceptedToolName_EmitsAdvisoryNudge(string toolName)
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var smallFile = Path.Combine(root, "small.cs");
+        await File.WriteAllTextAsync(smallFile, "class Small { }");
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home, ReadPayload(smallFile, limit: 2000, toolName: toolName), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        var lines = result.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        lines.Length.ShouldBe(1);
+        using var doc = JsonDocument.Parse(lines[0]);
+        var hook = doc.RootElement.GetProperty("hookSpecificOutput");
+        hook.GetProperty("hookEventName").GetString().ShouldBe("PreToolUse");
+        var context = hook.GetProperty("additionalContext").GetString();
+        context.ShouldNotBeNullOrWhiteSpace();
+        context!.ShouldContain("expand_span");
+        context.ShouldContain("code_search");
+        doc.RootElement.TryGetProperty("permissionDecision", out _).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("Grep")]
+    [InlineData("glob")]
+    [InlineData("write_file")]
+    [InlineData("read")]
+    public async Task WideRange_OffToolName_PrintsNothing(string toolName)
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var smallFile = Path.Combine(root, "small.cs");
+        await File.WriteAllTextAsync(smallFile, "class Small { }");
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home, ReadPayload(smallFile, limit: 2000, toolName: toolName), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Read")]
+    [InlineData("read_file")]
+    [InlineData("ReadFile")]
+    public async Task LargeFileProtectedByAnchoredExtension_AcceptedToolName_AnswersLikeAMissingOne(string toolName)
+    {
+        // same in-process fixture as the name-only pin above: the control run proves the accepted
+        // name does nudge an unguarded big file, so the silence below belongs to the guard, not to the tool
+        var root = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(root);
+        manager.Init(null);
+        Directory.CreateDirectory(Path.Combine(root, "repo", "infra"));
+        var secret = Path.Combine(root, "repo", "infra", "VaultKeys.cs");
+        await File.WriteAllTextAsync(secret, new string('x', 300 * 1024));
+        await File.WriteAllTextAsync(Path.Combine(root, "generated.cs"), new string('x', 300 * 1024));
+        manager.AddRepo("repo", "demo");
+        SecretGuardFixture.SetGuardExtra(root, "infra/VaultKeys.cs");
+
+        var controlRun = await CliTestProcess.RunPipedAsync(
+            SqueezrHome.Resolve(), ReadPayload(Path.Combine(root, "generated.cs"), toolName: toolName), root, "hook", "pre-read");
+        var protectedRun = await CliTestProcess.RunPipedAsync(
+            SqueezrHome.Resolve(), ReadPayload(secret, toolName: toolName), root, "hook", "pre-read");
+
+        controlRun.StdOut.ShouldContain("expand_span");
+        protectedRun.ExitCode.ShouldBe(0);
+        protectedRun.StdOut.ShouldBeEmpty();
+    }
+
     private static async Task<string> NewInitializedWorkspaceAsync(string home)
     {
         var root = TestDirs.NewTempDir();
@@ -227,10 +317,10 @@ public sealed class HookPreReadCommandTests
         return root;
     }
 
-    private static string ReadPayload(string filePath, int? limit = null, int? offset = null)
+    private static string ReadPayload(string filePath, int? limit = null, int? offset = null, string toolName = "Read")
     {
         var range = limit is null ? string.Empty : $",\"limit\":{limit}";
         var start = offset is null ? string.Empty : $",\"offset\":{offset}";
-        return "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"" + filePath + "\"" + range + start + "}}";
+        return "{\"tool_name\":\"" + toolName + "\",\"tool_input\":{\"file_path\":\"" + filePath + "\"" + range + start + "}}";
     }
 }

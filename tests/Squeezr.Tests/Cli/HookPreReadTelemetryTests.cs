@@ -79,12 +79,75 @@ public sealed class HookPreReadTelemetryTests
         QueryTelemetry.ReadAll(root).ShouldNotContain(e => e.Tool == "pre-read");
     }
 
-    private static string Payload(string sessionId, string filePath) => JsonSerializer.Serialize(new
+    [Theory]
+    [InlineData("Read")]
+    [InlineData("read_file")]
+    [InlineData("ReadFile")]
+    public async Task PreReadHook_AcceptedToolName_AppendsRowWithVerbatimTool(string toolName)
     {
-        session_id = sessionId,
-        tool_name = "Read",
-        tool_input = new { file_path = filePath }
-    });
+        var home = SqueezrHome.Resolve();
+        var root = await NewRegisteredWorkspaceAsync(home);
+        WriteFile(root, "src/Foo.cs", "public class Foo { }");
+
+        var run = await CliTestProcess.RunPipedAsync(
+            home, Payload(SessionId, Path.Combine(root, "src", "Foo.cs"), toolName), root, "hook", "pre-read");
+
+        run.ExitCode.ShouldBe(0);
+        var entry = QueryTelemetry.ReadAll(root).Single(e => e.Tool == "pre-read");
+        entry.Client.ShouldBe("hook");
+        var parameters = (JsonElement)entry.Params!;
+        parameters.GetProperty("tool").GetString().ShouldBe(toolName);
+        parameters.GetProperty("file").GetString().ShouldBe(Path.Combine(root, "src", "Foo.cs"));
+    }
+
+    [Theory]
+    [InlineData("Grep")]
+    [InlineData("glob")]
+    [InlineData("write_file")]
+    [InlineData("read")]
+    [InlineData("READ_FILE")]
+    public async Task PreReadHook_OffToolName_AppendsNoRowAndPrintsNothing(string toolName)
+    {
+        var home = SqueezrHome.Resolve();
+        var root = await NewRegisteredWorkspaceAsync(home);
+        WriteFile(root, "src/Foo.cs", "public class Foo { }");
+
+        var run = await CliTestProcess.RunPipedAsync(
+            home, Payload(SessionId, Path.Combine(root, "src", "Foo.cs"), toolName), root, "hook", "pre-read");
+
+        run.ExitCode.ShouldBe(0);
+        run.StdOut.ShouldBeEmpty();
+        QueryTelemetry.ReadAll(root).ShouldNotContain(e => e.Tool == "pre-read");
+    }
+
+    [Theory]
+    [InlineData("Read")]
+    [InlineData("read_file")]
+    [InlineData("ReadFile")]
+    public async Task PreReadHook_GuardedPath_AcceptedToolName_AppendsOnlyTheRedactedRow(string toolName)
+    {
+        var home = SqueezrHome.Resolve();
+        var root = await NewRegisteredWorkspaceAsync(home);
+        WriteFile(root, ".env", new string('x', 300 * 1024));
+
+        var run = await CliTestProcess.RunPipedAsync(
+            home, Payload(SessionId, Path.Combine(root, ".env"), toolName), root, "hook", "pre-read");
+
+        run.ExitCode.ShouldBe(0);
+        run.StdOut.ShouldBeEmpty();
+        var entry = QueryTelemetry.ReadAll(root).Single(e => e.Tool == "pre-read");
+        var parameters = (JsonElement)entry.Params!;
+        parameters.GetProperty("tool").GetString().ShouldBe(toolName);
+        parameters.GetProperty("file").GetString().ShouldBe(QueryTelemetry.RedactedPlaceholder);
+    }
+
+    private static string Payload(string sessionId, string filePath, string toolName = "Read") =>
+        JsonSerializer.Serialize(new
+        {
+            session_id = sessionId,
+            tool_name = toolName,
+            tool_input = new { file_path = filePath }
+        });
 
     private static async Task<string> NewRegisteredWorkspaceAsync(string home)
     {

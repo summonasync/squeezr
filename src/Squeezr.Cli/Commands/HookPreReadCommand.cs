@@ -7,7 +7,6 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
 {
-    private const string ReadToolName = "Read";
     private const string PreToolUseEvent = "PreToolUse";
 
     private const long LargeFileBytes = 256 * 1024;
@@ -47,7 +46,7 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
         try
         {
             var input = JsonSerializer.Deserialize<HookPreReadInput>(payload);
-            if (input is null || !string.Equals(input.ToolName, ReadToolName, StringComparison.Ordinal))
+            if (input is null || !HookPreReadToolNames.IsReadTool(input.ToolName))
             {
                 return;
             }
@@ -122,7 +121,7 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
             return null;
         }
 
-        if (!string.Equals(input?.ToolName, ReadToolName, StringComparison.Ordinal))
+        if (!HookPreReadToolNames.IsReadTool(input?.ToolName))
         {
             return null;
         }
