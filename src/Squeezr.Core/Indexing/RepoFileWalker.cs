@@ -38,6 +38,11 @@ public static class RepoFileWalker
 {
     private static readonly string[] AlwaysSkippedDirs = [".git", ".squeezr"];
 
+    // A linked worktree carries '.git' as a FILE naming the real gitdir, so the directory rule above never
+    // sees it and the walk reads the marker as source: its one line is an absolute path into the main
+    // worktree, which is exactly what a lane must not answer with.
+    private static readonly string[] AlwaysSkippedFiles = [".git"];
+
     public static FileWalkResult Walk(
         string repoRoot,
         IgnoreRuleset rules,
@@ -120,6 +125,11 @@ public static class RepoFileWalker
                     }
 
                     pending.Enqueue(entry);
+                    continue;
+                }
+
+                if (AlwaysSkippedFiles.Contains(Path.GetFileName(entry), StringComparer.OrdinalIgnoreCase))
+                {
                     continue;
                 }
 

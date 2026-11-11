@@ -24,9 +24,14 @@ public sealed record WorktreeInitReport(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? RepairHint,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    WorktreeFillReport? Fill)
+    WorktreeFillReport? Fill,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    WorktreeReconcileReport? Reconcile)
 {
-    public static WorktreeInitReport From(WorktreeRegistrationOutcome outcome, WorktreeFillOutcome fill) =>
+    public static WorktreeInitReport From(
+        WorktreeRegistrationOutcome outcome,
+        WorktreeFillOutcome fill,
+        WorktreeReconcileOutcome? reconcile = null) =>
         new(
             State: outcome.State.ToString(),
             RootPath: outcome.RootPath,
@@ -39,8 +44,17 @@ public sealed record WorktreeInitReport(
             ServeCommand: outcome.StoreKey is null ? null : RemedyText.RebindServe(outcome.RootPath),
             IsLinked: outcome.IsLinked,
             IsDetached: outcome.IsDetached,
-            ReconcilePending: outcome.ReconcilePending,
+            // The registration answers for a store it minted empty; once a reconcile pass has read this lane's
+            // own rows against its own collection, that measurement is the better answer and it replaces the
+            // guess. A deferred reconcile reports no measurement, so the registration's word stands.
+            ReconcilePending: reconcile?.State switch
+            {
+                WorktreeReconcileState.Reconciled => false,
+                WorktreeReconcileState.Pending => true,
+                _ => outcome.ReconcilePending,
+            },
             Reason: outcome.Reason,
             RepairHint: outcome.RepairHint,
-            Fill: WorktreeFillReport.From(fill));
+            Fill: WorktreeFillReport.From(fill),
+            Reconcile: reconcile is null ? null : WorktreeReconcileReport.From(reconcile));
 }

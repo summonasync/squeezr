@@ -14,12 +14,14 @@ public sealed record WorktreeFillOutcome(
     WorktreeFillState State,
     string? Reason,
     WorkspaceStoreCopyResult? Copy,
-    WorktreeVectorCopyStats? Vectors = null)
+    WorktreeVectorCopyStats? Vectors = null,
+    WorktreeFillSkip? Skip = null)
 {
     public static WorktreeFillOutcome Filled(
         WorkspaceStoreCopyResult copy,
         WorktreeVectorCopyStats? vectors = null) =>
         new(WorktreeFillState.Filled, null, copy, vectors);
 
-    public static WorktreeFillOutcome Skipped(string reason) => new(WorktreeFillState.Skipped, reason, null);
+    public static WorktreeFillOutcome Skipped(string reason, WorktreeFillSkip skip) =>
+        new(WorktreeFillState.Skipped, reason, null, Skip: skip);
 }

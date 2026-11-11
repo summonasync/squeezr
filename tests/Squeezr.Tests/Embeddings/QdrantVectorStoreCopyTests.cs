@@ -259,6 +259,52 @@ public class QdrantVectorStoreCopyTests
         read.Select((point, index) => point.Vector.SequenceEqual(written[index].Vector)).ShouldBe([true, true, true]);
     }
 
+    // The two knobs the copy's own invariant is read through, pinned on the wire rather than in the caller:
+    // an approximate count is answered out of segment metadata, and a default read can be answered by a
+    // follower that has not applied the batch this pass just wrote. Delete either field from the product and
+    // this test is the one that goes red — the fake that ignores request fields cannot say it alone.
+    [Fact]
+    public async Task CountAfterOwnWritesAsync_AskedByTheCopy_SendsExactAndMajorityOnTheWire()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Points/Count"] = new CountResponse { Result = new CountResult { Count = 7 } },
+        });
+        var store = Store(handler);
+
+        var count = await store.CountAfterOwnWritesAsync(CancellationToken.None);
+
+        count.ShouldBe(7);
+        var request = CountPoints.Parser.ParseFrom(
+            handler.Requests.Single(r => r.Path == "/qdrant.Points/Count").Body.AsSpan(5));
+        // 'exact' is also what the client library sends when the caller says nothing, so the field that
+        // discriminates on this wire is the consistency: the product names it, the plain reader does not.
+        request.Exact.ShouldBeTrue("the copy's own count is stated exact, not left to a server default");
+        request.ReadConsistency.Type.ShouldBe(ReadConsistencyType.Majority,
+            "a replicated endpoint may answer a default read from a follower that never saw the batch");
+        request.CollectionName.ShouldBe(Collection);
+    }
+
+    // The plain count keeps the server's consistency defaults, and that difference is the point: it is the
+    // count a reconcile threshold takes, where the caller owns no writes and strictness would cost the read.
+    [Fact]
+    public async Task CountAsync_RoutineReader_AskedForNoConsistencyAtAll()
+    {
+        var handler = new GrpcStubHttpMessageHandler(new Dictionary<string, IMessage>
+        {
+            ["/qdrant.Points/Count"] = new CountResponse { Result = new CountResult { Count = 3 } },
+        });
+        var store = Store(handler);
+
+        var count = await store.CountAsync(CancellationToken.None);
+
+        count.ShouldBe(3);
+        var request = CountPoints.Parser.ParseFrom(
+            handler.Requests.Single(r => r.Path == "/qdrant.Points/Count").Body.AsSpan(5));
+        request.ReadConsistency.ShouldBeNull(
+            "the threshold read names no consistency, so a pass that deleted the copy's knob shows up here");
+    }
+
     private static RetrievedPoint StoredPoint(ulong id, float[] vector) => new()
     {
         Id = new PointId { Num = id },

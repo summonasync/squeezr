@@ -24,6 +24,10 @@ public sealed class WorktreeInitCopyCliTests
     {
         var main = IndexedMainWithPendingContent("cli-copy-main");
         var child = AddWorktree(main, "feat/116-cli-copy");
+        // The lane's config names a provider that is not in the room, so the reconcile pass this verb now runs
+        // stays structural: no inference call, no collection, and the pending it reports is the embedding
+        // queue the copied rows left behind.
+        PreMintLaneStore(child, "feat/116-cli-copy", provider: "ollama", model: null, probeFails: true);
 
         var run = await Run(child, "worktree", "init", "--json");
 
@@ -58,12 +62,30 @@ public sealed class WorktreeInitCopyCliTests
         fill.TryGetProperty("vectors", out _).ShouldBeFalse(
             "a parent whose rows are all pending owns no points, so no vector store was asked on its behalf");
         payload.GetProperty("reconcilePending").GetBoolean().ShouldBeTrue(
-            "a copied store is not reconciled — the fill plants content, it does not re-scan the branch");
+            "measured pending, not guessed: the copied rows wait for embeddings this pass could not run");
 
         var childStoreDir = WorkspaceStorePaths.RequireStoreDir(storeKey);
-        StoreFixture.Counts(childStoreDir).ShouldBe((3, 6),
-            "the report's numbers are the installed store's numbers, not a wish");
-        StoreFixture.TrigramDocs(childStoreDir).ShouldBe(3);
+        // The reconcile block is the fill's counterpart: one standard pass over this tree, with its numbers
+        // measured off the installed store rather than off the copy. The parent's rows name files this
+        // checkout does not hold, so a pass that left them standing would keep the lane answering with
+        // another branch's coordinates.
+        var reconcile = payload.GetProperty("reconcile");
+        reconcile.GetProperty("passRan").GetBoolean().ShouldBeTrue(
+            "the verb runs the reconcile pass itself, it no longer points the reader at 'squeezr index'");
+        reconcile.GetProperty("state").GetString().ShouldBe("Pending");
+        reconcile.GetProperty("code").GetString()
+            .ShouldBe(WorktreeReconcileOutcome.RowsPendingCode,
+                "no row here claims a vector, so the pending is the embedding queue, not a short collection");
+        reconcile.GetProperty("obligation").GetBoolean().ShouldBeFalse(
+            "obligation is the store's own claim of embedded rows, and a pending-only copy makes none");
+        reconcile.GetProperty("deleted").GetInt32().ShouldBe(3,
+            "the three parent-only paths leave the lane's index when this pass runs");
+        reconcile.GetProperty("rescannedFiles").GetInt32().ShouldBe(1,
+            "the lane keeps the one file its own tree really holds");
+        StoreFixture.Counts(childStoreDir).ShouldBe(
+            (reconcile.GetProperty("rescannedFiles").GetInt32(), reconcile.GetProperty("storedChunks").GetInt32()),
+            "the reconcile numbers are the installed store's numbers, not a wish");
+        StoreFixture.TrigramDocs(childStoreDir).ShouldBe(reconcile.GetProperty("rescannedFiles").GetInt32());
         FilesIn(childStoreDir).ShouldBe(["config.json", "meta.db", "trigram.idx", "workspace.json"],
             "a finished fill leaves exactly the files a filled store is made of — no temp, no write-ahead log");
         File.Exists(Path.Combine(childStoreDir, SqueezrPaths.LockFileName)).ShouldBeFalse(
@@ -73,6 +95,14 @@ public sealed class WorktreeInitCopyCliTests
         WorkspaceManifestFile
             .LoadAt(Path.Combine(childStoreDir, SqueezrPaths.StoreManifestFileName))
             .Repos.ShouldAllBe(entry => !Path.IsPathRooted(entry.Path));
+        // The T6 constraint in one line: the reconcile pass writes through the identity the copy seeded, it
+        // never minters a second repo entry for the lane tree.
+        var postPassRepos = WorkspaceManifestFile
+            .LoadAt(Path.Combine(childStoreDir, SqueezrPaths.StoreManifestFileName)).Repos.ToList();
+        postPassRepos.ShouldHaveSingleItem(
+            "one pass over the lane tree must not add a repo entry beside the copied one");
+        postPassRepos[0].Name.ShouldBe(MainRepoName, "identity, not cosmetics: the names own the trigram pairs");
+        postPassRepos[0].Path.ShouldBe(".");
 
         var second = await Run(child, "worktree", "init", "--json");
 
@@ -81,18 +111,29 @@ public sealed class WorktreeInitCopyCliTests
         again.RootElement.GetProperty("state").GetString().ShouldBe("AlreadyRegistered");
         again.RootElement.GetProperty("fill").GetProperty("state").GetString().ShouldBe("Skipped",
             "the verb runs at every session start; a default copy that re-filled would bury the lane's own work");
-        StoreFixture.Counts(childStoreDir).ShouldBe((3, 6));
+        var repeat = again.RootElement.GetProperty("reconcile");
+        repeat.GetProperty("passRan").GetBoolean().ShouldBeFalse(
+            "the pass is owed by state, not by this verb having run: a repeat that re-scanned would double the " +
+            "work at every session start");
+        repeat.GetProperty("state").GetString().ShouldBe("Pending",
+            "and the pending is still reported — a pass that skipped its work does not shave the word away");
+        repeat.GetProperty("code").GetString().ShouldBe(WorktreeReconcileOutcome.RowsPendingCode,
+            "pending is named by code, not by prose, for the pass that has to record it");
+        StoreFixture.Counts(childStoreDir).ShouldBe((1, 1));
     }
 
-    // The gate condition for review-116-06 BLOCKER #1: a store can hold every byte and still answer with
-    // nothing while no manifest entry names its rows. Everything below runs against the lane BEFORE any
-    // indexing pass here — status reporting files:0, search reporting zero matches or symbol naming no repo
-    // is the defect that shipped past a green copy report once.
+    // The query pins here run against the lane right after the verb: since T6 the verb itself lands one
+    // incremental pass over this tree, so 'copied and silent' is no longer a state a reader can reach by
+    // skipping 'squeezr index'. What these pins still prove is that a filled lane answers — status reports
+    // files, search names the repo and the path, symbol names the repo — without anyone indexing by hand.
     [Fact]
-    public async Task WorktreeInit_FilledLaneAnswersQueriesBeforeAnyIndexingPassRunsHere()
+    public async Task WorktreeInit_FilledLaneAnswersQueriesRightAfterTheVerb()
     {
         var main = IndexedMainOfWorktree("cli-query-main");
         var child = AddWorktree(main, "feat/116-cli-query");
+        // A provider that is not in the room keeps the verb's own pass structural: no inference call and no
+        // collection are opened in the developer's store by a test run.
+        PreMintLaneStore(child, "feat/116-cli-query", provider: "ollama", model: null, probeFails: true);
 
         var run = await Run(child, "worktree", "init", "--json");
 
@@ -179,16 +220,23 @@ public sealed class WorktreeInitCopyCliTests
         // completes what the first pass could not — no drop, no manual repair
         WriteLaneConfig(storeDir, provider: "ollama", model: "cli-strand");
 
-        var second = await Run(child, "worktree", "init", "--json");
+        var second = await Run(child, "worktree", "init", "--no-semantic", "--json");
 
         second.ExitCode.ShouldBe(0);
-        using (var doc = JsonDocument.Parse(second.StdOut.Trim()))
-        {
-            doc.RootElement.GetProperty("state").GetString().ShouldBe("AlreadyRegistered");
-            doc.RootElement.GetProperty("fill").GetProperty("state").GetString().ShouldBe("Filled");
-        }
+        using var filledDoc = JsonDocument.Parse(second.StdOut.Trim());
+        filledDoc.RootElement.GetProperty("state").GetString().ShouldBe("AlreadyRegistered");
+        filledDoc.RootElement.GetProperty("fill").GetProperty("state").GetString().ShouldBe("Filled");
 
-        StoreFixture.Counts(storeDir).ShouldBe((3, 6));
+        // The reconcile numbers are the installed store's numbers: the three paths this checkout does not hold
+        // leave the index, the file it really holds lands in it, and --no-semantic keeps the pass structural.
+        var reconcile = filledDoc.RootElement.GetProperty("reconcile");
+        reconcile.GetProperty("passRan").GetBoolean().ShouldBeTrue();
+        reconcile.GetProperty("obligation").GetBoolean().ShouldBeFalse(
+            "the copied rows that claimed vectors named files this tree does not hold, so the pass retired " +
+            "the claim with the rows");
+        reconcile.GetProperty("rescannedFiles").GetInt32().ShouldBe(1);
+        StoreFixture.Counts(storeDir).ShouldBe(
+            (reconcile.GetProperty("rescannedFiles").GetInt32(), reconcile.GetProperty("storedChunks").GetInt32()));
         FilesIn(storeDir).ShouldBe(["config.json", "meta.db", "trigram.idx", "workspace.json"]);
     }
 
@@ -200,6 +248,7 @@ public sealed class WorktreeInitCopyCliTests
     {
         var main = IndexedMainWithPendingContent("cli-human-main");
         var child = AddWorktree(main, "feat/116-cli-human");
+        PreMintLaneStore(child, "feat/116-cli-human", provider: "ollama", model: null, probeFails: true);
 
         var run = await Run(child, "worktree", "init");
 
@@ -213,10 +262,82 @@ public sealed class WorktreeInitCopyCliTests
         run.StdOut.ShouldContain("docs 3→3→3");
         run.StdOut.ShouldContain($"manifest owns {MainRepoName}");
         run.StdOut.ShouldContain("reconcile pending");
+        // the numbers the contract asks the verb to print: what was rescanned here and what it changed
+        run.StdOut.ShouldContain("pass over this tree");
+        run.StdOut.ShouldContain("rescanned");
+        run.StdOut.ShouldContain("re-embedded 0 chunk(s)");
+        run.StdOut.ShouldContain("chunk(s) here have never been embedded");
         run.StdOut.ShouldContain("fill: vectors");
         // the human surface has to say the vector arm was never asked, not leave it out silently
         run.StdOut.ShouldContain("no embedded chunks");
         run.StdOut.ShouldNotContain("copy:");
+    }
+
+    // The contract's script test: the main worktree is indexed at one revision, this checkout holds another,
+    // and after the verb the lane answers with ITS content and ITS line numbers. Every assertion here compares
+    // the answer against the file on disk in this tree, never against what the parent's index says.
+    [Fact]
+    public async Task WorktreeInit_CopyThenReconcile_LaneAnswersWithItsOwnBranchContentAndLineNumbers()
+    {
+        const string marker = "GreetOnTheLane";
+        var main = IndexedMainOfWorktree("cli-ab-main");
+        var child = AddWorktree(main, "feat/116-cli-ab");
+        PreMintLaneStore(child, "feat/116-cli-ab", provider: "ollama", model: null, probeFails: true);
+
+        // Three lines of prose go above the method, so the number this tree has to answer with is not the
+        // number the main worktree holds, and the method's own name exists on this branch only.
+        var laneFile = Path.Combine(child, "Greeter.cs");
+        File.WriteAllText(laneFile,
+            "public sealed class Greeter\n{\n    // lane note\n    // lane note\n    // lane note\n"
+            + $"    public string {marker}() => \"hi\";\n}}\n");
+        var diskLine = Array.IndexOf(File.ReadAllLines(laneFile), $"    public string {marker}() => \"hi\";") + 1;
+        diskLine.ShouldBe(6, "the fixture itself has to state the number the lane is expected to answer with");
+
+        var run = await Run(child, "worktree", "init", "--json");
+
+        run.ExitCode.ShouldBe(0);
+        using (var doc = JsonDocument.Parse(run.StdOut.Trim()))
+        {
+            var reconcile = doc.RootElement.GetProperty("reconcile");
+            reconcile.GetProperty("passRan").GetBoolean().ShouldBeTrue();
+            reconcile.GetProperty("modified").GetInt32().ShouldBe(1,
+                "one file differs between this branch and the revision the copied rows describe");
+            reconcile.GetProperty("rescannedFiles").GetInt32().ShouldBe(1,
+                "the .git marker a linked worktree keeps is not a source file");
+        }
+
+        var search = await Run(child, "search", marker, "--json");
+
+        search.ExitCode.ShouldBe(0, search.StdErr);
+        var hits = SearchMatches(search.StdOut);
+        hits.ShouldNotBeEmpty("the reconcile pass moved this row onto the branch's own file");
+        hits[0].GetProperty("path").GetString().ShouldBe("Greeter.cs");
+        hits[0].GetProperty("line").GetInt32().ShouldBe(diskLine,
+            "the lane answers with the line number its own checkout holds, not the one it copied");
+        hits[0].GetProperty("snippet").GetString()!.ShouldContain(marker);
+
+        // The main worktree never saw this name: an answer there would mean the lane was reading the parent's
+        // store rather than its own.
+        var parentSearch = await Run(main, "search", marker, "--json");
+
+        parentSearch.ExitCode.ShouldBe(0, parentSearch.StdErr);
+        SearchMatches(parentSearch.StdOut).ShouldBeEmpty(
+            "one tree one store: the branch's own edit is not in the main worktree's index");
+
+        // The marker file a linked worktree keeps is not a source file. Measured before this exclusion, the
+        // lane indexed one file more than the parent and 'search gitdir' answered with the main worktree's
+        // absolute path out of this store.
+        var gitdir = await Run(child, "search", "gitdir", "--json");
+
+        gitdir.ExitCode.ShouldBe(0, gitdir.StdErr);
+        SearchMatches(gitdir.StdOut).ShouldBeEmpty();
+        File.Exists(Path.Combine(child, ".git")).ShouldBeTrue("this lane really is a linked worktree");
+        var status = await Run(child, "status", "--json");
+
+        status.ExitCode.ShouldBe(0, status.StdErr);
+        using var statusDoc = JsonDocument.Parse(status.StdOut.Trim());
+        statusDoc.RootElement.GetProperty("files").GetInt32().ShouldBe(
+            1, "the counters a reader trusts count this tree's one source file, marker excluded");
     }
 
     [Fact]
@@ -235,6 +356,10 @@ public sealed class WorktreeInitCopyCliTests
         fill.TryGetProperty("copied", out _).ShouldBeFalse("a skipped fill has no numbers to report");
 
         var storeDir = WorkspaceStorePaths.RequireStoreDir(doc.RootElement.GetProperty("storeKey").GetString()!);
+        var reindexReconcile = doc.RootElement.GetProperty("reconcile");
+        reindexReconcile.GetProperty("state").GetString().ShouldBe("Deferred",
+            "--reindex stays the explicit from-scratch option: this verb does not index the tree behind it");
+        reindexReconcile.GetProperty("passRan").GetBoolean().ShouldBeFalse();
         StoreFixture.Counts(storeDir).ShouldBe((0, 0));
         File.Exists(Path.Combine(storeDir, SqueezrPaths.TrigramIndexFileName)).ShouldBeFalse();
     }
@@ -313,7 +438,7 @@ public sealed class WorktreeInitCopyCliTests
         var child = AddWorktree(main, branch);
         var storeDir = PreMintLaneStore(child, branch, provider: "ollama", model: "nomic-embed-text");
 
-        var run = await Run(child, "worktree", "init", "--copy", "--json");
+        var run = await Run(child, "worktree", "init", "--copy", "--no-semantic", "--json");
 
         run.ExitCode.ShouldBe(0);
         using var doc = JsonDocument.Parse(run.StdOut.Trim());
@@ -326,8 +451,18 @@ public sealed class WorktreeInitCopyCliTests
         vectors.GetProperty("targetPoints").GetInt64().ShouldBe(0);
         vectors.GetProperty("reason").GetString()!.ShouldContain("did not answer");
         run.StdErr.ShouldContain("did not answer");
-        StoreFixture.Counts(storeDir).ShouldBe((3, 6),
-            "the refusal is the collection's, so the copied database keeps the rows it was given");
+        // --no-semantic keeps the verb's own pass structural: it reaps the copied rows whose paths this tree
+        // does not hold, and the claim they carried goes with them, so nothing here reads as a store whose
+        // vectors are missing. The warning line above is the honest half: the parent's own points did not land.
+        var reconcile = doc.RootElement.GetProperty("reconcile");
+        reconcile.GetProperty("passRan").GetBoolean().ShouldBeTrue();
+        reconcile.GetProperty("obligation").GetBoolean().ShouldBeFalse(
+            "no row left in this store calls itself embedded");
+        reconcile.GetProperty("state").GetString().ShouldBe("Reconciled");
+        reconcile.GetProperty("rescannedFiles").GetInt32().ShouldBe(1);
+        StoreFixture.Counts(storeDir).ShouldBe(
+            (reconcile.GetProperty("rescannedFiles").GetInt32(), reconcile.GetProperty("storedChunks").GetInt32()),
+            "the reconcile numbers are the installed store's numbers");
         FilesIn(storeDir).ShouldBe(["config.json", "meta.db", "trigram.idx", "workspace.json"]);
     }
 

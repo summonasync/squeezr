@@ -19,11 +19,17 @@ public sealed record WorktreeFillReport(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     WorktreeCopyReport? Copied,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    WorktreeVectorsCopyReport? Vectors)
+    WorktreeVectorsCopyReport? Vectors,
+    // Which deliberate no-copy this is, for the reader that decides what it owes the lane without reading
+    // prose: 'SourceHasNoRows' is a lane born before its main worktree was indexed, 'LaneKeepsItsIndex' is
+    // a lane whose store already works, and only the second of them can be reconciled at all.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Skip)
 {
     public static WorktreeFillReport From(WorktreeFillOutcome outcome) => new(
         State: outcome.State.ToString(),
         Reason: outcome.Reason,
         Copied: outcome.Copy is null ? null : WorktreeCopyReport.From(outcome.Copy),
-        Vectors: outcome.Vectors is null ? null : WorktreeVectorsCopyReport.From(outcome.Vectors));
+        Vectors: outcome.Vectors is null ? null : WorktreeVectorsCopyReport.From(outcome.Vectors),
+        Skip: outcome.Skip?.ToString());
 }

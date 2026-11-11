@@ -1,4 +1,5 @@
 using Shouldly;
+using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
@@ -449,6 +450,29 @@ public sealed class WorktreeStoreFillTests : IDisposable
         outcome.State.ShouldBe(WorktreeFillState.Skipped);
         outcome.Vectors.ShouldBeNull();
         asked.ShouldBeFalse();
+    }
+
+    // The public overload is what the verb injects, and until now nothing called it: both stores are built off
+    // the lane's own config inside it, so a refusal that needs no vector store in the room has to come back as
+    // the reported-not-thrown shape a session start reads, with both collections named.
+    [Fact]
+    public async Task CopyAsync_PublicOverloadWithNoAnsweringStore_ReportsNotCopiedAndNamesBothSides()
+    {
+        var main = IndexedMainWithContent(StoreFixture.ModelKey);
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+        // the minted config names the developer's endpoint; a test may not open a connection there
+        TestWorkspaceConfig.PointQdrantAtDeadEndpoint(registered.RootPath);
+
+        var stats = await WorktreeVectorCopier.CopyAsync(
+            new WorktreeVectorCopyRequest(main, registered.RootPath, registered.StoreKey!),
+            CancellationToken.None);
+
+        stats.Copied.ShouldBeFalse();
+        stats.Code.ShouldBe(WorkspaceException.StorageUnavailableCode);
+        stats.Reason.ShouldNotBeNull().ShouldContain("did not answer");
+        StoreFixture.Counts(StoreDirOf(registered.StoreKey!)).ShouldBe((0, 0),
+            "the refusal opens no collection and moves no byte into this store");
     }
 
     private string IndexedMainWithContent(string? modelKey)

@@ -35,13 +35,14 @@ public static class WorktreeStoreFill
             return WorktreeFillOutcome.Skipped(
                 "--reindex: this worktree fills by indexing its own tree, so nothing was copied. No pass " +
                 "runs here yet — this worktree stays empty until the reconcile pass lands. To take the main " +
-                "worktree's index instead, re-run this verb without '--reindex'.");
+                "worktree's index instead, re-run this verb without '--reindex'.",
+                WorktreeFillSkip.ReindexRequested);
         }
 
         if (registered.State
             is not (WorktreeRegistrationState.Registered or WorktreeRegistrationState.AlreadyRegistered))
         {
-            return WorktreeFillOutcome.Skipped(NothingMinted(registered));
+            return WorktreeFillOutcome.Skipped(NothingMinted(registered), WorktreeFillSkip.NothingMinted);
         }
 
         var childRow = RequireSingleRow(registered.RootPath, "this worktree", registered.StoreKey);
@@ -51,7 +52,7 @@ public static class WorktreeStoreFill
 
         if (registered.State == WorktreeRegistrationState.AlreadyRegistered && !IsUnfilled(childStoreDir))
         {
-            return WorktreeFillOutcome.Skipped(KeepsItsIndex(registered));
+            return WorktreeFillOutcome.Skipped(KeepsItsIndex(registered), WorktreeFillSkip.LaneKeepsItsIndex);
         }
 
         var source = PeekSourceState(parentStoreDir);
@@ -59,14 +60,16 @@ public static class WorktreeStoreFill
         {
             return WorktreeFillOutcome.Skipped(
                 $"The main worktree store '{parentStoreDir}' holds no readable meta.db, so this worktree has " +
-                $"nothing to inherit. Index it first: {RemedyText.AnchorIndex(parentRow.RootPath)}");
+                $"nothing to inherit. Index it first: {RemedyText.AnchorIndex(parentRow.RootPath)}",
+                WorktreeFillSkip.SourceStoreMissing);
         }
 
         if (source.Files == 0 && source.Repos == 0)
         {
             return WorktreeFillOutcome.Skipped(
                 $"The main worktree store '{parentStoreDir}' holds no indexed rows yet, so there is nothing " +
-                $"here to inherit. Index it first: {RemedyText.AnchorIndex(parentRow.RootPath)}");
+                $"here to inherit. Index it first: {RemedyText.AnchorIndex(parentRow.RootPath)}",
+                WorktreeFillSkip.SourceHasNoRows);
         }
 
         if (!WorkspaceManifestFile.Exists(parentRow.RootPath))
@@ -74,7 +77,8 @@ public static class WorktreeStoreFill
             return WorktreeFillOutcome.Skipped(
                 $"'{parentRow.RootPath}' has a registry row and a store but no workspace manifest, so this " +
                 "verb cannot say which repos the copied rows belong to. Nothing was copied; run 'squeezr " +
-                "workspace repair' to reconcile the row.");
+                "workspace repair' to reconcile the row.",
+                WorktreeFillSkip.SourceManifestMissing);
         }
 
         // The provider question is only worth its round trip when the source actually holds vectors: rows
@@ -94,7 +98,8 @@ public static class WorktreeStoreFill
                 return WorktreeFillOutcome.Skipped(
                     $"This worktree's embeddings model could not be named ({ex.Message}), so copying the main " +
                     "worktree's vectors would be a guess. Nothing was copied; this store still reads as " +
-                    "unfilled and a later run of this verb completes the fill.");
+                    "unfilled and a later run of this verb completes the fill.",
+                    WorktreeFillSkip.ModelUnresolved);
             }
         }
 

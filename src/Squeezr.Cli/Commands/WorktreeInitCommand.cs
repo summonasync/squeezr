@@ -28,6 +28,11 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
         [CommandOption("--reindex")]
         public bool Reindex { get; set; }
 
+        [Description("Run the reconcile pass without the semantic arm: the coordinates of this branch land, " +
+            "embeddings wait for 'squeezr index'")]
+        [CommandOption("--no-semantic")]
+        public bool NoSemantic { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -78,7 +83,21 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
                     settings.Json);
             }
 
-            var report = WorktreeInitReport.From(outcome, fill);
+            // The copy planted the main worktree's coordinates; this is the one standard incremental pass over
+            // this worktree's own root that puts them back on this branch. Registry reads inside it are guarded
+            // the way the fill's are: a registry that goes busy is contention, not a broken lane. The runtime
+            // comes from a factory because the pass is owed by state, not by this verb having run — a lane that
+            // already answers for its rows does not pay for a provider round trip at session start.
+            var noSemantic = IndexingMode.EffectiveNoSemantic(outcome.RootPath, settings.NoSemantic);
+            var reconcile = WorkspaceRootResolver.GuardRegistryIo(() => WorktreeReconcile.Run(
+                outcome,
+                fill,
+                noSemantic,
+                () => ReconcileRuntime(outcome.RootPath, noSemantic),
+                StaleLockWarningSink.ToStderr,
+                cancellationToken));
+
+            var report = WorktreeInitReport.From(outcome, fill, reconcile);
             if (report.RepairHint is not null)
             {
                 Console.Error.WriteLine($"warning: {report.RepairHint}");
@@ -99,6 +118,19 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
             if (report.Fill?.Vectors is { Copied: false, Reason: { } notCopied })
             {
                 Console.Error.WriteLine($"warning: {notCopied}");
+            }
+
+            // A lane that is still pending after this pass is the same 'bytes with no answer' state one level up
+            // the store, and the hook that reads only stderr has to see it there: the numbers say how short,
+            // the code says which shape. Pass warnings travel on the same channel, as they do for 'index'.
+            foreach (var warning in reconcile.Warnings ?? [])
+            {
+                Console.Error.WriteLine($"warning: {warning}");
+            }
+
+            if (reconcile is { State: WorktreeReconcileState.Pending, Reason: { } pending })
+            {
+                Console.Error.WriteLine($"warning: {pending}");
             }
 
             if (settings.Json)
@@ -140,7 +172,33 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
         AnsiConsole.MarkupLine($"  collection: {report.Collection!.EscapeMarkup()}");
         AnsiConsole.MarkupLine($"  serve: {report.ServeCommand!.EscapeMarkup()}");
         WriteFill(report.Fill);
+        if (report.Reconcile is { } reconcile)
+        {
+            AnsiConsole.MarkupLine(WorktreeReconcileLine.Build(reconcile));
+        }
+
         AnsiConsole.MarkupLine(IndexLine(report));
+    }
+
+    // The reconcile runtime, built once per pass that has something to measure: the same handle counts the
+    // collection and writes through it, and the provider comes along only when the workspace asked for
+    // semantic work. Provider handling mirrors 'squeezr index', so a lane's reconcile reports the warnings an
+    // explicit index of that lane would.
+    private static WorktreeReconcileRuntime ReconcileRuntime(string laneRoot, bool noSemantic)
+    {
+        var warnings = EmbeddingRuntimeFactory.TryCreate(
+            laneRoot, withProvider: !noSemantic,
+            out var embeddings, out var vectorStore, out var providerResolution);
+        return new WorktreeReconcileRuntime(
+            embeddings,
+            vectorStore,
+            providerResolution,
+            embeddings is null && !noSemantic
+                ? warnings.Count > 0
+                    ? $"provider unavailable: {string.Join("; ", warnings)}"
+                    : "provider unavailable"
+                : null,
+            warnings);
     }
 
     private static void WriteFill(WorktreeFillReport? fill)
@@ -177,16 +235,27 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
         AnsiConsole.MarkupLine(WorktreeVectorsFillLine.Build(fill.Vectors));
     }
 
+    // The reconcile line carries the state and the remedy; this line answers the one question the block above
+    // cannot: whose coordinates the store now holds. A copied lane used to be pointed at 'squeezr index' here
+    // because no pass had run — now that the verb runs one, that promise would name work this pass did.
     private static string IndexLine(WorktreeInitReport report) =>
-        report.Fill?.Copied is not null
-            ? "  index: copied from the main worktree — [yellow]reconcile pending[/], run [bold]squeezr index[/] " +
-              "here so this branch answers with its own coordinates"
-            : report.ReconcilePending switch
-            {
-                true => "  index: [yellow]empty[/] — nothing has been copied or reconciled into this store yet",
-                false => "  index: has content — [bold]squeezr status[/] breaks it down",
-                _ => "  index: reconcile state unknown until the store reports it",
-            };
+        report.Reconcile switch
+        {
+            { State: nameof(WorktreeReconcileState.Deferred) } => ReconcilePendingLine(report),
+            { PassRan: true } =>
+                "  index: rescanned from this tree, its own coordinates now — [bold]squeezr status[/] " +
+                "breaks it down",
+            _ =>
+                "  index: measured against its collection, not rescanned — the reconcile line names the state",
+        };
+
+    private static string ReconcilePendingLine(WorktreeInitReport report) =>
+        report.ReconcilePending switch
+        {
+            true => "  index: [yellow]empty[/] — nothing has been copied or reconciled into this store yet",
+            false => "  index: has content — [bold]squeezr status[/] breaks it down",
+            _ => "  index: reconcile state unknown until the store reports it",
+        };
 
     // The triple is printed in raw bytes and the human size names only the installed file: a copy that
     // moved nothing has to be visible as zero bytes, not rounded away into 0.0 KB.
