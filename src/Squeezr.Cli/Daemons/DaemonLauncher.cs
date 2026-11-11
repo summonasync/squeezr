@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Squeezr.Core.Infra.Autostart;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Daemons;
@@ -54,6 +55,18 @@ public sealed class DaemonLauncher
     {
         var binaryPath = _processPath();
         return IsMuxerd(binaryPath) ? EntryAssemblyPath() : binaryPath;
+    }
+
+    // The pair an autostart entry has to name to bring this build up. DaemonBinaryPath alone is not a
+    // program when the CLI runs through the muxer — it answers with the assembly — so the launch shape
+    // carries the muxer as its program and the assembly as the argument it loads. An apphost needs no
+    // argument: the platform execs it directly.
+    internal WatchdRunCommand WatchdLaunchPair()
+    {
+        var processPath = _processPath();
+        return IsMuxerd(processPath)
+            ? WatchdUnitGenerator.LaunchPair(processPath, EntryAssemblyPath())
+            : WatchdUnitGenerator.LaunchPair(processPath);
     }
 
     private static bool IsMuxerd(string binaryPath) =>
