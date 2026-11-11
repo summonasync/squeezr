@@ -98,7 +98,7 @@ public sealed class ExpandSpanTool
                 result.TokensUsed, result.Truncated, data.Span.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                baselineTokens: envelope.Cost?.BaselineTokens);
+                baselineTokens: envelope.Cost?.BaselineTokens, mapped: false);
             return envelope;
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or InvalidDataException or UnauthorizedAccessException)

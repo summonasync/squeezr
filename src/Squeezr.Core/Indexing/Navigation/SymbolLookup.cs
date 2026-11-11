@@ -30,7 +30,11 @@ public sealed record SymbolLookupResult(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? DidYouMean,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<string>? GuardWarnings = null);
+    IReadOnlyList<string>? GuardWarnings,
+    [property: JsonIgnore]
+    AnswerState State,
+    [property: JsonIgnore]
+    int RefusedBodyTokens);
 
 public sealed class SymbolLookup
 {
@@ -93,7 +97,7 @@ public sealed class SymbolLookup
         {
             if (!TryRender(symbol, entry, repoDoc, store, budget, includeBody, hits, guard))
             {
-                return new SymbolLookupResult(hits, budget.Used, true, HintFor(hits), null, guard.Warnings);
+                return Answer(hits, budget, AnswerState.Clipped, HintFor(hits), null, guard);
             }
         }
 
@@ -106,16 +110,25 @@ public sealed class SymbolLookup
                 var suggestionText = $"did you mean: {string.Join(", ", didYouMean)}";
                 if (!budget.TryTake(suggestionText))
                 {
-                    return new SymbolLookupResult([], budget.Used, true, null, null, guard.Warnings);
+                    return Answer([], budget, AnswerState.Clipped, null, null, guard);
                 }
             }
 
-            return new SymbolLookupResult([], budget.Used, budget.Truncated, null, didYouMean, guard.Warnings);
+            return Answer([], budget, AnswerState.Complete, null, didYouMean, guard);
         }
 
-        return new SymbolLookupResult(
-            hits, budget.Used, budget.Truncated, budget.Truncated ? HintFor(hits) : null, null, guard.Warnings);
+        return Answer(
+            hits, budget, StateOf(hits), budget.Truncated ? HintFor(hits) : null, null, guard);
     }
+
+    private static SymbolLookupResult Answer(
+        List<SymbolHit> hits,
+        TokenBudget budget,
+        AnswerState state,
+        TruncationHint? hint,
+        IReadOnlyList<string>? didYouMean,
+        SecretGuardReader guard) =>
+        new(hits, budget.Used, budget.Truncated, hint, didYouMean, guard.Warnings, state, budget.RefusedBodyTokens);
 
     private List<string> FindDidYouMean(
         string name,
@@ -182,7 +195,33 @@ public sealed class SymbolLookup
     }
 
     private static TruncationHint HintFor(List<SymbolHit> hits) =>
-        hits.Any(hit => hit.Members.Count > 0) ? MembersTruncation : Truncation;
+        hits.Any(hit => hit.BodyOmitted && hit.Members.Count > 0) ? MembersTruncation : Truncation;
+
+    private static AnswerState StateOf(List<SymbolHit> hits)
+    {
+        var state = AnswerState.Complete;
+        foreach (var hit in hits)
+        {
+            var refused = HitState(hit);
+            if (refused > state)
+            {
+                state = refused;
+            }
+        }
+
+        return state;
+    }
+
+    // an empty map next to a refused body means the rows never fit, not that the symbol had no members
+    private static AnswerState HitState(SymbolHit hit)
+    {
+        if (!hit.BodyOmitted)
+        {
+            return AnswerState.Complete;
+        }
+
+        return hit.Members.Count > 0 && hit.MembersOmitted == 0 ? AnswerState.Mapped : AnswerState.Clipped;
+    }
 
     private bool TryRender(
         SymbolDocument symbol,
@@ -219,7 +258,7 @@ public sealed class SymbolLookup
         {
             var fullPath = Path.Combine(NavigationContext.ResolveRepoRoot(_workspaceRoot, entry), file.Path.Replace('/', Path.DirectorySeparatorChar));
             bodyText = TryReadSpan(fullPath, symbol.StartLine, symbol.EndLine);
-            if (bodyText is not null && !budget.TryTake(bodyText))
+            if (bodyText is not null && !budget.TryTake(bodyText, isBody: true))
             {
                 bodyOmitted = true;
                 bodyText = null;

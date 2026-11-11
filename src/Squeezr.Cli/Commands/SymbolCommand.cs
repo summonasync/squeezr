@@ -46,12 +46,13 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
 
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "symbol",
                 new { name = settings.Name, kind = settings.Kind, repo = settings.Repo },
-                result.TokensUsed, result.Truncated, result.Matches.Count,
-                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot));
+                result.TokensUsed, result.State is AnswerState.Clipped, result.Matches.Count,
+                sw.ElapsedMilliseconds, indexAge: SearchCommand.ResolveIndexAge(workspaceRoot),
+                mapped: result.State is AnswerState.Mapped);
 
             if (settings.Json)
             {
-                JsonOutput.Write(result);
+                JsonOutput.Write(SymbolLookupJson.From(result));
             }
             else
             {
@@ -112,7 +113,10 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
                     }
                 }
 
-                WriteBudgetLine(result.TokensUsed, result.Truncated, result.Hint);
+                WriteBudgetLine(
+                    result.TokensUsed,
+                    result.State,
+                    result.State is AnswerState.Clipped ? result.RemedyForCli() : null);
             }
 
             return 0;
@@ -123,9 +127,15 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
         }
     }
 
-    internal static void WriteBudgetLine(int tokensUsed, bool truncated, TruncationHint? hint)
+    internal static void WriteBudgetLine(int tokensUsed, AnswerState state, string? remedy)
     {
-        var suffix = truncated && hint is not null ? $" — {hint.ForCli()}" : string.Empty;
-        AnsiConsole.MarkupLine($"[grey]tokens: {tokensUsed}{(truncated ? ", truncated" : string.Empty)}{suffix}[/]");
+        if (state is not AnswerState.Clipped)
+        {
+            AnsiConsole.MarkupLine($"[grey]tokens: {tokensUsed}[/]");
+            return;
+        }
+
+        var suffix = string.IsNullOrWhiteSpace(remedy) ? string.Empty : $" — {remedy}";
+        AnsiConsole.MarkupLine($"[grey]tokens: {tokensUsed}, truncated{suffix}[/]");
     }
 }

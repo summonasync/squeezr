@@ -100,7 +100,7 @@ public class ToolEnvelopeTests
     }
 
     [Fact]
-    public void Wrap_DefaultCost_UnknownNullsAndCompleteMatchesTruncation()
+    public void Wrap_DefaultCost_UnknownNullsAndDerivesCompleteFromTruncation()
     {
         var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true);
 
@@ -123,15 +123,26 @@ public class ToolEnvelopeTests
     }
 
     [Fact]
-    public void Wrap_ExplicitCost_NormalizedToEnvelopeTruncation()
+    public void Wrap_ExplicitCost_KeepsItsOwnCompleteAndTakesTheEnvelopeTokens()
     {
         var cost = AnswerCost.Measured(99, 100, true);
 
         var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true, cost: cost);
 
         envelope.Cost!.TokensUsed.ShouldBe(7);
-        envelope.Cost.Complete.ShouldBeFalse();
+        envelope.Cost.Complete.ShouldBeTrue();
         envelope.Cost.BaselineTokens.ShouldBe(100L);
+    }
+
+    [Fact]
+    public void Wrap_ExplicitIncompleteCost_LeavesTheLabelAloneToo()
+    {
+        var cost = AnswerCost.Measured(99, 100, false);
+
+        var envelope = ToolEnvelope.Wrap(new { hit = 1 }, 7, true, cost: cost);
+
+        envelope.Truncated.ShouldBeTrue();
+        envelope.Cost!.Complete.ShouldBeFalse();
     }
 
     [Fact]

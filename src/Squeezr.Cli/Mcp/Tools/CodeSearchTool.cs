@@ -78,11 +78,13 @@ public sealed class CodeSearchTool
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
                 var hit = (ToolEnvelope)cached!;
+                // code_search has no mapped state: a refusal here really does drop matches, so false is what the
+                // answer says, not a hole in the recording
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
                     hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
                     client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
-                    baselineTokens: hit.Cost?.BaselineTokens);
+                    baselineTokens: hit.Cost?.BaselineTokens, mapped: false);
                 return hit;
             }
 
@@ -149,7 +151,7 @@ public sealed class CodeSearchTool
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,
-                baselineTokens: envelope.Cost?.BaselineTokens);
+                baselineTokens: envelope.Cost?.BaselineTokens, mapped: false);
             _cache?.Put("code_search", parameters, envelope);
             return envelope.WithWarning(invalidated);
         }
