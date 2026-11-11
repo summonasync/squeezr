@@ -124,7 +124,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             QueryTelemetry.Record(workspaceRoot, QuerySession.Id, "search",
                 new { query = settings.Query, repo = settings.Repo, prefix = settings.Prefix, regex = settings.Regex, maxTokens = settings.MaxTokens, topK = settings.TopK, kind = kindFilter },
                 response.TokensUsed, response.Truncated, response.Matches.Count,
-                sw.ElapsedMilliseconds, indexAge: ResolveIndexAge(workspaceRoot));
+                sw.ElapsedMilliseconds, indexAge: ResolveIndexAge(workspaceRoot), mapped: false);
 
             if (settings.Json)
             {

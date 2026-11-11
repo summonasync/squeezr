@@ -4,6 +4,7 @@ using Shouldly;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
+using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Xunit.Abstractions;
@@ -17,6 +18,7 @@ public class SymbolMembersTests(ITestOutputHelper output)
     private const int MembersOverflowBudget = 40;
     private const int GenericFitBudget = 60;
     private const int MethodCount = 12;
+    private const int HugeBodyTokens = 225;
 
     [Fact]
     public void Symbol_TypeBodyOverBudget_ListsMembersWithLines()
@@ -164,6 +166,84 @@ public class SymbolMembersTests(ITestOutputHelper output)
         members[0].GetProperty("kind").GetString().ShouldBe("method");
         members[0].GetProperty("line").GetInt32().ShouldBe(5);
         match.GetProperty("membersOmitted").GetInt32().ShouldBe(0);
+    }
+
+    [Fact]
+    public void Symbol_TypeBodyOverBudget_FullMemberMap_ReportsMappedState()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find("Huge", null, null, MembersFitBudget, body: true);
+
+        result.State.ShouldBe(AnswerState.Mapped);
+        result.Truncated.ShouldBeTrue();
+        result.TokensUsed.ShouldBeLessThanOrEqualTo(MembersFitBudget);
+    }
+
+    [Fact]
+    public void Symbol_MembersOverBudget_PartialMemberMap_ReportsClippedState()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find("Huge", null, null, MembersOverflowBudget, body: true);
+
+        var hit = result.Matches.ShouldHaveSingleItem();
+        hit.MembersOmitted.ShouldBeGreaterThan(0);
+        result.State.ShouldBe(AnswerState.Clipped);
+    }
+
+    [Fact]
+    public void Symbol_BudgetTooTightForAnyMember_EmptyMapIsClippedNotMapped()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find("Huge", null, null, 15, body: true);
+
+        var hit = result.Matches.ShouldHaveSingleItem();
+        hit.BodyOmitted.ShouldBeTrue();
+        hit.Members.ShouldBeEmpty();
+        hit.MembersOmitted.ShouldBe(0);
+        result.State.ShouldBe(AnswerState.Clipped);
+    }
+
+    [Fact]
+    public void Symbol_HeaderOverBudget_HitNeverLands_ReportsClippedState()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find("Huge", null, null, 1, body: true);
+
+        result.Matches.ShouldBeEmpty();
+        result.Truncated.ShouldBeTrue();
+        result.State.ShouldBe(AnswerState.Clipped);
+        result.RefusedBodyTokens.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Symbol_BodyFitsWithinBudget_ReportsCompleteState()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find("Huge", null, null, SymbolLookup.DefaultMaxTokens, body: true);
+
+        result.State.ShouldBe(AnswerState.Complete);
+        result.RefusedBodyTokens.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Symbol_RefusedBody_PriceIsTheEstimateOfTheSpanTurnedAway()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var result = new SymbolLookup(workspace).Find("Huge", null, null, MembersFitBudget, body: true);
+
+        var hit = result.Matches.ShouldHaveSingleItem();
+        hit.Body.ShouldBeNull();
+        result.RefusedBodyTokens.ShouldBe(HugeBodyTokens);
+        var lines = File.ReadAllLines(
+            Path.Combine(workspace, "repo/src/Huge.cs".Replace('/', Path.DirectorySeparatorChar)));
+        result.RefusedBodyTokens
+            .ShouldBe(TokenCounter.Estimate(string.Join("\n", lines[(hit.StartLine - 1)..hit.EndLine])));
     }
 
     private static string NewIndexedWorkspace()

@@ -15,12 +15,19 @@ public sealed class TokenBudget
 
     public bool Truncated { get; private set; }
 
-    public bool TryTake(string text, int? knownTokens = null)
+    public int RefusedBodyTokens { get; private set; }
+
+    public bool TryTake(string text, int? knownTokens = null, bool isBody = false)
     {
         var tokens = knownTokens ?? TokenCounter.Estimate(text);
         if (Used + tokens > MaxTokens)
         {
             Truncated = true;
+            if (isBody)
+            {
+                RefusedBodyTokens += tokens;
+            }
+
             return false;
         }
 
