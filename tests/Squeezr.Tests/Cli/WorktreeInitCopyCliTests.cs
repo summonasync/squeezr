@@ -55,6 +55,8 @@ public sealed class WorktreeInitCopyCliTests
         copied.GetProperty("ownedRepos").EnumerateArray().Select(value => value.GetString())
             .ShouldBe([MainRepoName], "the copied rows are owned by the lane the moment they land");
         copied.GetProperty("unownedRepos").EnumerateArray().ShouldBeEmpty();
+        fill.TryGetProperty("vectors", out _).ShouldBeFalse(
+            "a parent whose rows are all pending owns no points, so no vector store was asked on its behalf");
         payload.GetProperty("reconcilePending").GetBoolean().ShouldBeTrue(
             "a copied store is not reconciled — the fill plants content, it does not re-scan the branch");
 
@@ -211,6 +213,9 @@ public sealed class WorktreeInitCopyCliTests
         run.StdOut.ShouldContain("docs 3→3→3");
         run.StdOut.ShouldContain($"manifest owns {MainRepoName}");
         run.StdOut.ShouldContain("reconcile pending");
+        run.StdOut.ShouldContain("fill: vectors");
+        // the human surface has to say the vector arm was never asked, not leave it out silently
+        run.StdOut.ShouldContain("no embedded chunks");
         run.StdOut.ShouldNotContain("copy:");
     }
 
@@ -293,6 +298,37 @@ public sealed class WorktreeInitCopyCliTests
         File.Exists(Path.Combine(storeDir, SqueezrPaths.TrigramIndexFileName)).ShouldBeFalse();
         FilesIn(storeDir).ShouldBe(["config.json", "meta.db", "workspace.json"],
             "a refusal keeps its temp out of the store it refused to write");
+    }
+
+    // The verb wires the semantic arm, and a vector store that is not in the room is a reported session-start
+    // fact rather than a failed one: the files land, the fill says Filled, and the vector block says it did
+    // not — on stdout for the reader walking the payload, on stderr for the hook that only reads warnings.
+    // The lane's own config names a dead endpoint, so this is also the pin that a fill cannot mint a
+    // collection in the developer's Qdrant to discover that.
+    [Fact]
+    public async Task WorktreeInit_EmbeddedParentWithNoAnsweringStore_FillsFilesAndReportsVectorsNotCopied()
+    {
+        const string branch = "feat/116-cli-vectors";
+        var main = IndexedMainWithEmbeddedRows("cli-vectors-main", StoreFixture.ModelKey);
+        var child = AddWorktree(main, branch);
+        var storeDir = PreMintLaneStore(child, branch, provider: "ollama", model: "nomic-embed-text");
+
+        var run = await Run(child, "worktree", "init", "--copy", "--json");
+
+        run.ExitCode.ShouldBe(0);
+        using var doc = JsonDocument.Parse(run.StdOut.Trim());
+        var fill = doc.RootElement.GetProperty("fill");
+        fill.GetProperty("state").GetString().ShouldBe("Filled");
+        var vectors = fill.GetProperty("vectors");
+        vectors.GetProperty("copied").GetBoolean().ShouldBeFalse();
+        vectors.GetProperty("sourcePoints").GetInt64().ShouldBe(0);
+        vectors.GetProperty("copiedPoints").GetInt64().ShouldBe(0);
+        vectors.GetProperty("targetPoints").GetInt64().ShouldBe(0);
+        vectors.GetProperty("reason").GetString()!.ShouldContain("did not answer");
+        run.StdErr.ShouldContain("did not answer");
+        StoreFixture.Counts(storeDir).ShouldBe((3, 6),
+            "the refusal is the collection's, so the copied database keeps the rows it was given");
+        FilesIn(storeDir).ShouldBe(["config.json", "meta.db", "trigram.idx", "workspace.json"]);
     }
 
     private static async Task<(int ExitCode, string StdOut, string StdErr)> Run(

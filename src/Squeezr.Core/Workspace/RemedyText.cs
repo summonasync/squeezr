@@ -10,6 +10,7 @@ public static class RemedyText
     public const string AddCommand = "squeezr add";
     public const string DropCommand = "squeezr drop";
     public const string ServicesUp = "squeezr services up";
+    public const string VectorsReconcileApply = "squeezr vectors reconcile --apply";
     public const int ScopeHintSiblingLimit = 3;
     public const string WorkspaceNotInitialized = $"Workspace is not initialized. Run '{InitCommand}' first.";
     public const string IndexNotBuilt = $"Index is not built. Run '{IndexCommand}' first.";

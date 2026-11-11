@@ -54,12 +54,22 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
 
             // Guarded like the registration, because a registry read inside it that goes busy must still
             // read as registry contention. Store IO is not at risk of being repainted: every file failure
-            // the copy path can raise is already a WorkspaceException naming the file it touched.
+            // the copy path can raise is already a WorkspaceException naming the file it touched, and the
+            // vector arm maps every Qdrant read it makes — the geometry read, both source counts, the
+            // scroll, the writes and the count that confirms them — onto that shape rather than letting a
+            // gRPC exception out of a command: whether a stop is reported or refused is decided by whether
+            // this pass was already asked to touch the lane's collection — before that it is reported with
+            // its own reason, from that moment it is a refusal carrying the numbers it stopped on. It
+            // blocks here because the verb is synchronous: a page scroll against a
+            // live Qdrant is the longest wait this command takes, and it runs after both store locks are
+            // down — never holding the parent for a round trip the parent's own data does not need.
             var fill = WorkspaceRootResolver.GuardRegistryIo(() => WorktreeStoreFill.Fill(
                 outcome,
                 copy: !settings.Reindex,
                 () => EmbeddingRuntimeFactory.ResolveModelKey(outcome.RootPath),
-                StaleLockWarningSink.ToStderr));
+                StaleLockWarningSink.ToStderr,
+                request => WorktreeVectorCopier.CopyAsync(request, cancellationToken)
+                    .GetAwaiter().GetResult()));
 
             if (outcome is { State: WorktreeRegistrationState.Registered, WorkspaceName: { } registeredName })
             {
@@ -80,6 +90,15 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
             foreach (var unowned in report.Fill?.Copied?.UnownedRepos ?? [])
             {
                 Console.Error.WriteLine($"warning: {unowned}");
+            }
+
+            // An arm that ran and moved nothing is the same 'the store has bytes and no answer' state one
+            // layer down: the copied database already calls these chunks embedded, and only the collection
+            // can say whether they are. A session-start reader has to see that on the channel warnings
+            // travel on, not only inside a fill block.
+            if (report.Fill?.Vectors is { Copied: false, Reason: { } notCopied })
+            {
+                Console.Error.WriteLine($"warning: {notCopied}");
             }
 
             if (settings.Json)
@@ -152,6 +171,10 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
         AnsiConsole.MarkupLine(copy.OwnedRepos.Count > 0
             ? $"  fill: manifest owns {string.Join(", ", copy.OwnedRepos.Select(name => name.EscapeMarkup()))}"
             : "  fill: manifest already owned every copied row");
+        // The semantic arm gets its own triple in points rather than bytes, and the state where no vector
+        // store was asked is spelled out: a lane whose parent holds pending rows only inherits an empty
+        // collection, and a reader who is not told that will go looking for vectors that were never there.
+        AnsiConsole.MarkupLine(WorktreeVectorsFillLine.Build(fill.Vectors));
     }
 
     private static string IndexLine(WorktreeInitReport report) =>

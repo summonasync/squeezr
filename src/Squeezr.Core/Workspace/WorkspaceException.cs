@@ -17,6 +17,10 @@ public class WorkspaceException : Exception
     public const string WorktreeStoreForkCode = "worktree_store_fork";
     public const string WorktreeStoreUnresolvedCode = "worktree_store_unresolved";
     public const string WorktreeSameStoreCode = "worktree_same_store";
+    public const string WorktreeVectorMismatchCode = "worktree_vector_mismatch";
+    public const string WorktreeVectorDriftCode = "worktree_vector_drift";
+    public const string WorktreeVectorDimensionCode = "worktree_vector_dimension";
+    public const string VectorPointForeignCode = "vector_point_foreign";
 
     public WorkspaceException(string message, string code = DefaultCode, Exception? innerException = null)
         : base(message, innerException)

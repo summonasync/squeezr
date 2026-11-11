@@ -707,7 +707,7 @@ public class EmbeddingIndexPhaseTests
 
         public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<uint>>(Points.Values
-                .Where(p => p.RepoId == repoId && p.Kind.Length == 0)
+                .Where(p => p.RepoId == repoId && string.IsNullOrEmpty(p.Kind))
                 .Select(p => p.FileId)
                 .Distinct()
                 .ToList());

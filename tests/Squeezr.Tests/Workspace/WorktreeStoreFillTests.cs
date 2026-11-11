@@ -291,6 +291,166 @@ public sealed class WorktreeStoreFillTests : IDisposable
             "the first fill's work survives the second pass untouched");
     }
 
+    // The vector arm gets the rows this pass resolved, not names or paths it recomputes: the collection a
+    // copy writes into has to be the collection the lane's own serve path reads afterwards. And it is asked
+    // after the files landed — the semantic arm is the second half of one fill, not a separate pass that can
+    // be reached over an empty store.
+    [Fact]
+    public void Fill_SourceHoldsEmbeddedChunks_HandsTheArmTheResolvedRowsAfterTheFilesLanded()
+    {
+        var main = IndexedMainWithContent(StoreFixture.ModelKey);
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+        var childStoreDir = StoreDirOf(registered.StoreKey!);
+        WorktreeVectorCopyRequest? seen = null;
+
+        var outcome = WorktreeStoreFill.Fill(registered, true, () => StoreFixture.ModelKey, null, request =>
+        {
+            StoreFixture.Counts(childStoreDir).ShouldBe((3, 6),
+                "the database is already in place when the vector arm is asked");
+            // row counts alone do not say the rows are embedded, and the arm inherits its coverage reading
+            // from them: a copied chunk still marked pending here would be a lane the copy was asked to
+            // finish with its own points, and the gate that decides whether to ask reads this number
+            using var copied = new MetaStore(Path.Combine(childStoreDir, SqueezrPaths.MetaDbFileName));
+            copied.GetSemanticCoverage().PendingChunks.ShouldBe(0,
+                "'ok' names the model that produced the vector, and the arm must not be handed a lane whose " +
+                "rows still wait for one");
+            seen = request;
+            return WorktreeVectorCopyStats.Moved(6, 6, 6);
+        });
+
+        var arm = seen.ShouldNotBeNull();
+        arm.SourceRoot.ShouldBe(WorkspaceRegistry.FindByAnyRootSpelling(main)!.RootPath);
+        arm.TargetRoot.ShouldBe(registered.RootPath);
+        arm.TargetStoreKey.ShouldBe(registered.StoreKey);
+        outcome.Vectors.ShouldNotBeNull().CopiedPoints.ShouldBe(6);
+    }
+
+    // A parent whose rows are all pending owns no points, so the fill must not open a conversation with a
+    // vector store on its behalf — every CLI fixture in this lane starts from that shape, and a pass that
+    // reached Qdrant anyway would write collections under a developer's own endpoint.
+    [Fact]
+    public void Fill_ParentRowsArePendingOnly_VectorArmIsNeverAsked()
+    {
+        var main = IndexedMainWithContent(modelKey: null);
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+
+        var outcome = WorktreeStoreFill.Fill(registered, true, () => StoreFixture.ModelKey, null,
+            _ => throw new InvalidOperationException("the vector arm was asked for a parent with no vectors"));
+
+        outcome.State.ShouldBe(WorktreeFillState.Filled);
+        outcome.Copy.ShouldNotBeNull().Database.TargetChunks.ShouldBe(6);
+        outcome.Vectors.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Fill_ModelMismatch_ThrowsBeforeTheVectorArmIsAsked()
+    {
+        var main = IndexedMainWithContent("ollama/qmdl/1024");
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+        var asked = false;
+
+        var ex = Should.Throw<WorkspaceException>(() => WorktreeStoreFill.Fill(
+            registered, true, () => StoreFixture.ModelKey, null,
+            _ =>
+            {
+                asked = true;
+                return WorktreeVectorCopyStats.Moved(0, 0, 0);
+            }));
+
+        ex.Code.ShouldBe(WorkspaceException.WorktreeModelMismatchCode);
+        asked.ShouldBeFalse("no point moves on a pass the model check refused");
+    }
+
+    // A vector store that is not in the room is a session-start fact, not a failed session: the files landed,
+    // the fill is Filled, and the arm's reason rides the report so the reader can see the lane is short.
+    [Fact]
+    public void Fill_VectorStoreRefused_FillStandsAndTheArmReportsItsOwnState()
+    {
+        var main = IndexedMainWithContent(StoreFixture.ModelKey);
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+
+        var outcome = WorktreeStoreFill.Fill(registered, true, () => StoreFixture.ModelKey, null,
+            _ => WorktreeVectorCopyStats.NotCopied("the vector store at 'http://localhost:1' did not answer"));
+
+        outcome.State.ShouldBe(WorktreeFillState.Filled);
+        var vectors = outcome.Vectors.ShouldNotBeNull();
+        vectors.Copied.ShouldBeFalse();
+        vectors.Reason.ShouldNotBeNull().ShouldContain("did not answer");
+        StoreFixture.Counts(StoreDirOf(registered.StoreKey!)).ShouldBe((3, 6));
+    }
+
+    // Three numbers that disagree are a failed command. The refusal does not rewind the file arms: undoing a
+    // verified copy is not this arm's call, and the half-filled store stays visible to the pass that can
+    // finish it.
+    [Fact]
+    public void Fill_VectorCopyRefusesLoudly_CommandFailsAndTheCopiedFilesStayWhereTheyAre()
+    {
+        var main = IndexedMainWithContent(StoreFixture.ModelKey);
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+        var childStoreDir = StoreDirOf(registered.StoreKey!);
+
+        var ex = Should.Throw<WorkspaceException>(() => WorktreeStoreFill.Fill(
+            registered, true, () => StoreFixture.ModelKey, null,
+            _ => throw new WorkspaceException(
+                "held 6 point(s), wrote 6, counts 3 after the writes",
+                WorkspaceException.WorktreeVectorMismatchCode)));
+
+        ex.Code.ShouldBe(WorkspaceException.WorktreeVectorMismatchCode);
+        StoreFixture.Counts(childStoreDir).ShouldBe((3, 6),
+            "the refusal is about the collection, so the database it inherits its chunk rows from stays put");
+        File.Exists(Path.Combine(childStoreDir, SqueezrPaths.TrigramIndexFileName)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Fill_VectorArmRan_ModelQuestionWasAskedOnce()
+    {
+        var main = IndexedMainWithContent(StoreFixture.ModelKey);
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+        var asked = 0;
+
+        WorktreeStoreFill.Fill(registered, true, () =>
+        {
+            asked++;
+            return StoreFixture.ModelKey;
+        }, null, _ => WorktreeVectorCopyStats.Moved(6, 6, 6));
+
+        asked.ShouldBe(1,
+            "the copy carries vectors it never re-derives: a second model question would mean a provider " +
+            "round trip inside the pass that is only allowed to move points");
+    }
+
+    // The verb runs at every session start. A lane that already got its fill must not be scrolled again —
+    // a second copy over the same collection is the same ids written twice, and a second collection would be
+    // the identity fork this whole feature closes.
+    [Fact]
+    public void Fill_LaneAlreadyFilledAndVectorized_VectorArmIsNotAskedAgain()
+    {
+        var main = IndexedMainWithContent(StoreFixture.ModelKey);
+        var child = AddWorktree(main, LaneBranch);
+        var registered = WorktreeRegistration.Register(child, null);
+        WorktreeStoreFill.Fill(registered, true, () => StoreFixture.ModelKey, null,
+            _ => WorktreeVectorCopyStats.Moved(6, 6, 6)).State.ShouldBe(WorktreeFillState.Filled);
+
+        var adopted = WorktreeRegistration.Register(child, null);
+        var asked = false;
+        var outcome = WorktreeStoreFill.Fill(adopted, true, () => StoreFixture.ModelKey, null,
+            _ =>
+            {
+                asked = true;
+                return WorktreeVectorCopyStats.Moved(6, 6, 6);
+            });
+
+        outcome.State.ShouldBe(WorktreeFillState.Skipped);
+        outcome.Vectors.ShouldBeNull();
+        asked.ShouldBeFalse();
+    }
+
     private string IndexedMainWithContent(string? modelKey)
     {
         var main = RegisteredMain(repoAdded: true);

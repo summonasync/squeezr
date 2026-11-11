@@ -27,7 +27,8 @@ public static class WorktreeStoreFill
         WorktreeRegistrationOutcome registered,
         bool copy,
         Func<string> targetModelKeyResolver,
-        Action<string>? onStaleTakeover = null)
+        Action<string>? onStaleTakeover = null,
+        Func<WorktreeVectorCopyRequest, WorktreeVectorCopyStats>? copyVectors = null)
     {
         if (!copy)
         {
@@ -104,7 +105,19 @@ public static class WorktreeStoreFill
             SqueezrPaths.ManifestPath(childRow.RootPath),
             WorkspaceManifestFile.Load(parentRow.RootPath).Repos);
 
-        return WorktreeFillOutcome.Filled(WorkspaceStoreCopy.Copy(request, targetModelKey, onStaleTakeover));
+        var files = WorkspaceStoreCopy.Copy(request, targetModelKey, onStaleTakeover);
+
+        // The vector half runs after both store locks are down and never inside them: a collection of this
+        // size is pages of round trips, and holding the parent's lock across them would freeze a store
+        // other agents are querying. It is asked only when the source's database claims vectors — pending
+        // rows carry no points to inherit, and the model answer that makes a vector copy trustworthy is
+        // the same fact that makes the question worth asking.
+        var vectors = targetModelKey is null || copyVectors is null
+            ? null
+            : copyVectors(new WorktreeVectorCopyRequest(
+                parentRow.RootPath, childRow.RootPath, childRow.StoreKey));
+
+        return WorktreeFillOutcome.Filled(files, vectors);
     }
 
     // Every row that resolves to this tree is gathered, not the first hit: the fold lookup answers with
