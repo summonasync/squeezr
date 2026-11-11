@@ -15,8 +15,6 @@ namespace Squeezr.Cli.Mcp.Tools;
 [McpServerToolType]
 public sealed class CodeSearchTool
 {
-    private const int GuardCandidateLimit = 50;
-
     private const int DefaultMaxTokens = 2000;
 
     private readonly McpWorkspace _workspace;
@@ -77,11 +75,11 @@ public sealed class CodeSearchTool
             var parameters = Params(query, repo, normalizedPrefix, maxTokens, topK, kindFilter, rankExclusion, secretGuardExtra);
             if (_cache is not null && _cache.TryGet("code_search", parameters, out var cached))
             {
-                var hit = (ToolEnvelope)cached!;
+                var hit = ((ToolEnvelope)cached!).MarkReplayed();
                 // code_search has no mapped state: a refusal here really does drop matches, so false is what the
                 // answer says, not a hole in the recording
                 QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
-                    hit.TokensUsed, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
+                    hit.PaidTokens, hit.Truncated, ((List<SearchHitData>)hit.Data!).Count,
                     sw.ElapsedMilliseconds, cacheHit: true, indexAge: hit.IndexAge,
                     client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                     baselineTokens: hit.Cost?.BaselineTokens, mapped: false);
@@ -99,7 +97,8 @@ public sealed class CodeSearchTool
 
             warnings.AddRange(response.Warnings);
 
-            var freshness = Guard(root, response);
+            var candidates = GuardCandidates(response);
+            var freshness = Guard(root, candidates);
             if (freshness.Refreshed.Count > 0)
             {
                 response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
@@ -143,11 +142,35 @@ public sealed class CodeSearchTool
                     $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
             }
 
+            // the candidate cap bounds what the content check covered, not what the answer claims: when the
+            // answer names more files than that, the answer says how many the check actually reached
+            var namedCount = namedFiles.Distinct().Count();
+            var coverageLine = AnswerFreshness.CoverageWarning(candidates.Count, namedCount);
+            if (coverageLine is not null)
+            {
+                warnings.Add(coverageLine);
+            }
+
+            var budgetLine = AnswerFreshness.BudgetWarning(freshness.Unrefreshed.Count);
+            if (budgetLine is not null)
+            {
+                warnings.Add(budgetLine);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
-                freshness.Stale, cost: cost, fileFreshness: fileFreshness);
+                freshness.Stale, cost: cost, fileFreshness: fileFreshness,
+                freshness: AnswerFreshness.ForContent(
+                    checkedCandidates: candidates.Count,
+                    namedFiles: namedCount,
+                    staleTotal: freshness.Stale.Count,
+                    listed: freshness.Stale.Count,
+                    laggingFiles: AnswerFreshness.CountLaggingFiles(fileFreshness),
+                    stalePaths: freshness.Stale,
+                    payloadLines: [coverageLine, budgetLine],
+                    unrefreshedFiles: freshness.Unrefreshed.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search", parameters,
-                response.TokensUsed, response.Truncated, data.Count,
+                envelope.PaidTokens, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 cacheInvalidated: invalidated is not null,
@@ -167,11 +190,14 @@ public sealed class CodeSearchTool
         return meta?.GetSemanticCoverage();
     }
 
-    private static FreshnessResult Guard(string root, SearchResponse response) =>
-        FreshnessGuard.CheckAndRefresh(
-            root,
-            response.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.Path)).Distinct().ToList(),
-            StaleLockWarningSink.ToStderr);
+    private static IReadOnlyList<(string Repo, string Path)> GuardCandidates(SearchResponse response) =>
+        [.. response.Matches
+            .Take(FreshnessGuard.CandidateLimit)
+            .Select(m => (m.Repo, m.Path))
+            .Distinct()];
+
+    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string Path)> candidates) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
 
     private static object Params(
         string query,

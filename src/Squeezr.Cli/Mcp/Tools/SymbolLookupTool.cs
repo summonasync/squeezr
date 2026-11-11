@@ -14,8 +14,6 @@ namespace Squeezr.Cli.Mcp.Tools;
 [McpServerToolType]
 public sealed class SymbolLookupTool
 {
-    private const int GuardCandidateLimit = 50;
-
     private readonly McpWorkspace _workspace;
     private readonly McpToolGate _gate;
     private readonly ToolResponseCache? _cache;
@@ -56,7 +54,7 @@ public sealed class SymbolLookupTool
             var parameters = Params(symbolName, kind, repo, budget, SecretGuardReader.Load(root).ExtraPatterns);
             if (_cache is not null && _cache.TryGet("symbol_lookup", parameters, out var cached))
             {
-                var hit = (ToolEnvelope)cached!;
+                var hit = ((ToolEnvelope)cached!).MarkReplayed();
                 RecordLedger(root, parameters, hit, sw, cacheHit: true, cacheInvalidated: false);
                 return hit;
             }
@@ -66,7 +64,8 @@ public sealed class SymbolLookupTool
 
             var result = lookup.Find(symbolName, repo, kind, budget, body: true);
 
-            var freshness = Guard(root, result);
+            var candidates = GuardCandidates(result);
+            var freshness = Guard(root, candidates);
             if (freshness.Refreshed.Count > 0)
             {
                 result = lookup.Find(symbolName, repo, kind, budget, body: true);
@@ -116,8 +115,30 @@ public sealed class SymbolLookupTool
                     $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
             }
 
-            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, clipped, warnings, root, freshness.Stale,
-                result.DidYouMean, cost: cost, fileFreshness: fileFreshness);
+            var namedCount = namedFiles.Distinct().Count();
+            var coverageLine = AnswerFreshness.CoverageWarning(candidates.Count, namedCount);
+            if (coverageLine is not null)
+            {
+                warnings.Add(coverageLine);
+            }
+
+            var budgetLine = AnswerFreshness.BudgetWarning(freshness.Unrefreshed.Count);
+            if (budgetLine is not null)
+            {
+                warnings.Add(budgetLine);
+            }
+
+            var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, clipped, warnings, root,
+                freshness.Stale, result.DidYouMean, cost: cost, fileFreshness: fileFreshness,
+                freshness: AnswerFreshness.ForContent(
+                    checkedCandidates: candidates.Count,
+                    namedFiles: namedCount,
+                    staleTotal: freshness.Stale.Count,
+                    listed: freshness.Stale.Count,
+                    laggingFiles: AnswerFreshness.CountLaggingFiles(fileFreshness),
+                    stalePaths: freshness.Stale,
+                    payloadLines: [coverageLine, budgetLine],
+                    unrefreshedFiles: freshness.Unrefreshed.Count));
             var invalidated = _cache?.TakeInvalidationWarning();
             RecordLedger(root, parameters, envelope, sw, cacheHit: false, cacheInvalidated: invalidated is not null);
             _cache?.Put("symbol_lookup", parameters, envelope);
@@ -129,11 +150,14 @@ public sealed class SymbolLookupTool
         }
     }
 
-    private static FreshnessResult Guard(string root, SymbolLookupResult result) =>
-        FreshnessGuard.CheckAndRefresh(
-            root,
-            result.Matches.Take(GuardCandidateLimit).Select(m => (m.Repo, m.File)).Distinct().ToList(),
-            StaleLockWarningSink.ToStderr);
+    private static IReadOnlyList<(string Repo, string File)> GuardCandidates(SymbolLookupResult result) =>
+        [.. result.Matches
+            .Take(FreshnessGuard.CandidateLimit)
+            .Select(m => (m.Repo, m.File))
+            .Distinct()];
+
+    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string File)> candidates) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
 
     // both roads write through here, reading the state off the envelope the caller is about to receive: a fresh
     // call and the cache hit that replays it carry one answer, so one answer cannot be two rows in the ledger

@@ -242,14 +242,16 @@ public class TreeSitterRustReferenceTests
     }
 
     [Fact]
-    public void Extract_UnknownLanguageLabel_EmitsNoReferencesWhereRustEmitsItsOwn()
+    public void CrossGrammarSilence_RustTreeUnderThePythonLabelEmitsNothingWhereRustEmitsItsOwn()
     {
         using var grammar = new Language("Rust");
         using var parser = new Parser(grammar);
         using var tree = parser.Parse(UseAndCallSource)!;
 
-        // same tree, different label: unrouted languages must not borrow the js/ts walker, whose
-        // import and member-expression shapes this tree does have analogues of by name alone
+        // same tree, different label. This is a cross-grammar silence guard, not a test about unrouted
+        // languages — python is routed and has its own walker now: what it pins is that the python reader
+        // finds no node kind it keys on inside a rust tree, even though 'use' and 'import' are the same
+        // concept to a reader who thinks in meanings instead of grammars
         TsReferenceExtractor.Extract(tree.RootNode!, "rust", "src/lib.rs").Count.ShouldBe(8);
         TsReferenceExtractor.Extract(tree.RootNode!, "python", "src/lib.rs").ShouldBe([]);
     }

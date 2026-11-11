@@ -224,9 +224,26 @@ that is the deal.
   aliases, import graph; Rust gets that same layer over its own vocabulary —
   functions, structs, enums, unions, traits, impl blocks, modules, type
   aliases, consts, statics and macro definitions, with `use` trees, calls,
-  trait/impl targets and macro invocations as its reference graph; every other
+  trait/impl targets and macro invocations as its reference graph; Python gets
+  it over functions, async functions, classes, methods, module and class
+  constants, with imports (plain, aliased, `from`, relative, wildcard), calls
+  and base classes as its reference graph — and a dotted `import a.b.c` binds
+  the top package `a`, never the leaf; Go gets it over functions, methods
+  named by their receiver (`Store.Put`), structs, interfaces, type aliases,
+  type declarations and package-level consts and vars, with imports, calls,
+  type uses and embedded fields as its reference graph — and `import
+  "net/http"` binds the last element `http`, so the two grammars keep their
+  own import rule instead of sharing one; every other
   text (Markdown, YAML, JSON…) is indexed by a sliding-window fallback chunker
   — searchable, but not symbol-aware.
+- **Per-language reference pools, because the same name is not the same
+  thing.** `mul` in JavaScript and `mul` in Rust are unrelated symbols, so a
+  reference edge is name-matched only inside its own language pool — js/ts/tsx
+  share one, and rust, python and go each got their own. No language is
+  declared a symbol source before its own vocabulary lands in the index home
+  (`TreeSitterLanguages`), and the refusals are stated rather than smoothed
+  over: a go blank identifier and a multi-name const/var spec name nothing, and
+  rust, python and go capture no doc comments yet — js/ts keep theirs.
 - **Adoption is the hard part, not the tech.** Agents must be *allowed* to
   call it. Tool allowlists and flow gates decide whether the index gets used
   at all.
@@ -970,8 +987,11 @@ guard stays the content-exact authority — a file it refreshed inline reads
 `fresh` afterwards, and one whose inline refresh failed stays `lagging` even
 when its mtime reads young. A live watcher on the store is named in the same
 answer (`active writer on this store: pid N, watch beat Ns old`) so a verdict
-about to flip is never mistaken for a settled one; `index_status` and
-`repo_map` aggregate rather than name files and say so in `warnings`.
+about to flip is never mistaken for a settled one. `index_status` aggregates
+rather than names files and says so in `warnings`; `repo_map` names a bounded
+sample of up to 50 rows of its own scope in `staleFiles` and declares what it
+left out in `freshness` — the vanished rows are listed first (`listedMissing`
+of them), the lagging rows after.
 
 ### Navigation flow
 
@@ -996,7 +1016,10 @@ Every tool answers in one envelope:
   means "this answer lost something the caller asked for", not "the budget
   refused at least once"; `cost.complete` means "the answer holds everything it
   claims" — true for a whole answer and for a mapped one, false only when
-  something really went missing.
+  something really went missing, and an answer that carries less of its own
+  freshness verdict than its check found is not holding everything it claims.
+  The freshness story an answer ships beside its content is priced separately,
+  in `freshness.freshnessTokens`.
   <removed 2026-11-10 — 115/T6>~~`truncated: true` → narrow the query (`repo`,
   `kind`) or raise `maxTokens`~~</removed> — that rule conflated a substituted
   body with a lost one. Read the three states below.
@@ -1005,10 +1028,71 @@ Every tool answers in one envelope:
   chunks pending embedding)" in `code_search` when the semantic layer is not
   fully pumped — at 100% the line is absent), trimming hints, and "cache:
   invalidated (index changed)" — the cache-death mark (see below).
-- `indexAge` / `staleFiles` — freshness. Modified files refresh inline on
-  read; what could not be refreshed lands honestly in `staleFiles` — the
-  agent sees the data for those files is stale and may suggest `squeezr
-  index`. The final call on a reindex belongs to the workspace owner.
+- `indexAge` / `staleFiles` — freshness. `staleFiles` names indexed rows the
+  answer can no longer vouch for, in one of two classes: on `repo_map` it is
+  the verdict of a structure pass (a row whose file is gone, or whose size or
+  mtime moved — no content is read there and nothing is refreshed), on
+  `code_search` / `symbol_lookup` / `find_references` it is the content guard
+  (modified files refresh inline on read, inside a per-call budget — a file
+  count and a wall bound, both named by the warning line that appears when a
+  re-read was refused; `RefreshBudget` is the one place they are declared).
+  Whatever could not be refreshed — refused by that budget, or attempted and
+  failed — lands honestly in `staleFiles`, and `unrefreshedFiles` says how
+  many of them the budget refused. Either way the agent sees the data behind
+  those files is not confirmed and may suggest `squeezr index`. The final call
+  on a reindex belongs to the workspace owner.
+- `freshness` — the attestation of a check, carried by the four tools that run
+  one (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) on every
+  answer they produce, and additive over the core keys above:
+  `{check, checked, scopeRows | namedFiles, staleTotal, listed,
+  freshnessTokens}`, plus `listedMissing`, `missing` and `changed` on the map's
+  structure pass and `laggingFiles` and `unrefreshedFiles` on the content
+  tools. A stored answer that
+  the cache hands back keeps the block it was produced with and marks itself
+  (`replayed`, third sub-bullet): the block attests a check, and on a replay the
+  check ran in the earlier call. It says which class of check ran
+  (`structure` or `content`), how many positions it examined against the volume
+  the answer speaks for (`scopeRows` — the rows of a map scope, withheld and
+  unresolvable ones included; `namedFiles` — the distinct files a query answer
+  names), how many came back stale, and how many of those the answer actually
+  lists. An empty `staleFiles` with `checked: 0` means nothing was examined, not
+  that everything is fine; a `listed` below `staleTotal` means the answer
+  carries a sample, and `cost.complete` says so.
+  - `freshnessTokens` is what this story costs the caller and `tokensUsed`
+    does not count: the `staleFiles` sample, the `warnings` lines that explain
+    the check, and this block itself, measured on the wire basis (a quote
+    travelling inside the MCP content string costs six bytes, and the product's
+    own estimator prices those bytes). Folding them into `tokensUsed` was
+    rejected — that number is what the caller's budget governs — so telemetry
+    records `tokensUsed + freshnessTokens`, the number actually paid.
+  - `laggingFiles` counts the files this answer calls `lagging` in
+    `fileFreshness`. Those are stat verdicts (size or mtime against the stamp,
+    never a content read), so a `staleTotal` of `0` says nothing about them and
+    the answer no longer reads as a clean verdict while naming them.
+  - `unrefreshedFiles` counts the stale files this call examined and then
+    refused to re-read because the inline-refresh budget was spent. The budget
+    is two numbers declared once, in `RefreshBudget` — a count of re-reads a
+    call may start and a wall bound read between candidates — and the
+    `warnings` line that appears with it says both. Absent means the budget
+    never bound: either nothing was stale, or the call never reached a
+    candidate (a store it could not open collapses every candidate and
+    attributes no cause, and that shape is never charged to the budget). A
+    refused row costs the answer nothing extra: it is still named in
+    `staleFiles`, still counted in `staleTotal`, still `lagging` in
+    `fileFreshness`. What the budget buys is the caller's wall time — a
+    re-measured `code_search` over a repo naming 24 stale files spent 46.7 s of
+    inline re-reads before the budget existed and 5.9 s after it (at 12 stale
+    files, 27.9 s → 6.0 s; medians of ten cold `squeezr serve` runs per arm,
+    harness `scripts/bench-guard-017.sh`), and the 23 rows it left unread are
+    named in the answer instead of being silent. `tokensUsed` did not move
+    between those arms — 815 before, 815 after — while `freshnessTokens` rose
+    from 127 to 601, which is exactly what disclosure costs.
+  - `replayed: true` appears **only** on an answer the response cache handed
+    back (see below). File mtimes move no cache generation, so on a replay the
+    numbers in this block — and `staleFiles` and `indexAge` beside them —
+    describe the call that produced the stored envelope, not this one. A
+    replayed answer attests no check of its own; the mark is how the reader
+    knows.
 
 **Budget states: complete, mapped, clipped.** `symbol_lookup` and `code_pack`
 spend their answers out of one `TokenBudget`, and since 115 the engine keeps
@@ -1098,7 +1182,12 @@ and `repo_map` key the value as it was passed, so leaving `maxTokens` out and
 passing the default are two different entries there. An
 identical query in the same session = an instant replay of the stored
 envelope; telemetry marks it `cacheHit: true` (and it shows in the hit-rate
-of `squeezr stats`). Any reindex — a watch pass or an external `squeezr index`
+of `squeezr stats`). A replayed answer says so in its own block —
+`freshness.replayed: true`, present only on hits and costing 15 text bytes (26
+on the wire, which `freshnessTokens` re-prices) — because the generation is
+the mtime pair of `meta.db` and `config.json`: files that changed on disk, or
+vanished from it, never invalidate a stored answer, so the numbers a replay
+carries describe the call that produced it. Any reindex — a watch pass or an external `squeezr index`
 — changes the cache generation (mtime of meta.db): dead entries are dropped
 immediately, not left for LRU eviction, and the first answer after the change
 carries `cache: invalidated (index changed)` in `warnings` — once per
@@ -1430,6 +1519,178 @@ watchers wait that window out (`--await-claim`) and take over when it expires,
 so kill→respawn converges within ~30s. A manual `squeezr watch` started inside
 the window declines immediately, as before.
 
+### Autostart: `watchd install` / `uninstall` / `installed`
+
+A manually started watchd lives and dies with the shell that started it. Three
+verbs hand its lifetime to the operating system, take it back, and report what
+actually happened:
+
+```bash
+squeezr watchd install     # register autostart for this account (idempotent)
+squeezr watchd installed   # read-only verdict: is it registered, and will it start?
+squeezr watchd uninstall   # remove the entry squeezr manages; a no-op when there is none
+```
+
+What `install` writes, per platform:
+
+| Platform | The entry | Start semantics |
+|---|---|---|
+| Linux | `~/.config/systemd/user/squeezr-watchd.service` (an absolute `XDG_CONFIG_HOME` moves it, same as systemd does) | `systemctl --user enable --now` at install; `Restart=on-failure`, `RestartSec=5` in the unit |
+| macOS | `~/Library/LaunchAgents/dev.summonasync.squeezr-watchd.plist` | `launchctl bootstrap gui/<uid>` at install; `RunAtLoad` + `KeepAlive`/`SuccessfulExit=false` in the plist |
+| Windows | a Task Scheduler task `squeezr-watchd` created with `/SC ONLOGON` (deliberately an ONLOGON task, not a service) | fires at the next logon and nothing else — no restart-on-exit semantics at all |
+
+The command line baked into every entry ends with `watchd --autostart`. The
+flag is a declared option of the `watchd` command that tells the supervisor the
+init system started it and will bring it back; that pair is what makes the
+upgrade policy below possible. A manually started `squeezr watchd` (without the
+flag) never retires itself.
+
+**Upgrade retire.** Under `--autostart`, once per sweep the supervisor compares
+the modification time of its own binary against its own process start time.
+When the disk is newer — an upgrade landed — the drift check is the first
+thing the next sweep runs: it prints `watchd is retiring after an upgrade:
+<path> changed at <stamp>, this process started at <stamp>`, and exits **75**
+at the top of that sweep without touching the fleet; the retire only unlocks
+once at least one full useful fleet sweep has already completed in this
+process's lifetime. 75 is sysexits'
+`EX_TEMPFAIL`: a temporary failure the starter is invited to retry, and
+`Restart=on-failure` (systemd) and `KeepAlive`+`SuccessfulExit=false` (launchd)
+both bring the process back on any non-zero exit. The number cannot be 0 —
+that reads as "finished cleanly, don't restart", and the fleet freezes on the
+old code — and cannot be 1/2/3, because those steps belong to the
+`watchd installed` verdict ladder. On Windows the retire question does not
+arise: `/SC ONLOGON` never brings a process back, so the policy refuses
+self-exit there and the running supervisor keeps its binary until the next
+logon.
+
+**What an upgrade does to the supervised daemons.** The generated systemd unit
+leaves `KillMode` at the systemd default — `control-group` — so retiring the
+supervisor stops its whole cgroup: every supervised watch daemon takes a
+fleet-wide SIGTERM, roughly 5–10 seconds pass (`RestartSec=5`, then the new
+instance's first sweep, which runs immediately at start — the 2 s cadence
+never waits before relaunching; on launchd the default throttle caps the same
+window at 10 s), and the whole fleet comes up on the new binary. On launchd
+the children survive the retire
+(the default `AbandonProcessGroup` keeps them), and the new supervisor reads
+them as `SkippedLiveOwner` — `watch <store> is managed elsewhere (pid N)` — and
+does not restart children it does not own: the fleet runs a mix of old and new
+daemons until each survivor dies on its own. Both shapes are deliberate
+(review-110-08 owner rulings), not accidents. One practical consequence: during
+that 5–10 s idle window a starting `squeezr serve` sees the retired supervisor
+as gone — the watchd lock is released and the claim's owner pid is not alive —
+so it prints the plain no-indexer warning and asks the operator to run
+`squeezr watch` by hand. That is the trap to know: the incoming supervisor
+relaunches the daemon on its own within seconds, so the manual `watch` is
+unnecessary here. The wedged-under-supervision warning (advice: "if the
+supervisor does not clear it, run `squeezr fleet restart`") needs a live
+supervisor and a live wedged owner, so it belongs to a genuinely wedged,
+blocked store outside this window — and there that manual `fleet restart` is
+exactly what it is for.
+
+**Trap 1: linger on a headless machine.** A systemd *user* manager exists only
+while the account has a session: without more, the unit will not start at boot
+at all — it waits for the first login, and a logout takes the user manager (and
+watchd) down with it. On a server you only reach over ssh, enable lingering
+once:
+
+```bash
+loginctl enable-linger $USER
+```
+
+The account's units then start at boot and survive logout. (Platform behaviour;
+owner-verifiable on the target box — after a reboot, `squeezr watchd installed`
+should read `watchd=running`.) On macOS and Windows the entry is a plain
+login-time agent/task and there is nothing to enable.
+
+**Trap 2: the start limit parks a failing unit.** The unit names its own
+window — `StartLimitIntervalSec=60` plus `StartLimitBurst=5` in `[Unit]`
+(systemd's 10 s default cannot count a `RestartSec=5` flap) — so a binary that
+dies at start is retried every 5 s, and after five starts inside 60 s systemd
+stops trying: the unit comes to rest in `failed` instead of flapping forever.
+That parked state is a *feature* against a broken binary — the crash loop has a
+full stop. `squeezr watchd installed` reads it as `status=unit-failed` with
+`failed=yes` and exit 2, and the hint says to look it up with the platform
+tool. To recover: fix or replace the binary, then
+
+```bash
+systemctl --user reset-failed squeezr-watchd && systemctl --user restart squeezr-watchd
+```
+
+`reset-failed` flushes the counter instead of waiting for the declared 60 s
+window to pass — until it does (or you reset), systemd keeps refusing the start
+with "Start request repeated too quickly". Re-running `squeezr watchd install`
+also works: it rewrites the unit and `enable --now` starts it again.
+
+**`installed` is the instrument panel.** One `key=value` line per dimension —
+byte-stable, scriptable — plus the exit-code ladder:
+
+| Exit | `status=` | Means |
+|---|---|---|
+| 0 | `installed` | the entry is registered, hooked, and names a program this platform can exec |
+| 1 | `not-installed` | nothing is registered |
+| 2 | `installed-but-binary-missing` / `unit-failed` / `present-but-not-enabled` | registered, and it will not start the daemon as it stands |
+| 3 | `probe-unsupported` / `probe-unknown` | the platform refused to answer, or has no question to ask here |
+
+The other lines answer the neighbouring questions: `platform=`, `unit=` (where
+the entry lives), `present=`/`enabled=`/`failed=`/`loaded=` (each `yes`, `no`,
+`couldn't-ask` where the tool would not talk, or `not-supported` where the
+platform has no such question — launchd for `failed=`, Windows for `loaded=`;
+`failed=` also prints `not-supported` where the question exists but the
+platform has no answer yet: a Windows task that never ran has no run outcome
+to read, and systemd answers exit 4 for a unit its running manager has not
+read),
+`program=`/`arguments=`/`program-state=` (what the entry execs and whether it
+can), `watchd=running`/`watchd=not-running` with `pid=` (the singleton lock —
+registered and running are two facts, and a linger-less box after a reboot is
+exactly where they disagree). `install` and `installed` deliberately stay
+separate: the status command never fixes anything on its way past.
+
+**`install` over a live manual watchd.** Before applying the entry, install
+reads `~/.squeezr/watchd/watchd.lock` and warns (stderr) when a live instance
+holds it — install takes nothing, steals nothing and kills nothing, because
+whose instance owns the singleton is the operator's call. The warning names
+what the entry will then do about the refusing instance: systemd restarts it on
+failure until the start limit parks the unit in `failed`; launchd respawns it on
+every unsuccessful exit; the Windows task's instance refuses at every logon.
+Stop that instance and run install again. The success line is
+`watchd autostart installed — <target>`, plus `(with SQUEEZR_HOME=<path>)` when
+the installing shell had `SQUEEZR_HOME` explicitly set — only then is the
+variable baked into the entry (the default home is whatever the account
+resolves at logon anyway). `uninstall` prints `watchd autostart removed —
+<target>`; nothing of ours to remove is not a failure either — it says `warning:
+no squeezr watchd autostart entry at <target>; nothing was removed.` on stderr
+and still exits 0.
+
+**The release path.** Upgrading through `scripts/install-release.sh` keeps
+autostart honest: the script restamps the unpacked binary with `touch` (a
+published tar carries archived mtimes, and an unstamped file gives the drift
+detector nothing to see), asks the new build `watchd installed`, and when
+autostart is registered it rewrites the entry onto the new tag and restarts the
+supervisor (`systemctl --user restart` on Linux, `launchctl kickstart -k` on
+macOS). The step closes with a machine-readable line:
+`autostart=rewritten+restarted` when the handover completed;
+`autostart=rewired+restart-failed` when the entry moved but the restart was
+refused (stderr names the manual restart commands); `autostart=touched` when
+the probe gave no verdict, so the entry stays pointed where it was; and
+`autostart=skipped:<reason>` (`no-new-build`, `touch-failed`,
+`autostart-not-installed`, `install-failed`) when nothing needed rewiring.
+Upgrading by unpacking a release tar by hand is the blind case — no restamp,
+archived mtime preserved, so drift may never fire and the old supervisor runs
+the old binary until you act: run `squeezr watchd install` from the new binary
+(it re-points the entry — the unit names the concrete install path, not the
+`~/.local/bin` symlink) and restart the entry yourself.
+
+**Legacy LaunchAgent name.** During the pre-release drafts of this feature the
+macOS file was `squeezr-watchd.plist`; current tooling writes and manages only
+the reverse-DNS `dev.summonasync.squeezr-watchd.plist`. A machine that ran the
+drafts can still carry the old file in `~/Library/LaunchAgents`, and neither
+`uninstall` nor `install` touches it — it loads a second supervisor every login
+(whose instance refuses the lock; launchd then respawns the refuser). If that
+is your machine: `launchctl bootout gui/$(id -u)/squeezr-watchd`, delete the
+old plist, re-run install. No released version ever wrote the legacy name, so
+this paragraph is almost certainly not you. (Owner-verifiable on a macOS box
+that ran feature-branch builds.)
+
 ## Vector hygiene: `squeezr vectors reconcile`
 
 Routine cleanup is done by indexing: a file's chunk set changed — its old
@@ -1516,7 +1777,13 @@ carry the same arithmetic in their own envelope: the additive `cost` block
 (`tokensUsed`, `baselineTokens`, `savedTokens`, `ratio`, `complete`) shows
 the whole-file price of the returned files at the moment of the call, and
 telemetry records that same per-call `baselineTokens`, so the dashboard
-and the transcript cannot disagree:
+and the transcript cannot disagree. `tokensUsed` there is the content the
+`maxTokens` budget governs; the freshness story shipped beside it prices
+itself in `freshness.freshnessTokens`, and the telemetry line records the sum.
+`complete` is a claim about the verdict, not about the budget: it reads false
+when `staleFiles` carries a sample of a bigger verdict, and a reader who sees
+`complete: false` with `truncated: false` should go to `freshness`, not raise
+`maxTokens`:
 
 ```bash
 squeezr stats           # per-tool table + savings + cache
