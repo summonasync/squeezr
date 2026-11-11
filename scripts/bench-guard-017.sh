@@ -88,6 +88,9 @@ FRESH_HOMES=()
 atexit() {
   local h
   for h in "${FRESH_HOMES[@]:-}"; do [ -n "$h" ] && rm -rf "$h"; done
+  # every probe build carries the full dependency closure (~500 MB); the logs are the evidence, the
+  # build directories are disposable — leaving them burns the scratch disk after a handful of arms
+  rm -rf "$SCRATCH/probe-builds"
 }
 trap atexit EXIT
 
@@ -935,6 +938,7 @@ run_probe() {
     --label "$name head=$head" --root "$stand" --reps "$REPS" > "$log" 2>&1
   local ec=$?
   echo "exit=$ec" >> "$log"
+  rm -rf "$dir"
   grep -E "^(guard|pass|map|stand|build|derived|preflight|component|NOT FRESH|PREFLIGHT|  VERDICT|.*med )" "$log" | head -30
   return $ec
 }
