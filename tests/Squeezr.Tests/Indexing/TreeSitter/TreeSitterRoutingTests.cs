@@ -212,6 +212,269 @@ public class TreeSitterRoutingTests
     }
 
     [Fact]
+    public void Index_PythonFile_RoutesToTreeSitterSymbolsAndPerSymbolChunks()
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var file = store.ListFiles(repoId).Single(f => f.Path == "src/loader.py");
+
+        // the converted half of the T1 tripwire: the python vocabulary landed, so this file left the
+        // sliding-window chunker and its rows now come from python nodes. The go half stayed a
+        // tripwire below — converting a guard whose vocabulary has not shipped is the same fail as
+        // deleting it
+        file.Language.ShouldBe("python");
+        file.Kind.ShouldBe("code");
+
+        var symbols = store.ListSymbolsByFile(file.Id);
+        symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe([("load", "function", null)]);
+        symbols.Single(s => s.Name == "load").Signature.ShouldBe("def load(path):");
+
+        var chunks = store.ListChunksByFile(file.Id);
+        chunks.ShouldNotBeEmpty();
+        chunks.Count.ShouldBe(symbols.Count);
+        chunks.ShouldAllBe(c => c.SymbolId != null);
+        var load = symbols.Single(s => s.Name == "load");
+        chunks.ShouldAllBe(c => c.SymbolId == load.Id);
+        chunks[0].Text.ShouldContain("def load(path):");
+
+        // the T1 tripwire row, converted by T2's symbol table and now carrying its reference half too:
+        // the file's edges are the import statement and the two callees of the chained read, all of them
+        // unresolved because nothing in this workspace is a python definition named os/open/read.
+        // Asserted per row rather than as a list: ListRefsByFile is an unordered read like every other
+        // per-file collection (this same store handed the three rows back as open, read, os), while the
+        // provider-level walk order is pinned in TreeSitterPythonReferenceTests
+        var edges = store.ListRefsByFile(file.Id);
+        edges.Count.ShouldBe(3);
+        edges.ShouldContain(r => r.Kind == "import" && r.ToName == "os" && r.Line == 1);
+        edges.ShouldContain(r => r.Kind == "call" && r.ToName == "read" && r.Line == 4);
+        edges.ShouldContain(r => r.Kind == "call" && r.ToName == "open" && r.Line == 4);
+        edges.ShouldAllBe(r => r.FromSymbolId == 0);
+    }
+
+    [Fact]
+    public void Index_GoFile_RoutesToTreeSitterSymbolsAndPerSymbolChunks()
+    {
+        var workspace = NewPolyglotWorkspace();
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var file = store.ListFiles(repoId).Single(f => f.Path == "cmd/server.go");
+
+        // T1's last tripwire, converted on schedule (python's half became this shape in T2): the
+        // grammar arms, the home row and the pool name were already in place, and the symbol table is
+        // what moved this file off the sliding-window chunker. Deleting the guard instead of converting
+        // it was the fail this form avoids, and so is a routed file leaving the run with no chunks
+        file.Language.ShouldBe("go");
+        file.Kind.ShouldBe("code");
+
+        var symbols = store.ListSymbolsByFile(file.Id);
+        symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe([("Listen", "function", null)]);
+        symbols.Single(s => s.Name == "Listen").Signature.ShouldBe("func Listen(path string) string");
+
+        var chunks = store.ListChunksByFile(file.Id);
+        chunks.ShouldNotBeEmpty();
+        chunks.Count.ShouldBe(symbols.Count);
+        chunks.ShouldAllBe(c => c.SymbolId != null);
+        var listen = symbols.Single(s => s.Name == "Listen");
+        chunks.ShouldAllBe(c => c.SymbolId == listen.Id);
+        chunks[0].Text.ShouldContain("func Listen(path string) string");
+
+        // the reference half T5 signed: the import binds the package name the file can type, and the
+        // qualified call binds the member. Asserted per row like python's three above — ListRefsByFile is
+        // unordered — with the counts pinned so a dropped row cannot hide inside a ShouldContain
+        var goEdges = store.ListRefsByFile(file.Id);
+        goEdges.Count.ShouldBe(2);
+        goEdges.ShouldContain(r => r.Kind == "import" && r.ToName == "fmt" && r.Line == 3);
+        var listenCall = goEdges.Single(r => r.Kind == "call");
+        listenCall.ToName.ShouldBe("Println");
+        listenCall.Line.ShouldBe(6);
+        listenCall.EnclosingSymbol.ShouldBe("Listen");
+
+        // and both stay unresolved: nothing in this workspace is a go definition named 'fmt' or 'Println',
+        // which is the honest reading — the wall holds by having nothing to bind to, not by refusing
+        goEdges.ShouldAllBe(r => r.FromSymbolId == 0);
+
+        // the F3 name collision, checked where it would bite: symbol_lookup and RefLookup match names
+        // case-insensitively, so any name one language contributes must not be contributed by another
+        // differing only in case. Iterated over what the go file actually defines rather than a typed
+        // list, so a fixture that grows (T5's go references will add names here) extends the sweep by
+        // itself instead of leaving a hand-typed one behind
+        var goNames = symbols.Select(s => s.Name).ToList();
+        goNames.ShouldNotBeEmpty();
+        var everyName = store.ListFiles(repoId)
+            .SelectMany(f => store.ListSymbolsByFile(f.Id).Select(s => s.Name))
+            .ToList();
+        foreach (var goName in goNames)
+        {
+            everyName.Count(n => n.Equals(goName, StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
+        }
+
+        // and the two residents that predates go keep their own names: python's 'load' is the only
+        // load-shaped row, javascript's 'serve' the only serve-shaped one
+        everyName.Count(n => n.Equals("load", StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
+        everyName.Count(n => n.Equals("serve", StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
+    }
+
+    [Fact]
+    public void Index_PythonSymbolNamedLikeJsCallee_KeepsJsEdgesOnTheJsRow()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/mul.py", "def mul(a, b):\n    return a * b\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/mul.py");
+        var utilFile = store.ListFiles(repoId).Single(f => f.Path == "src/util.js");
+        var appFile = store.ListFiles(repoId).Single(f => f.Path == "src/app.js");
+
+        // the row has to exist before the wall is asserted against it, otherwise a silent zero-symbol
+        // python file would make this test green for the wrong reason
+        var pyMul = store.ListSymbolsByFile(pyFile.Id).ShouldHaveSingleItem();
+        pyMul.Name.ShouldBe("mul");
+        var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
+
+        // a python row that shares a name with a javascript callee stays out of reach: name matching
+        // happens inside a pool, and 'mul' in a .js file lives in the js-ts pool while the python row
+        // lives in python's own — so app.js keeps binding both of its 'mul' edges to the javascript row
+        // instead of fanning out across grammars
+        var edges = store.ListRefsByFile(appFile.Id).Where(r => r.ToName == "mul").ToList();
+        edges.Count.ShouldBe(2);
+        edges.ShouldAllBe(r => r.FromSymbolId == jsMul.Id);
+        edges.ShouldNotContain(r => r.FromSymbolId == pyMul.Id);
+    }
+
+    // The firewall half of T3, written before the reference vocabulary landed (the 111 sequence, where
+    // the reviewer found the pool hole after the fact): each direction gets its own test and every
+    // 'no edge' assertion ships with a control that resolves on the same name inside the owning pool, so
+    // an empty python reference list can never pass as a win.
+    [Fact]
+    public void Index_PythonCallToNameDefinedOnlyInJavascript_BindsNothingAcrossTheWall()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/caller.py", "def run(items):\n    return mul(1, 2)\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/caller.py");
+        var utilFile = store.ListFiles(repoId).Single(f => f.Path == "src/util.js");
+        var appFile = store.ListFiles(repoId).Single(f => f.Path == "src/app.js");
+
+        // the edge exists — python's call rule saw mul(1, 2) — and resolves to nothing, because javascript's
+        // 'mul' row lives in the js-ts pool and python's pool holds only python files
+        var call = store.ListRefsByFile(pyFile.Id).Single(r => r.Kind == "call" && r.ToName == "mul");
+        call.FromSymbolId.ShouldBe(0);
+        call.EnclosingSymbol.ShouldBe("run");
+
+        // the control: javascript reaches its own mul in both places it names it
+        var jsMul = store.ListSymbolsByFile(utilFile.Id).ShouldHaveSingleItem();
+        var jsEdges = store.ListRefsByFile(appFile.Id).Where(r => r.ToName == "mul").ToList();
+        jsEdges.Count.ShouldBe(2);
+        jsEdges.ShouldAllBe(r => r.FromSymbolId == jsMul.Id);
+    }
+
+    [Fact]
+    public void Index_JavascriptCallToNameDefinedOnlyInPython_BindsNothingAcrossTheWall()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/pymod.py",
+            "def pyonly_widget():\n    return 1\n\ndef use():\n    return pyonly_widget()\n");
+        WriteFile(workspace, "repo/src/probe.js", "export function go() {\n  return pyonly_widget();\n}\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/pymod.py");
+        var jsFile = store.ListFiles(repoId).Single(f => f.Path == "src/probe.js");
+
+        // javascript names a python function and gets an unresolved row: the name exists in the repository,
+        // but the row it would bind is in python's pool, and name matching never leaves a pool
+        store.ListRefsByFile(jsFile.Id).Single(r => r.Kind == "call" && r.ToName == "pyonly_widget")
+            .FromSymbolId.ShouldBe(0);
+
+        // the same name, the same call shape, one pool over: python binds its own row
+        var definition = store.ListSymbolsByFile(pyFile.Id).Single(s => s.Name == "pyonly_widget");
+        var edges = store.ListRefsByFile(pyFile.Id).Where(r => r.ToName == "pyonly_widget").ToList();
+        edges.Count.ShouldBe(1);
+        edges.ShouldAllBe(r => r.FromSymbolId == definition.Id);
+        edges[0].EnclosingSymbol.ShouldBe("use");
+    }
+
+    [Fact]
+    public void Index_RustCallToPythonOnlyName_KeepsTheRustRowUnresolvedWhilePythonBindsItsOwn()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/pymod.py",
+            "def pyonly_widget():\n    return 1\n\ndef use():\n    return pyonly_widget()\n");
+        WriteFile(workspace, "repo/src/calls.rs", "pub fn boot() -> u32 {\n    pyonly_widget();\n    0\n}\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var pyFile = store.ListFiles(repoId).Single(f => f.Path == "src/pymod.py");
+        var rustFile = store.ListFiles(repoId).Single(f => f.Path == "src/calls.rs");
+
+        // the third pool in the picture: rust's call rules found the name and could not bind it either, so
+        // python did not quietly join the rust pool when its own was created
+        store.ListRefsByFile(rustFile.Id).Single(r => r.Kind == "call" && r.ToName == "pyonly_widget")
+            .FromSymbolId.ShouldBe(0);
+
+        var definition = store.ListSymbolsByFile(pyFile.Id).Single(s => s.Name == "pyonly_widget");
+        store.ListRefsByFile(pyFile.Id).Single(r => r.ToName == "pyonly_widget")
+            .FromSymbolId.ShouldBe(definition.Id);
+    }
+
+    [Fact]
+    public void Index_PythonSameSpanPair_AttributesEveryDuplicateChunkToTheOuterRow()
+    {
+        var workspace = NewPolyglotWorkspace();
+        WriteFile(workspace, "repo/src/config.py", "class Config: DEBUG = True\n\nX = Y = 1\n");
+        new WorkspaceIndexer().Index(workspace);
+
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        var repoId = store.FindRepo("demo")!.Id;
+        var file = store.ListFiles(repoId).Single(f => f.Path == "src/config.py");
+
+        // the store half of BUGS/022: four symbol rows on two lines, four chunk rows on the same two
+        // lines, and every chunk of a colliding pair attributed to the symbol that came first in source
+        // order — SymbolPersistence.FindContainingSymbol orders candidates by span width and LINQ's
+        // OrderBy is stable, so a class and the one-line const inside it (equal widths) never split the
+        // pair, and the inner symbol ends up with no chunk of its own
+        var symbols = store.ListSymbolsByFile(file.Id);
+        symbols.Count.ShouldBe(4);
+        symbols.ShouldContain(s => s.Name == "Config" && s.Kind == "class" && s.ContainerName == null);
+        symbols.ShouldContain(s => s.Name == "DEBUG" && s.Kind == "field" && s.ContainerName == "Config");
+        symbols.ShouldContain(s => s.Name == "X" && s.Kind == "field" && s.ContainerName == null);
+        symbols.ShouldContain(s => s.Name == "Y" && s.Kind == "field" && s.ContainerName == null);
+
+        // asserted unordered on purpose: ListSymbolsByFile is an unordered read — this very list came
+        // back X, Y, DEBUG, Config on the first run — while the attribution tie-break works on the
+        // persisted order, which is source order. The ids below are that proof, not the row order.
+        var config = symbols.Single(s => s.Name == "Config");
+        var debug = symbols.Single(s => s.Name == "DEBUG");
+        var chained = symbols.Single(s => s.Name == "X");
+        var chainedInner = symbols.Single(s => s.Name == "Y");
+        config.Id.ShouldBeLessThan(debug.Id);
+        chained.Id.ShouldBeLessThan(chainedInner.Id);
+
+        var chunks = store.ListChunksByFile(file.Id);
+        chunks.Count.ShouldBe(4);
+        chunks.Select(c => c.StartLine).Distinct().Count().ShouldBe(2);
+        chunks.Count(c => c.SymbolId == config.Id).ShouldBe(2);
+        chunks.Count(c => c.SymbolId == chained.Id).ShouldBe(2);
+
+        // the unreachable half of each pair, named so the day the collision is fixed this test is the
+        // one that flips — no chunk anywhere points at DEBUG or Y
+        chunks.ShouldNotContain(c => c.SymbolId == debug.Id);
+        chunks.ShouldNotContain(c => c.SymbolId == chainedInner.Id);
+    }
+
+    [Fact]
     public void Run_Downgrade_FallbackChunksAndAggregatedWarning()
     {
         var workspace = NewPolyglotWorkspace();
@@ -453,6 +716,27 @@ public class TreeSitterRoutingTests
 
             export function Badge({ count }: { count: number }) {
               return <div className="badge">{mul(count, 2)}</div>;
+            }
+            """);
+        WriteFile(workspace, "repo/src/loader.py", """
+            import os
+
+            def load(path):
+                return open(path).read()
+            """);
+        // 'Listen', not 'Serve': tools/main.mjs already exports a function called 'serve', and
+        // RefLookup matches names with OrdinalIgnoreCase, so a go symbol that differs from a
+        // javascript one by case alone fans out into its answers — the trap review-023-01 F3 caught in
+        // the python/go pair (loader.py 'load' vs a go 'Load'), resolved here in the fixture rather
+        // than with a pin that would only notice after the fact
+        WriteFile(workspace, "repo/cmd/server.go", """
+            package main
+
+            import "fmt"
+
+            func Listen(path string) string {
+                fmt.Println(path)
+                return path
             }
             """);
         WriteFile(workspace, "repo/src/lib.rs", """

@@ -33,6 +33,27 @@ public class LanguageDetectorTests
         language.ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData("src/main.go", "go")]
+    [InlineData("cmd/Server.GO", "go")]
+    [InlineData("go.mod", "unknown")]
+    [InlineData("notes.golang", "unknown")]
+    public void Detect_GoSource_IsTrackedAsGo(string path, string expected)
+    {
+        var language = LanguageDetector.Detect(path);
+
+        language.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void Detect_PythonRow_IsUntouchedByTheGoAddition()
+    {
+        // the py row predates this feature and its shape is the odd one: a python file is detected as
+        // 'python' while its grammar arm answers 'Python', so a refactor of either side trips here
+        LanguageDetector.Detect("src/main.py").ShouldBe("python");
+        LanguageDetector.Detect("src/main.PY").ShouldBe("python");
+    }
+
     [Fact]
     public void ProjectLayoutExtensions_CompositionIsPinnedAbsolutely()
     {
