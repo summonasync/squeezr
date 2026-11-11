@@ -7,13 +7,16 @@ namespace Squeezr.Cli.Output;
 // the lanes where this verb really rescanned the tree from the ones where it looked and owed nothing, and a
 // reader that cannot tell those apart will read the numbers as new work every session.
 //
-// 'obligation' is this store's own claim — at least one chunk it calls embedded — and 'collectionPoints' is
-// what this worktree's collection answered against it. Points stay absent when nothing answered: an
-// unanswered count is not a zero, and 'code' names which pending shape that is.
+// 'obligation' is this store's own claim — at least one chunk it calls embedded — counted in 'obligationChunks'
+// as the distinct chunk hashes behind that claim, because a point answers a hash, not a row. 'coveredChunks'
+// is how many of those hashes the collection actually holds a point for, and 'collectionPoints' is what the
+// collection answered in total. Points stay absent when nothing answered: an unanswered count is not a zero,
+// and 'code' names which shape that is.
 public sealed record WorktreeReconcileReport(
     string State,
     bool PassRan,
     bool Obligation,
+    int ObligationChunks,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? Reason,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -23,6 +26,8 @@ public sealed record WorktreeReconcileReport(
     int PendingChunks,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     long? CollectionPoints,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? CoveredChunks,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? RescannedFiles,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -40,12 +45,14 @@ public sealed record WorktreeReconcileReport(
         State: outcome.State.ToString(),
         PassRan: outcome.PassRan,
         Obligation: outcome.Obligation,
+        ObligationChunks: outcome.ObligationChunks,
         Reason: outcome.Reason,
         Code: outcome.Code,
         StoredFiles: outcome.StoredFiles,
         StoredChunks: outcome.StoredChunks,
         PendingChunks: outcome.PendingChunks,
         CollectionPoints: outcome.CollectionPoints,
+        CoveredChunks: outcome.CoveredChunks,
         RescannedFiles: outcome.RescannedFiles,
         Added: outcome.Added,
         Modified: outcome.Modified,

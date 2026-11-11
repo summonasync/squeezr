@@ -33,9 +33,9 @@ public static class WorktreeStoreFill
         if (!copy)
         {
             return WorktreeFillOutcome.Skipped(
-                "--reindex: this worktree fills by indexing its own tree, so nothing was copied. No pass " +
-                "runs here yet — this worktree stays empty until the reconcile pass lands. To take the main " +
-                "worktree's index instead, re-run this verb without '--reindex'.",
+                "--reindex: this worktree fills by indexing its own tree, so nothing was copied and no "
+                + $"reconcile pass ran here. Run '{RemedyText.IndexCommand}' here to fill the store; to take "
+                + "the main worktree's index instead, re-run this verb without '--reindex'.",
                 WorktreeFillSkip.ReindexRequested);
         }
 

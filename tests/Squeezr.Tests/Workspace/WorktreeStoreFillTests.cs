@@ -254,7 +254,7 @@ public sealed class WorktreeStoreFillTests : IDisposable
     }
 
     [Fact]
-    public void Fill_ReindexMode_SkipsAndNamesThePassThatDoesNotExistYet()
+    public void Fill_ReindexMode_SkipsAndNamesTheCommandThatFillsTheLaneToday()
     {
         var main = IndexedMainWithContent(StoreFixture.ModelKey);
         var child = AddWorktree(main, LaneBranch);
@@ -266,9 +266,9 @@ public sealed class WorktreeStoreFillTests : IDisposable
         outcome.Copy.ShouldBeNull();
         outcome.Reason.ShouldNotBeNull().ShouldContain("--reindex");
         outcome.Reason.ShouldContain("reconcile pass");
-        // review-116-06 #3: text may only promise a command that runs today, and no pass runs in the lane
-        // until the reconcile pass lands — so the sentence must not point at 'squeezr index'.
-        outcome.Reason.ShouldNotContain("squeezr index");
+        // review-116-06 #3: text may only promise a command that runs today, and the command that fills this
+        // lane today is the index of its own tree — naming a reconcile pass that never lands is the lie.
+        outcome.Reason.ShouldContain(RemedyText.IndexCommand);
         StoreFixture.Counts(StoreDirOf(registered.StoreKey!)).ShouldBe((0, 0));
     }
 

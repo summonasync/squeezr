@@ -7,19 +7,22 @@ namespace Squeezr.Core.Workspace;
 // The pass that makes a copied store answer for its own tree. A fill lands the main worktree's rows, and
 // every coordinate in them — the file list, the line numbers, the chunk hashes — was measured on another
 // checkout. This is the one standard incremental pass over this worktree's root that puts those numbers back
-// on this branch, plus the counts that say whether this worktree's vectors reach what its rows claim.
+// on this branch, plus the measurement that says whether this worktree's vectors reach what its rows claim.
 //
 // The threshold is a comparison, never the copied database. A fill writes rows that already read 'ok', and
 // 'ok' names the model that produced a vector, not a vector that exists in THIS collection; reading those
 // rows as coverage is how a lane would print fresh over an empty collection. So the rows' claim is the
-// obligation, and the collection is what answers it: the pass calls the lane reconciled only when the count
-// the collection gives back reaches the rows that claim a vector.
+// obligation, counted in the unit the collection is made of: a point id comes from a chunk hash, N rows
+// sharing one hash own one point, and an obligation counted in rows could never be met by any tree holding
+// duplicate content. What answers the obligation is the set of ids the collection hands back, intersected
+// with those hashes — a like number of foreign points covers nothing.
 //
-// The verb runs at every session start, so owing a pass is decided by state rather than by memory of the pass
-// that filled. A copy that landed this session always owes one. A lane that kept its index owes another only
-// while its collection is MEASURABLY shorter than its claim: a count that did not answer is not a short
-// count, and re-scanning the same tree at every session because a service is down is doubled work, not
-// progress.
+// The verb runs at every session start, so owing a pass is decided by state rather than by memory of the
+// pass that filled. A copy that landed this session always owes one. A lane that kept its index owes another
+// only while its collection measurably fails to cover its claim: a measurement that did not answer is not a
+// gap, and re-scanning the same tree at every session because a service is down is doubled work, not
+// progress. Owing no pass is not the same as being proven: the agreement measured without one is between
+// copied numbers, which is what 'assumed' claims and nothing more.
 public static class WorktreeReconcile
 {
     public static WorktreeReconcileOutcome Run(
@@ -34,7 +37,7 @@ public static class WorktreeReconcile
         {
             return WorktreeReconcileOutcome.Deferred(
                 "--reindex: this worktree fills by indexing its own tree, so no reconcile pass ran here and "
-                + "the store stays empty until that pass does.");
+                + $"the store stays empty until one does. Run '{RemedyText.IndexCommand}' here to fill it.");
         }
 
         if (registered.StoreKey is null || registered.State
@@ -69,16 +72,16 @@ public static class WorktreeReconcile
         WorktreeReconcileRuntime? built = null;
         WorktreeReconcileRuntime Runtime() => built ??= runtimeFactory();
 
-        var obligation = before.EmbeddedRows > 0;
-        var pointsBefore = obligation ? CountPoints(Runtime().VectorStore, ct) : null;
+        var obligation = before.ObligationChunks > 0;
+        var coveredBefore = obligation ? MeasureCollection(Runtime().VectorStore, before, ct) : null;
 
         var owed = fill.State == WorktreeFillState.Filled
-            || (obligation && pointsBefore?.Points is { } measured && measured < before.EmbeddedRows);
+            || (obligation && coveredBefore is { Points: { }, Uncovered: > 0 });
 
         if (!owed)
         {
-            var settled = Judge(before, noSemantic, pointsBefore, passFailure: null);
-            return Outcome(settled, passRan: false, before, obligation, pointsBefore,
+            var settled = Judge(before, noSemantic, coveredBefore, passFailure: null, passProven: false);
+            return Outcome(settled, passRan: false, before, obligation, coveredBefore,
                 pass: null, runtime: Runtime());
         }
 
@@ -109,18 +112,26 @@ public static class WorktreeReconcile
         }
 
         var after = ReadRows(registered.RootPath) ?? before;
-        var stillObligated = after.EmbeddedRows > 0;
-        var pointsAfter = stillObligated ? CountPoints(runtime.VectorStore, ct) : null;
-        var verdict = Judge(after, noSemantic, pointsAfter, passFailure);
-        return Outcome(verdict, passRan: true, after, stillObligated, pointsAfter, pass, runtime);
+        var stillObligated = after.ObligationChunks > 0;
+        var coveredAfter = stillObligated ? MeasureCollection(runtime.VectorStore, after, ct) : null;
+        var verdict = Judge(after, noSemantic, coveredAfter, passFailure, passProven: true);
+        return Outcome(verdict, passRan: true, after, stillObligated, coveredAfter, pass, runtime);
     }
 
-    private sealed record StoreRows(int Files, int TotalChunks, int PendingChunks, bool Readable)
+    private sealed record StoreRows(
+        int Files,
+        int TotalChunks,
+        int PendingChunks,
+        IReadOnlyList<string> EmbeddedHashes,
+        bool Readable)
     {
-        public int EmbeddedRows => TotalChunks - PendingChunks;
+        public int ObligationChunks => EmbeddedHashes.Count;
     }
 
-    private sealed record PointCount(long? Points, string? Failure);
+    // The collection's answer in the obligation's own unit: how many points it holds and how many of the
+    // hashes this store calls embedded have no point among them. Points stay null when the store did not
+    // answer, and an unanswered measurement holds no gap for anyone to act on.
+    private sealed record CollectionCoverage(long? Points, int? Uncovered, string? Failure);
 
     // Null is 'this store holds no database at all', which is the lane born before its main worktree was
     // indexed. A database that exists and will not open is a different fact and is reported as such: the
@@ -136,33 +147,42 @@ public static class WorktreeReconcile
         var store = MetaStore.TryOpen(metaDb);
         if (store is null)
         {
-            return new StoreRows(0, 0, 0, Readable: false);
+            return new StoreRows(0, 0, 0, [], Readable: false);
         }
 
         using (store)
         {
             var coverage = store.GetSemanticCoverage();
-            return new StoreRows(store.CountAllFiles(), coverage.TotalChunks, coverage.PendingChunks, true);
+            return new StoreRows(
+                store.CountAllFiles(),
+                coverage.TotalChunks,
+                coverage.PendingChunks,
+                store.ListEmbeddedChunkHashes(),
+                true);
         }
     }
 
-    // A missing handle is an unanswered count, never a count of zero: a store with no vector configuration
-    // cannot prove the claim its rows make, and the pending shape that says so is the one named 'silent'.
-    private static PointCount CountPoints(IVectorStore? store, CancellationToken ct)
+    // A missing handle is an unanswered measurement, never a measurement of zero: a store with no vector
+    // configuration cannot prove the claim its rows make, and the pending shape that says so is the one
+    // named 'silent'. The ids are scrolled rather than counted because the claim is about THESE rows — a
+    // collection of the right size carrying other rows' points is the failure this verb exists to refuse.
+    private static CollectionCoverage MeasureCollection(IVectorStore? store, StoreRows rows, CancellationToken ct)
     {
         if (store is null)
         {
-            return new PointCount(null, "this worktree has no vector store to ask");
+            return new CollectionCoverage(null, null, "this worktree has no vector store to ask");
         }
 
         try
         {
-            return new PointCount(store.CountAsync(ct).GetAwaiter().GetResult(), null);
+            var ids = store.ScrollPointIdsAsync(ct).GetAwaiter().GetResult().ToHashSet();
+            var uncovered = rows.EmbeddedHashes.Count(hash => !ids.Contains(ChunkPointId.FromHash(hash)));
+            return new CollectionCoverage(ids.Count, uncovered, null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException
                                    and not OperationCanceledException)
         {
-            return new PointCount(null, ex.Message);
+            return new CollectionCoverage(null, null, ex.Message);
         }
     }
 
@@ -174,13 +194,14 @@ public static class WorktreeReconcile
             : "this worktree's store holds no rows yet, so there is nothing here to reconcile.";
 
     // The obligation is the rows' own claim. A store that claims no vector cannot be short of one, and a
-    // workspace that asked for no semantic work is reported reconciled on coordinates — its embedding queue
-    // is 'status' business, not a reconcile that failed here.
+    // workspace that asked for no semantic work is measured on coordinates — its embedding queue is 'status'
+    // business, not a reconcile that failed here.
     private static (WorktreeReconcileState State, string? Reason, string? Code) Judge(
         StoreRows rows,
         bool noSemantic,
-        PointCount? points,
-        string? passFailure)
+        CollectionCoverage? coverage,
+        string? passFailure,
+        bool passProven)
     {
         if (passFailure is not null)
         {
@@ -191,8 +212,7 @@ public static class WorktreeReconcile
                 WorktreeReconcileOutcome.PassFailedCode);
         }
 
-        var obligation = rows.EmbeddedRows > 0;
-        if (!obligation)
+        if (rows.ObligationChunks == 0)
         {
             // A store that claims no vector cannot be short of one. An embedding queue in a workspace that
             // asked for semantic work is still unfinished business, and 'pending' is the word for it.
@@ -206,40 +226,56 @@ public static class WorktreeReconcile
                     WorktreeReconcileOutcome.RowsPendingCode);
             }
 
-            return (WorktreeReconcileState.Reconciled, null, null);
+            return Settled(passProven, rows);
         }
 
-        if (points?.Points is not { } counted)
+        if (coverage?.Points is not { } points)
         {
             return (
                 WorktreeReconcileState.Pending,
-                $"this store calls {rows.EmbeddedRows} chunk(s) embedded and the collection did not answer "
-                + $"({points?.Failure ?? "no count"}), so nothing here proves those vectors exist. Start the "
-                + $"services ('{RemedyText.ServicesUp}') and re-run this verb, or close the gap with "
-                + $"'{RemedyText.VectorsReconcileApply}' in this worktree.",
+                $"this store calls {rows.ObligationChunks} chunk hash(s) embedded and the collection did not "
+                + $"answer ({coverage?.Failure ?? "no measurement"}), so nothing here proves those vectors "
+                + $"exist. Start the services ('{RemedyText.ServicesUp}') and re-run this verb, or close the "
+                + $"gap with '{RemedyText.VectorsReconcileApply}' in this worktree.",
                 WorktreeReconcileOutcome.StoreSilentCode);
         }
 
-        if (counted < rows.EmbeddedRows)
+        if (coverage.Uncovered is > 0)
         {
             return (
                 WorktreeReconcileState.Pending,
-                $"the collection counts {counted} point(s) under {rows.EmbeddedRows} row(s) this store calls "
-                + "embedded, so semantic answers here are short of what the database claims. Re-run this verb "
-                + $"once '{RemedyText.ServicesUp}' has brought the store up, or fill this worktree from its "
-                + $"own tree with '{RemedyText.IndexCommand}'.",
+                $"the collection holds {points} point(s) and {coverage.Uncovered} of the "
+                + $"{rows.ObligationChunks} chunk hash(es) this store calls embedded have no point in it, so "
+                + "semantic answers here are short of what the database claims. Re-run this verb once "
+                + $"'{RemedyText.ServicesUp}' has brought the store up, or fill this worktree from its own "
+                + $"tree with '{RemedyText.IndexCommand}'.",
                 WorktreeReconcileOutcome.CollectionShortCode);
         }
 
-        return (WorktreeReconcileState.Reconciled, null, null);
+        return Settled(passProven, rows);
     }
+
+    // Nothing this store claims is missing, which is the whole observation. Only a pass over this tree says
+    // the rows describe this tree; without one the agreement between two copied numbers is an assumption,
+    // and the store-side marker 116/T7 is what turns it into a fact.
+    private static (WorktreeReconcileState State, string? Reason, string? Code) Settled(
+        bool passProven,
+        StoreRows rows) =>
+        passProven
+            ? (WorktreeReconcileState.Reconciled, null, null)
+            : (
+                WorktreeReconcileState.Assumed,
+                $"the rows and the collection agree, but no pass over this tree has shown that these "
+                + $"{rows.Files} file(s) are this branch's — the agreement is between numbers copied from "
+                + $"another checkout. Run '{RemedyText.IndexCommand}' here to prove it.",
+                WorktreeReconcileOutcome.AssumedCode);
 
     private static WorktreeReconcileOutcome Outcome(
         (WorktreeReconcileState State, string? Reason, string? Code) verdict,
         bool passRan,
         StoreRows rows,
         bool obligation,
-        PointCount? points,
+        CollectionCoverage? coverage,
         IndexResult? pass,
         WorktreeReconcileRuntime runtime)
     {
@@ -253,7 +289,11 @@ public static class WorktreeReconcile
             rows.TotalChunks,
             rows.PendingChunks,
             obligation,
-            points?.Points,
+            rows.ObligationChunks,
+            coverage?.Points,
+            coverage?.Uncovered is int uncovered
+                ? rows.ObligationChunks - uncovered
+                : null,
             pass is null ? null : pass.Repos.Sum(repo => repo.Files),
             pass is null ? null : Sum(pass, repo => repo.Added),
             pass is null ? null : Sum(pass, repo => repo.Modified),

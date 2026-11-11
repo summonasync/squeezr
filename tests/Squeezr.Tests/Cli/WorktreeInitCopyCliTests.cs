@@ -235,8 +235,12 @@ public sealed class WorktreeInitCopyCliTests
             "the copied rows that claimed vectors named files this tree does not hold, so the pass retired " +
             "the claim with the rows");
         reconcile.GetProperty("rescannedFiles").GetInt32().ShouldBe(1);
+        StoreFixture.Counts(storeDir).ShouldBe((1, 1),
+            "the absolute anchor: one file this tree holds and the one chunk it lands, not a number the "
+            + "reconcile block wrote for itself");
         StoreFixture.Counts(storeDir).ShouldBe(
-            (reconcile.GetProperty("rescannedFiles").GetInt32(), reconcile.GetProperty("storedChunks").GetInt32()));
+            (reconcile.GetProperty("rescannedFiles").GetInt32(), reconcile.GetProperty("storedChunks").GetInt32()),
+            "and the report carries those same installed numbers");
         FilesIn(storeDir).ShouldBe(["config.json", "meta.db", "trigram.idx", "workspace.json"]);
     }
 
@@ -364,10 +368,11 @@ public sealed class WorktreeInitCopyCliTests
         File.Exists(Path.Combine(storeDir, SqueezrPaths.TrigramIndexFileName)).ShouldBeFalse();
     }
 
-    // review-116-06 #3 and ruling D: text may only name a command that runs today, and in a lane whose
-    // store was never filled there is no pass to point at yet — so the skip says so instead.
+    // review-116-06 #3 and ruling D: text may only name a command that runs today, and the command that
+    // fills this lane today is the index of its own tree — a promise about a reconcile pass that never
+    // lands is the door that does not open.
     [Fact]
-    public async Task WorktreeInit_HumanModeOnReindex_SaysNoPassRunsWithoutPromisingOneThatDoesNotExist()
+    public async Task WorktreeInit_HumanModeOnReindex_SaysNoPassRanAndNamesTheDoorThatDoes()
     {
         var main = IndexedMainWithPendingContent("cli-reindex-human-main");
         var child = AddWorktree(main, "feat/116-cli-reindex-human");
@@ -377,7 +382,7 @@ public sealed class WorktreeInitCopyCliTests
         run.ExitCode.ShouldBe(0);
         run.StdOut.ShouldContain("--reindex");
         run.StdOut.ShouldContain("reconcile pass");
-        run.StdOut.ShouldNotContain("squeezr index");
+        run.StdOut.ShouldContain("squeezr index");
     }
 
     [Fact]
@@ -460,6 +465,8 @@ public sealed class WorktreeInitCopyCliTests
             "no row left in this store calls itself embedded");
         reconcile.GetProperty("state").GetString().ShouldBe("Reconciled");
         reconcile.GetProperty("rescannedFiles").GetInt32().ShouldBe(1);
+        StoreFixture.Counts(storeDir).ShouldBe((1, 1),
+            "the absolute anchor, before any number this same payload reports");
         StoreFixture.Counts(storeDir).ShouldBe(
             (reconcile.GetProperty("rescannedFiles").GetInt32(), reconcile.GetProperty("storedChunks").GetInt32()),
             "the reconcile numbers are the installed store's numbers");

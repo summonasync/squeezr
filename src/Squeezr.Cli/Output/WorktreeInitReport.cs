@@ -46,11 +46,13 @@ public sealed record WorktreeInitReport(
             IsDetached: outcome.IsDetached,
             // The registration answers for a store it minted empty; once a reconcile pass has read this lane's
             // own rows against its own collection, that measurement is the better answer and it replaces the
-            // guess. A deferred reconcile reports no measurement, so the registration's word stands.
+            // guess. An assumed match is not that measurement — it is two copied numbers agreeing — so it
+            // stays pending until a pass or 116/T7's marker proves the tree. A deferred reconcile reports no
+            // measurement, so the registration's word stands.
             ReconcilePending: reconcile?.State switch
             {
                 WorktreeReconcileState.Reconciled => false,
-                WorktreeReconcileState.Pending => true,
+                WorktreeReconcileState.Pending or WorktreeReconcileState.Assumed => true,
                 _ => outcome.ReconcilePending,
             },
             Reason: outcome.Reason,

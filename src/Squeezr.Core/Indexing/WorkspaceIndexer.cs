@@ -327,7 +327,11 @@ public sealed class WorkspaceIndexer
             List<FileDocument> changed = [];
             List<(uint RepoId, uint Id)> tombstones = [];
 
-            if (File.Exists(fullPath) && rules.Decision(relativePath, isDirectory: false).Excluded)
+            // The marker shares its door with the cascade: rows reach this route from a stored candidate, so
+            // a legacy worktree store that already holds a '.git' row loses it here instead of answering with
+            // the main worktree's gitdir a second time.
+            if (File.Exists(fullPath)
+                && (GitMarkerPath.Is(relativePath) || rules.Decision(relativePath, isDirectory: false).Excluded))
             {
                 if (existing is null)
                 {

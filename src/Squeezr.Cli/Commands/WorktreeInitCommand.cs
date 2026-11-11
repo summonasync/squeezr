@@ -122,13 +122,16 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
 
             // A lane that is still pending after this pass is the same 'bytes with no answer' state one level up
             // the store, and the hook that reads only stderr has to see it there: the numbers say how short,
-            // the code says which shape. Pass warnings travel on the same channel, as they do for 'index'.
+            // the code says which shape. An assumed match travels on the same channel, because the hook that
+            // treats a copied store as proven is the reader this state exists to stop. Pass warnings travel on
+            // the same channel, as they do for 'index'.
             foreach (var warning in reconcile.Warnings ?? [])
             {
                 Console.Error.WriteLine($"warning: {warning}");
             }
 
-            if (reconcile is { State: WorktreeReconcileState.Pending, Reason: { } pending })
+            if (reconcile is { State: WorktreeReconcileState.Pending or WorktreeReconcileState.Assumed,
+                    Reason: { } pending })
             {
                 Console.Error.WriteLine($"warning: {pending}");
             }

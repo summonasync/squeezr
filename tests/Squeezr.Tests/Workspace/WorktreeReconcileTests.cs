@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
@@ -12,8 +13,8 @@ namespace Squeezr.Tests.Workspace;
 
 // The reconcile in one sentence: a copied store holds another branch's numbers, and this is the pass that puts
 // them back on this one. Everything here runs against fakes for the provider and the collection, because the
-// two facts the contract is made of — which chunks were re-embedded and whether the collection reaches the
-// rows that claim a vector — have to be counted exactly, not measured against a live service.
+// two facts the contract is made of — which chunks were re-embedded and whether the collection's points cover
+// the chunk hashes that claim a vector — have to be counted exactly, not measured against a live service.
 [Collection("ProcessGlobals")]
 public sealed class WorktreeReconcileTests : IDisposable
 {
@@ -25,6 +26,13 @@ public sealed class WorktreeReconcileTests : IDisposable
         public sealed class Kept
         {
             public int Value => 1;
+        }
+        """;
+
+    private const string TwinSource = """
+        public sealed class Twin
+        {
+            public int Value => 2;
         }
         """;
 
@@ -113,8 +121,55 @@ public sealed class WorktreeReconcileTests : IDisposable
         outcome.PassRan.ShouldBeTrue();
         outcome.Obligation.ShouldBeTrue();
         outcome.CollectionPoints.ShouldBe(collection.Points.Count);
-        ((long)outcome.StoredChunks - outcome.PendingChunks).ShouldBeGreaterThan(outcome.CollectionPoints!.Value,
-            "the rows that claim a vector outnumber the points that answer them — that gap is the pending");
+        outcome.CoveredChunks.ShouldNotBeNull().ShouldBeLessThan(outcome.ObligationChunks,
+            "chunk hashes this store calls embedded have no point among the ids the collection holds — that "
+            + "gap is the pending, and it is measured in hashes because a point answers a hash, not a row");
+    }
+
+    // The count and the coverage are different facts, and only the second one earns the word reconciled: a
+    // collection holding exactly as many points as this store has claims, none of them answering a single
+    // claim of it, is the state a cardinality comparison prints as fresh.
+    [Fact]
+    public void Reconcile_CollectionHoldsTheRightNumberOfForeignPoints_IsPendingNotReconciled()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        var rowsBeforeTheSwap = CountEmbeddedRows(registered.RootPath);
+        rowsBeforeTheSwap.ShouldNotBe(0, "an empty claim would let any collection look covered");
+
+        collection.ReplaceWithForeignIdsOf(rowsBeforeTheSwap);
+
+        var outcome = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        outcome.CollectionPoints.ShouldBe(rowsBeforeTheSwap,
+            "the collection answers a full set of points, so a count-based gate has nothing to complain about");
+        outcome.State.ShouldBe(WorktreeReconcileState.Pending);
+        outcome.Code.ShouldBe(WorktreeReconcileOutcome.CollectionShortCode);
+        outcome.CoveredChunks.ShouldBe(0, "none of the hashes this store calls embedded is among those ids");
+    }
+
+    // Two byte-identical files hold one chunk hash, and one hash owns one point id: an obligation counted in
+    // rows could never be met by this tree, and the lane would read as pending at every session start no
+    // matter how healthy its collection is.
+    [Fact]
+    public void Reconcile_TwoFilesSharingOneChunkHash_ObligationCountsTheHashAndTheLaneLandsReconciled()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection, withTwinFiles: true);
+        var (registered, fill) = FillLane(main, child, collection);
+
+        var outcome = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        var claimingRows = outcome.StoredChunks - outcome.PendingChunks;
+        claimingRows.ShouldBeGreaterThan(outcome.ObligationChunks,
+            "the fixture has to leave rows sharing a hash, or this test measures an ordinary store");
+        outcome.CoveredChunks.ShouldBe(outcome.ObligationChunks,
+            "every distinct hash the store calls embedded has its point here");
+        outcome.State.ShouldBe(WorktreeReconcileState.Reconciled,
+            "a duplicate-content tree is not a short collection, and an obligation in rows would make it one");
     }
 
     // The count that did not answer is not a count of zero: a lane whose store cannot be read is pending with
@@ -124,7 +179,7 @@ public sealed class WorktreeReconcileTests : IDisposable
     {
         var (main, child) = IndexedMainAndLane(out var collection);
         var (registered, fill) = FillLane(main, child, collection);
-        var silent = new FakeVectorStore { CountThrows = true };
+        var silent = new FakeVectorStore { AnswerThrows = true };
 
         var outcome = WorktreeReconcile.Run(
             registered, fill, noSemantic: false,
@@ -133,7 +188,60 @@ public sealed class WorktreeReconcileTests : IDisposable
         outcome.State.ShouldBe(WorktreeReconcileState.Pending);
         outcome.Code.ShouldBe(WorktreeReconcileOutcome.StoreSilentCode);
         outcome.CollectionPoints.ShouldBeNull();
+        outcome.CoveredChunks.ShouldBeNull();
         outcome.Obligation.ShouldBeTrue();
+        // the silent collection is the service-that-is-down shape, and its remedy names that door
+        outcome.Reason.ShouldNotBeNull().ShouldContain(RemedyText.ServicesUp);
+    }
+
+    // A store whose bytes will not open is a different fact from a collection that will not answer: same
+    // null count, different remedy, and a machine-reader must not have to parse prose to tell them apart.
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void Reconcile_MetaDbWillNotOpen_IsPendingUnreadableWithTheRepairRemedy()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        // a denied read is the shape the store reports as unreadable; a corrupted header is a different
+        // engine failure, and TryOpen does not claim to swallow it
+        var metaDb = SqueezrPaths.MetaDbPath(registered.RootPath);
+        File.SetUnixFileMode(metaDb, UnixFileMode.None);
+        Should.Throw<UnauthorizedAccessException>(() => File.OpenRead(metaDb).Dispose());
+
+        var outcome = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        outcome.State.ShouldBe(WorktreeReconcileState.Pending);
+        outcome.Code.ShouldBe(WorktreeReconcileOutcome.StoreUnreadableCode);
+        outcome.CollectionPoints.ShouldBeNull();
+        var unreadableReason = outcome.Reason.ShouldNotBeNull();
+        unreadableReason.ShouldContain("workspace repair");
+        // the services are not the broken half here, and pointing at them wastes the reader's next step
+        unreadableReason.ShouldNotContain(RemedyText.ServicesUp);
+    }
+
+    // The loud pass failure is the shape AC7 refuses: the verb says what did not land and which door finishes
+    // it, instead of printing numbers from a pass that never happened.
+    [Fact]
+    public void Reconcile_PassThrewOnTheWayIn_ReportsPassFailedWithItsNumbersAbsentAndTheIndexRemedy()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        // the pass is a standard index over this root, and a root whose manifest went missing is the loud
+        // failure it reports rather than throwing at the verb
+        File.Delete(SqueezrPaths.ManifestPath(registered.RootPath));
+
+        var outcome = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        outcome.State.ShouldBe(WorktreeReconcileState.Pending);
+        outcome.Code.ShouldBe(WorktreeReconcileOutcome.PassFailedCode);
+        outcome.PassRan.ShouldBeTrue("the pass was run and it failed loudly — that is what this shape records");
+        outcome.RescannedFiles.ShouldBeNull("a pass that threw has no rescan to report");
+        // the remedy for a pass that died is the pass itself, and it runs today
+        outcome.Reason.ShouldNotBeNull().ShouldContain(RemedyText.IndexCommand);
     }
 
     // The re-embed number the contract demands, measured against a real tree: only the file this branch
@@ -170,13 +278,49 @@ public sealed class WorktreeReconcileTests : IDisposable
             .Select(chunk => chunk.StartLine)
             .ToList();
         chunkLines.ShouldNotBeEmpty("the lane indexes its own checkout, so the method has rows here");
-        chunkLines.ShouldContain(line => line <= diskLine,
-            "the row that covers the marker belongs to this branch's copy of the file");
+        chunkLines.ShouldContain(line => line == diskLine,
+            "the row that covers the tree sits exactly where the lane's file puts it — a comparison loose "
+            + "enough to accept the parent's number would prove nothing here");
 
         // the marker file of a linked worktree is not a source file: three files on disk, three rows, no
         // '.git' row that would answer with the main worktree's absolute path.
         File.Exists(Path.Combine(child, ".git")).ShouldBeTrue("a linked worktree carries .git as a file");
         outcome.StoredFiles.ShouldBe(2, "the .git marker never enters the index");
+    }
+
+    // The walk is not the only door into this store: a stored path can come back through the per-file route,
+    // and a marker that answers there is the same parent coordinate wearing a different coat.
+    [Fact]
+    public void Reconcile_MarkerAskedThroughThePerFileRoute_LeavesNoRowForTheReadersToAnswerWith()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        var added = new WorkspaceIndexer().IndexFile(child, RepoName, ".git");
+
+        added.ShouldBeNull("the marker is not indexable content, whichever route named it");
+        StoredPaths(child).ShouldNotContain(".git",
+            "and a route that refuses must not write the row the walk refused either");
+    }
+
+    // The tail this rule exists for: a store that was indexed before the marker was excluded still holds the
+    // row, and the read route that finds it must take it away rather than serve the main worktree's gitdir.
+    [Fact]
+    public void Reconcile_LegacyStoreAlreadyHoldingTheMarkerRow_ReadRouteReapsIt()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        SeedLegacyMarkerRow(child);
+
+        var outcome = new WorkspaceIndexer().IndexFile(child, RepoName, ".git");
+
+        outcome.ShouldBeNull();
+        StoredPaths(child).ShouldNotContain(".git", "the legacy row does not get to keep answering");
+        ListChunks(child).ShouldNotContain(chunk => chunk.Text.Contains("gitdir", StringComparison.Ordinal),
+            "and its chunks go with it, because that is what a search would have returned");
     }
 
     // A loud failure of the vector arm leaves the copied database calling its chunks embedded. There must be
@@ -206,9 +350,11 @@ public sealed class WorktreeReconcileTests : IDisposable
     }
 
     // The verb runs at every session start. A lane that already answers for its rows is measured, not
-    // rescanned, and the measurement costs one count instead of a second pass over the tree.
+    // rescanned, and the measurement costs one round trip instead of a second pass over the tree. Being owed
+    // nothing is not the same fact as being proven, though: the state that prints here is assumed, because
+    // nothing in this session has shown that these rows describe this checkout.
     [Fact]
-    public void Reconcile_LaneAlreadyReconciled_SecondRunOwesNoPass()
+    public void Reconcile_LaneAlreadyReconciled_SecondRunOwesNoPassAndNeverClaimsProof()
     {
         var (main, child) = IndexedMainAndLane(out var collection);
         var (registered, fill) = FillLane(main, child, collection);
@@ -231,8 +377,43 @@ public sealed class WorktreeReconcileTests : IDisposable
             () => Runtime(collection, provider));
 
         second.PassRan.ShouldBeFalse("no second pass over the same tree at the next session start");
-        second.State.ShouldBe(WorktreeReconcileState.Reconciled);
+        second.State.ShouldBe(WorktreeReconcileState.Assumed);
+        second.Code.ShouldBe(WorktreeReconcileOutcome.AssumedCode);
+        second.CoveredChunks.ShouldBe(second.ObligationChunks,
+            "the measurement says nothing is missing, which is the whole thing this state claims");
+        // the door that turns the assumption into proof runs today
+        second.Reason.ShouldNotBeNull().ShouldContain(RemedyText.IndexCommand);
         provider.EmbedCallCount.ShouldBe(callsAfterFirst, "a pass that was not owed asked for no embeddings");
+    }
+
+    // A pass that never ran is not a proof, and a lane whose rows still describe another checkout must not
+    // read as reconciled just because its copied numbers agree with each other.
+    [Fact]
+    public void Reconcile_CopyLandedButNoPassEverRanHere_AnAgreementOfCopiedNumbersIsNotReconciled()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        var first = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+        first.State.ShouldBe(WorktreeReconcileState.Reconciled);
+
+        // the branch deleted a file the main worktree still holds rows for, and no pass here has reaped them
+        File.Delete(Path.Combine(child, "src", "Kept.cs"));
+        var adopted = WorktreeRegistration.Register(child, null);
+        var kept = WorktreeStoreFill.Fill(adopted, true, ModelKey(main), null,
+            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
+        kept.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex);
+
+        var outcome = WorktreeReconcile.Run(
+            adopted, kept, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        outcome.PassRan.ShouldBeFalse();
+        outcome.State.ShouldBe(WorktreeReconcileState.Assumed,
+            "the store still answers for its own rows and that is all the measurement can say");
+        StoreRows(registered.RootPath).Files.ShouldBeGreaterThan(1,
+            "the deleted file is still a row here — a pass that could have reaped it never ran");
     }
 
     // A lane born before its main worktree was indexed has nothing inherited and nothing short. That is a
@@ -258,7 +439,7 @@ public sealed class WorktreeReconcileTests : IDisposable
 
         outcome.State.ShouldBe(WorktreeReconcileState.Deferred);
         outcome.PassRan.ShouldBeFalse();
-        collection.CountCallCount.ShouldBe(0,
+        collection.MeasurementCallCount.ShouldBe(0,
             "an empty lane has no collection question to ask, so it costs no round trip either");
     }
 
@@ -276,16 +457,19 @@ public sealed class WorktreeReconcileTests : IDisposable
 
         outcome.State.ShouldBe(WorktreeReconcileState.Deferred);
         outcome.PassRan.ShouldBeFalse();
+        // the door this sentence names fills the lane today; a promise about a pass that never lands does not
+        outcome.Reason.ShouldNotBeNull().ShouldContain(RemedyText.IndexCommand);
         provider.EmbedCallCount.ShouldBe(0);
         StoreRows(registered.RootPath).ShouldBe((0, 0),
             "the explicit from-scratch option stays from-scratch: this verb does not index it for the user");
     }
 
-    private (string Main, string Child) IndexedMainAndLane(out FakeVectorStore collection)
+    private (string Main, string Child) IndexedMainAndLane(
+        out FakeVectorStore collection, bool withTwinFiles = false)
     {
         var main = Tracked(TestDirs.NewTempDir());
         TestGitRepo.Init(main);
-        WriteSource(main);
+        WriteSource(main, withTwinFiles);
         new WorkspaceManager(main).Init("mainws");
         // The provider is named and its endpoint is dead: the fake runtime is what embeds here, and no test
         // path in this file may open a connection to the services on this machine.
@@ -324,13 +508,23 @@ public sealed class WorktreeReconcileTests : IDisposable
     private static Func<string> ModelKey(string main) =>
         () => EmbeddingModelKey.From(ConfigFile.Load(main).Embeddings);
 
-    private static void WriteSource(string root)
+    private static void WriteSource(string root, bool withTwinFiles = false)
     {
         Directory.CreateDirectory(Path.Combine(root, "src"));
         File.WriteAllText(Path.Combine(root, "src", "Kept.cs"), KeptSource);
         File.WriteAllText(Path.Combine(root, "src", "Shifted.cs"), ShiftedSource);
         TestGitRepo.Add(root, "src/Kept.cs");
         TestGitRepo.Add(root, "src/Shifted.cs");
+        if (withTwinFiles)
+        {
+            // Two paths, byte-identical content: the chunk hashes collide, so the rows that claim a vector
+            // outnumber the points any honest collection can hold for them.
+            File.WriteAllText(Path.Combine(root, "src", "TwinOne.cs"), TwinSource);
+            File.WriteAllText(Path.Combine(root, "src", "TwinTwo.cs"), TwinSource);
+            TestGitRepo.Add(root, "src/TwinOne.cs");
+            TestGitRepo.Add(root, "src/TwinTwo.cs");
+        }
+
         TestGitRepo.Commit(root, "seed");
     }
 
@@ -361,6 +555,50 @@ public sealed class WorktreeReconcileTests : IDisposable
         return store.ListFiles(store.FindRepo(RepoName)!.Id)
             .SelectMany(file => store.ListChunksByFile(file.Id))
             .ToList();
+    }
+
+    private static IReadOnlyList<string> StoredPaths(string root)
+    {
+        using var store = OpenStore(root);
+        return store.ListFiles(store.FindRepo(RepoName)!.Id).Select(file => file.Path).ToList();
+    }
+
+    // The shape a store indexed before the marker rule carries: a row for the '.git' file and a chunk whose
+    // text is the main worktree's gitdir. Hand-seeded, because no current pass would ever write it again.
+    private static void SeedLegacyMarkerRow(string root)
+    {
+        using var store = OpenStore(root);
+        var repo = store.FindRepo(RepoName)!;
+        var file = new FileDocument
+        {
+            Id = store.GetNextFileId(),
+            RepoId = repo.Id,
+            Path = ".git",
+            Sha256 = "legacy-seed",
+            Language = "text",
+            Kind = "docs",
+            SizeBytes = 48,
+            LineCount = 1,
+            IndexedAt = DateTime.UtcNow,
+        };
+        store.UpsertFile(file);
+        var nextChunkId = store.ListFiles(repo.Id)
+            .SelectMany(existing => store.ListChunksByFile(existing.Id))
+            .Select(chunk => chunk.Id)
+            .DefaultIfEmpty(0L)
+            .Max() + 1;
+        store.InsertChunks([new ChunkDocument
+        {
+            Id = nextChunkId,
+            FileId = file.Id,
+            RepoId = repo.Id,
+            StartLine = 1,
+            EndLine = 1,
+            Text = "gitdir: /somewhere/above/.git/worktrees/lane-a",
+            TokenCount = 6,
+            ChunkHash = "legacy-marker-hash",
+            EmbeddingStatus = "pending",
+        }]);
     }
 
     private static MetaStore OpenStore(string root) =>
@@ -402,9 +640,11 @@ public sealed class WorktreeReconcileTests : IDisposable
     {
         public Dictionary<ulong, VectorPoint> Points { get; } = new();
 
-        public int CountCallCount { get; private set; }
+        // One flag for one fact: this collection is not in the room. Both doors a measurement can be asked
+        // through refuse, so a reconcile that reaches for the count instead of the ids gets the same answer.
+        public bool AnswerThrows { get; init; }
 
-        public bool CountThrows { get; init; }
+        public int MeasurementCallCount { get; private set; }
 
         public int UpsertedPointCount { get; private set; }
 
@@ -429,17 +669,42 @@ public sealed class WorktreeReconcileTests : IDisposable
 
         public Task<long> CountAsync(CancellationToken ct)
         {
-            CountCallCount++;
-            if (CountThrows)
-            {
-                throw new HttpRequestException("qdrant is down");
-            }
-
+            ThrowIfUnreachable();
             return Task.FromResult((long)Points.Count);
         }
 
-        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<ulong>>(Points.Keys.ToList());
+        public Task<IReadOnlyList<ulong>> ScrollPointIdsAsync(CancellationToken ct)
+        {
+            MeasurementCallCount++;
+            ThrowIfUnreachable();
+            return Task.FromResult<IReadOnlyList<ulong>>(Points.Keys.ToList());
+        }
+
+        public void ReplaceWithForeignIdsOf(int count)
+        {
+            Points.Clear();
+            for (var index = 0; index < count; index++)
+            {
+                var id = ChunkPointId.FromHash($"hash-of-a-chunk-that-lives-in-another-store-{index}");
+                Points[id] = new VectorPoint(
+                    id,
+                    new float[4],
+                    $"hash-of-a-chunk-that-lives-in-another-store-{index}",
+                    FileId: 9_999,
+                    RepoId: 9_999,
+                    StartLine: 1,
+                    EndLine: 2,
+                    Kind: "code");
+            }
+        }
+
+        private void ThrowIfUnreachable()
+        {
+            if (AnswerThrows)
+            {
+                throw new HttpRequestException("qdrant is down");
+            }
+        }
 
         public Task<IReadOnlyList<uint>> ScrollFileIdsWithoutKindAsync(uint repoId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<uint>>([]);
