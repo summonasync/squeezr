@@ -1062,13 +1062,14 @@ Every tool answers in one envelope:
     attributes no cause, and that shape is never charged to the budget). A
     refused row costs the answer nothing extra: it is still named in
     `staleFiles`, still counted in `staleTotal`, still `lagging` in
-    `fileFreshness`. What the budget buys is the caller's wall time — one
-    measured `code_search` over a repo naming 24 stale files spent 55.9 s of
-    inline re-reads before the budget existed and 6.9 s after it (at 12 stale
-    files, 32.5 s → 7.0 s), and the 23 rows it left unread are named in the
-    answer instead of being silent. `tokensUsed` did not move between those
-    arms — 815 before, 815 after — while `freshnessTokens` rose from 127 to
-    601, which is exactly what disclosure costs.
+    `fileFreshness`. What the budget buys is the caller's wall time — a
+    re-measured `code_search` over a repo naming 24 stale files spent 46.7 s of
+    inline re-reads before the budget existed and 5.9 s after it (at 12 stale
+    files, 28.0 s → 6.0 s; medians of ten cold `squeezr serve` runs per arm,
+    harness `scripts/bench-guard-017.sh`), and the 23 rows it left unread are
+    named in the answer instead of being silent. `tokensUsed` did not move
+    between those arms — 815 before, 815 after — while `freshnessTokens` rose
+    from 127 to 601, which is exactly what disclosure costs.
   - `replayed: true` appears **only** on an answer the response cache handed
     back (see below). File mtimes move no cache generation, so on a replay the
     numbers in this block — and `staleFiles` and `indexAge` beside them —
