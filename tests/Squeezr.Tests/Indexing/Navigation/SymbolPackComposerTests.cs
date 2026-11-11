@@ -1,3 +1,4 @@
+using System.Text;
 using Shouldly;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
@@ -8,6 +9,10 @@ namespace Squeezr.Tests.Indexing.Navigation;
 
 public class SymbolPackComposerTests
 {
+    private const int MemberCount = 8;
+    private const int MapBudget = 120;
+    private const int RowsOverflowBudget = 25;
+
     [Fact]
     public void Compose_KnownMethod_CarriesDefinitionBodyAndCallers()
     {
@@ -89,6 +94,62 @@ public class SymbolPackComposerTests
 
         pack.Name.ShouldBe("Add");
         pack.Callers.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void Compose_TypeBodyRefusedWithFullMemberMap_StateMapped_PackStaysComplete()
+    {
+        var workspace = NewBigTypeWorkspace();
+
+        var pack = new SymbolPackComposer(workspace).Compose("Widget", null, null, MapBudget);
+
+        pack.BodyOmitted.ShouldBeTrue();
+        pack.BodyLines.ShouldBeEmpty();
+        pack.Members.Count.ShouldBe(MemberCount);
+        pack.MembersOmitted.ShouldBe(0);
+        pack.WithheldCallers.ShouldBe(0);
+        pack.State.ShouldBe(AnswerState.Mapped);
+        pack.LookupTruncated.ShouldBeFalse();
+        pack.Complete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compose_MemberRowsRefused_StateClipped_MarksPackIncompleteWithoutAnyWithheldCaller()
+    {
+        var workspace = NewBigTypeWorkspace();
+
+        var pack = new SymbolPackComposer(workspace).Compose("Widget", null, null, RowsOverflowBudget);
+
+        pack.MembersOmitted.ShouldBeGreaterThan(0);
+        pack.WithheldCallers.ShouldBe(0);
+        pack.State.ShouldBe(AnswerState.Clipped);
+        pack.LookupTruncated.ShouldBeTrue();
+        pack.Complete.ShouldBeFalse();
+    }
+
+    private static string NewBigTypeWorkspace()
+    {
+        var workspace = TestDirs.NewTempDir();
+        var manager = new WorkspaceManager(workspace);
+        manager.Init("demo");
+        WriteFile(workspace, "repo/src/Widget.cs", Widget());
+        manager.AddRepo("repo", "demo");
+        new WorkspaceIndexer().Index(workspace);
+        return workspace;
+    }
+
+    private static string Widget()
+    {
+        var text = new StringBuilder("namespace Demo;\n\npublic class Widget\n{\n");
+        foreach (var index in Enumerable.Range(1, MemberCount))
+        {
+            text.Append($"    public int Part{index:00}(int a)\n");
+            text.Append("    {\n");
+            text.Append($"        return a * {index};\n");
+            text.Append("    }\n\n");
+        }
+
+        return text.Append("}\n").ToString();
     }
 
     private static string NewWorkspace()

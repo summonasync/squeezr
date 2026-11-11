@@ -3,7 +3,16 @@ using Squeezr.Core.Indexing;
 
 namespace Squeezr.Core.Storage;
 
-public sealed record ToolStats(string Tool, int Count, double AvgTokensUsed, double TruncationRate);
+// MappedRate is null rather than zero when no row of the tool carries a state: a rate over an empty
+// denominator would read as "nothing was mapped" where the ledger actually says "nothing is known".
+// UnsplitRows counts those stateless rows — written before the split, or by a surface that records none.
+public sealed record ToolStats(
+    string Tool,
+    int Count,
+    double AvgTokensUsed,
+    double TruncationRate,
+    double? MappedRate,
+    int UnsplitRows);
 
 public sealed record SavingsStats(
     long ActualTokens,
@@ -56,7 +65,9 @@ public static class QueryTelemetrySummary
                 g.Key,
                 g.Count(),
                 g.Average(e => e.TokensUsed),
-                g.Average(e => e.Truncated ? 1.0 : 0.0)))
+                g.Average(e => e.Truncated ? 1.0 : 0.0),
+                MappedRate(g),
+                g.Count(e => e.Mapped is null)))
             .OrderBy(t => t.Tool, StringComparer.Ordinal)
             .ToList();
 
@@ -85,6 +96,15 @@ public static class QueryTelemetrySummary
             AggregateAgents(entries),
             AggregateSessions(entries),
             guardWarnings);
+    }
+
+    // the mapped half of the ledger only says something over the rows that recorded it
+    private static double? MappedRate(IGrouping<string, QueryTelemetryEntry> rows)
+    {
+        var known = rows.Where(e => e.Mapped is not null).ToList();
+        return known.Count == 0
+            ? null
+            : known.Average(e => e.Mapped!.Value ? 1.0 : 0.0);
     }
 
     public static IReadOnlyList<AgentStats> AggregateAgents(IReadOnlyList<QueryTelemetryEntry> entries) =>

@@ -18,7 +18,8 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "code_search", new Dictionary<string, object?>
         {
-            ["query"] = "Add", ["maxTokens"] = 1,
+            ["query"] = "Add",
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
@@ -33,7 +34,8 @@ public class TruncationRemedyTests
 
         var envelope = await CallWarnings(harness, "code_search", new Dictionary<string, object?>
         {
-            ["query"] = "Add", ["maxTokens"] = 2000,
+            ["query"] = "Add",
+            ["maxTokens"] = 2000,
         });
 
         envelope.Warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(0);
@@ -47,11 +49,61 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "symbol_lookup", new Dictionary<string, object?>
         {
-            ["name"] = "Add", ["maxTokens"] = 1,
+            ["name"] = "Add",
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
         warnings.ShouldContain(w => w.Contains(" of 1 token ceiling — narrow the query"));
+    }
+
+    [Fact]
+    public async Task SymbolLookup_BodyRefusedWithoutSubstitute_RemedyNamesTheBodyPrice()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var (envelope, warnings) = await CallWarnings(harness, "symbol_lookup", new Dictionary<string, object?>
+        {
+            ["name"] = "Go",
+            ["maxTokens"] = 20,
+        });
+
+        warnings.Single(w => w.StartsWith("truncated: ")).ShouldBe(
+            "truncated: 15 of 20 token ceiling — raise maxTokens (the body alone needs ~19 tokens)");
+
+        var hit = envelope.GetProperty("data").EnumerateArray().ShouldHaveSingleItem();
+        hit.GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
+        hit.TryGetProperty("body", out _).ShouldBeFalse();
+        hit.TryGetProperty("members", out _).ShouldBeFalse();
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
+        envelope.GetProperty("tokensUsed").GetInt32().ShouldBe(15);
+    }
+
+    [Fact]
+    public async Task SymbolLookup_DidYouMeanRefused_IsClippedAndOmitsTheSuggestions()
+    {
+        var kept = NewIndexedWorkspace();
+        await using (var harness = await McpTestHarness.StartAsync(kept))
+        {
+            var (envelope, warnings) = await CallWarnings(harness, "symbol_lookup",
+                new Dictionary<string, object?> { ["name"] = "Runer", ["maxTokens"] = 200 });
+
+            envelope.GetProperty("didYouMean").GetArrayLength().ShouldBeGreaterThan(0);
+            envelope.GetProperty("truncated").GetBoolean().ShouldBeFalse();
+            warnings.ShouldNotContain(w => w.StartsWith("truncated: "));
+        }
+
+        var lost = NewIndexedWorkspace();
+        await using var starved = await McpTestHarness.StartAsync(lost);
+        var (lostEnvelope, lostWarnings) = await CallWarnings(starved, "symbol_lookup",
+            new Dictionary<string, object?> { ["name"] = "Runer", ["maxTokens"] = 1 });
+
+        lostEnvelope.TryGetProperty("didYouMean", out _).ShouldBeFalse();
+        lostEnvelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        lostEnvelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
+        lostWarnings.ShouldContain(w => w == "truncated: 0 of 1 token ceiling — raise maxTokens");
     }
 
     [Fact]
@@ -62,7 +114,8 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "repo_map", new Dictionary<string, object?>
         {
-            ["depth"] = 3, ["maxTokens"] = 1,
+            ["depth"] = 3,
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
@@ -77,7 +130,10 @@ public class TruncationRemedyTests
 
         var warnings = (await CallWarnings(harness, "expand_span", new Dictionary<string, object?>
         {
-            ["file"] = "src/Calc.cs", ["startLine"] = 1, ["endLine"] = 15, ["maxTokens"] = 1,
+            ["file"] = "src/Calc.cs",
+            ["startLine"] = 1,
+            ["endLine"] = 15,
+            ["maxTokens"] = 1,
         })).Warnings;
 
         warnings.Count(w => w.StartsWith("truncated: ")).ShouldBe(1);
