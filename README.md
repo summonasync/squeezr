@@ -960,8 +960,11 @@ without requiring `permissionDecision`, so the text arrives in the model's
 context. Plain text on stdout at exit 0 would reach the human as a UI
 `systemMessage` and never touch the model — a nudge nobody reads.
 
-Everything else — silence: a non-workspace path, a small file, a missing
-file, malformed stdin → empty stdout, exit 0. The hook is advisory-only — it
+Everything else — silence: a non-workspace path, a small file, a missing or
+guarded file at a narrow or absent limit, malformed stdin → empty stdout,
+exit 0. (A wide requested limit of ≥ 400 lines answers before the guard and
+before the disk is consulted — that over-answer is the open defect BUGS/027,
+not documented behavior.) The hook is advisory-only — it
 sets no `permissionDecision` and never blocks a read; internal errors are
 fail-open (silent, code 0). No network — only the workspace registry and a
 stat of the file, so it is cheap to run on every read.

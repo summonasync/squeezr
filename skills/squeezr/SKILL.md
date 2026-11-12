@@ -177,8 +177,8 @@ still says `read_file`), and the telemetry row keeps that value verbatim —
 which is how `squeezr usage` names the runtime behind each reading session.
 
 Check it with `squeezr mcp doctor`: one `hook pre-read: <state>` line per
-client (`armed` / `armed (project scope)` / `not armed` / the unverified-layout
-reason), additive `hookStatus` in `--json`. `squeezr mcp remove` strips the
+client (`armed` / `armed (project scope)` / `not armed` / `not armed (hook layout unverified)`),
+additive `hookStatus` in `--json`. `squeezr mcp remove` strips the
 managed entry. A snippet applied by hand before this existed counts as managed
 — install normalizes it to the canonical command, remove takes it back.
 `mcp install --project` alone arms nothing, and there is no flag to skip the
