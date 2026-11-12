@@ -254,6 +254,23 @@ public sealed class WatchdLockTests : IDisposable
             .ShouldBe(WatchdLockOwner.StartCheck.Agreed);
     }
 
+    // The edge the comparison actually keeps: the code reads `duration <= StartTimeTolerance`, so two
+    // seconds on the dot still agrees and only the step past it drifts. The skew is a duration, so a
+    // live start earlier than the record is measured the same way as one later.
+    [Theory]
+    [InlineData(1.9, WatchdLockOwner.StartCheck.Agreed)]
+    [InlineData(2.0, WatchdLockOwner.StartCheck.Agreed)]
+    [InlineData(-2.0, WatchdLockOwner.StartCheck.Agreed)]
+    [InlineData(2.1, WatchdLockOwner.StartCheck.Drifted)]
+    [InlineData(-2.1, WatchdLockOwner.StartCheck.Drifted)]
+    public void CheckAgainstLiveStart_TheToleranceEdge_IsTwoSecondsInclusive(double skewSeconds, WatchdLockOwner.StartCheck expected)
+    {
+        var recorded = new DateTime(2026, 11, 12, 10, 0, 0, DateTimeKind.Utc);
+        var owner = new WatchdLockOwner(4242, Environment.MachineName, recorded);
+
+        owner.CheckAgainstLiveStart(recorded.AddSeconds(skewSeconds)).ShouldBe(expected);
+    }
+
     private static string OwnerJsonWithoutStart(int pid, string host) =>
         $$"""
           {

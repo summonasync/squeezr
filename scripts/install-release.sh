@@ -90,6 +90,10 @@ install_dir="$(cd "$install_dir" && pwd)"
 # text - generation and quoting stay in the CLI, which is the thing being upgraded.
 systemd_unit='squeezr-watchd.service'
 launch_agent_label='dev.summonasync.squeezr-watchd'
+# Set by a restart leg that hands the switch-over to the platform instead of performing it. A flag, not
+# a borrowed exit code: the exit code belongs to systemctl and could answer anything, so the caller
+# cannot tell a sentinel from a real status - the flag is the only honest signal of a deferred leg.
+restart_deferred=0
 
 fetch_json() {
   local url=$1 out=$2 code
@@ -153,8 +157,12 @@ rewire_autostart() {
     return
   fi
   if restart_supervisor; then
-    echo "  Autostart : entry rewritten onto $new_bin, supervisor restarted"
-    echo "autostart=rewritten+restarted"
+    if [[ "$restart_deferred" -eq 1 ]]; then
+      echo "autostart=rewritten+restart-deferred"
+    else
+      echo "  Autostart : entry rewritten onto $new_bin, supervisor restarted"
+      echo "autostart=rewritten+restarted"
+    fi
   else
     echo "install-release: warning: the entry is rewritten but the supervisor was not restarted - it keeps running the previous build until you say otherwise." >&2
     echo "install-release:          restart it by hand: systemctl --user restart $systemd_unit" >&2
@@ -168,9 +176,11 @@ restart_supervisor() {
     Linux) systemctl --user restart "$systemd_unit" ;;
     Darwin) launchctl kickstart -k "gui/$(id -u)/$launch_agent_label" ;;
     # No release artifact reaches this arm today: a rewritten scheduled task simply waits for the next
-    # logon, and killing the instance that is running now is not this script's call to make.
+    # logon, and killing the instance that is running now is not this script's call to make. The flag is
+    # what lets the caller say deferred instead of claiming a restart this leg never performed.
     *)
       echo "  Autostart : task rewritten, the new binary is picked up at next logon"
+      restart_deferred=1
       return 0
       ;;
   esac
