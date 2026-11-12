@@ -17,9 +17,12 @@ public sealed class OllamaEmbeddingProvider : IEmbeddingProvider, IEmbeddingExec
 
     public int Dimensions => _options.Dimensions;
 
-    public OllamaEmbeddingProvider(OllamaOptions options, HttpMessageHandler? handler = null)
+    public string ModelKey { get; }
+
+    public OllamaEmbeddingProvider(OllamaOptions options, string modelKey, HttpMessageHandler? handler = null)
     {
         _options = options;
+        ModelKey = modelKey;
         _handler = handler;
         _http = handler is null ? new HttpClient() : new HttpClient(handler);
         _http.BaseAddress = new Uri(options.Endpoint.TrimEnd('/') + "/");

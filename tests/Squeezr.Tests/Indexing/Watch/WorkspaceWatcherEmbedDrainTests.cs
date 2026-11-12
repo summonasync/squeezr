@@ -382,6 +382,8 @@ public class WorkspaceWatcherEmbedDrainTests
     {
         public int Dimensions { get; init; } = 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public int EmbeddedTextCount { get; private set; }
 
         public void Reset() => EmbeddedTextCount = 0;
@@ -488,6 +490,8 @@ public class WorkspaceWatcherEmbedDrainTests
     private sealed class FailsFromSecondCallProvider : IEmbeddingProvider
     {
         public int Dimensions { get; init; } = 4;
+
+        public string ModelKey => TestEmbeddingKeys.TestModel;
 
         private int _calls;
 

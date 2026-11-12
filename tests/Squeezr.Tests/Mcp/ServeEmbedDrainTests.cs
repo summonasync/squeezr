@@ -155,6 +155,8 @@ public sealed class ServeEmbedDrainTests
     {
         public int Dimensions { get; init; } = 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public int EmbeddedTextCount { get; private set; }
 
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct)

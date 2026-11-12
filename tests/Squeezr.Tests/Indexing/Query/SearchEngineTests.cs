@@ -377,6 +377,8 @@ public class SearchEngineTests
     {
         public int Dimensions => 4;
 
+        public string ModelKey => TestEmbeddingKeys.Calibrated;
+
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(_ => new[] { 0.25f, 0.5f, 0.75f, 1f }).ToArray());
     }

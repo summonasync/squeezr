@@ -46,7 +46,9 @@ public class WatchEmbeddingRuntimeExecutorTests : IDisposable
     {
         var handler = new ExplodingHandler();
         var provider = new OpenAiCompatibleEmbeddingProvider(
-            new OpenAiCompatibleOptions { Endpoint = "http://localhost:9/v1", ApiKeyEnv = ApiKeyEnv }, handler);
+            new OpenAiCompatibleOptions { Endpoint = "http://localhost:9/v1", ApiKeyEnv = ApiKeyEnv },
+            TestEmbeddingKeys.UnregisteredOpenAiModel,
+            handler);
         var runtime = new WatchEmbeddingRuntime(provider, new SilentStore(), new EmbeddingProviderResolution("openai", null));
 
         runtime.Executor.Device.ShouldBe("remote");
@@ -73,6 +75,8 @@ public class WatchEmbeddingRuntimeExecutorTests : IDisposable
 
         public int Dimensions => 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public EmbeddingExecutor ProbeExecutor()
         {
             Interlocked.Increment(ref _probes);
@@ -87,6 +91,8 @@ public class WatchEmbeddingRuntimeExecutorTests : IDisposable
     {
         public int Dimensions => 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             throw new NotSupportedException();
     }
@@ -94,6 +100,8 @@ public class WatchEmbeddingRuntimeExecutorTests : IDisposable
     private sealed class ThrowingEvidenceProvider : IEmbeddingProvider, IEmbeddingExecutorEvidence
     {
         public int Dimensions => 4;
+
+        public string ModelKey => TestEmbeddingKeys.TestModel;
 
         public EmbeddingExecutor ProbeExecutor() =>
             throw new InvalidOperationException("evidence source exploded");
