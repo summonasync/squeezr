@@ -1469,12 +1469,28 @@ squeezr fleet restart <storeKey>  # restart the watch daemon
   `not-running`, exit 0.
 - `restart` works with `watch` only: a live watch owner is stopped cleanly, then a
   detached `squeezr watch` process is spawned with cwd = the workspace's
-  rootPath (rootPath gone — an error with a `drop` hint). A claimed
+  rootPath (rootPath gone — an error with a `drop` hint). The spawn is the
+  supervisor's own launch path (`--await-claim`, see the Watchd section), and
+  the verdict is alive-gated: `started`/`restarted` prints only while the new
+  daemon is still alive after a short settle window (750 ms) — a daemon
+  already gone at report time gets `watch: restart pending — the daemon (pid N)
+  was gone before it settled; the supervisor will converge on its next pass`,
+  and the pid in the payload is never a claim that anything is running.
+  `--json` carries this as additive `watcherAlive` (defaulted `true` for
+  readers predating the field). A claimed
   `serve --watch` is not restarted and not stopped: the MCP client owns it,
   and trying honestly errors with a hint naming the owner pid (`squeezr mcp
   install` or an agent restart); beside an owner or a gone claim, observers do
   not block the restart.
-- Both commands do `--json`: one NDJSON result object, clean stdout (the 035
+- All three write-side verbs — `start`, `stop`, `restart` — first refuse a
+  registry row whose root does not resolve on this machine: exit 1 with
+  `Cannot stop workspace '…': root path '…' does not exist; remove the stale
+  entry with 'squeezr drop --store-key …'` (same shape for `start`/`restart`)
+  — and write no desire. A wish for a store this machine cannot reach would
+  outlive the workspace it names and make the next status row look wanted.
+  The TUI answers the same refusal with `wish not saved` plus the `drop`
+  hint, and its Start/Stop/Restart never reach a dead root either.
+- All three commands do `--json`: one NDJSON result object, clean stdout (the 035
   contract).
 
 ## Watchd: the global watch supervisor
@@ -1484,18 +1500,39 @@ session, a terminal, an MCP client. `squeezr watchd` is the answer to "and who
 brings the watcher back": one long-lived supervisor process per machine that
 owns the watch daemons of every workspace in the registry and applies a
 desired state per store (`running` / `stopped`), persisted across watchd
-restarts in `~/.squeezr/watchd/state.json`.
+restarts in `~/.squeezr/watchd/state.json`. The file carries the crash-loop
+wedge markers too, as an additive `wedged` key that stays absent while no
+store is wedged (a clean fleet writes byte-for-byte the pre-113 shape):
+`state.json` is the live channel between the supervisor and the `fleet`
+commands, not just a restart snapshot — a wedge written by one process is
+honoured by every other, and cleared by every other.
 
 ```bash
 squeezr watchd                    # start the supervisor (singleton per machine)
 squeezr fleet stop <store-key>    # desired=stopped: the daemon goes down and stays down
 squeezr fleet start <store-key>   # desired=running: watchd brings it back
-squeezr fleet restart <store-key> # restart now, reset the wedged flag
-squeezr fleet status              # desired vs actual, supervised/wedged/managed elsewhere
+squeezr fleet restart <store-key> # restart now: waits out the claim grace, clears the wedge through the state file
+squeezr fleet status              # desired vs actual: supervised / starting / wedged / stopped / idle (no supervisor) / managed elsewhere
 ```
 
 The same actions live in the TUI under `Watchd supervisor` — a session list
-with per-session start / stop / restart.
+with per-session start / stop / restart. The dead-cell words are the
+fleet's on both surfaces: `stopped`, `starting` and `idle (no supervisor)`
+answer the same facts in the TUI row and the `fleet status` column alike.
+
+`fleet status` resolves one supervision word per store from what this
+machine can actually read — the desire file, the claim probe, the watchd
+lock: `supervised` (a live watchd owns the watcher), `managed elsewhere` (a
+live owner belongs to an MCP client or another host), `wedged` (a live pid
+holding a stale claim — the pathology every other cell would cosmeticize),
+`stopped` (the operator's recorded wish), `starting` (watchd is alive and the
+indexer is not up yet — the supervisor brings it up on its next sweep), and
+`idle (no supervisor)` — the store wants watching (`desired=running`) but no
+live watchd is left to carry the wish out. `stopped` and
+`idle (no supervisor)` are the two faces of nothing running and stay
+distinct: the first is a wish the operator wrote, the second is a wish
+nobody performs, and collapsing them reads as a fleet that is wanted when it
+is orphaned.
 
 Supervision rules, in one place:
 
@@ -1507,7 +1544,27 @@ Supervision rules, in one place:
   an upgrade the new code picks up without a manual step. Without watchd the
   upgrade flow is `squeezr fleet restart`.
 - **Crash-loop guard.** More than 5 restarts of one store within 10 minutes
-  wedges it: restarts stop, the status shows `wedged`, `fleet restart` resets.
+  wedges it: restarts stop, the status shows `wedged`, and the supervisor's
+  row names the cause — `restarts stopped after 5 starts inside 10 minutes`.
+  The wedge marker lives in `state.json`, so `fleet restart` is a real
+  reset even against a live supervisor: the command writes the wish back to
+  `running` and removes the marker from the file, and the supervisor's own
+  guard is just a cache over that file — it releases the store and hands out
+  a fresh restart budget on its next sweep. The one exception is told
+  instead of hidden: when the marker write itself failed, the wedge holds in
+  the supervisor's memory until the flush lands (retried every sweep, and
+  the row appends `the marker never reached state.json (…)`), because an
+  unflushed wedge released to a fresh budget every sweep would be a restart
+  flap nobody sees.
+- **SIGTERM stops both processes the way Ctrl+C does.** `watchd` and a
+  watched `squeezr watch` register SIGTERM onto the same shutdown their
+  console handler drives: the watchd lock or the watch claim is released,
+  the heartbeat carriers are dropped, the process exits 0. That is the path
+  an init system takes — `systemctl --user stop` signals every process in
+  the unit, and the upgrade retire's `KillMode=control-group` sweep reaches
+  the supervised daemons the same way (below in the autostart section) — so
+  a stopped fleet now goes down clean instead of leaving a dead pid's lock
+  and claim for the staleness rules to sort out.
 - **A second watchd refuses to start** — the lock names the running instance.
 - **Live foreign owners are respected.** A store watched by an agent session
   or an MCP client reads `managed elsewhere`: watchd does not touch it.
@@ -1517,7 +1574,39 @@ One nuance to know: a watch claim is intentionally held for a grace window
 claim until the window passes, so a takeover race cannot steal it. Supervised
 watchers wait that window out (`--await-claim`) and take over when it expires,
 so kill→respawn converges within ~30s. A manual `squeezr watch` started inside
-the window declines immediately, as before.
+the window declines immediately, as before. `squeezr fleet restart` spawns its
+daemon on the supervised path — the same `--await-claim` launch the
+supervisor uses — so a restart right after a killed owner waits the grace out
+instead of declining to the dead pid's claim.
+
+**When state.json cannot be read.** An absent file is business as usual —
+the running default, no wedge markers. A file that exists but cannot be
+read (unparseable JSON, or a path the process cannot open) is never treated
+as absent, and nothing guesses across it. The supervisor fails closed: its
+sweep starts nobody from the recorded desires and leaves every live watcher
+alone — starting or stopping on wishes it cannot read is still an action
+taken — and because the fleet never completes a sweep behind the fault, the
+upgrade retire is stalled behind it too: an upgraded `watchd --autostart`
+cannot take over from this instance until the file is fixed. The warning
+names both stalls and the repair: `supervision state '<path>' is not valid
+JSON (…)` / `… could not be read (…); nothing is started from the recorded
+desires and running watchers are left alone, and with the fleet never swept
+an upgraded watchd cannot retire this one either — it exits as already
+running until the file is fixed. Repair the JSON, or move the file away to
+start supervision from the running default`. Readers tell the same truth in
+their own voice: `fleet status` prints `unknown` in the Desired column with
+a stderr fault line (`warning: watchd state '…' — no desired state is known,
+the supervisor applies nothing until the file is repaired; the supervision
+column shows live facts only`) while the Supervision column keeps answering
+from live facts, `fleet status --json` carries the fault in an additive
+`stateFault` member omitted while the file is clean, and a starting `serve`
+promises no watcher it cannot bring — `no watcher is coming until the file
+is repaired` instead of the supervised promise. Desire writers refuse rather
+than overwrite: `fleet start`, `fleet stop`, `fleet restart` and the TUI's
+Start/Stop/Restart report `supervision state '<path>' …; it is not
+overwritten — rebuilding it from what cannot be read would drop the desires
+of every other store` and write nothing — every other store's wishes and
+wedge markers live in that same file.
 
 ### Autostart: `watchd install` / `uninstall` / `installed`
 
@@ -1566,7 +1655,9 @@ logon.
 **What an upgrade does to the supervised daemons.** The generated systemd unit
 leaves `KillMode` at the systemd default — `control-group` — so retiring the
 supervisor stops its whole cgroup: every supervised watch daemon takes a
-fleet-wide SIGTERM, roughly 5–10 seconds pass (`RestartSec=5`, then the new
+fleet-wide SIGTERM — taken gracefully on both sides, watchd dropping its lock
+and each daemon releasing its claim and dropping its beats the way Ctrl+C
+does, exit 0 — and roughly 5–10 seconds pass (`RestartSec=5`, then the new
 instance's first sweep, which runs immediately at start — the 2 s cadence
 never waits before relaunching; on launchd the default throttle caps the same
 window at 10 s), and the whole fleet comes up on the new binary. On launchd
@@ -1669,6 +1760,10 @@ autostart is registered it rewrites the entry onto the new tag and restarts the
 supervisor (`systemctl --user restart` on Linux, `launchctl kickstart -k` on
 macOS). The step closes with a machine-readable line:
 `autostart=rewritten+restarted` when the handover completed;
+`autostart=rewritten+restart-deferred` when the entry moved on a platform leg
+that performs no restart — the rewritten scheduled task simply waits for the
+next logon, and the flag says deferred instead of claiming a restart this leg
+never performed (no released artifact reaches that arm today);
 `autostart=rewired+restart-failed` when the entry moved but the restart was
 refused (stderr names the manual restart commands); `autostart=touched` when
 the probe gave no verdict, so the entry stays pointed where it was; and
