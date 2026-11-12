@@ -9,4 +9,6 @@ public sealed record WorkspaceRepairReport(
     IReadOnlyList<WorkspaceRepairStaleEntry> Stale,
     WorkspaceRepairPruneSummary Prune,
     WorkspaceRepairCategoryCounts Counts,
-    IReadOnlyList<WorkspaceRepairFailedAdoptionEntry>? FailedAdoptions = null);
+    IReadOnlyList<WorkspaceRepairFailedAdoptionEntry>? FailedAdoptions = null,
+    // Absent means the collection arm never ran; a reader must not take it as "nothing was unreferenced".
+    WorkspaceRepairCollectionsReport? Collections = null);

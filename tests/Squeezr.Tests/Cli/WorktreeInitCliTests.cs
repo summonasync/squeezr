@@ -133,6 +133,8 @@ public sealed class WorktreeInitCliTests
         var registered = await Run(child, "worktree", "init", "--json");
         registered.ExitCode.ShouldBe(0);
         var storeKey = JsonDocument.Parse(registered.StdOut.Trim()).RootElement.GetProperty("storeKey").GetString()!;
+        var registeredRoot = JsonDocument.Parse(registered.StdOut.Trim())
+            .RootElement.GetProperty("rootPath").GetString()!;
 
         var clash = await Run(child, "worktree", "init", "--name", "another-lane", "--json");
 
@@ -142,7 +144,8 @@ public sealed class WorktreeInitCliTests
         error.GetProperty("code").GetString().ShouldBe(WorkspaceException.WorktreeNameClashCode);
         var message = error.GetProperty("message").GetString()!;
         message.ShouldContain(storeKey);
-        message.ShouldContain($"squeezr drop --store-key '{storeKey}'");
+        message.ShouldContain($"squeezr worktree drop '{registeredRoot}'", Case.Sensitive,
+            "the remedy names the verb that clears every row of this one tree, not one row at a time");
         RegistryRowsUnder(child).Length.ShouldBe(1);
         StoreDirKeysStartingWith("another-lane-").ShouldBeEmpty();
     }

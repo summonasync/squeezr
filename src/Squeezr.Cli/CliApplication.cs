@@ -93,6 +93,10 @@ public static class CliApplication
                     .WithDescription(
                         "Register this worktree as its own store — idempotent by path, and only once the main " +
                         "worktree is indexed");
+                worktree.AddCommand<WorktreeDropCommand>("drop")
+                    .WithDescription(
+                        "Remove the store of this worktree: registry rows of every spelling of one root, their " +
+                        "store dirs and their Qdrant collections");
             });
             config.AddBranch("services", services =>
             {

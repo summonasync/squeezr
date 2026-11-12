@@ -62,7 +62,7 @@ public static class WorktreeRegistration
             ?? throw new WorkspaceException(
                 $"'{childRoot}' was registered and then disappeared from the registry in the same pass, so it " +
                 $"is not linked to '{parentRoot}' yet. Re-run the command; if the row keeps disappearing run " +
-                "'squeezr workspace repair'.");
+                $"'{RemedyText.WorkspaceRepairCommand}'.");
 
         var linked = created with
         {
@@ -142,6 +142,6 @@ public static class WorktreeRegistration
     private static string NameClash(WorkspaceRegistryEntry existing, string name, string intended) =>
         $"'{existing.RootPath}' is already registered as store '{existing.StoreKey}', but --name '{name}' asks " +
         $"for '{intended}'. One worktree gets one store — two keys for one root is the identity fork this verb " +
-        $"exists to close. Drop the store and register again: {RemedyText.DropStore(existing.StoreKey)}. Or " +
+        $"exists to close. Drop the store and register again: {RemedyText.DropWorktree(existing.RootPath)}. Or " +
         $"re-run with --name '{existing.Name}' to keep the store this root already has.";
 }

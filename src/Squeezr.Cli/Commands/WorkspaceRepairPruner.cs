@@ -64,7 +64,7 @@ internal static class WorkspaceRepairPruner
             .Where(row => !huskKeys.Contains(row.StoreKey))
             .OrderBy(row => row.Name, StringComparer.Ordinal)
             .ThenBy(row => row.StoreKey, StringComparer.Ordinal)
-            .Select(row => Measured(row.Name, row.StoreKey, row.RootPath, CategoryStale))
+            .Select(row => Measured(row.Name, row.StoreKey, row.RootPath, CategoryStale, row.ParentRootPath))
             .ToList();
 
     public static IReadOnlyList<WorkspaceRepairStaleEntry> HuskCandidates(
@@ -74,7 +74,7 @@ internal static class WorkspaceRepairPruner
             .Where(husk => !staleKeys.Contains(husk.StoreKey))
             .OrderBy(husk => husk.Name, StringComparer.Ordinal)
             .ThenBy(husk => husk.StoreKey, StringComparer.Ordinal)
-            .Select(husk => Measured(husk.Name, husk.StoreKey, husk.RootPath, CategoryHusk))
+            .Select(husk => Measured(husk.Name, husk.StoreKey, husk.RootPath, CategoryHusk, null))
             .ToList();
 
     public static string CandidateLabel(IReadOnlyList<WorkspaceRepairStaleEntry> candidates) =>
@@ -165,10 +165,15 @@ internal static class WorkspaceRepairPruner
         return await prompt.ShowAsync(console, cancellationToken);
     }
 
-    private static WorkspaceRepairStaleEntry Measured(string name, string storeKey, string rootPath, string category)
+    private static WorkspaceRepairStaleEntry Measured(
+        string name,
+        string storeKey,
+        string rootPath,
+        string category,
+        string? parentRootPath)
     {
         var (state, bytes) = MeasureStore(storeKey);
-        return new WorkspaceRepairStaleEntry(name, storeKey, rootPath, bytes, state, category);
+        return new WorkspaceRepairStaleEntry(name, storeKey, rootPath, bytes, state, category, parentRootPath);
     }
 
     private static WorkspaceRepairPrunedEntry Planned(WorkspaceRepairStaleEntry candidate) =>

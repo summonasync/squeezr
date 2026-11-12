@@ -349,7 +349,7 @@ public sealed class WorktreeRegistrationTests : IDisposable
         clash.Code.ShouldBe(WorkspaceException.WorktreeNameClashCode);
         clash.Message.ShouldContain(registered.StoreKey!);
         clash.Message.ShouldContain("other-lane-");
-        clash.Message.ShouldContain($"squeezr drop --store-key '{registered.StoreKey}'");
+        clash.Message.ShouldContain($"squeezr worktree drop '{registered.RootPath}'");
         RowsFor(child).ShouldHaveSingleItem().StoreKey.ShouldBe(registered.StoreKey);
         StoreDirNames().ShouldBe(storeDirNames);
     }

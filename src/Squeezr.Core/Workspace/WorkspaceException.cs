@@ -11,6 +11,7 @@ public class WorkspaceException : Exception
     public const string StorageUnavailableCode = "storage_unavailable";
     public const string OnnxProviderCode = "onnx_provider_removed";
     public const string NotAWorktreeCode = "not_a_worktree";
+    public const string WorktreeNotRegisteredCode = "worktree_not_registered";
     public const string WorktreeNameClashCode = "worktree_name_clash";
     public const string WorktreeModelMismatchCode = "worktree_model_mismatch";
     public const string WorktreeModelUnresolvedCode = "worktree_model_unresolved";

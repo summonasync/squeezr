@@ -228,7 +228,7 @@ public static class WorktreeStoreFill
         $"'{registered.StoreKey}' was already registered before this pass and its store already holds " +
         "content, so nothing was re-copied — this verb runs at every session start, and a re-copy would bury " +
         "the index work the lane has done since. To refill it from the main worktree: " +
-        $"{RemedyText.DropStore(registered.StoreKey!)}, then re-run.";
+        $"{RemedyText.DropWorktree(registered.RootPath)}, then re-run.";
 
     private static string NothingMinted(WorktreeRegistrationOutcome registered) =>
         $"This pass created no store for '{registered.RootPath}' ({registered.State}), so there is nothing to " +

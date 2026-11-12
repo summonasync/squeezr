@@ -243,7 +243,7 @@ public static class WorktreeVectorCopier
             "still names them as embedded. Close the gap without throwing the lane away: run " +
             $"'{RemedyText.VectorsReconcileApply}' in this worktree first — it re-queues exactly the chunks " +
             "whose point is missing, and the next index pass fills them. Or clear the half-filled store and " +
-            $"fill again: {RemedyText.DropStore(request.TargetStoreKey)}, then re-run this verb — or fill from " +
+            $"fill again: {RemedyText.DropWorktree(request.TargetRoot)}, then re-run this verb — or fill from " +
             "this worktree's own tree with '--reindex'.",
             WorkspaceException.WorktreeVectorMismatchCode);
     }
@@ -262,7 +262,7 @@ public static class WorktreeVectorCopier
             $"'{target.Collection}' holds what got through and no more, while the copied database already " +
             "calls these chunks embedded. Close the gap without throwing the lane away: first " +
             $"'{RemedyText.VectorsReconcileApply}' in this worktree — it re-queues exactly the chunks whose " +
-            $"point is missing. Or clear the store and fill again: {RemedyText.DropStore(request.TargetStoreKey)}, " +
+            $"point is missing. Or clear the store and fill again: {RemedyText.DropWorktree(request.TargetRoot)}, " +
             "then re-run this verb — or fill from this worktree's own tree with '--reindex'.",
             WorkspaceException.WorktreeVectorMismatchCode,
             cause);
@@ -281,7 +281,7 @@ public static class WorktreeVectorCopier
             "This lane's collection predates the main " +
             "worktree's current geometry — nothing was copied and the copied database still calls these " +
             "chunks embedded. Clear this worktree's store and fill again: " +
-            $"{RemedyText.DropStore(request.TargetStoreKey)}, then re-run this verb — or fill from this " +
+            $"{RemedyText.DropWorktree(request.TargetRoot)}, then re-run this verb — or fill from this " +
             "worktree's own tree with '--reindex'.",
             WorkspaceException.WorktreeVectorDimensionCode,
             cause);

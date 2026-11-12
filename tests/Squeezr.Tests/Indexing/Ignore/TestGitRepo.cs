@@ -38,6 +38,11 @@ internal static class TestGitRepo
         Run(mainRoot, "worktree", "add", worktreePath, "-b", branch);
     }
 
+    public static void RemoveWorktree(string mainRoot, string worktreePath)
+    {
+        Run(mainRoot, "worktree", "remove", "--force", worktreePath);
+    }
+
     public static void Detach(string root)
     {
         Run(root, "checkout", "--detach");

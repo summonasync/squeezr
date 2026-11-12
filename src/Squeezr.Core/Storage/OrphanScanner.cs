@@ -49,8 +49,11 @@ public static class OrphanScanner
             .Select(entry => new HuskInfo(entry.Name, entry.StoreKey, entry.RootPath))
             .ToList();
 
+        // Worktree children are reaped here, not by a verb of their own: a lane whose checkout is gone is the
+        // same fact as a plain folder whose root is gone, and a second reaper would be a second answer to
+        // "is this store dead". The parent link rides along so the report can say which dead root was a lane.
         var stale = entries.Where(entry => !Directory.Exists(entry.RootPath))
-            .Select(entry => new StaleInfo(entry.Name, entry.StoreKey, entry.RootPath))
+            .Select(entry => new StaleInfo(entry.Name, entry.StoreKey, entry.RootPath, entry.ParentRootPath))
             .ToList();
 
         return new OrphanScanResult(orphans, husks, stale);

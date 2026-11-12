@@ -109,7 +109,7 @@ public class WorktreeVectorCopierTests
         ex.Message.ShouldContain($"'{SourceCollection}' held 5 point(s)");
         ex.Message.ShouldContain("wrote 5");
         ex.Message.ShouldContain($"'{ChildCollection}' counts 0 after the writes");
-        ex.Message.ShouldContain($"squeezr drop --store-key '{TargetStoreKey}'");
+        ex.Message.ShouldContain($"squeezr worktree drop '{ChildRoot}'");
         ex.Message.ShouldContain("--reindex");
     }
 
@@ -295,7 +295,7 @@ public class WorktreeVectorCopierTests
         ex.Message.ShouldContain(ChildCollection);
         ex.Message.ShouldContain("size 3");
         ex.Message.ShouldContain("2-dimensional");
-        ex.Message.ShouldContain($"drop --store-key '{TargetStoreKey}'");
+        ex.Message.ShouldContain($"worktree drop '{ChildRoot}'");
         ex.Message.ShouldContain("--reindex");
         ex.Message.ShouldNotContain("--reembed",
             customMessage: "the parent's model is not what disagrees here, and re-embedding it is not this lane's remedy");

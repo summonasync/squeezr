@@ -30,6 +30,13 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         [CommandOption("--yes")]
         public bool Yes { get; set; }
 
+        [Description(
+            "Also delete the Qdrant collections no surviving registry row names. This is the destructive door " +
+            "for the collection arm only: without it the sweep reports and touches nothing, and a row that " +
+            "names a collection still protects it")]
+        [CommandOption("--apply")]
+        public bool Apply { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -52,9 +59,15 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 throw new McpUsageException("Options --dry-run and --yes are mutually exclusive.");
             }
 
-            if (settings.StoreKey is not null && (settings.DryRun || settings.Yes))
+            if (settings.DryRun && settings.Apply)
             {
-                throw new McpUsageException("--dry-run and --yes sweep the whole registry; run them without --store-key.");
+                throw new McpUsageException("Options --dry-run and --apply are mutually exclusive.");
+            }
+
+            if (settings.StoreKey is not null && (settings.DryRun || settings.Yes || settings.Apply))
+            {
+                throw new McpUsageException(
+                    "--dry-run, --yes and --apply sweep the whole registry; run them without --store-key.");
             }
 
             if (settings.StoreKey is not null)
@@ -125,6 +138,13 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
 
             WriteHuskHints(huskRows, prune);
 
+            // Rows before collections, and the sweep reads the registry itself rather than a snapshot handed
+            // to it: what it can protect is what survived the row sweep above. A collection no surviving row
+            // names is a leak from a store that is already gone; a collection a live row names is that row's
+            // own data, whatever the tree above just did with the other rows.
+            var collections = await SurveyCollections(settings, prune, cancellationToken);
+            WriteCollectionHints(collections);
+
             if (settings.Json)
             {
                 JsonOutput.Write(new WorkspaceRepairReport(
@@ -134,11 +154,13 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                     [.. candidates.Where(row => row.Category == WorkspaceRepairPruner.CategoryStale)],
                     prune,
                     Counts(adoptedRows.Count, needsRootRows.Count, candidates, prune, settings.DryRun),
-                    failedRows.Count > 0 ? failedRows : null));
+                    failedRows.Count > 0 ? failedRows : null,
+                    collections));
             }
             else
             {
                 RenderPrune(prune, candidates);
+                RenderCollections(collections);
                 RenderSummary(adoptedRows.Count, needsRootRows.Count, candidates, prune, settings.DryRun);
             }
 
@@ -181,6 +203,70 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             scan.Husks,
             scan.Stale,
             []);
+    }
+
+    // The destructive half of the collection arm unlocks only on a run whose row phase reached a confirmed
+    // sweep: a run that refused to prune, declined the prompt or died mid-sweep has not earned a delete on
+    // any endpoint, and a dry run previews. Reporting itself is unconditional — a leak nobody listed reads
+    // as a clean registry.
+    private static async Task<WorkspaceRepairCollectionsReport> SurveyCollections(
+        Settings settings,
+        WorkspaceRepairPruneSummary prune,
+        CancellationToken cancellationToken)
+    {
+        var rows = WorkspaceRootResolver.GuardRegistryIo(WorkspaceRegistry.Load);
+        var confirmed = prune.Mode
+            is WorkspaceRepairPruner.ModePruned
+            or WorkspaceRepairPruner.ModeNone;
+        return await WorkspaceCollectionSweep.RunAsync(
+            WorkspaceCollectionSweep.EndpointsOf(rows),
+            settings.Apply && confirmed,
+            cancellationToken);
+    }
+
+    // An endpoint that never answered is a hole in the ledger, and a --json reader has to see it on the
+    // channel warnings travel on: silence here would read as "the sweep looked everywhere and found nothing".
+    private static void WriteCollectionHints(WorkspaceRepairCollectionsReport collections)
+    {
+        foreach (var endpoint in collections.UnreachableEndpoints)
+        {
+            Console.Error.WriteLine(
+                $"warning: the collection sweep could not reach '{endpoint}'; collections living there are not in " +
+                "this ledger, and nothing on it was deleted.");
+        }
+    }
+
+    private static void RenderCollections(WorkspaceRepairCollectionsReport collections)
+    {
+        if (collections.SkipReason is { } skipped)
+        {
+            AnsiConsole.MarkupLine($"[grey]Collections: survey skipped — {skipped.EscapeMarkup()}[/]");
+            return;
+        }
+
+        foreach (var entry in collections.Entries)
+        {
+            var named = $"{entry.Collection.EscapeMarkup()} on {entry.Endpoint.EscapeMarkup()}";
+            AnsiConsole.MarkupLine(entry.Action switch
+            {
+                WorkspaceCollectionSweep.ActionReaped => $"  [green]-[/] collection {named} — reaped",
+                WorkspaceCollectionSweep.ActionReapFailed =>
+                    $"  [red]x[/] collection {named} — not reaped: " +
+                    $"{(entry.Failure ?? "no reason given").EscapeMarkup()}",
+                _ => $"  [yellow]-[/] collection {named} — would be reaped (pass --apply)",
+            });
+        }
+
+        var reaped = collections.Entries.Count(entry => entry.Action == WorkspaceCollectionSweep.ActionReaped);
+        AnsiConsole.MarkupLine(
+            $"[grey]Collections: {collections.Entries.Count} unreferenced of {collections.SeenMinted} " +
+            $"collection(s) this product minted on {collections.Endpoints.Count} endpoint(s) — " +
+            $"{(collections.Apply
+                ? $"{reaped} reaped"
+                : "reported only, nothing deleted (pass --apply)")}[/]" +
+            (collections.UnreachableEndpoints.Count > 0
+                ? $"[grey], {collections.UnreachableEndpoints.Count} endpoint(s) unreachable[/]"
+                : string.Empty) + "[grey].[/]");
     }
 
     // The per-row causes live in the report; the envelope carries the count, the rows it covers and the
@@ -244,7 +330,7 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
         {
             AnsiConsole.MarkupLine(
                 $"  [yellow]-[/] stale: {row.Name.EscapeMarkup()} ({row.StoreKey.EscapeMarkup()}) " +
-                $"root {row.RootPath.EscapeMarkup()} · {StoreSizeLabel(row)}");
+                $"root {row.RootPath.EscapeMarkup()}{LaneMarker(row)} · {StoreSizeLabel(row)}");
         }
 
         foreach (var row in candidates.Where(row => row.Category == WorkspaceRepairPruner.CategoryHusk))
@@ -389,6 +475,13 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
 
     private static string SizeParenthesis(long? bytes) =>
         bytes is { } value ? $" ({StoreSizeText.Format(value)})" : string.Empty;
+
+    // The dead root of a lane and the dead root of a plain folder are the same fact to this sweep, but a
+    // reader deciding whether to confirm says "lane" and looks at the parent, so the line names it.
+    private static string LaneMarker(WorkspaceRepairStaleEntry row) =>
+        row.ParentRootPath is { } parent
+            ? $" — worktree child of {parent.EscapeMarkup()}"
+            : string.Empty;
 
     private static string StoreSizeLabel(WorkspaceRepairStaleEntry row) =>
         row.StoreState switch

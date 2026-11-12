@@ -9,6 +9,9 @@ public static class RemedyText
     public const string IndexCommand = "squeezr index";
     public const string AddCommand = "squeezr add";
     public const string DropCommand = "squeezr drop";
+    public const string WorktreeDropCommand = "squeezr worktree drop";
+    public const string WorktreeInitCommand = "squeezr worktree init";
+    public const string WorkspaceRepairCommand = "squeezr workspace repair";
     public const string ServicesUp = "squeezr services up";
     public const string VectorsReconcileApply = "squeezr vectors reconcile --apply";
     public const int ScopeHintSiblingLimit = 3;
@@ -26,6 +29,11 @@ public static class RemedyText
     public static string AddRepo(string path, string name) => $"{AddCommand} {ShellPath.Quote(path)} --name {name}";
 
     public static string DropStore(string storeKey) => $"{DropCommand} --store-key {ShellPath.Quote(storeKey)}";
+
+    // The path form is the one a worktree reader wants: a lane is named by its checkout, and one checkout can
+    // hold several rows, so dropping by path takes them together. The store-key form stays in the product for
+    // a row whose tree is already gone, which no path argument can reach.
+    public static string DropWorktree(string rootPath) => $"{WorktreeDropCommand} {ShellPath.Quote(rootPath)}";
 
     public static string? ScopeBlindSiblings(IReadOnlyList<WorkspaceSiblingEntry> siblings)
     {

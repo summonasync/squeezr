@@ -287,7 +287,7 @@ public sealed class WorktreeStoreFillTests : IDisposable
 
         outcome.State.ShouldBe(WorktreeFillState.Skipped);
         outcome.Reason.ShouldNotBeNull().ShouldContain("already registered");
-        outcome.Reason.ShouldContain($"squeezr drop --store-key '{adopted.StoreKey}'");
+        outcome.Reason.ShouldContain($"squeezr worktree drop '{adopted.RootPath}'");
         StoreFixture.Counts(StoreDirOf(adopted.StoreKey!)).ShouldBe((3, 6),
             "the first fill's work survives the second pass untouched");
     }
