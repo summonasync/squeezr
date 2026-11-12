@@ -37,6 +37,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
             cts.Cancel();
         };
         Console.CancelKeyPress += onStop;
+        using var onTerminate = DaemonShutdownSignal.Watch(cts);
         try
         {
             SqueezrHome.RequireHabitableProfileHome();
