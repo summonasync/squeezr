@@ -10,6 +10,8 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class FleetStatusCommand : Command<FleetStatusCommand.Settings>
 {
+    private const string DesiredUnknown = "unknown";
+
     public sealed class Settings : CommandSettings
     {
         [CommandOption("--json")]
@@ -52,14 +54,19 @@ public sealed class FleetStatusCommand : Command<FleetStatusCommand.Settings>
             table.AddRow(
                 entry.Stale ? $"{entry.Name.EscapeMarkup()} [yellow](stale)[/]" : entry.Name.EscapeMarkup(),
                 entry.StoreKey.EscapeMarkup(),
-                entry.Desired == WatchDesire.Running.ToString().ToLowerInvariant()
-                    ? "[green]running[/]"
-                    : "[grey]stopped[/]",
+                DesiredCell(entry.Desired),
                 Colorize(entry.Supervision),
                 FormatLastPass(entry.LastPass));
         }
 
         AnsiConsole.Write(table);
+        if (report.StateFault is { } fault)
+        {
+            Console.Error.WriteLine(
+                $"warning: watchd state '{fault}' — no desired state is known, the supervisor applies nothing " +
+                "until the file is repaired; the supervision column shows live facts only.");
+        }
+
         AnsiConsole.MarkupLine(report.Watchd.Running
             ? $"[grey]watchd[/]: running (pid {report.Watchd.Pid})"
             : "[grey]watchd[/]: [yellow]not running[/]");
@@ -77,29 +84,40 @@ public sealed class FleetStatusCommand : Command<FleetStatusCommand.Settings>
     {
         var watchd = FleetWatchdProbe.Probe();
         var now = DateTime.UtcNow;
+        var supervision = new SupervisionState().Read();
         var staleKeys = OrphanScanner.Scan().Stale
             .Select(stale => stale.StoreKey)
             .ToHashSet(StringComparer.Ordinal);
         var entries = WorkspaceRegistry.Load();
         return new FleetStatusReport(
-            entries.Select(entry => BuildEntry(entry, now, watchd, staleKeys.Contains(entry.StoreKey))).ToList(),
-            watchd);
+            entries.Select(entry =>
+                BuildEntry(entry, now, watchd, supervision, staleKeys.Contains(entry.StoreKey))).ToList(),
+            watchd,
+            supervision.Status == SupervisionStateStatus.Unreadable
+                ? $"{supervision.FilePath} {supervision.Fault}"
+                : null);
     }
 
     private static FleetStatusEntry BuildEntry(
         WorkspaceRegistryEntry entry,
         DateTime now,
         FleetWatchdState watchd,
+        SupervisionSnapshot supervision,
         bool stale)
     {
         var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
         var health = WatchStoreHealth.Probe(storeDir, now);
-        var desired = new SupervisionState().DesireOf(entry.StoreKey);
+        // An unreadable file answers "unknown" for the wish and leaves the posture to the body: the live
+        // facts behind supervision do not depend on the desire unless it says stopped, and a corrupt file
+        // cannot say that. Guessing a wish is what R3 forbids; guessing nothing is not.
+        var desire = supervision.DesireOf(entry.StoreKey);
         return new FleetStatusEntry(
             entry.Name,
             entry.StoreKey,
-            desired.ToString().ToLowerInvariant(),
-            FleetSupervisionPosture.Resolve(desired, health, watchd.Running),
+            supervision.Status == SupervisionStateStatus.Unreadable
+                ? DesiredUnknown
+                : desire.ToString().ToLowerInvariant(),
+            FleetSupervisionPosture.Resolve(desire, health, watchd.Running),
             health.State.ToString().ToLowerInvariant(),
             health.OwnerPid,
             health.OwnerKind,
@@ -107,12 +125,20 @@ public sealed class FleetStatusCommand : Command<FleetStatusCommand.Settings>
             stale);
     }
 
+    private static string DesiredCell(string desired) => desired switch
+    {
+        "running" => "[green]running[/]",
+        "stopped" => "[grey]stopped[/]",
+        _ => $"[red]{desired.EscapeMarkup()}[/]",
+    };
+
     private static string Colorize(string supervision) => supervision switch
     {
         FleetSupervisionPosture.Supervised => "[green]supervised[/]",
         FleetSupervisionPosture.Wedged => "[red]wedged[/]",
         FleetSupervisionPosture.ManagedElsewhere => "[yellow]managed elsewhere[/]",
         FleetSupervisionPosture.Starting => "[yellow]starting[/]",
+        FleetSupervisionPosture.Idle => "[yellow]idle (no supervisor)[/]",
         _ => "[grey]stopped[/]",
     };
 

@@ -32,7 +32,8 @@ public sealed class FleetStartCommand : Command<FleetStartCommand.Settings>
     {
         try
         {
-            var entry = FleetStoreKeyResolver.Require(settings.StoreKey);
+            var entry = FleetStoreKeyResolver.RequireResolvable(
+                FleetStoreKeyResolver.Require(settings.StoreKey), "start");
             _state.SetDesire(entry.StoreKey, WatchDesire.Running);
             var watchd = FleetWatchdProbe.Probe();
             var health = WatchStoreHealth.Probe(SqueezrPaths.StoreDir(entry.RootPath), DateTime.UtcNow);

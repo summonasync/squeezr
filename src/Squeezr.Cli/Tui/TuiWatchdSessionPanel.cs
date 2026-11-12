@@ -6,9 +6,9 @@ namespace Squeezr.Cli.Tui;
 public static class TuiWatchdSessionPanel
 {
     private const string Back = "Back";
-    private const string StartAction = "Start watching";
-    private const string StopAction = "Stop watching";
-    private const string RestartAction = "Restart";
+    internal const string StartAction = "Start watching";
+    internal const string StopAction = "Stop watching";
+    internal const string RestartAction = "Restart";
     private const int RestartPollLimit = 24;
 
     private static readonly TimeSpan RestartPollInterval = TimeSpan.FromMilliseconds(250);
@@ -33,7 +33,7 @@ public static class TuiWatchdSessionPanel
             return;
         }
 
-        await ApplyAsync(console, action, session.StoreKey, state, source, cancellationToken);
+        await ApplyAsync(console, action, session, state, source, cancellationToken);
     }
 
     private static void RenderHeader(IAnsiConsole console, WatchdSessionRow session, WatchdDaemonStatus daemon)
@@ -41,8 +41,9 @@ public static class TuiWatchdSessionPanel
         var owner = session.OwnerPid is { } pid ? $", pid {pid}" : string.Empty;
         console.MarkupLine(
             $"[bold]{session.Name.EscapeMarkup()}[/] ([grey]{session.StoreKey.EscapeMarkup()}[/]){Markup.Escape(owner)}");
+        var desire = session.DesireKnown ? WatchdSessionText.Desire(session.Desire) : "unknown";
         console.MarkupLine(
-            $"desired: {WatchdSessionText.Desire(session.Desire)}; state: {WatchdSessionText.State(session.State)}; " +
+            $"desired: {desire}; state: {WatchdSessionText.State(session.State)}; " +
             $"health: {session.Health.EscapeMarkup()}");
         console.MarkupLine($"last pass: {session.LastPass.EscapeMarkup()}");
         console.MarkupLine($"root: {session.RootPath.EscapeMarkup()}");
@@ -52,31 +53,44 @@ public static class TuiWatchdSessionPanel
         }
     }
 
-    private static async Task ApplyAsync(
+    internal static async Task ApplyAsync(
         IAnsiConsole console,
         string action,
-        string storeKey,
+        WatchdSessionRow session,
         SupervisionState state,
         IWatchdSupervisorSource source,
         CancellationToken cancellationToken)
     {
+        // A wish for a store this machine cannot reach is a line in a file no supervisor will ever read: it
+        // outlives the workspace it names and makes the next status row look wanted. Refuse and write nothing.
+        if (!session.RootResolves)
+        {
+            console.MarkupLine(
+                $"[red]wish not saved[/]: '{Markup.Escape(session.StoreKey)}' does not resolve on this machine " +
+                $"(root '{session.RootPath.EscapeMarkup()}' is gone).");
+            console.MarkupLine(
+                $"[grey]remove the stale entry with 'squeezr drop --store-key {Markup.Escape(session.StoreKey)}'.[/]");
+            return;
+        }
+
         try
         {
             switch (action)
             {
                 case StartAction:
-                    state.SetDesire(storeKey, WatchDesire.Running);
+                    state.SetDesire(session.StoreKey, WatchDesire.Running);
                     console.MarkupLine(
-                        $"[green]desired state set to running for {Markup.Escape(storeKey)}[/].");
+                        $"[green]desired state set to running for {Markup.Escape(session.StoreKey)}[/].");
                     break;
                 case StopAction:
-                    state.SetDesire(storeKey, WatchDesire.Stopped);
+                    state.SetDesire(session.StoreKey, WatchDesire.Stopped);
                     console.MarkupLine(
-                        $"[yellow]desired state set to stopped for {Markup.Escape(storeKey)}[/] — " +
+                        $"[yellow]desired state set to stopped for {Markup.Escape(session.StoreKey)}[/] — " +
                         "the supervisor stops the watcher on its next pass.");
                     break;
                 case RestartAction:
-                    await RestartAsync(console, storeKey, state, source, cancellationToken);
+                    await RestartAsync(
+                        console, session.StoreKey, state, source, cancellationToken);
                     break;
             }
         }

@@ -9,6 +9,7 @@ internal static class WatchdSessionText
         WatchdSessionState.Running => "running",
         WatchdSessionState.Stopped => "stopped",
         WatchdSessionState.Wedged => "wedged",
+        WatchdSessionState.NoSupervisor => "idle (no supervisor)",
         _ => "managed elsewhere",
     };
 

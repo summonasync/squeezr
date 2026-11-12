@@ -4,6 +4,7 @@ using Shouldly;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Commands;
 using Squeezr.Cli.Daemons;
+using Squeezr.Cli.Mcp;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Indexing.Watch.Supervision;
 using Squeezr.Core.Serialization;
@@ -160,6 +161,115 @@ public sealed class FleetDesiredStateTests : IDisposable
     }
 
     [Fact]
+    public async Task Status_NothingAliveNoWatchd_WantedStoreReadsIdleStoppedStoreReadsStopped()
+    {
+        var (_, runningKey) = await NewWorkspaceAsync("fleet-idle-row");
+        var (_, stoppedKey) = await NewWorkspaceAsync("fleet-stopped-row");
+        NewState().SetDesire(stoppedKey, WatchDesire.Stopped);
+
+        var json = await RunInProcessAsync(null, "status", "--json");
+        var report = SingleJsonLine(json.StdOut);
+        report.TryGetProperty("stateFault", out _).ShouldBeFalse(
+            "a state file that reads clean adds nothing to the shape");
+        Row(report, runningKey).GetProperty("supervision").GetString().ShouldBe("idle (no supervisor)");
+        Row(report, stoppedKey).GetProperty("supervision").GetString().ShouldBe("stopped");
+        Row(report, runningKey).GetProperty("desired").GetString().ShouldBe("running");
+        Row(report, stoppedKey).GetProperty("desired").GetString().ShouldBe("stopped");
+
+        var human = await CliTestProcess.RunWithHomeAsync(_home, TestDirs.NewTempDir(), "fleet", "status");
+        human.ExitCode.ShouldBe(0, $"out: {human.StdOut} err: {human.StdErr}");
+        human.StdOut.ShouldContain("idle (no supervisor)");
+    }
+
+    [Fact]
+    public async Task Status_StateFileUnreadable_NamesTheFault_AndNeverClaimsARunningWish()
+    {
+        var (_, storeKey) = await NewWorkspaceAsync("fleet-corrupt-state");
+        WriteRawState("{ \"stores\": oops");
+
+        var json = await RunInProcessAsync(null, "status", "--json");
+        json.ExitCode.ShouldBe(0, $"out: {json.StdOut} err: {json.StdErr}");
+        var report = SingleJsonLine(json.StdOut);
+        var row = Row(report, storeKey);
+        row.GetProperty("desired").GetString().ShouldBe("unknown");
+        row.GetProperty("supervision").GetString().ShouldBe("idle (no supervisor)");
+        report.GetProperty("stateFault").GetString().ShouldContain("watchd");
+        report.GetProperty("stateFault").GetString().ShouldContain("not valid JSON");
+
+        var human = await CliTestProcess.RunWithHomeAsync(_home, TestDirs.NewTempDir(), "fleet", "status");
+        human.StdOut.ShouldContain("unknown");
+        human.StdErr.ShouldContain("no desired state is known");
+    }
+
+    [Fact]
+    public async Task Stop_StaleRoot_Refuses_AndWritesNoDesire()
+    {
+        var (root, storeKey) = await NewWorkspaceAsync("fleet-stop-stale");
+        Directory.Delete(root, recursive: true);
+
+        var result = await RunInProcessAsync(null, "stop", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(1);
+        result.StdErr.ShouldContain("Cannot stop workspace");
+        result.StdErr.ShouldContain("root path");
+        result.StdErr.ShouldContain($"squeezr drop --store-key {storeKey}");
+        NewState().Read().Desires.ContainsKey(storeKey).ShouldBeFalse(
+            "a refusal must not leave a wish for a store this machine cannot reach");
+    }
+
+    [Fact]
+    public async Task Start_StaleRoot_Refuses_AndWritesNoDesire()
+    {
+        var (root, storeKey) = await NewWorkspaceAsync("fleet-start-stale");
+        Directory.Delete(root, recursive: true);
+
+        var result = await RunInProcessAsync(null, "start", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(1);
+        result.StdErr.ShouldContain("Cannot start workspace");
+        result.StdErr.ShouldContain($"squeezr drop --store-key {storeKey}");
+        NewState().Read().Desires.ContainsKey(storeKey).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ServeNoticeReading_WatchdHoldingTheLockOverACorruptState_AnswersUnreadable()
+    {
+        var (root, _) = await NewWorkspaceAsync("fleet-notice-reading-corrupt");
+        using var watchd = HoldWatchdLock();
+        WriteRawState("{ \"stores\": oops");
+
+        NoIndexerNotice.ReadSupervision(root).ShouldBe(NoIndexerNotice.Supervision.StateUnreadable);
+    }
+
+    [Fact]
+    public async Task ServeNoticeReading_LiveWatchdOverAWantedStore_AnswersItWillBringItUp()
+    {
+        var (root, _) = await NewWorkspaceAsync("fleet-notice-reading-running");
+        using var watchd = HoldWatchdLock();
+
+        NoIndexerNotice.ReadSupervision(root).ShouldBe(NoIndexerNotice.Supervision.WillBringItUp);
+    }
+
+    [Fact]
+    public async Task ServeNoticeReading_LiveWatchdOverAStoppedStore_AnswersNone()
+    {
+        var (root, storeKey) = await NewWorkspaceAsync("fleet-notice-reading-stopped");
+        using var watchd = HoldWatchdLock();
+        NewState().SetDesire(storeKey, WatchDesire.Stopped);
+
+        NoIndexerNotice.ReadSupervision(root).ShouldBe(NoIndexerNotice.Supervision.None);
+    }
+
+    [Fact]
+    public async Task ServeNoticeReading_NoWatchdAlive_AnswersNone_EvenOverACorruptState()
+    {
+        var (root, _) = await NewWorkspaceAsync("fleet-notice-reading-dead");
+        WriteRawState("{ \"stores\": oops");
+
+        NoIndexerNotice.ReadSupervision(root).ShouldBe(NoIndexerNotice.Supervision.None);
+    }
+
+    [Fact]
     public async Task FleetListJson_KeepsItsShape_AlongsideTheDesiredStateWork()
     {
         var (root, storeKey) = await NewWorkspaceAsync("fleet-compat");
@@ -177,6 +287,25 @@ public sealed class FleetDesiredStateTests : IDisposable
     }
 
     private SupervisionState NewState() => new();
+
+    private static JsonElement Row(JsonElement report, string storeKey) => report.GetProperty("stores")
+        .EnumerateArray()
+        .Single(store => store.GetProperty("storeKey").GetString() == storeKey);
+
+    private static void WriteRawState(string json)
+    {
+        Directory.CreateDirectory(WatchdPaths.Dir);
+        File.WriteAllText(WatchdPaths.StatePath, json);
+    }
+
+    // The lock is the only test a reader has for "a supervisor is alive here": WatchdLock answers refused to
+    // the second claimant, so holding it in-process stands in for a running watchd without spawning one.
+    private static WatchdLock HoldWatchdLock()
+    {
+        var claim = new WatchdLock();
+        claim.TryAcquire().Acquired.ShouldBeTrue("test failed to hold the watchd lock the scenario needs");
+        return claim;
+    }
 
     private async Task<(string Root, string StoreKey)> NewWorkspaceAsync(string name)
     {

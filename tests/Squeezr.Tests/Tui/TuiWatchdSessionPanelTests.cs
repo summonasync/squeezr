@@ -60,6 +60,64 @@ public sealed class TuiWatchdSessionPanelTests : IDisposable
         state.DesireOf("demo-key").ShouldBe(WatchDesire.Running);
     }
 
+    [Theory]
+    [InlineData(TuiWatchdSessionPanel.StartAction)]
+    [InlineData(TuiWatchdSessionPanel.StopAction)]
+    [InlineData(TuiWatchdSessionPanel.RestartAction)]
+    public async Task EveryAction_OnARowThatDoesNotResolve_Refuses_AndWritesNoDesire(string action)
+    {
+        var state = NewState();
+        var console = TuiTestHarness.InteractiveConsole();
+        var session = UnresolvedRow("demo-abc12345");
+
+        await TuiWatchdSessionPanel.ApplyAsync(
+            console, action, session, state, new FakeSource(running: false), CancellationToken.None);
+
+        console.Output.ShouldContain("wish not saved");
+        console.Output.ShouldContain("squeezr drop --store-key demo-abc12345");
+        state.Read().Desires.ContainsKey(session.StoreKey).ShouldBeFalse(
+            $"the {action} refusal must leave state.json untouched");
+        File.Exists(Path.Combine(_dir, "watchd", "state.json")).ShouldBeFalse(
+            "no wish means no file created");
+    }
+
+    [Fact]
+    public async Task StartAction_OnAResolvingRow_WritesTheDesireAsBefore()
+    {
+        var state = NewState();
+        var console = TuiTestHarness.InteractiveConsole();
+
+        await TuiWatchdSessionPanel.ApplyAsync(
+            console, TuiWatchdSessionPanel.StartAction, ResolvingRow("demo-abc12345"), state,
+            new FakeSource(running: false), CancellationToken.None);
+
+        console.Output.ShouldContain("desired state set to running for demo-abc12345");
+        state.DesireOf("demo-abc12345").ShouldBe(WatchDesire.Running);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_WhenTheRowIsKnown_StillNamesTheDesireFromTheFile()
+    {
+        var state = NewState();
+        state.SetDesire("demo-abc12345", WatchDesire.Stopped);
+        var console = TuiTestHarness.InteractiveConsole();
+
+        await TuiWatchdSessionPanel.ApplyAsync(
+            console, TuiWatchdSessionPanel.StopAction, ResolvingRow("demo-abc12345"), state,
+            new FakeSource(running: false), CancellationToken.None);
+
+        console.Output.ShouldContain("desired state set to stopped");
+    }
+
+    private static WatchdSessionRow ResolvingRow(string storeKey) =>
+        new(storeKey, "demo", "/repo/demo", WatchDesire.Running, WatchdSessionState.NoSupervisor,
+            "idle", "no pass recorded", null);
+
+    private static WatchdSessionRow UnresolvedRow(string storeKey) =>
+        new(storeKey, "demo", "/gone/demo", WatchDesire.Running, WatchdSessionState.Stopped,
+            "unresolved", "store row does not resolve on this machine", null)
+        { RootResolves = false };
+
     private SupervisionState NewState() => new(StatePath);
 
     private sealed class FakeSource(bool running) : IWatchdSupervisorSource

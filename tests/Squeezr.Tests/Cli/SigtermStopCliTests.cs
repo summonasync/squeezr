@@ -80,19 +80,29 @@ public sealed class SigtermStopCliTests
             $"watch never claimed anything under {home}");
         var storeDir = Path.GetDirectoryName(claimPath)!;
 
+        // The claim lands before the beats do, so a ready test on the claim alone can signal a process that
+        // never stamped anything: the two absence asserts below would then pass without measuring a cleanup.
+        // Required here: the kind heartbeat and this pid's own beat, the exact files the stop must drop.
+        var kindBeatPath = DaemonHeartbeat.PathFor(storeDir, DaemonHeartbeat.DefaultKind);
+        var ownBeatPath = DaemonHeartbeat.BeatPathFor(storeDir, DaemonHeartbeat.DefaultKind, child.Pid);
+        await child.WaitForFilesAsync(
+            [kindBeatPath, ownBeatPath],
+            $"watch claimed the store but never stamped {kindBeatPath} and {ownBeatPath}");
+        var beatsDir = DaemonHeartbeat.BeatsDirFor(storeDir);
+        var beatsBefore = Directory.GetFiles(beatsDir, "*" + DaemonHeartbeat.BeatExtension);
+        beatsBefore.ShouldContain(ownBeatPath, "the beat the stop is expected to drop");
+
         child.SendSigterm();
         var stopped = await child.ExitedWithinAsync(StopBudget);
 
         stopped.ShouldBeTrue($"watch was still running {StopBudget.TotalSeconds:F0}s after SIGTERM; {child.State()}");
         child.ExitCode.ShouldBe(0, $"SIGTERM took the default action instead of the stop path's 0; {child.State()}");
         File.Exists(claimPath).ShouldBeFalse("the stopped watch left its claim on the store");
-        File.Exists(DaemonHeartbeat.PathFor(storeDir, DaemonHeartbeat.DefaultKind)).ShouldBeFalse(
+        File.Exists(kindBeatPath).ShouldBeFalse(
             "the stopped watch left the kind heartbeat naming a dead pid");
-        var beatsDir = DaemonHeartbeat.BeatsDirFor(storeDir);
-        if (Directory.Exists(beatsDir))
+        foreach (var beat in beatsBefore)
         {
-            Directory.GetFiles(beatsDir, "*" + DaemonHeartbeat.BeatExtension).ShouldBeEmpty(
-                "the stopped watch left its per-pid beat beating");
+            File.Exists(beat).ShouldBeFalse("the stopped watch left its per-pid beat beating");
         }
 
         child.StdErr.ShouldNotContain("Unhandled exception");
@@ -118,6 +128,8 @@ public sealed class SigtermStopCliTests
             new(CliTestProcess.StartLiveChild(squeezrHome, workingDir, args));
 
         public int ExitCode => _process.ExitCode;
+
+        public int Pid => _process.Id;
 
         public string StdOut
         {
@@ -166,6 +178,29 @@ public sealed class SigtermStopCliTests
 
             throw new InvalidOperationException(
                 $"{what} within {ReadyBudget.TotalSeconds:F0}s ({State()}); stdout: {StdOut}stderr: {StdErr}");
+        }
+
+        public async Task WaitForFilesAsync(IReadOnlyList<string> paths, string what)
+        {
+            var deadline = DateTime.UtcNow + ReadyBudget;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (paths.All(File.Exists))
+                {
+                    return;
+                }
+
+                if (_process.HasExited)
+                {
+                    break;
+                }
+
+                await Task.Delay(200);
+            }
+
+            throw new InvalidOperationException(
+                $"{what} within {ReadyBudget.TotalSeconds:F0}s ({State()}); still missing: " +
+                $"{string.Join(", ", paths.Where(path => !File.Exists(path)))}; stdout: {StdOut}stderr: {StdErr}");
         }
 
         public async Task<bool> ExitedWithinAsync(TimeSpan budget)

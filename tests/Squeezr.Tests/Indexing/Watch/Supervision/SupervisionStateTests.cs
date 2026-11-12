@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Indexing.Watch.Supervision;
+using Squeezr.Core.Serialization;
 
 namespace Squeezr.Tests.Indexing.Watch.Supervision;
 
@@ -106,6 +107,38 @@ public sealed class SupervisionStateTests : IDisposable
         snapshot.IsWedged("demo-abc12345").ShouldBeFalse();
     }
 
+    // The IOException arm of the classification (113/T4, MINOR-4 from review-113-t1-01): the JsonException and
+    // truncation pins above never reach it. Both fixtures here fail the open, not the parse.
+    [Fact]
+    public void Read_FileNoOneMayRead_IsUnreadable_AndNamesTheReadFault()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        WriteRawState("""{"stores": {"demo-abc12345": "Stopped"}}""");
+        File.SetUnixFileMode(StatePath, UnixFileMode.UserWrite);
+
+        var snapshot = new SupervisionState(StatePath).Read();
+
+        snapshot.Status.ShouldBe(SupervisionStateStatus.Unreadable);
+        snapshot.Fault.ShouldNotBeNull();
+        snapshot.Fault.ShouldContain("could not be read");
+        snapshot.Desires.ShouldBeEmpty("an unreadable file gives no desires to hand out");
+    }
+
+    [Fact]
+    public void Read_PathOccupiedByADirectory_IsUnreadable_NotAbsent()
+    {
+        Directory.CreateDirectory(StatePath);
+
+        var snapshot = new SupervisionState(StatePath).Read();
+
+        snapshot.Status.ShouldBe(SupervisionStateStatus.Unreadable);
+        snapshot.Fault.ShouldContain("could not be read");
+    }
+
     [Fact]
     public void SetWedged_LandsInTheFileBesideTheDesires_AndReloads()
     {
@@ -156,7 +189,31 @@ public sealed class SupervisionStateTests : IDisposable
     {
         new SupervisionState(StatePath).SetDesire("demo-abc12345", WatchDesire.Stopped);
 
-        File.ReadAllText(StatePath).ShouldNotContain("wedged");
+        var written = File.ReadAllText(StatePath);
+        written.ShouldNotBeEmpty("the byte comparison needs a file to compare");
+
+        // The pre-113 writer's own output: one record, one property, the same options. A substring check on
+        // "wedged" would keep passing if the serializer's shape moved under the claim (review-113-t1-01 MINOR-1).
+        var preElevenThirteen = JsonSerializer.Serialize(
+            new PreElevenThirteenStateFile(new Dictionary<string, string> { ["demo-abc12345"] = "Stopped" }),
+            SqueezrJson.FileOptions);
+
+        written.ShouldBe(preElevenThirteen);
+    }
+
+    [Fact]
+    public void WedgesClearedBackToEmpty_ReturnsToTheBytesTheFleetCarriedBeforeThem()
+    {
+        var state = new SupervisionState(StatePath);
+        state.SetDesire("demo-abc12345", WatchDesire.Stopped);
+        var wedgeFree = File.ReadAllText(StatePath);
+
+        state.SetWedged("demo-abc12345", true);
+        File.ReadAllText(StatePath).ShouldNotBe(wedgeFree);
+
+        state.SetWedged("demo-abc12345", false);
+
+        File.ReadAllText(StatePath).ShouldBe(wedgeFree);
     }
 
     [Fact]
@@ -168,6 +225,24 @@ public sealed class SupervisionStateTests : IDisposable
             () => new SupervisionState(StatePath).SetDesire("demo-abc12345", WatchDesire.Stopped));
 
         File.ReadAllText(StatePath).ShouldBe("{\"stores\": oops");
+    }
+
+    [Fact]
+    public void SetDesire_OnAFileThatCannotBeRead_Refuses_AndTheFileIsStillThere()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        WriteRawState("""{"stores": {"demo-abc12345": "Stopped"}}""");
+        File.SetUnixFileMode(StatePath, UnixFileMode.UserWrite);
+
+        Should.Throw<SupervisionStateUnreadableException>(
+            () => new SupervisionState(StatePath).SetDesire("demo-abc12345", WatchDesire.Running));
+
+        File.SetUnixFileMode(StatePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        File.ReadAllText(StatePath).ShouldBe("""{"stores": {"demo-abc12345": "Stopped"}}""");
     }
 
     [Fact]
@@ -202,5 +277,18 @@ public sealed class SupervisionStateTests : IDisposable
         File.WriteAllText(StatePath, json);
     }
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    private sealed record PreElevenThirteenStateFile(Dictionary<string, string>? Stores);
+
+    public void Dispose()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            foreach (var path in Directory.EnumerateFiles(_dir, "*", SearchOption.AllDirectories))
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+
+        Directory.Delete(_dir, recursive: true);
+    }
 }

@@ -6,4 +6,5 @@ public enum WatchdSessionState
     Stopped,
     Wedged,
     ManagedElsewhere,
+    NoSupervisor,
 }

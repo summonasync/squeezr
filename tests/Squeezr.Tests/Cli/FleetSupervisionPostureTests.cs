@@ -77,10 +77,24 @@ public sealed class FleetSupervisionPostureTests
     }
 
     [Fact]
-    public void NothingAlive_WithoutWatchd_IsStopped()
+    public void NothingAlive_WithoutWatchd_IsIdleNoSupervisor_NotStopped()
     {
         FleetSupervisionPosture.Resolve(WatchDesire.Running, Health(WatchIndexerState.None), watchdRunning: false)
+            .ShouldBe(FleetSupervisionPosture.Idle);
+        FleetSupervisionPosture.Resolve(WatchDesire.Running, Health(WatchIndexerState.Gone), watchdRunning: false)
+            .ShouldBe(FleetSupervisionPosture.Idle);
+    }
+
+    // The pair R5 is about: nothing runs in either row, and only the second one was asked for.
+    [Fact]
+    public void SameDeadBody_WishedStopped_ReadsStopped_WishedIdle_ReadsIdle()
+    {
+        var none = Health(WatchIndexerState.None);
+
+        FleetSupervisionPosture.Resolve(WatchDesire.Stopped, none, watchdRunning: false)
             .ShouldBe(FleetSupervisionPosture.Stopped);
+        FleetSupervisionPosture.Resolve(WatchDesire.Running, none, watchdRunning: false)
+            .ShouldBe(FleetSupervisionPosture.Idle);
     }
 
     private static WatchStoreHealth Health(
