@@ -827,7 +827,12 @@ Codex — AGENTS.md, Qwen — QWEN.md); `mcp remove` takes it back out.
 
 `squeezr mcp doctor` — the attach checkup: client found, entry present
 (user/project), binary on PATH, workspace indexed, headless status through the
-client's CLI. Plus detection of **stale registrations**: if a client config
+client's CLI. It also reads the managed hook block that `mcp install` arms in
+the same pass and `mcp remove` strips: one `hook pre-read: <state>` line per
+client (`armed`, `armed (project scope)`, `not armed`, or the reason the layout
+cannot be armed at all — hook layout unverified), plus an additive `hookStatus`
+per entry in `--json`; the arming rules are under **Advisory hook**. Plus
+detection of **stale registrations**: if a client config
 names a path other than the stable one, doctor shows `stale` with the pair
 "registered → expected" and a ready repair command (`squeezr mcp install
 --client <id> --yes`); in `--json` — additive
@@ -917,34 +922,74 @@ by `serve` itself from the process cwd (and `CLAUDE_PROJECT_DIR`, see above).
 
 ### Advisory hook: `squeezr hook pre-read`
 
-A hook for Claude Code (PreToolUse on Read): squeezr reads the hook payload
-from stdin and, if the file lives in a registered workspace and looks like a
-bulk read — ≥ 256 KB on disk, or a wide range requested (limit ≥ 400 lines) —
-it appends a soft nudge into the agent's context: "the workspace is indexed —
-consider code_search / symbol_lookup + expand_span instead of reading it
-whole". An explicitly narrow limit suppresses the nudge: the agent is already
-reading a targeted span.
+A PreToolUse hook on the read tool, for every runtime whose hook layout squeezr
+has verified. The command reads the hook payload from stdin and, if the file
+lives in a registered workspace and looks like a bulk read — ≥ 256 KB on disk,
+or a wide range requested (limit ≥ 400 lines) — it answers with a soft nudge,
+verbatim: "This workspace is indexed by squeezr. For a read this size,
+code_search or symbol_lookup can locate the relevant lines, and
+expand_span(file, startLine, endLine) returns just that span from the live
+file. If the file or repo is not in the index, a plain Read is correct." An
+explicitly narrow limit suppresses the nudge: the agent is already reading a
+targeted span. The hook only ever sees calls the host's matcher routes to it,
+and the advice lands only when the payload parses and the rule above says
+"bulk" — the measured delivery is the whole-file read. One open defect sits
+inside that path (`BUGS/028`: a payload that quotes its numbers,
+`"offset":"437"`, is unreadable to the deserializer and mutes the hook — advice
+and telemetry row both); it is a gap, not the design, and it is not fixed here.
+
+**`tool_name` carries the runtime's own id.** Qwen sends `read_file`, Claude
+sends `Read`. Nothing is normalized: the command accepts a declared set —
+`Read`, `read_file`, `ReadFile` — compared Ordinal-exact, so a name nobody
+measured stays silent instead of being lowercased into something invented.
+`Read`/`ReadFile` are accepted *matcher aliases* on Qwen (its hook surface lets
+a pattern name the read tool either way), while the payload Qwen actually
+delivers still says `read_file` — which is why the armed Qwen pattern is
+`^read_file$` and not an alias. The telemetry row keeps whatever the payload
+carried, verbatim, because that verbatim value is the runtime evidence `usage`
+reads back.
+
+**The advice is a JSON object, never bare text:**
+
+```json
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"…"}}
+```
+
+The shape is load-bearing: the Qwen aggregator collects `additionalContext`
+without requiring `permissionDecision`, so the text arrives in the model's
+context. Plain text on stdout at exit 0 would reach the human as a UI
+`systemMessage` and never touch the model — a nudge nobody reads.
 
 Everything else — silence: a non-workspace path, a small file, a missing
 file, malformed stdin → empty stdout, exit 0. The hook is advisory-only — it
-sets no `permissionDecision` and never blocks Read; internal errors are
+sets no `permissionDecision` and never blocks a read; internal errors are
 fail-open (silent, code 0). No network — only the workspace registry and a
-stat of the file, so it is cheap to run on every Read.
+stat of the file, so it is cheap to run on every read.
 
-The snippet is applied by hand (crew policy: agents are forbidden from
-writing hook configs). In `~/.claude/settings.json` (user scope; for a single
-project — `.claude/settings.json`):
+**Arming is `squeezr mcp install`'s job now.** `<removed 2026-11-11 — 114/T3>`
+~~The snippet is applied by hand (crew policy: agents are forbidden from
+writing hook configs).~~</removed> One command writes the managed block,
+`mcp doctor` reports the state it measured, `mcp remove` takes it back out:
+
+| Client | armed matcher | hooks file (user scope) | doctor state |
+|---|---|---|---|
+| Claude Code | `Read` | `~/.claude/settings.json` — a different file from the `~/.claude.json` server entry | `armed` |
+| Qwen Code | `^read_file$` (anchored: Qwen evaluates matchers as regex) | `~/.qwen/settings.json` — `hooks` lands as an additive sibling of `mcpServers` | `armed` |
+| Kimi Code, Codex CLI | — | not armed (hook layout unverified) | `not armed (hook layout unverified)` |
+
+The written entry takes this shape — the command is the canonical absolute path
+of the binary, quoted when it contains a space:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read",
+        "matcher": "^read_file$",
         "hooks": [
           {
             "type": "command",
-            "command": "squeezr hook pre-read"
+            "command": "/home/you/.local/bin/squeezr hook pre-read"
           }
         ]
       }
@@ -952,6 +997,43 @@ project — `.claude/settings.json`):
   }
 }
 ```
+
+`--scope project` arms the workspace's own settings file instead
+(`<root>/.claude/settings.json`, `<root>/.qwen/settings.json`); `mcp install
+--project` alone — block-only mode, no clients — arms nothing, and no flag
+skips the arm: it rides with the client registration. There is no
+hook-specific opt-out.
+
+What counts as managed is defined strictly: the command equals the one install
+computes, or it is `<exe> hook pre-read` with the executable named `squeezr`.
+So a snippet applied by hand before this feature is managed too — install
+normalizes it into the canonical form, remove strips it. Merge-safety, stated
+at the altitude it was proven: foreign entries under `PreToolUse` are preserved
+by canonical serialization, and whole-file byte-identity is proven against the
+canonical pre-image — the JSON round-trip reformats the file (the same posture
+as the direct config writer), a foreign shape the merge cannot resolve refuses
+the write before touching it, and a second install writes neither the block nor
+a `.bak`. The `.bak` a re-install does leave behind comes from the
+server-entry write; the hook upsert stays silent because the block is already
+canonical.
+
+The `hook pre-read armed` line and the additive `hooksArmed` key claim a state,
+not a write: they are true for any client whose hook layout resolves, so an
+idempotent re-run still says armed having moved no byte. `mcp doctor` is the
+place that answers what is actually on disk.
+
+**Why the hook exists, in the numbers.** Every matching call into a registered
+workspace appends a telemetry row (`client: "hook"`), and `squeezr usage --json`
+rolls them up under `totals.sessions`: `hookSessions` is the distinct set of
+reading sessions and stays the denominator the adoption ratio divides by, while
+`hookSessionsByTool` holds one bucket per verbatim recorded tool name and
+`hookSessionsWithoutTool` counts the distinct sessions whose rows named no tool
+at all. Read the buckets as *observed under this name*: a session that read
+through two tools is counted in both, so buckets overlap and are not exhaustive
+— **never sum them to get `hookSessions`**, and `hookSessionsWithoutTool` sits
+outside the per-tool list. The runtime name beside a tool is a reading rule,
+not a matcher: a `Read` row is called Claude Code because that is what the row
+says, not because some other host was ruled out.
 
 ### Tools
 
