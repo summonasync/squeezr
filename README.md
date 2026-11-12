@@ -933,10 +933,13 @@ file. If the file or repo is not in the index, a plain Read is correct." An
 explicitly narrow limit suppresses the nudge: the agent is already reading a
 targeted span. The hook only ever sees calls the host's matcher routes to it,
 and the advice lands only when the payload parses and the rule above says
-"bulk" — the measured delivery is the whole-file read. One open defect sits
-inside that path (`BUGS/028`: a payload that quotes its numbers,
-`"offset":"437"`, is unreadable to the deserializer and mutes the hook — advice
-and telemetry row both); it is a gap, not the design, and it is not fixed here.
+"bulk". A payload that quotes its numbers — the shape a paged Qwen read takes
+when the host forwards the model's raw arguments (`"offset":"437"`) — parses
+exactly like the numeric one: quoted decimal integers are read as numbers,
+quoted non-digits still fail open. Measured delivery: the whole-file read in
+an armed live Qwen session (`audits/hook-live-2026-11-11/`); the quoted-number
+arms by in-process A/B replay against the armed command
+(`audits/t6-028-fix-2026-11-12/`).
 
 **`tool_name` carries the runtime's own id.** Qwen sends `read_file`, Claude
 sends `Read`. Nothing is normalized: the command accepts a declared set —

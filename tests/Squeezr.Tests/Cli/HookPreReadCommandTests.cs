@@ -310,6 +310,147 @@ public sealed class HookPreReadCommandTests
         protectedRun.StdOut.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task QuotedRangeArgs_OnLargeFile_EmitTheByteSameNudgeAsNumericArgs()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+
+        var numericRun = await CliTestProcess.RunPipedAsync(
+            home, ReadPayload(bigFile, limit: 437, offset: 400, toolName: "read_file"), root, "hook", "pre-read");
+        var quotedRun = await CliTestProcess.RunPipedAsync(
+            home, QuotedRangePayload(bigFile, "437", "400"), root, "hook", "pre-read");
+
+        numericRun.ExitCode.ShouldBe(0);
+        quotedRun.ExitCode.ShouldBe(0);
+        quotedRun.StdOut.ShouldContain("expand_span");
+        quotedRun.StdOut.ShouldBe(numericRun.StdOut);
+    }
+
+    [Theory]
+    [InlineData("399", false)]
+    [InlineData("400", true)]
+    [InlineData("401", true)]
+    [InlineData("2000", true)]
+    public async Task QuotedLimit_Boundary_AnswersAsTheNumericArm(string limit, bool nudges)
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var smallFile = Path.Combine(root, "small.cs");
+        await File.WriteAllTextAsync(smallFile, "class Small { }");
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home, QuotedRangePayload(smallFile, limit), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        if (nudges)
+        {
+            result.StdOut.ShouldContain("expand_span");
+        }
+        else
+        {
+            result.StdOut.ShouldBeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task QuotedOffsetWithNumericLimit_OnLargeFile_EmitsAdvisoryNudge()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home, MixedRangePayload(bigFile, "437", 400), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldContain("expand_span");
+    }
+
+    [Fact]
+    public async Task QuotedOffsetWithoutLimit_LargeFile_EmitsAdvisoryNudge()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home, QuotedRangePayload(bigFile, null, "5000"), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldContain("expand_span");
+    }
+
+    [Fact]
+    public async Task QuotedNarrowLimit_OnLargeFile_PrintsNothing()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+
+        var result = await CliTestProcess.RunPipedAsync(
+            home, QuotedRangePayload(bigFile, "399", "437"), root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task TruncatedPayload_OnLargeFile_PrintsNothing()
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+
+        var complete = ReadPayload(bigFile, toolName: "read_file");
+        var result = await CliTestProcess.RunPipedAsync(
+            home, complete[..(complete.Length - 2)], root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("[{\"tool_name\":\"read_file\"}]")]
+    [InlineData("\"read_file\"")]
+    [InlineData("42")]
+    public async Task WrongRootTypePayload_PrintsNothing(string payload)
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+
+        var result = await CliTestProcess.RunPipedAsync(home, payload, root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("{\"limit\":\"wide\"}")]
+    [InlineData("{\"limit\":\"400abc\"}")]
+    [InlineData("{\"limit\":\"\"}")]
+    public async Task QuotedNonNumericRangeValue_OnLargeFile_PrintsNothing(string rangeFragment)
+    {
+        var home = TestDirs.NewTempDir();
+        var root = await NewInitializedWorkspaceAsync(home);
+        var bigFile = Path.Combine(root, "generated.cs");
+        await File.WriteAllTextAsync(bigFile, new string('x', 300 * 1024));
+
+        var payload = "{\"tool_name\":\"read_file\",\"tool_input\":{\"file_path\":\"" + bigFile + "\"" +
+                      rangeFragment.TrimStart('{').TrimEnd('}') + "}}";
+
+        var result = await CliTestProcess.RunPipedAsync(home, payload, root, "hook", "pre-read");
+
+        result.ExitCode.ShouldBe(0);
+        result.StdOut.ShouldBeEmpty();
+    }
+
     private static async Task<string> NewInitializedWorkspaceAsync(string home)
     {
         var root = TestDirs.NewTempDir();
@@ -323,4 +464,16 @@ public sealed class HookPreReadCommandTests
         var start = offset is null ? string.Empty : $",\"offset\":{offset}";
         return "{\"tool_name\":\"" + toolName + "\",\"tool_input\":{\"file_path\":\"" + filePath + "\"" + range + start + "}}";
     }
+
+    // the shape Qwen 0.27.1 forwards for a paged read: the same fields, the numbers quoted
+    private static string QuotedRangePayload(string filePath, string? limit = null, string? offset = null, string toolName = "read_file")
+    {
+        var range = limit is null ? string.Empty : $",\"limit\":\"{limit}\"";
+        var start = offset is null ? string.Empty : $",\"offset\":\"{offset}\"";
+        return "{\"tool_name\":\"" + toolName + "\",\"tool_input\":{\"file_path\":\"" + filePath + "\"" + range + start + "}}";
+    }
+
+    private static string MixedRangePayload(string filePath, string offset, int limit, string toolName = "read_file") =>
+        "{\"tool_name\":\"" + toolName + "\",\"tool_input\":{\"file_path\":\"" + filePath +
+        "\",\"limit\":" + limit + ",\"offset\":\"" + offset + "\"}}";
 }
