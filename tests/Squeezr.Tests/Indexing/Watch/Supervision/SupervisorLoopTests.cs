@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Indexing.Watch;
@@ -10,6 +11,11 @@ namespace Squeezr.Tests.Indexing.Watch.Supervision;
 public sealed class SupervisorLoopTests : IDisposable
 {
     private static readonly DateTime Now = new(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc);
+
+    private static readonly UnixFileMode DirWritable =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+        UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
 
     private const string OwnBinary = "/opt/squeezr/squeezr";
 
@@ -124,6 +130,66 @@ public sealed class SupervisorLoopTests : IDisposable
         workspace.Launcher.Roots.ShouldHaveSingleItem();
     }
 
+    // The R1 round trip in the shape the two doors really take: the live loop wedges the store with its
+    // own guard, the CLI clears it through CrashLoopGuard.Reset (the call fleet restart makes), and the
+    // same loop reads the clearance off the file on its next sweep.
+    [Fact]
+    public void WedgeTheLoopItselfMade_ClearedByACliShapedGuard_ReleasesTheStoreOnTheNextSweep()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(exited: true);
+        var loop = NewLoop(workspace);
+
+        for (var sweep = 0; sweep < CrashLoopGuard.RestartLimit; sweep++)
+        {
+            loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+        }
+
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+        new SupervisionState(StateFile).Read().IsWedged(workspace.StoreKey).ShouldBeTrue();
+
+        new CrashLoopGuard(new SupervisionState(StateFile)).Reset(workspace.StoreKey);
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+        workspace.Launcher.Roots.Count.ShouldBe(CrashLoopGuard.RestartLimit + 1);
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void WedgeMarkerThatCannotBeWritten_KeepsTheStoreBlocked_AndTheRowNamesTheFault()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(exited: true);
+        var locked = Path.Combine(_root, "locked");
+        Directory.CreateDirectory(locked);
+        var state = new SupervisionState(Path.Combine(locked, "state.json"));
+        state.SetDesire(workspace.StoreKey, WatchDesire.Running);
+        var loop = NewLoop([workspace.Entry], state: state, launcher: workspace.Launcher);
+        File.SetUnixFileMode(locked, DirWritable & ~UnixFileMode.UserWrite);
+        try
+        {
+            for (var sweep = 0; sweep < CrashLoopGuard.RestartLimit; sweep++)
+            {
+                loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+            }
+
+            var sixth = loop.RunOnce().Stores[0];
+            sixth.Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+            sixth.Detail.ShouldNotBeNull().ShouldContain("never reached state.json");
+
+            for (var sweep = 0; sweep < 3; sweep++)
+            {
+                loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+            }
+
+            workspace.Launcher.Roots.Count.ShouldBe(CrashLoopGuard.RestartLimit,
+                "an unwritable marker must not turn the wedge into a restart flap");
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, DirWritable);
+        }
+    }
+
     [Fact]
     public void UnreadableStateJson_FailClosed_NobodyIsStarted_AndTheLiveWatcherIsNotStopped()
     {
@@ -158,6 +224,9 @@ public sealed class SupervisorLoopTests : IDisposable
         warning.ShouldContain("nothing is started", Case.Insensitive);
         warning.ShouldContain("running watchers are left alone", Case.Insensitive);
         warning.ShouldContain("repair", Case.Insensitive);
+        warning.ShouldContain("retire", Case.Insensitive,
+            "the warn must name the second casualty: an unreadable channel also stalls the upgrade retire");
+        warning.ShouldContain("already running", Case.Insensitive);
     }
 
     [Fact]

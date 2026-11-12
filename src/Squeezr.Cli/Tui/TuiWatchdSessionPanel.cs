@@ -86,20 +86,42 @@ public static class TuiWatchdSessionPanel
         }
     }
 
-    private static async Task RestartAsync(
+    internal static async Task RestartAsync(
         IAnsiConsole console,
         string storeKey,
         SupervisionState state,
         IWatchdSupervisorSource source,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int pollLimit = RestartPollLimit,
+        TimeSpan? pollInterval = null)
     {
+        var gap = pollInterval ?? RestartPollInterval;
         state.SetDesire(storeKey, WatchDesire.Stopped);
-        for (var attempt = 0; attempt < RestartPollLimit && source.IsWatcherRunning(storeKey); attempt++)
+        var watcherSeen = source.IsWatcherRunning(storeKey);
+        var watcher = watcherSeen;
+        for (var attempt = 0; watcher && attempt < pollLimit; attempt++)
         {
-            await Task.Delay(RestartPollInterval, cancellationToken);
+            await Task.Delay(gap, cancellationToken);
+            watcher = source.IsWatcherRunning(storeKey);
         }
 
         state.SetDesire(storeKey, WatchDesire.Running);
+        if (!watcherSeen)
+        {
+            console.MarkupLine(
+                $"[yellow]no watcher was running for {Markup.Escape(storeKey)}[/] — the desire is back to " +
+                "running and the supervisor starts it on its next pass.");
+            return;
+        }
+
+        if (watcher)
+        {
+            console.MarkupLine(
+                $"[yellow]restart pending for {Markup.Escape(storeKey)}[/] — the watcher was still up when " +
+                "the panel stopped asking; the supervisor will converge on its own passes.");
+            return;
+        }
+
         console.MarkupLine(
             $"[green]restart requested for {Markup.Escape(storeKey)}[/] — " +
             "the supervisor stops the watcher, then starts it fresh.");

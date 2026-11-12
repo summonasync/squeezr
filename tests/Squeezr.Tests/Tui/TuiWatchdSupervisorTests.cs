@@ -102,14 +102,16 @@ public sealed class TuiWatchdSupervisorTests : IDisposable
         var source = RealSource([entry], state, health: _ =>
         {
             healthCalls++;
-            return healthCalls == 1
+            // The table render eats the first probe, so the watcher has to still be alive for the
+            // panel's own first ask; from the second ask on it is gone and the restart can be requested.
+            return healthCalls <= 2
                 ? new WatchStoreHealth(WatchIndexerState.Alive, 4711, "watch", null, 0)
                 : new WatchStoreHealth(WatchIndexerState.None, null, null, null, 0);
         });
         await TuiWatchdSupervisor.RunAsync(console, source, state);
 
         state.DesireOf(entry.StoreKey).ShouldBe(WatchDesire.Running);
-        healthCalls.ShouldBeGreaterThan(1);
+        healthCalls.ShouldBeGreaterThan(2);
         console.Output.ShouldContain("restart requested");
     }
 

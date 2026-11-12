@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Daemons;
@@ -11,6 +12,9 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Settings>
 {
+    private static readonly TimeSpan SettleWindow = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan SettlePoll = TimeSpan.FromMilliseconds(50);
+
     private readonly DaemonLauncher _launcher;
     private readonly SupervisionState _state;
     private readonly CrashLoopGuard _guard;
@@ -122,11 +126,10 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
             _state.SetDesire(entry.StoreKey, WatchDesire.Running);
             _guard.Reset(entry.StoreKey);
 
-            int pid;
+            Process process;
             try
             {
-                using var process = _launcher.StartWatch(entry.RootPath);
-                pid = process.Id;
+                process = _launcher.StartSupervisedWatch(entry.RootPath);
             }
             catch (WorkspaceException)
             {
@@ -137,15 +140,20 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
                 throw new WorkspaceException($"Failed to start the watch daemon: {ex.Message}", innerException: ex);
             }
 
-            Report(
-                new FleetRestartResult(
-                    entry.Name,
-                    entry.StoreKey,
-                    previousStatus,
-                    previousPid,
-                    pid,
-                    WatchDesire.Running.ToString().ToLowerInvariant()),
-                settings.Json);
+            using (process)
+            {
+                Report(
+                    new FleetRestartResult(
+                        entry.Name,
+                        entry.StoreKey,
+                        previousStatus,
+                        previousPid,
+                        process.Id,
+                        WatchDesire.Running.ToString().ToLowerInvariant(),
+                        await WatcherSettled(process, cancellationToken)),
+                    settings.Json);
+            }
+
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -166,14 +174,58 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
             return;
         }
 
+        ReportVerdict(result, AnsiConsole.Console);
+    }
+
+    internal static void ReportVerdict(FleetRestartResult result, IAnsiConsole console)
+    {
+        if (!result.WatcherAlive)
+        {
+            console.MarkupLine(
+                $"[yellow]watch[/]: restart pending — the daemon (pid {result.Pid}) was gone before it " +
+                "settled; the supervisor will converge on its next pass");
+            return;
+        }
+
         if (result.PreviousStatus == "not-running")
         {
-            AnsiConsole.MarkupLine($"[green]watch[/]: started (pid {result.Pid})");
+            console.MarkupLine($"[green]watch[/]: started (pid {result.Pid})");
         }
         else
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[green]watch[/]: restarted (pid {result.PreviousPid} stopped {result.PreviousStatus}, new pid {result.Pid})");
+        }
+    }
+
+    // A daemon that declines the claim or crashes on startup is gone within milliseconds of the spawn, so
+    // one short settle window separates "running" from "exited" without making the command wait out the
+    // claim grace the supervised start is now willing to sit through.
+    private static async Task<bool> WatcherSettled(Process process, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + SettleWindow;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (HasGone(process))
+            {
+                return false;
+            }
+
+            await Task.Delay(SettlePoll, cancellationToken);
+        }
+
+        return !HasGone(process);
+    }
+
+    private static bool HasGone(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            return true;
         }
     }
 }

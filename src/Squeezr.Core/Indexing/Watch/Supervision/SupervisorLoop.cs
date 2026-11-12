@@ -166,7 +166,7 @@ public sealed class SupervisorLoop
         if (_guard.IsWedged(entry.StoreKey))
         {
             return Report(entry, desire, null, WatchIndexerState.None, SupervisionAction.BlockedByCrashLoop,
-                WedgedDetail());
+                WedgedDetail(entry.StoreKey));
         }
 
         if (_managed.TryGetValue(entry.StoreKey, out var managed))
@@ -213,7 +213,7 @@ public sealed class SupervisorLoop
         if (!_guard.RegisterRestart(entry.StoreKey, now))
         {
             return Report(entry, WatchDesire.Running, null, indexerState, SupervisionAction.BlockedByCrashLoop,
-                WedgedDetail());
+                WedgedDetail(entry.StoreKey));
         }
 
         try
@@ -276,11 +276,19 @@ public sealed class SupervisorLoop
         int? managedPid = null) =>
         new(entry.StoreKey, entry.Name, entry.RootPath, desire, indexerState, ownerPid, managedPid, action, detail);
 
-    private static string WedgedDetail() =>
-        $"restarts stopped after {CrashLoopGuard.RestartLimit} starts inside {CrashLoopGuard.Window.TotalMinutes:F0} minutes";
+    private string WedgedDetail(string storeKey)
+    {
+        var detail =
+            $"restarts stopped after {CrashLoopGuard.RestartLimit} starts inside {CrashLoopGuard.Window.TotalMinutes:F0} minutes";
+        return _guard.WedgeWriteFault(storeKey) is { } fault
+            ? $"{detail}; the marker never reached state.json ({fault}) — the wedge holds in this process " +
+              "only until the write lands"
+            : detail;
+    }
 
     private static string UnreadableStateWarning(SupervisionSnapshot supervision) =>
         $"supervision state '{supervision.FilePath}' {supervision.Fault}; nothing is started from the recorded " +
-        "desires and running watchers are left alone — repair the JSON, or move the file away to start " +
-        "supervision from the running default";
+        "desires and running watchers are left alone, and with the fleet never swept an upgraded watchd cannot " +
+        "retire this one either — it exits as already running until the file is fixed. Repair the JSON, or move " +
+        "the file away to start supervision from the running default";
 }

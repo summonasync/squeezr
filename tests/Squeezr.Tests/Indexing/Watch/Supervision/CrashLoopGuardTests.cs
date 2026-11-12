@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Core.Indexing.Watch.Supervision;
 
@@ -6,6 +7,11 @@ namespace Squeezr.Tests.Indexing.Watch.Supervision;
 public sealed class CrashLoopGuardTests : IDisposable
 {
     private static readonly DateTime Start = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
+
+    private static readonly UnixFileMode DirWritable =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+        UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
 
     private readonly string _dir = TestDirs.NewTempDir();
 
@@ -79,6 +85,80 @@ public sealed class CrashLoopGuardTests : IDisposable
 
         File.Exists(StatePath).ShouldBeTrue("the marker is the file, not the guard");
         new SupervisionState(StatePath).Read().IsWedged("demo").ShouldBeTrue();
+        guard.WedgeWriteFault("demo").ShouldBeNull();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void WedgeWriteFails_MemoryKeepsTheBlock_AndTheSyncRefusesToReleaseWhatNeverFlushed()
+    {
+        LockTheChannel();
+        try
+        {
+            var guard = NewGuard();
+            Wedge(guard, "demo");
+
+            guard.IsWedged("demo").ShouldBeTrue();
+            guard.WedgeWriteFault("demo").ShouldNotBeNull("the write fault is the operator's only signal");
+            new SupervisionState(StatePath).Read().IsWedged("demo")
+                .ShouldBeFalse("the channel never accepted the marker");
+
+            guard.SyncWedged(new HashSet<string>(StringComparer.Ordinal));
+
+            guard.IsWedged("demo").ShouldBeTrue("the file cannot release a marker it never accepted");
+            guard.RegisterRestart("demo", Start.AddMinutes(30)).ShouldBeFalse(
+                "an unflushed wedge must not hand the store a fresh budget on the next sweep");
+        }
+        finally
+        {
+            UnlockTheChannel();
+        }
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void WedgeWriteFails_HealsOnTheNextSyncOnceTheChannelOpens_AndTheMarkerLands()
+    {
+        LockTheChannel();
+        var guard = NewGuard();
+        try
+        {
+            Wedge(guard, "demo");
+            guard.WedgeWriteFault("demo").ShouldNotBeNull();
+        }
+        finally
+        {
+            UnlockTheChannel();
+        }
+
+        guard.SyncWedged(new HashSet<string>(StringComparer.Ordinal));
+
+        new SupervisionState(StatePath).Read().IsWedged("demo").ShouldBeTrue();
+        guard.WedgeWriteFault("demo").ShouldBeNull();
+        guard.IsWedged("demo").ShouldBeTrue();
+        guard.RegisterRestart("demo", Start.AddMinutes(30)).ShouldBeFalse();
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void WedgeWriteFails_ACliResetStillReleasesTheStore_ForTheGuardThatCouldNotFlush()
+    {
+        LockTheChannel();
+        try
+        {
+            var guard = NewGuard();
+            Wedge(guard, "demo");
+
+            guard.Reset("demo");
+
+            guard.IsWedged("demo").ShouldBeFalse();
+            guard.WedgeWriteFault("demo").ShouldBeNull();
+            guard.RegisterRestart("demo", Start.AddMinutes(30)).ShouldBeTrue();
+        }
+        finally
+        {
+            UnlockTheChannel();
+        }
     }
 
     [Fact]
@@ -149,6 +229,19 @@ public sealed class CrashLoopGuardTests : IDisposable
     }
 
     private CrashLoopGuard NewGuard() => new(new SupervisionState(StatePath));
+
+    [SupportedOSPlatform("linux")]
+    private void LockTheChannel()
+    {
+        var dir = Path.GetDirectoryName(StatePath)!;
+        Directory.CreateDirectory(dir);
+        new SupervisionState(StatePath).SetDesire("seed", WatchDesire.Running);
+        File.SetUnixFileMode(dir, DirWritable & ~UnixFileMode.UserWrite);
+    }
+
+    [SupportedOSPlatform("linux")]
+    private void UnlockTheChannel() =>
+        File.SetUnixFileMode(Path.GetDirectoryName(StatePath)!, DirWritable);
 
     private static void Wedge(CrashLoopGuard guard, string storeKey)
     {

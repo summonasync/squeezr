@@ -129,6 +129,7 @@ public sealed class FleetDesiredStateTests : IDisposable
         payload.GetProperty("desired").GetString().ShouldBe("running");
         var pid = payload.GetProperty("pid").GetInt32();
         pid.ShouldBeGreaterThan(0);
+        payload.GetProperty("watcherAlive").GetBoolean().ShouldBeTrue();
         guard.IsWedged(storeKey).ShouldBeFalse("fleet restart is the documented way out of a crash-loop wedge");
         NewState().DesireOf(storeKey).ShouldBe(WatchDesire.Running);
         TrackSpawned(pid).HasExited.ShouldBeFalse();
