@@ -226,7 +226,12 @@ plain grep/read is correct, not a violation.
   tool that returns raw source lines; reads the live file on disk, so it reflects
   edits newer than the index. Call it on coordinates from other tools.
 - `index_status()` — workspace freshness: per-repo counts, pending embeddings,
-  semantic coverage (`embeddings.coverage`, embedded share of chunks 0..1),
+  semantic coverage (`embeddings.coverage`, embedded share of chunks 0..1), the
+  embedding identity (`embeddings.modelKey` — the model whose vectors are in this
+  store — with `embeddings.otherModelChunks`, how many embedded chunks carry a
+  different one; both absent when the provider does not resolve, and reading them
+  costs one bounded provider probe per call: ~5 s worst case under `auto`, ~2 s
+  explicit ollama, 0 s OpenAI-compatible),
   per-kind chunk counts (`kindChunks`: `code`/`docs`, values sum to the per-repo
   chunks counts), Qdrant availability, and the resolved workspace `rootPath` (if it is not your
   project's root, the session serves a different workspace). Call before heavy
