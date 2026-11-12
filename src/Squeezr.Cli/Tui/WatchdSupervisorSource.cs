@@ -94,6 +94,10 @@ public sealed class WatchdSupervisorSource : IWatchdSupervisorSource
         { DesireKnown = desireKnown };
     }
 
+    // The same dead body answers three different words, and the pair is the fleet's: stopped is a wish the
+    // operator wrote, starting is a wish the live supervisor is on its way to carry out, idle is a wish nobody
+    // is left to carry out. Naming the middle one "stopped" here while the fleet column called it "starting"
+    // made the two surfaces contradict each other about one store (113/R7, review-113-t4-01 obstacle 5).
     private static WatchdSessionState ClassifyState(
         WatchDesire desire,
         bool supervisorAlive,
@@ -105,7 +109,7 @@ public sealed class WatchdSupervisorSource : IWatchdSupervisorSource
                 WatchIndexerState.Alive => WatchdSessionState.Running,
                 WatchIndexerState.Foreign => WatchdSessionState.ManagedElsewhere,
                 WatchIndexerState.Wedged => WatchdSessionState.Wedged,
-                _ => supervisorAlive ? WatchdSessionState.Stopped : WatchdSessionState.NoSupervisor,
+                _ => supervisorAlive ? WatchdSessionState.Starting : WatchdSessionState.NoSupervisor,
             };
 
     private string DescribePass(PassPhaseStamp? pass, DateTime now)

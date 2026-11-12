@@ -81,6 +81,7 @@ public static class TuiWatchdSupervisor
     private static string StateCell(WatchdSessionState state) => state switch
     {
         WatchdSessionState.Running => "[green]running[/]",
+        WatchdSessionState.Starting => "[yellow]starting[/]",
         WatchdSessionState.Stopped => "[grey]stopped[/]",
         WatchdSessionState.Wedged => "[red]wedged[/]",
         WatchdSessionState.NoSupervisor => "[yellow]idle (no supervisor)[/]",

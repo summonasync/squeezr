@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Serialization;
 
@@ -7,8 +9,6 @@ namespace Squeezr.Core.Indexing.Watch.Supervision;
 
 public sealed class WatchdLock : IDisposable
 {
-    private static readonly TimeSpan StartedAtTolerance = TimeSpan.FromSeconds(2);
-
     private readonly string _path;
     private readonly Func<int, bool> _isProcessAlive;
     private readonly Func<int, DateTime?> _processStartUtc;
@@ -25,7 +25,7 @@ public sealed class WatchdLock : IDisposable
     {
         _path = path;
         _isProcessAlive = isProcessAlive ?? DaemonHeartbeatReader.IsProcessAlive;
-        _processStartUtc = processStartUtc ?? ReadProcessStartUtc;
+        _processStartUtc = processStartUtc ?? WatchdLockOwner.ReadLiveStartUtc;
     }
 
     public WatchdLockOutcome TryAcquire()
@@ -45,7 +45,7 @@ public sealed class WatchdLock : IDisposable
         var claim = new WatchdLockOwner(
             Environment.ProcessId,
             Environment.MachineName,
-            _processStartUtc(Environment.ProcessId) ?? DateTime.UtcNow);
+            _processStartUtc(Environment.ProcessId));
         try
         {
             WriteOwner(claim);
@@ -67,7 +67,7 @@ public sealed class WatchdLock : IDisposable
         }
 
         _held = null;
-        if (ReadLock().Owner is { } owner && owner.IsOwnedByCurrentProcess())
+        if (ReadLock().Owner is { } owner && owner.ClaimedByCurrentProcess)
         {
             TryDelete();
         }
@@ -173,7 +173,7 @@ public sealed class WatchdLock : IDisposable
 
     private bool IsOwnerAlive(WatchdLockOwner owner)
     {
-        if (!string.Equals(owner.Host, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
+        if (!owner.HeldOnThisHost)
         {
             return true;
         }
@@ -183,8 +183,8 @@ public sealed class WatchdLock : IDisposable
             return false;
         }
 
-        return _processStartUtc(owner.Pid) is not { } started
-            || (started - owner.StartedAtUtc).Duration() <= StartedAtTolerance;
+        return owner.CheckAgainstLiveStart(_processStartUtc(owner.Pid))
+            != WatchdLockOwner.StartCheck.Drifted;
     }
 
     private void WriteOwner(WatchdLockOwner owner)
@@ -205,19 +205,6 @@ public sealed class WatchdLock : IDisposable
         }
     }
 
-    private static DateTime? ReadProcessStartUtc(int pid)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            return process.StartTime.ToUniversalTime();
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            return null;
-        }
-    }
-
     private enum LockReadStatus
     {
         Missing,
@@ -229,11 +216,70 @@ public sealed class WatchdLock : IDisposable
     {
         public static readonly LockRead Missing = new(LockReadStatus.Missing, null, null);
     }
+}
 
-    private sealed record WatchdLockOwner(int Pid, string Host, DateTime StartedAtUtc)
+// The one wire shape of watchd.lock, and the only reader of it: the holder writes it, FleetWatchdProbe and
+// WatchdDaemonProbe read it, and the three fields are the whole contract — a pid, the host it was claimed on,
+// and when that process started. StartedAtUtc is nullable because the holder may not be able to read its own
+// start time: absence is an unanswered question, never a start time of now.
+public sealed record WatchdLockOwner(int Pid, string? Host, DateTime? StartedAtUtc)
+{
+    // A reader's two ways of not-knowing are different facts. NotRecorded is a claim that answered nothing;
+    // LiveUnreadable is a claim that answered, with a process this machine cannot inspect any more. They are
+    // kept apart so each surface can choose its own silence, and neither one is ever read as a drift.
+    public enum StartCheck
     {
-        public bool IsOwnedByCurrentProcess() =>
-            Pid == Environment.ProcessId
-            && string.Equals(Host, Environment.MachineName, StringComparison.OrdinalIgnoreCase);
+        NotRecorded,
+        LiveUnreadable,
+        Agreed,
+        Drifted,
+    }
+
+    // The clock a daemon writes and the process table answer it are two different reads of one instant, so a
+    // claim inside this window is the same process, not a recycled pid.
+    public static TimeSpan StartTimeTolerance { get; } = TimeSpan.FromSeconds(2);
+
+    // The two answers a reader asks of a claim are read, never written: the lock file carries pid, host and
+    // start time, and the byte shape of those three fields is the compatibility promise to every older claim.
+    [JsonIgnore]
+    public bool HeldOnThisHost =>
+        string.Equals(Host, Environment.MachineName, StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool ClaimedByCurrentProcess => Pid == Environment.ProcessId && HeldOnThisHost;
+
+    public StartCheck CheckAgainstLiveStart(DateTime? liveStartUtc) =>
+        StartedAtUtc is not { } recorded
+            ? StartCheck.NotRecorded
+            : liveStartUtc is not { } started
+                ? StartCheck.LiveUnreadable
+                : (started - recorded).Duration() <= StartTimeTolerance
+                    ? StartCheck.Agreed
+                    : StartCheck.Drifted;
+
+    public static DateTime? ReadLiveStartUtc(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return process.StartTime.ToUniversalTime();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    public static WatchdLockOwner? TryRead(string lockPath)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<WatchdLockOwner>(File.ReadAllText(lockPath), SqueezrJson.FileOptions);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 }
+

@@ -163,6 +163,19 @@ public sealed class TuiWatchdSupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_WantedStoreUnderLiveWatchd_ReadsStartingNotStopped()
+    {
+        var console = TuiTestHarness.InteractiveConsole();
+        var row = NewRow("demo", WatchdSessionState.Running) with { State = WatchdSessionState.Starting };
+        TuiTestHarness.PushMenuChoice(console, 1);
+
+        await TuiWatchdSupervisor.RunAsync(console, FakeSource(row), NewState());
+
+        console.Output.ShouldContain("starting");
+        console.Output.ShouldNotContain("stopped");
+    }
+
+    [Fact]
     public async Task Run_WantedStoreWithoutWatchd_ReadsIdleNoSupervisor_NotStopped()
     {
         var console = TuiTestHarness.InteractiveConsole();

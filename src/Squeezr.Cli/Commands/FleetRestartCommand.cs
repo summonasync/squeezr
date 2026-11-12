@@ -47,15 +47,10 @@ public sealed class FleetRestartCommand : AsyncCommand<FleetRestartCommand.Setti
     {
         try
         {
-            var entry = FleetStoreKeyResolver.Require(settings.StoreKey);
-            if (!Directory.Exists(entry.RootPath))
-            {
-                throw new WorkspaceException(
-                    $"Cannot restart workspace '{entry.Name}': root path '{entry.RootPath}' does not exist; " +
-                    $"remove the stale entry with 'squeezr drop --store-key {entry.StoreKey}'.");
-            }
+            var entry = FleetStoreKeyResolver.RequireResolvable(
+                FleetStoreKeyResolver.Require(settings.StoreKey), "restart");
 
-            var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
+            var storeDir = SqueezrPaths.StoreDir(entry);
             var now = DateTime.UtcNow;
             var owner = WatchOwnerMarker.TryRead(storeDir);
             string previousStatus;

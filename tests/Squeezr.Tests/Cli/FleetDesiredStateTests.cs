@@ -231,6 +231,26 @@ public sealed class FleetDesiredStateTests : IDisposable
         NewState().Read().Desires.ContainsKey(storeKey).ShouldBeFalse();
     }
 
+    // review-113-t4-01 obstacle 6: restart carried its own exists-check while the predicate that decides
+    // whether a store can receive a wish lives in one helper. Restart is a desire writer too, so it answers to
+    // that predicate — including the row whose store key names no directory of its own.
+    [Fact]
+    public async Task Restart_RowThatDoesNotResolve_Refuses_AndWritesNoDesire()
+    {
+        var (root, _) = await NewWorkspaceAsync("fleet-restart-unresolved");
+        const string storeKey = "bad/key";
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry(
+            "fleet-restart-unresolved", root, storeKey, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+
+        var result = await RunInProcessAsync(null, "restart", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(1);
+        result.StdErr.ShouldContain("Cannot restart workspace");
+        result.StdErr.ShouldContain("root path");
+        result.StdErr.ShouldContain($"squeezr drop --store-key {storeKey}");
+        NewState().Read().Desires.ContainsKey(storeKey).ShouldBeFalse();
+    }
+
     [Fact]
     public async Task ServeNoticeReading_WatchdHoldingTheLockOverACorruptState_AnswersUnreadable()
     {

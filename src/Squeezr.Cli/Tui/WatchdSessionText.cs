@@ -7,6 +7,7 @@ internal static class WatchdSessionText
     public static string State(WatchdSessionState state) => state switch
     {
         WatchdSessionState.Running => "running",
+        WatchdSessionState.Starting => "starting",
         WatchdSessionState.Stopped => "stopped",
         WatchdSessionState.Wedged => "wedged",
         WatchdSessionState.NoSupervisor => "idle (no supervisor)",

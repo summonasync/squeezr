@@ -105,7 +105,7 @@ public sealed class FleetStatusCommand : Command<FleetStatusCommand.Settings>
         SupervisionSnapshot supervision,
         bool stale)
     {
-        var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
+        var storeDir = SqueezrPaths.StoreDir(entry);
         var health = WatchStoreHealth.Probe(storeDir, now);
         // An unreadable file answers "unknown" for the wish and leaves the posture to the body: the live
         // facts behind supervision do not depend on the desire unless it says stopped, and a corrupt file

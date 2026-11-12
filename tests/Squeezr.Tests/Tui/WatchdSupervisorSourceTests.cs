@@ -68,13 +68,16 @@ public sealed class WatchdSupervisorSourceTests : IDisposable
             .State.ShouldBe(WatchdSessionState.NoSupervisor);
     }
 
+    // The wording gap review-113-t4-01 obstacle 5 carried here: under a live supervisor the same dead body is
+    // starting, not stopped — stopped stays the word for a wish the operator wrote.
     [Fact]
-    public void GoneOwner_UnderLiveWatchd_KeepsTheStoppedRow()
+    public void GoneOwner_UnderLiveWatchd_ReadsStartingNotStopped()
     {
         _healthState = WatchIndexerState.Gone;
 
-        ReadWithDesire(WatchDesire.Running, liveWatchd: true).Sessions.ShouldHaveSingleItem()
-            .State.ShouldBe(WatchdSessionState.Stopped);
+        var session = ReadWithDesire(WatchDesire.Running, liveWatchd: true).Sessions.ShouldHaveSingleItem();
+        session.State.ShouldBe(WatchdSessionState.Starting);
+        WatchdSessionText.State(session.State).ShouldBe("starting");
     }
 
     // R5 in one pair: the same dead body reads stopped when the operator stopped it and idle when nothing
