@@ -8,6 +8,7 @@ using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
+using Squeezr.Tests.Storage;
 
 namespace Squeezr.Tests.Workspace;
 
@@ -202,8 +203,8 @@ public sealed class WorktreeReconcileTests : IDisposable
     {
         var (main, child) = IndexedMainAndLane(out var collection);
         var (registered, fill) = FillLane(main, child, collection);
-        // a denied read is the shape the store reports as unreadable; a corrupted header is a different
-        // engine failure, and TryOpen does not claim to swallow it
+        // a denied read is one unreadable form; the header that will not decode is the other, and the two
+        // are different facts to a reader even though the store answers null for both
         var metaDb = SqueezrPaths.MetaDbPath(registered.RootPath);
         File.SetUnixFileMode(metaDb, UnixFileMode.None);
         Should.Throw<UnauthorizedAccessException>(() => File.OpenRead(metaDb).Dispose());
@@ -219,6 +220,25 @@ public sealed class WorktreeReconcileTests : IDisposable
         unreadableReason.ShouldContain("workspace repair");
         // the services are not the broken half here, and pointing at them wastes the reader's next step
         unreadableReason.ShouldNotContain(RemedyText.ServicesUp);
+    }
+
+    // The unreadable branch's doctrine is that it reports rather than throws, and the denied read pinned
+    // above proves only the half of it a chmod can reach: this is the form that comes out of the engine.
+    [Fact]
+    public void Reconcile_MetaDbMagicStandsAndItsHeaderFieldsDoNot_IsReportedUnreadableNotThrown()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        LiteDbHeaderCorruption.AfterTheMagic(SqueezrPaths.MetaDbPath(registered.RootPath));
+
+        var outcome = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        outcome.State.ShouldBe(WorktreeReconcileState.Pending);
+        outcome.Code.ShouldBe(WorktreeReconcileOutcome.StoreUnreadableCode);
+        outcome.CollectionPoints.ShouldBeNull();
+        outcome.Reason.ShouldNotBeNull().ShouldContain("workspace repair");
     }
 
     // The loud pass failure is the shape AC7 refuses: the verb says what did not land and which door finishes
@@ -384,6 +404,48 @@ public sealed class WorktreeReconcileTests : IDisposable
         // the door that turns the assumption into proof runs today
         second.Reason.ShouldNotBeNull().ShouldContain(RemedyText.IndexCommand);
         provider.EmbedCallCount.ShouldBe(callsAfterFirst, "a pass that was not owed asked for no embeddings");
+    }
+
+    // The other half of the session-start rule: a lane that kept its index is not a lane that stayed
+    // healthy, because the collection can lose its points between sessions. Nothing on disk changed and the
+    // fill owes nothing, so the measured gap is the only thing that can owe this lane its pass. If it does
+    // not, the degraded lane reads 're-run this verb' at every start forever — and the verb that re-runs
+    // never does the work it asks for.
+    [Fact]
+    public void Reconcile_LaneKeptItsIndexAndItsCollectionDegraded_TheNextSessionOwesThePassAgain()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        var first = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+        first.State.ShouldBe(WorktreeReconcileState.Reconciled);
+        var obligation = first.ObligationChunks;
+        obligation.ShouldNotBe(0, "a lane that claims no vector has no collection left to degrade");
+
+        collection.ReplaceWithForeignIdsOf(obligation);
+
+        var adopted = WorktreeRegistration.Register(child, null);
+        var kept = WorktreeStoreFill.Fill(adopted, true, ModelKey(main), null,
+            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
+        kept.State.ShouldBe(WorktreeFillState.Skipped);
+        kept.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex,
+            "the store kept its index, so the fill is not what could owe this session a pass");
+
+        var second = WorktreeReconcile.Run(
+            adopted, kept, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        second.PassRan.ShouldBeTrue(
+            "the hole in the coverage is the trigger, not the copy — the start that finds it owes the pass, "
+            + "so 're-run this verb' names a verb that works instead of one that measures and shrugs");
+        second.State.ShouldBe(WorktreeReconcileState.Pending);
+        second.Code.ShouldBe(WorktreeReconcileOutcome.CollectionShortCode);
+        second.ObligationChunks.ShouldBe(obligation);
+        second.CollectionPoints.ShouldBe(obligation,
+            "the collection answered a full set of points, so a count has nothing to complain about and it is "
+            + "the coverage that owes this lane its pass");
+        second.CoveredChunks.ShouldBe(0);
     }
 
     // A pass that never ran is not a proof, and a lane whose rows still describe another checkout must not

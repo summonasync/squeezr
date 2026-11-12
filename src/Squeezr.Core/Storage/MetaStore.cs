@@ -75,7 +75,12 @@ public sealed class MetaStore : IDisposable
         {
             return new MetaStore(dbPath);
         }
-        catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException or LiteException or InvalidOperationException)
+        // A header whose LiteDB magic stands while the fields behind it do not dies on a DateTime rather
+        // than on a LiteException, and every consumer of this door (fleet, stats, search, the worktree
+        // verbs) asks 'will this open' rather than 'open this' — so the crash is this method's to swallow.
+        catch (Exception ex)
+            when (ex is WorkspaceException or IOException or UnauthorizedAccessException or LiteException
+                or InvalidOperationException or ArgumentOutOfRangeException)
         {
             return null;
         }

@@ -37,6 +37,6 @@ internal static class WorktreeReconcileLine
             ? $"{reconcile.CoveredChunks?.ToString() ?? "no answer"} covered of {reconcile.ObligationChunks} "
                 + $"chunk hash(es) this store calls embedded, collection "
                 + $"{reconcile.CollectionPoints?.ToString() ?? "no answer"} point(s)"
-            : $"{reconcile.ObligationChunks} row(s) call themselves embedded, "
+            : $"{reconcile.ObligationChunks} chunk hash(es) this store calls embedded, "
                 + $"{reconcile.PendingChunks} chunk(s) wait for embeddings";
 }

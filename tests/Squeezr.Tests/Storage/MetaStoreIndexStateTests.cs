@@ -48,6 +48,20 @@ public class MetaStoreIndexStateTests
         MetaStore.TryOpen(NewDbPath()).ShouldBeNull();
     }
 
+    // The header form beside the missing-file one: this door answers null, it does not hand a crash out.
+    [Fact]
+    public void TryOpen_HeaderFieldsAreGarbageBehindTheMagic_ReturnsNull()
+    {
+        var path = NewDbPath();
+        using (var created = new MetaStore(path, createIfMissing: true))
+        {
+        }
+
+        LiteDbHeaderCorruption.AfterTheMagic(path);
+
+        MetaStore.TryOpen(path).ShouldBeNull();
+    }
+
     private static string NewDbPath() => Path.Combine(TestDirs.NewTempDir(), "meta.db");
 
     private static MetaStore NewStore() => new(NewDbPath(), createIfMissing: true);

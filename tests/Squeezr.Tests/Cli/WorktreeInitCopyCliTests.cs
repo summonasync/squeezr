@@ -122,6 +122,43 @@ public sealed class WorktreeInitCopyCliTests
         StoreFixture.Counts(childStoreDir).ShouldBe((1, 1));
     }
 
+    // The third state's carriers, measured through the CLI rather than in the core: the payload names the
+    // state and keeps the pending word, and the assumption reaches the channel a session-start hook reads.
+    // A hook that treats a copied store as proven is the reader this state exists to stop, and it reads
+    // stderr, not the reconcile block.
+    [Fact]
+    public async Task WorktreeInit_SecondPassOverAHealthyLane_ReportsAssumedAndWarnsOnStdErr()
+    {
+        const string branch = "feat/116-cli-assumed";
+        var main = IndexedMainWithPendingContent("cli-assumed-main");
+        var child = AddWorktree(main, branch);
+        PreMintLaneStore(child, branch, provider: "ollama", model: null, probeFails: true);
+
+        var first = await Run(child, "worktree", "init", "--no-semantic", "--json");
+
+        first.ExitCode.ShouldBe(0, first.StdErr);
+        using (var doc = JsonDocument.Parse(first.StdOut.Trim()))
+        {
+            doc.RootElement.GetProperty("fill").GetProperty("state").GetString().ShouldBe("Filled");
+            doc.RootElement.GetProperty("reconcile").GetProperty("state").GetString().ShouldBe("Reconciled",
+                "the session that ran the pass over this tree is the one allowed to say reconciled");
+        }
+
+        var second = await Run(child, "worktree", "init", "--no-semantic", "--json");
+
+        second.ExitCode.ShouldBe(0, second.StdErr);
+        using var again = JsonDocument.Parse(second.StdOut.Trim());
+        again.RootElement.GetProperty("fill").GetProperty("state").GetString().ShouldBe("Skipped");
+        var repeat = again.RootElement.GetProperty("reconcile");
+        repeat.GetProperty("state").GetString().ShouldBe("Assumed");
+        repeat.GetProperty("code").GetString().ShouldBe(WorktreeReconcileOutcome.AssumedCode);
+        repeat.GetProperty("passRan").GetBoolean().ShouldBeFalse();
+        again.RootElement.GetProperty("reconcilePending").GetBoolean().ShouldBeTrue(
+            "an assumed match is two copied numbers agreeing, so the reader keeps the pending word");
+        // the warning channel is where a hook that reads no payload learns the difference
+        second.StdErr.ShouldContain("no pass over this tree");
+    }
+
     // The query pins here run against the lane right after the verb: since T6 the verb itself lands one
     // incremental pass over this tree, so 'copied and silent' is no longer a state a reader can reach by
     // skipping 'squeezr index'. What these pins still prove is that a filled lane answers — status reports
@@ -271,6 +308,8 @@ public sealed class WorktreeInitCopyCliTests
         run.StdOut.ShouldContain("rescanned");
         run.StdOut.ShouldContain("re-embedded 0 chunk(s)");
         run.StdOut.ShouldContain("chunk(s) here have never been embedded");
+        // the printed unit is the unit the number is counted in, in the branch that reports no obligation too
+        run.StdOut.ShouldContain("chunk hash(es) this store calls embedded");
         run.StdOut.ShouldContain("fill: vectors");
         // the human surface has to say the vector arm was never asked, not leave it out silently
         run.StdOut.ShouldContain("no embedded chunks");
