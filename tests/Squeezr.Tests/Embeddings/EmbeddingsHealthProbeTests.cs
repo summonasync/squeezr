@@ -95,6 +95,59 @@ public sealed class EmbeddingsHealthProbeTests : IDisposable
     }
 
     [Fact]
+    public async Task Probe_OllamaProvider_NamesTheActiveModelKey()
+    {
+        SaveConfig(new EmbeddingsConfig
+        {
+            Provider = "ollama",
+            Ollama = new OllamaOptions { Endpoint = TestWorkspaceConfig.DeadOllamaEndpoint }
+        });
+
+        var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
+
+        health.Provider.ShouldBe("ollama");
+        health.ModelKey.ShouldBe(TestEmbeddingKeys.Calibrated);
+        health.OtherModelChunks.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Probe_OpenAiProvider_NamesTheKeyWithoutTouchingTheNetwork()
+    {
+        SaveConfig(new EmbeddingsConfig { Provider = "openai" });
+
+        var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
+
+        health.ModelKey.ShouldBe(TestEmbeddingKeys.UnregisteredOpenAiModel);
+    }
+
+    [Fact]
+    public async Task Probe_AutoProviderWithUnreachableOllama_KeepsTheSilentShape()
+    {
+        SaveConfig(new EmbeddingsConfig
+        {
+            Provider = "auto",
+            Ollama = new OllamaOptions { Endpoint = TestWorkspaceConfig.DeadOllamaEndpoint }
+        });
+
+        var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
+
+        health.ModelKey.ShouldBeNull();
+        health.OtherModelChunks.ShouldBeNull();
+        health.Provider.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Probe_ConfigWithoutEmbeddingsSection_KeepsTheSilentShape()
+    {
+        File.Delete(SqueezrPaths.ConfigPath(_root));
+
+        var health = await EmbeddingsHealthProbe.ProbeAsync(_root, CancellationToken.None);
+
+        health.ModelKey.ShouldBeNull();
+        health.OtherModelChunks.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Probe_OnnxStore_CarriesMigrationPathAsModelProblem()
     {
         SaveConfig(new EmbeddingsConfig { Provider = "onnx" });

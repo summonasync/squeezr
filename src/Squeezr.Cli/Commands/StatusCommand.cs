@@ -3,6 +3,7 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Health;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -39,12 +40,15 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                 }
             }
 
+            var health = EmbeddingsHealthProbe.ProbeAsync(workspaceRoot, cancellationToken)
+                .GetAwaiter().GetResult();
             QdrantStatus qdrant;
             IReadOnlyDictionary<string, int> kindChunks;
             using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
             {
                 qdrant = QdrantStatusProbe.ProbeAsync(vectorStore, store, cancellationToken).GetAwaiter().GetResult();
                 kindChunks = store.CountChunksByKind();
+                health = EmbeddingVintages.Measure(health, store);
             }
 
             status = status with { Qdrant = qdrant };
@@ -54,7 +58,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                 var staleFiles = DetectStaleFilesIfReadable(workspaceRoot);
                 var report = WorkspaceStatusReport.Create(
                     status, staleFiles, config?.Embeddings.Provider, siblings,
-                    FleetWatchAdoption.FromStore(workspaceRoot)) with
+                    FleetWatchAdoption.FromStore(workspaceRoot),
+                    health.ModelKey, health.OtherModelChunks) with
                 { KindChunks = kindChunks };
                 if (onnxStore)
                 {
@@ -114,6 +119,12 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             if (config is not null)
             {
                 AnsiConsole.MarkupLine($"Embeddings provider: {config.Embeddings.Provider.EscapeMarkup()}");
+                if (health.ModelKey is { } modelKey)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"Embedding model: {modelKey.EscapeMarkup()}{VintageSuffix(health.OtherModelChunks)}");
+                }
+
                 if (RankExclusion.Parse(config.Indexing.RankExclude) is { IsActive: true, Patterns: var patterns })
                 {
                     AnsiConsole.MarkupLine(
@@ -164,6 +175,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
     private static string CoverageSuffix(QdrantStatus qdrant) =>
         new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio is { } ratio
             ? $", semantic coverage {(int)Math.Round(ratio * 100, MidpointRounding.AwayFromZero)}%"
+            : string.Empty;
+
+    private static string VintageSuffix(int? otherModelChunks) =>
+        otherModelChunks is { } count
+            ? $" — {count} chunk(s) carry vectors from another embedding model"
             : string.Empty;
 
     private static void RenderWorkspaces(WorkspaceSiblingSnapshot siblings)
