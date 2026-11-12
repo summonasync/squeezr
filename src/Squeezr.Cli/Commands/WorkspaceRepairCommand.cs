@@ -205,22 +205,17 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
             []);
     }
 
-    // The destructive half of the collection arm unlocks only on a run whose row phase reached a confirmed
-    // sweep: a run that refused to prune, declined the prompt or died mid-sweep has not earned a delete on
-    // any endpoint, and a dry run previews. Reporting itself is unconditional — a leak nobody listed reads
-    // as a clean registry.
+    // Reporting is unconditional — a leak nobody listed reads as a clean registry. Whether a delete is
+    // owed at all is the decision of the pinned predicate, never of a conjunction restated here.
     private static async Task<WorkspaceRepairCollectionsReport> SurveyCollections(
         Settings settings,
         WorkspaceRepairPruneSummary prune,
         CancellationToken cancellationToken)
     {
         var rows = WorkspaceRootResolver.GuardRegistryIo(WorkspaceRegistry.Load);
-        var confirmed = prune.Mode
-            is WorkspaceRepairPruner.ModePruned
-            or WorkspaceRepairPruner.ModeNone;
         return await WorkspaceCollectionSweep.RunAsync(
             WorkspaceCollectionSweep.EndpointsOf(rows),
-            settings.Apply && confirmed,
+            WorkspaceCollectionSweep.CollectionApplyGate(settings.Apply, prune.Mode),
             cancellationToken);
     }
 

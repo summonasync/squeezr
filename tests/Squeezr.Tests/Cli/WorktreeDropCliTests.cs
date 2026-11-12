@@ -314,6 +314,91 @@ public sealed class WorktreeDropCliTests : IDisposable
         }
     }
 
+    // Three spellings of one tree, the middle one undeletable: a fold that stops at a failure must still
+    // account for the tail it never reached. A two-claim setup passes whether or not the policy counts
+    // unattempted claims — there is no tail to hide — so the pin needs three rows and a poisoned middle.
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public async Task WorktreeDrop_FoldDiesMidway_TailClaimIsLedgeredAsNotAttemptedOnTheWire()
+    {
+        var lane = await MintedLane("feat/116-drop-tail");
+        var poison = AddSpelledRow("lane-poisoned-middle", lane.ChildRoot, undeletable: true);
+        var tail = AddSpelledRow("lane-untouched-tail", lane.ChildRoot, undeletable: false);
+        try
+        {
+            var drop = await Run(lane.ChildRoot, "worktree", "drop", "--json");
+
+            drop.ExitCode.ShouldBe(1);
+            using var report = JsonDocument.Parse(drop.StdOut.Trim());
+            var root = report.RootElement;
+            root.GetProperty("notAttempted").GetInt32().ShouldBe(1,
+                "a three-row plan that died on the second row must not read as a two-row plan");
+            var stores = root.GetProperty("stores").EnumerateArray().ToList();
+            stores.Select(store => store.GetProperty("storeKey").GetString())
+                .ShouldBe([lane.StoreKey, poison.StoreKey]);
+            stores[1].GetProperty("failure").GetString().ShouldBe("a store dir could not be removed");
+            Directory.Exists(StoreDir(lane.StoreKey)).ShouldBeFalse();
+            Directory.Exists(poison.StoreDir).ShouldBeTrue();
+            Directory.Exists(tail.StoreDir).ShouldBeTrue("the tail was never asked to die");
+            LaneRows([lane.StoreKey, poison.StoreKey, tail.StoreKey]).Select(row => row.GetProperty("storeKey").GetString())
+                .ShouldBe([poison.StoreKey, tail.StoreKey]);
+            var error = ParseStdErrError(drop.StdErr);
+            error.GetProperty("message").GetString()!.ShouldContain(poison.StoreKey);
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                poison.StoreDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public async Task WorktreeDrop_FoldDiesMidway_HumanRenderNamesTheUnattemptedTail()
+    {
+        var lane = await MintedLane("feat/116-drop-tail-human");
+        var poison = AddSpelledRow("lane-poisoned-middle", lane.ChildRoot, undeletable: true);
+        var tail = AddSpelledRow("lane-untouched-tail", lane.ChildRoot, undeletable: false);
+        try
+        {
+            var drop = await Run(lane.ChildRoot, "worktree", "drop");
+
+            drop.ExitCode.ShouldBe(1);
+            drop.StdOut.ShouldContain("Dropped 1 of 2 store(s)", Case.Sensitive,
+                "the tally counts what the pass attempted, not what it planned");
+            drop.StdOut.ShouldContain("1 claim(s) not attempted", Case.Sensitive,
+                "the plan was three rows wide, and the reader has to see the row nobody touched");
+            drop.StdOut.ShouldContain("then stopped");
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                poison.StoreDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    // A second link spelling of the lane tree with its own registry row and store: the shape a
+    // link-shaped mint left behind. The undeletable variant wears mode 000, the same trap the half-fold
+    // test uses, and the caller restores it.
+    [SupportedOSPlatform("linux")]
+    private (string StoreKey, string StoreDir) AddSpelledRow(string name, string childRoot, bool undeletable)
+    {
+        var holder = Tracked(TestDirs.NewTempDir());
+        var linkPath = Path.Combine(holder, name);
+        Directory.CreateSymbolicLink(linkPath, childRoot);
+        var storeKey = WorkspaceStoreKeys.Create(name, linkPath);
+        AppendRow(name, linkPath, storeKey);
+        var storeDir = StoreDir(storeKey);
+        Directory.CreateDirectory(storeDir);
+        File.WriteAllText(Path.Combine(storeDir, "meta.db"), "x");
+        if (undeletable)
+        {
+            File.SetUnixFileMode(storeDir, UnixFileMode.None);
+        }
+
+        return (storeKey, storeDir);
+    }
+
     private async Task<Lane> MintedLane(string branch)
     {
         var main = Tracked(TestDirs.NewTempDir());

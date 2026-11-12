@@ -1,5 +1,4 @@
 using System.Net.Http;
-using System.Text.Json;
 
 namespace Squeezr.Cli.Embeddings;
 
@@ -29,7 +28,7 @@ public static class LegacyCollectionReaper
         List<string> existing;
         try
         {
-            existing = await ListCollections(http, baseUri, cancellationToken);
+            existing = await QdrantCollectionListing.NamesAsync(http, baseUri, cancellationToken);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -67,29 +66,5 @@ public static class LegacyCollectionReaper
         }
 
         return new LegacyReapReport(true, dropped, kept);
-    }
-
-    private static async Task<List<string>> ListCollections(
-        HttpClient http, string baseUri, CancellationToken cancellationToken)
-    {
-        using var response = await http.GetAsync(baseUri + "collections", cancellationToken);
-        response.EnsureSuccessStatusCode();
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        var names = new List<string>();
-        if (document.RootElement.TryGetProperty("result", out var result) &&
-            result.ValueKind == JsonValueKind.Object &&
-            result.TryGetProperty("collections", out var collections) &&
-            collections.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var entry in collections.EnumerateArray())
-            {
-                if (entry.TryGetProperty("collection_name", out var name) && name.ValueKind == JsonValueKind.String)
-                {
-                    names.Add(name.GetString()!);
-                }
-            }
-        }
-
-        return names;
     }
 }

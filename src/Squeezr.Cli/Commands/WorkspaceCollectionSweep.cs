@@ -16,6 +16,13 @@ internal static partial class WorkspaceCollectionSweep
 
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
 
+    // The collection door opens only on a run that both carries --apply and finished its row sweep
+    // confirmed: a preview, a refusal, a declined prompt or a sweep that died halfway has not earned a
+    // delete on any endpoint. ModeNone counts as confirmed — a registry with nothing to prune is a row
+    // phase that completed honestly, and --apply on that run is consent, not an accident.
+    public static bool CollectionApplyGate(bool apply, string pruneMode) =>
+        apply && pruneMode is WorkspaceRepairPruner.ModePruned or WorkspaceRepairPruner.ModeNone;
+
     // The claim set is read from the registry here, at the moment the sweep asks, never handed in by the
     // caller: the row sweep runs first, so what this reads is what survived it. A collection is reap
     // candidate only when no surviving row names it, which is the direction that cannot take a live store's
@@ -46,7 +53,7 @@ internal static partial class WorkspaceCollectionSweep
             List<string> observed;
             try
             {
-                observed = await ListCollectionsAsync(http, endpoint, cancellationToken);
+                observed = await QdrantCollectionListing.NamesAsync(http, BaseUri(endpoint), cancellationToken);
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
                                         or IOException or UriFormatException or JsonException)
@@ -132,33 +139,6 @@ internal static partial class WorkspaceCollectionSweep
         yield return rootPath;
         yield return WorkspaceCanonicalPath.Canonicalize(rootPath);
         yield return WorkspaceCanonicalPath.ResolveThroughLinks(rootPath);
-    }
-
-    private static async Task<List<string>> ListCollectionsAsync(
-        HttpClient http,
-        string endpoint,
-        CancellationToken cancellationToken)
-    {
-        var baseUri = BaseUri(endpoint);
-        using var response = await http.GetAsync(baseUri + "collections", cancellationToken);
-        response.EnsureSuccessStatusCode();
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        var names = new List<string>();
-        if (document.RootElement.TryGetProperty("result", out var result) &&
-            result.ValueKind == JsonValueKind.Object &&
-            result.TryGetProperty("collections", out var collections) &&
-            collections.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var entry in collections.EnumerateArray())
-            {
-                if (entry.TryGetProperty("collection_name", out var name) && name.ValueKind == JsonValueKind.String)
-                {
-                    names.Add(name.GetString()!);
-                }
-            }
-        }
-
-        return names;
     }
 
     private static async Task<string?> TryDeleteCollectionAsync(

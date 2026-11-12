@@ -19,4 +19,7 @@ public sealed record WorktreeDropReport(
     string? ParentRootPath,
     bool IsLinked,
     int DependentLanes,
-    IReadOnlyList<WorktreeDroppedStore> Stores);
+    IReadOnlyList<WorktreeDroppedStore> Stores,
+    // Claims the plan named but this pass never reached because an earlier failure stopped the fold.
+    // Without it a three-row plan that died on the second row reads as a two-row plan.
+    int NotAttempted = 0);

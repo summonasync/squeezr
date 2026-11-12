@@ -30,41 +30,13 @@ public sealed class WorktreeDropCommand : AsyncCommand<WorktreeDropCommand.Setti
                 : settings.Path!;
 
             var plan = WorkspaceRootResolver.GuardRegistryIo(() => WorktreeDrop.Plan(target));
-            var stores = new List<WorktreeDroppedStore>();
-            Exception? halted = null;
-            foreach (var claim in plan.Claims)
-            {
-                // The handle is opened before the row goes, the collection is deleted after: a store whose
-                // config cannot be read is dropped anyway and says so, because the vectors are the smaller
-                // loss to leave behind than a registry row that names a directory nothing can open.
-                //
-                // A fold can stop halfway: one store of one tree is deletable, the other is not. The rows
-                // already gone are gone from the registry, so they are reported as facts of this run instead
-                // of being lost with the exception — the shape the repair sweep already uses.
-                // One door for both verbs that end a store: the claim is resolved by path, the removal runs by
-                // key through the same DropByStoreKey the old verb uses, so a worktree drop and
-                // `drop --store-key` cannot drift into two different kinds of death.
-                try
-                {
-                    var result = await WorkspaceStoreDropper.DropByStoreKeyAsync(claim.StoreKey, cancellationToken);
-                    stores.Add(new WorktreeDroppedStore(
-                        claim.StoreKey,
-                        claim.Name,
-                        claim.RegisteredRootPath,
-                        result.RemovedPaths,
-                        result.Collection,
-                        result.CollectionState));
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    stores.Add(FailedClaim(claim, ex));
-                    halted = ex;
-                    break;
-                }
-            }
+            var outcome = await WorktreeFolder.RunAsync(plan.Claims, cancellationToken);
+            var stores = outcome.Stores;
+            var halted = outcome.Halted;
 
             var report = new WorktreeDropReport(
-                plan.RootPath, plan.Branch, plan.ParentRootPath, plan.IsLinked, plan.DependentLanes, stores);
+                plan.RootPath, plan.Branch, plan.ParentRootPath, plan.IsLinked, plan.DependentLanes,
+                stores, outcome.NotAttempted);
 
             if (plan.DependentLanes > 0)
             {
@@ -92,10 +64,14 @@ public sealed class WorktreeDropCommand : AsyncCommand<WorktreeDropCommand.Setti
     {
         var stores = report.Stores;
         var removed = stores.Count(store => store.Failure is null);
+        var notAttempted = report.NotAttempted > 0
+            ? $", {report.NotAttempted} claim(s) not attempted"
+            : string.Empty;
         AnsiConsole.MarkupLine(halted is null
             ? $"Dropped {(report.IsLinked ? "worktree" : "main worktree")} store{(stores.Count > 1 ? "s" : "")} " +
               $"for {report.RootPath.EscapeMarkup()}"
-            : $"Dropped {removed} of {stores.Count} store(s) for {report.RootPath.EscapeMarkup()}, then stopped");
+            : $"Dropped {removed} of {stores.Count} store(s) for {report.RootPath.EscapeMarkup()}" +
+              notAttempted + ", then stopped");
         AnsiConsole.MarkupLine(
             $"  branch: {(report.Branch ?? (report.IsLinked ? "detached or unknown" : "not a lane")).EscapeMarkup()}");
         AnsiConsole.MarkupLine($"  parent: {(report.ParentRootPath ?? "unknown").EscapeMarkup()}");
@@ -136,31 +112,6 @@ public sealed class WorktreeDropCommand : AsyncCommand<WorktreeDropCommand.Setti
                 $"stores are untouched; {RemedyText.WorkspaceRepairCommand.EscapeMarkup()} reaps them once their " +
                 "trees are gone");
         }
-    }
-
-    // The removal primitive tags both phases, and the tag is what the reader needs: a store-side tag means
-    // nothing disappeared, an unverified tag means a store dir did disappear while its row stayed. Raw
-    // exception text carries paths this pass did not remove, so the wording stays with the tag.
-    private static WorktreeDroppedStore FailedClaim(WorktreeDropClaim claim, Exception ex)
-    {
-        IReadOnlyList<string> gone = ex is WorkspaceStoreRemovalUnverifiedException unverified
-            ? unverified.RemovedStoreDirs
-            : [];
-        var reason = ex switch
-        {
-            WorkspaceStoreRemovalUnverifiedException => "the store dir was removed, the registry row could not be pruned",
-            WorkspaceStoreRemovalException => "a store dir could not be removed",
-            UnauthorizedAccessException => "permission denied on the store path",
-            _ => $"{ex.GetType().Name}: the store could not be removed",
-        };
-        return new WorktreeDroppedStore(
-            claim.StoreKey,
-            claim.Name,
-            claim.RegisteredRootPath,
-            gone,
-            null,
-            WorkspaceStoreDropper.CollectionNotConfigured,
-            reason);
     }
 
     private static string CollectionText(WorktreeDroppedStore store) =>

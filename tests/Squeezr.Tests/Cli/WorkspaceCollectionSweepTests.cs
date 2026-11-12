@@ -182,6 +182,36 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
     public void IsMintedName_AcceptsOnlyWhatThisProductWrites(string collection, bool expected) =>
         WorkspaceCollectionSweep.IsMintedName(collection).ShouldBe(expected);
 
+    // The whole truth table of the destructive gate, in one pure predicate: --apply alone is not consent to
+    // delete, and a row phase that refused, declined the prompt, died mid-sweep or merely previewed has not
+    // earned a delete on any endpoint even holding --apply. ModeNone is the confirmed no-op sweep: nothing
+    // was left to prune, and --apply on that run is consent, not an accident.
+    [Theory]
+    [InlineData(true, WorkspaceRepairPruner.ModePruned, true)]
+    [InlineData(true, WorkspaceRepairPruner.ModeNone, true)]
+    [InlineData(true, WorkspaceRepairPruner.ModeDryRun, false)]
+    [InlineData(true, WorkspaceRepairPruner.ModeRefused, false)]
+    [InlineData(true, WorkspaceRepairPruner.ModeDeclined, false)]
+    [InlineData(true, WorkspaceRepairPruner.ModeAborted, false)]
+    [InlineData(false, WorkspaceRepairPruner.ModePruned, false)]
+    [InlineData(false, WorkspaceRepairPruner.ModeNone, false)]
+    [InlineData(false, WorkspaceRepairPruner.ModeDryRun, false)]
+    [InlineData(false, WorkspaceRepairPruner.ModeRefused, false)]
+    [InlineData(false, WorkspaceRepairPruner.ModeDeclined, false)]
+    [InlineData(false, WorkspaceRepairPruner.ModeAborted, false)]
+    public void CollectionApplyGate_OnlyAppliedConfirmedSweepOpensTheDoor(bool apply, string pruneMode, bool expected) =>
+        WorkspaceCollectionSweep.CollectionApplyGate(apply, pruneMode).ShouldBe(expected);
+
+    [Fact]
+    public void RepairCommand_CollectionDoorReadsThePinnedGate()
+    {
+        var source = File.ReadAllText(RepoFile("src/Squeezr.Cli/Commands/WorkspaceRepairCommand.cs"));
+
+        source.ShouldContain("CollectionApplyGate(settings.Apply, prune.Mode)", Case.Sensitive,
+            "the destructive door opens only through the pinned predicate, never through a conjunction " +
+            "restated at the call site where a refactor can drop it silently");
+    }
+
     [Fact]
     public void EndpointsOf_RowsOnDistinctEndpoints_ListsEachOnce_AndNamesNothingWithoutAReadableConfig()
     {

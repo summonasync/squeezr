@@ -12,11 +12,14 @@ internal sealed record WorkspaceDropResult(
     string? Collection,
     string CollectionState);
 
-// The one door that ends a workspace store: registry row and store dir first, through
-// WorkspaceStore.DropByStoreKey, then the collection this root names. Every verb that kills a store
-// (`drop --store-key`, `worktree drop`, the repair sweep) comes through here, so the order is stated once
-// and cannot drift between them: a collection is touched only after the row owning it is gone, which is the
-// direction that leaves a live store's vectors alone when a removal fails halfway.
+// The removal door shared by `drop --store-key` and `worktree drop`: registry row and store dir first,
+// through WorkspaceStore.DropByStoreKey, then the collection this root names. Where this door is called,
+// the order is stated once and holds there: a collection is touched only after the row owning it is gone,
+// which is the direction that leaves a live store's vectors alone when a removal fails halfway. The other
+// two store-killing paths do not come through the door and do not need to: the current-workspace `drop`
+// composes the same shape inline (manager.Drop, then this class's RemoveCollectionAsync), and the repair
+// row sweep removes row+store only and leaves every collection to the gated sweep that reads the registry
+// after it. They cannot drift from each other because they reuse these same halves.
 internal static class WorkspaceStoreDropper
 {
     public const string CollectionRemoved = "removed";
