@@ -935,8 +935,10 @@ targeted span. The hook only ever sees calls the host's matcher routes to it,
 and the advice lands only when the payload parses and the rule above says
 "bulk". A payload that quotes its numbers — the shape a paged Qwen read takes
 when the host forwards the model's raw arguments (`"offset":"437"`) — parses
-exactly like the numeric one: quoted decimal integers are read as numbers,
-quoted non-digits still fail open. Measured delivery: the whole-file read in
+exactly like the numeric one: quoted decimal integers are read as numbers
+(leading zeros and a sign parse too), and a quoted non-digit fails the whole
+payload open — no advice and no telemetry row, on `offset` as well as `limit`.
+Measured delivery: the whole-file read in
 an armed live Qwen session (`audits/hook-live-2026-11-11/`); the quoted-number
 arms by in-process A/B replay against the armed command
 (`audits/t6-028-fix-2026-11-12/`).

@@ -435,6 +435,8 @@ public sealed class HookPreReadCommandTests
     [InlineData("{\"limit\":\"wide\"}")]
     [InlineData("{\"limit\":\"400abc\"}")]
     [InlineData("{\"limit\":\"\"}")]
+    [InlineData("{\"offset\":\"wide\",\"limit\":400}")]
+    [InlineData("{\"offset\":\"400abc\",\"limit\":400}")]
     public async Task QuotedNonNumericRangeValue_OnLargeFile_PrintsNothing(string rangeFragment)
     {
         var home = TestDirs.NewTempDir();

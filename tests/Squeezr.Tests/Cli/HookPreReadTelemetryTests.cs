@@ -200,6 +200,7 @@ public sealed class HookPreReadTelemetryTests
     [InlineData("[{\"tool_name\":\"read_file\"}]")]
     [InlineData("\"read_file\"")]
     [InlineData("{\"tool_name\":\"read_file\",\"tool_input\":{\"file_path\":\"/etc/hostname\",\"limit\":\"wide\"}}")]
+    [InlineData("{\"tool_name\":\"read_file\",\"tool_input\":{\"file_path\":\"/etc/hostname\",\"offset\":\"wide\",\"limit\":400}}")]
     public async Task PreReadHook_BrokenPayload_AppendsNoRowAndExitsZero(string payload)
     {
         var home = SqueezrHome.Resolve();
