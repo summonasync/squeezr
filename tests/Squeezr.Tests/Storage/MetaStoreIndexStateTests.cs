@@ -60,6 +60,9 @@ public class MetaStoreIndexStateTests
         LiteDbHeaderCorruption.AfterTheMagic(path);
 
         MetaStore.TryOpen(path).ShouldBeNull();
+        // The probe swallows this form; the loud door must keep throwing it, or a bad-argument bug inside
+        // the open path would go silent for every writer.
+        Should.Throw<ArgumentOutOfRangeException>(() => new MetaStore(path));
     }
 
     private static string NewDbPath() => Path.Combine(TestDirs.NewTempDir(), "meta.db");

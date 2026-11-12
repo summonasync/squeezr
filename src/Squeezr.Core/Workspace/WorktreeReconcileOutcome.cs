@@ -49,8 +49,9 @@ public sealed record WorktreeReconcileOutcome(
             WorktreeReconcileState.Pending,
             PassRan: false,
             $"this worktree's meta.db would not open, so neither its rows nor its collection could be read. "
-            + $"Run 'squeezr workspace repair' on '{root}'; if the store itself is the broken half, "
-            + $"'{RemedyText.DropCommand}' it and re-run this verb.",
+            + $"'{RemedyText.DropCommand}' it and re-run this verb to fill it from the main worktree again "
+            + $"— 'squeezr workspace repair' on '{root}' will not help here: it sweeps registry rows and "
+            + "never opens a meta.db.",
             StoreUnreadableCode,
             0,
             0,

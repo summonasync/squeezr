@@ -130,8 +130,11 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
                 Console.Error.WriteLine($"warning: {warning}");
             }
 
-            if (reconcile is { State: WorktreeReconcileState.Pending or WorktreeReconcileState.Assumed,
-                    Reason: { } pending })
+            if (reconcile is
+                {
+                    State: WorktreeReconcileState.Pending or WorktreeReconcileState.Assumed,
+                    Reason: { } pending
+                })
             {
                 Console.Error.WriteLine($"warning: {pending}");
             }
