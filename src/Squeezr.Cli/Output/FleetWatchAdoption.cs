@@ -12,7 +12,13 @@ public sealed record FleetWatchAdoption(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DisplacedHost = null)
 {
     public static FleetWatchAdoption? FromStore(string workspaceRoot) =>
-        WatchAdoptionEventFile.TryRead(SqueezrPaths.StoreDir(workspaceRoot)) is { } adopted
+        FromStoreDir(SqueezrPaths.StoreDir(workspaceRoot));
+
+    public static FleetWatchAdoption? FromStore(WorkspaceRegistryEntry entry) =>
+        FromStoreDir(SqueezrPaths.StoreDir(entry));
+
+    private static FleetWatchAdoption? FromStoreDir(string storeDir) =>
+        WatchAdoptionEventFile.TryRead(storeDir) is { } adopted
             ? new FleetWatchAdoption(
                 adopted.AdopterPid,
                 adopted.AdopterHost,

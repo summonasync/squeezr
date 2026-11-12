@@ -60,16 +60,78 @@ public sealed class WatchdSupervisorSourceTests : IDisposable
     }
 
     [Fact]
-    public void GoneOwner_Stopped()
+    public void GoneOwner_WithoutSupervisor_IdleNoSupervisor()
     {
         _healthState = WatchIndexerState.Gone;
 
         ReadWithDesire(WatchDesire.Running).Sessions.ShouldHaveSingleItem()
+            .State.ShouldBe(WatchdSessionState.NoSupervisor);
+    }
+
+    // The wording gap review-113-t4-01 obstacle 5 carried here: under a live supervisor the same dead body is
+    // starting, not stopped — stopped stays the word for a wish the operator wrote.
+    [Fact]
+    public void GoneOwner_UnderLiveWatchd_ReadsStartingNotStopped()
+    {
+        _healthState = WatchIndexerState.Gone;
+
+        var session = ReadWithDesire(WatchDesire.Running, liveWatchd: true).Sessions.ShouldHaveSingleItem();
+        session.State.ShouldBe(WatchdSessionState.Starting);
+        WatchdSessionText.State(session.State).ShouldBe("starting");
+    }
+
+    // R5 in one pair: the same dead body reads stopped when the operator stopped it and idle when nothing
+    // is left to carry the wish.
+    [Fact]
+    public void NothingAlive_NoWatchd_DesireSplitsStoppedFromIdle()
+    {
+        _healthState = WatchIndexerState.None;
+
+        ReadWithDesire(WatchDesire.Stopped).Sessions.ShouldHaveSingleItem()
             .State.ShouldBe(WatchdSessionState.Stopped);
+        ReadWithDesire(WatchDesire.Running).Sessions.ShouldHaveSingleItem()
+            .State.ShouldBe(WatchdSessionState.NoSupervisor);
     }
 
     [Fact]
-    public void StoreRowOutsideMachine_UnresolvedAndStopped()
+    public void LiveOwner_UnderLiveWatchd_StillRunning()
+    {
+        ReadWithDesire(WatchDesire.Running, liveWatchd: true).Sessions.ShouldHaveSingleItem()
+            .State.ShouldBe(WatchdSessionState.Running);
+    }
+
+    [Fact]
+    public void UnreadableStateJson_DoesNotResolveToARunningWish()
+    {
+        var entry = NewEntry("demo");
+        WriteRawState("{ \"stores\": oops");
+
+        var view = BuildSource(WatchIndexerState.Alive, [entry]).Read();
+
+        view.StateFault.ShouldNotBeNull();
+        view.StateFault.ShouldContain("not valid JSON");
+        var session = view.Sessions.ShouldHaveSingleItem();
+        session.DesireKnown.ShouldBeFalse();
+        session.RootResolves.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ReadableStateJson_LeavesTheFaultOut_AndTheDesireKnown()
+    {
+        var entry = NewEntry("demo");
+        var state = NewState();
+        state.SetDesire(entry.StoreKey, WatchDesire.Stopped);
+
+        var view = BuildSource(WatchIndexerState.Alive, [entry], state: state).Read();
+
+        view.StateFault.ShouldBeNull();
+        var session = view.Sessions.ShouldHaveSingleItem();
+        session.DesireKnown.ShouldBeTrue();
+        session.Desire.ShouldBe(WatchDesire.Stopped);
+    }
+
+    [Fact]
+    public void StoreRowOutsideMachine_UnresolvedAndCannotReceiveAWish()
     {
         var root = NewRoot();
         var entry = new WorkspaceRegistryEntry("demo", root, "bad/key", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
@@ -79,6 +141,20 @@ public sealed class WatchdSupervisorSourceTests : IDisposable
         var session = view.Sessions.ShouldHaveSingleItem();
         session.State.ShouldBe(WatchdSessionState.Stopped);
         session.Health.ShouldBe("unresolved");
+        session.RootResolves.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void StoreRowWithGoneRoot_CannotReceiveAWish()
+    {
+        var entry = NewEntry("demo");
+        var root = entry.RootPath;
+        Directory.Delete(root, recursive: true);
+
+        var session = BuildSource(WatchIndexerState.Alive, [entry]).Read().Sessions.ShouldHaveSingleItem();
+
+        session.Health.ShouldBe("unresolved");
+        session.RootResolves.ShouldBeFalse();
     }
 
     [Fact]
@@ -143,30 +219,41 @@ public sealed class WatchdSupervisorSourceTests : IDisposable
         view.Daemon.Running.ShouldBeFalse();
     }
 
-    private WatchdSupervisorView ReadWithDesire(WatchDesire desire)
+    private WatchdSupervisorView ReadWithDesire(WatchDesire desire, bool liveWatchd = false)
     {
         var entry = NewEntry("demo");
         var state = NewState();
         state.SetDesire(entry.StoreKey, desire);
-        return BuildSource(_healthState, [entry], state: state).Read();
+        return BuildSource(_healthState, [entry], state: state, liveWatchd: liveWatchd).Read();
     }
 
     private WatchdSupervisorSource BuildSource(
         WatchIndexerState healthState,
         IReadOnlyList<WorkspaceRegistryEntry> entries,
         SupervisionState? state = null,
-        PassPhaseStamp? pass = null)
+        PassPhaseStamp? pass = null,
+        bool liveWatchd = false)
     {
         _healthState = healthState;
         var heartbeat = new DaemonHeartbeat(Environment.ProcessId, DaemonHeartbeat.DefaultKind, Now, Now);
         return new WatchdSupervisorSource(
             registry: () => entries,
             state: state ?? NewState(),
-            daemon: new WatchdDaemonProbe(Path.Combine(_dir, "watchd", "absent.lock")),
+            daemon: liveWatchd
+                ? new WatchdDaemonProbe(LiveWatchdLockPath(), _ => true)
+                : new WatchdDaemonProbe(Path.Combine(_dir, "watchd", "absent.lock")),
             health: _ => new WatchStoreHealth(healthState, 4711, "watch", null, 0),
             heartbeat: _ => heartbeat,
             pass: _ => pass,
             utcNow: () => Now);
+    }
+
+    private string LiveWatchdLockPath()
+    {
+        var path = Path.Combine(_dir, "watchd", "live.lock");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{\"pid\":4321,\"host\":\"anywhere\"}");
+        return path;
     }
 
     private WorkspaceRegistryEntry NewEntry(string name)
@@ -185,9 +272,20 @@ public sealed class WatchdSupervisorSourceTests : IDisposable
 
     private SupervisionState NewState() => new(Path.Combine(_dir, "watchd", "state.json"));
 
+    private void WriteRawState(string json)
+    {
+        var path = Path.Combine(_dir, "watchd", "state.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, json);
+    }
+
     public void Dispose()
     {
-        _roots.ForEach(root => Directory.Delete(root, recursive: true));
+        foreach (var root in _roots.Where(Directory.Exists))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
         Directory.Delete(_dir, recursive: true);
     }
 }

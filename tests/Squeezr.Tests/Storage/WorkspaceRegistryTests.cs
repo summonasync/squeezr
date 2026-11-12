@@ -108,6 +108,35 @@ public sealed class WorkspaceRegistryTests : IDisposable
         WorkspaceRegistry.FindByRootPath(NewTempDir()).ShouldBeNull();
     }
 
+    // The row a command is holding is the snapshot it acted on: re-resolving the store dir through the
+    // registry a second time can answer with a different row, or with no row at all, mid-run.
+    [Fact]
+    public void StoreDir_RowInHand_KeepsNamingItsOwnStore_AfterTheRegistryMovesOn()
+    {
+        var root = NewTempDir();
+        var now = DateTimeOffset.UtcNow;
+        WorkspaceRegistry.Add(new WorkspaceRegistryEntry("demo", root, "demo-aaaa1111", now, now));
+        var snapshot = WorkspaceRegistry.Load();
+
+        WorkspaceRegistry.RemoveByRoot(root);
+
+        SqueezrPaths.StoreDir(snapshot.ShouldHaveSingleItem())
+            .ShouldBe(Path.Combine(_home, SqueezrPaths.WorkspacesDirName, "demo-aaaa1111"));
+        SqueezrPaths.StoreDir(root).ShouldBe(Path.Combine(root, SqueezrPaths.StoreDirName));
+    }
+
+    [Fact]
+    public void StoreDir_RowWithKeyThatLeavesWorkspaces_KeepsTheProjectFallback()
+    {
+        var root = NewTempDir();
+        var entry = new WorkspaceRegistryEntry(
+            "evil", root, "workspaces/../../outside", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+        SqueezrPaths.StoreDir(entry).ShouldBe(Path.Combine(root, SqueezrPaths.StoreDirName));
+        SqueezrPaths.MetaDbPath(entry)
+            .ShouldBe(Path.Combine(root, SqueezrPaths.StoreDirName, SqueezrPaths.MetaDbFileName));
+    }
+
     [Fact]
     public void TryGetStoreDir_RegisteredRoot_ReturnsStoreDirUnderHome()
     {

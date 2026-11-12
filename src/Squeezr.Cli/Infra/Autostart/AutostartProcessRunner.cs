@@ -6,7 +6,9 @@ namespace Squeezr.Cli.Infra.Autostart;
 
 public sealed class AutostartProcessRunner : IAutostartProcessRunner
 {
-    internal static readonly TimeSpan RunBudget = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan DefaultRunBudget = TimeSpan.FromSeconds(30);
+
+    internal TimeSpan RunBudget { get; init; } = DefaultRunBudget;
 
     public Task<AutostartProcessResult> RunAsync(
         string fileName,
@@ -19,7 +21,7 @@ public sealed class AutostartProcessRunner : IAutostartProcessRunner
             startInfo.ArgumentList.Add(argument);
         }
 
-        return SpawnAsync(startInfo, cancellationToken);
+        return SpawnAsync(startInfo, RunBudget, cancellationToken);
     }
 
     public Task<AutostartProcessResult> RunRawAsync(
@@ -31,7 +33,7 @@ public sealed class AutostartProcessRunner : IAutostartProcessRunner
         // ProcessStartInfo.Arguments reaches the command line untouched, which is what a line that
         // is already quoted at argv level needs; the ArgumentList path would quote it again.
         startInfo.Arguments = argumentLine;
-        return SpawnAsync(startInfo, cancellationToken);
+        return SpawnAsync(startInfo, RunBudget, cancellationToken);
     }
 
     private static ProcessStartInfo CreateStartInfo(string fileName) => new()
@@ -45,12 +47,13 @@ public sealed class AutostartProcessRunner : IAutostartProcessRunner
 
     private static async Task<AutostartProcessResult> SpawnAsync(
         ProcessStartInfo startInfo,
+        TimeSpan runBudget,
         CancellationToken cancellationToken)
     {
         var fileName = startInfo.FileName;
         using var process = Start(fileName, startInfo);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budget.CancelAfter(RunBudget);
+        budget.CancelAfter(runBudget);
         var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
         var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
         try
@@ -63,7 +66,7 @@ public sealed class AutostartProcessRunner : IAutostartProcessRunner
             TryKill(process);
             await DrainQuietly(stdoutTask, stderrTask);
             throw new AutostartException(
-                $"'{fileName}' did not finish within {RunBudget.TotalSeconds:0} seconds.");
+                $"'{fileName}' did not finish within {runBudget.TotalSeconds:0} seconds.");
         }
         catch (OperationCanceledException)
         {

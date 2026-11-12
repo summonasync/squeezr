@@ -3,8 +3,10 @@ using System.Reflection;
 using System.Text.Json;
 using Shouldly;
 using Spectre.Console.Cli;
+using Spectre.Console.Testing;
 using Squeezr.Cli.Commands;
 using Squeezr.Cli.Daemons;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
@@ -188,7 +190,8 @@ public sealed class FleetManagementTests : IAsyncLifetime
         payload.GetProperty("previousPid").ValueKind.ShouldBe(JsonValueKind.Null);
         var pid = payload.GetProperty("pid").GetInt32();
         pid.ShouldBeGreaterThan(0);
-        (await MarkerFor(fake)).ShouldBe(Path.GetFullPath(root) + "|watch");
+        payload.GetProperty("watcherAlive").GetBoolean().ShouldBeTrue();
+        (await MarkerFor(fake)).ShouldBe(Path.GetFullPath(root) + "|watch --await-claim");
         TrackSpawned(pid).HasExited.ShouldBeFalse();
     }
 
@@ -213,7 +216,7 @@ public sealed class FleetManagementTests : IAsyncLifetime
         var payload = SingleJsonLine(result.StdOut);
         var pid = payload.GetProperty("pid").GetInt32();
         var expectedAssemblyPath = Assembly.GetEntryAssembly()!.Location;
-        (await MarkerFor(muxerd)).ShouldBe(Path.GetFullPath(root) + "|" + expectedAssemblyPath + " watch");
+        (await MarkerFor(muxerd)).ShouldBe(Path.GetFullPath(root) + "|" + expectedAssemblyPath + " watch --await-claim");
         TrackSpawned(pid).HasExited.ShouldBeFalse();
     }
 
@@ -265,8 +268,91 @@ public sealed class FleetManagementTests : IAsyncLifetime
         var newPid = payload.GetProperty("pid").GetInt32();
         newPid.ShouldNotBe(oldDaemon.Id);
         (await WaitForExitAsync(oldDaemon, TimeSpan.FromSeconds(10))).ShouldBeTrue();
-        (await MarkerFor(fake)).ShouldBe(Path.GetFullPath(root) + "|watch");
+        (await MarkerFor(fake)).ShouldBe(Path.GetFullPath(root) + "|watch --await-claim");
         TrackSpawned(newPid).HasExited.ShouldBeFalse();
+    }
+
+    // R2a: the restart that follows a killed owner must launch the way the supervisor does. A bare
+    // 'watch' reads the dead owner's claim, declines it with OwnerHold and returns 0 — the reported
+    // pid would be a corpse; --await-claim waits the grace out and takes the store over.
+    [Fact]
+    public async Task Restart_ClaimHeldByDeadOwner_LaunchesSupervisedAndReportsALivePid()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var name = UniqueName("fleet-restart-deadowner");
+        var root = await NewInitializedWorkspaceAsync(name);
+        var storeKey = StoreKeyFor(root);
+        WriteClaim(SqueezrPaths.StoreDir(root), new WatchOwnerMarker(
+            int.MaxValue, Environment.MachineName, DaemonHeartbeat.DefaultKind,
+            DateTime.UtcNow.AddMinutes(-10), DateTime.UtcNow));
+        var fake = CreateFakeSqueezrBinary();
+
+        var result = await RunInProcessAsync(
+            (typeof(FleetRestartCommand), new FleetRestartCommand(new DaemonLauncher(() => fake))),
+            "restart", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(0, $"out: {result.StdOut} err: {result.StdErr}");
+        var payload = SingleJsonLine(result.StdOut);
+        payload.GetProperty("previousStatus").GetString().ShouldBe("not-running");
+        payload.GetProperty("watcherAlive").GetBoolean().ShouldBeTrue();
+        (await MarkerFor(fake)).ShouldBe(Path.GetFullPath(root) + "|watch --await-claim");
+        TrackSpawned(payload.GetProperty("pid").GetInt32()).HasExited.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Restart_DaemonDiesBeforeItSettles_ReportsPending_NotASuccessfulRestart()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var name = UniqueName("fleet-restart-pending");
+        var root = await NewInitializedWorkspaceAsync(name);
+        var storeKey = StoreKeyFor(root);
+        var fake = CreateFakeSqueezrBinaryThatExits();
+        var command = new FleetRestartCommand(new DaemonLauncher(() => fake));
+
+        var result = await RunInProcessAsync((typeof(FleetRestartCommand), command), "restart", storeKey, "--json");
+
+        result.ExitCode.ShouldBe(0, $"out: {result.StdOut} err: {result.StdErr}");
+        var payload = SingleJsonLine(result.StdOut);
+        payload.GetProperty("watcherAlive").GetBoolean().ShouldBeFalse(
+            "a pid that was already gone at report time is not a restarted watcher");
+        payload.GetProperty("desired").GetString().ShouldBe("running");
+    }
+
+    // The in-process harness cannot see AnsiConsole output, so the human verdict is pinned at the seam
+    // that renders it: the same line fleet restart writes when the spawn did not survive.
+    [Fact]
+    public void ReportVerdict_DaemonGoneBeforeItSettled_NamesThePendingVerdictInsteadOfSuccess()
+    {
+        var console = new TestConsole();
+
+        FleetRestartCommand.ReportVerdict(
+            new FleetRestartResult("demo", "demo-key", "graceful", 4242, 9999, "running", WatcherAlive: false),
+            console);
+
+        console.Output.ShouldContain("restart pending");
+        console.Output.ShouldContain("supervisor will converge");
+        console.Output.ShouldNotContain("restarted");
+        console.Output.ShouldNotContain("started (pid");
+    }
+
+    [Fact]
+    public void ReportVerdict_LiveDaemon_StillNamesTheNewPid()
+    {
+        var console = new TestConsole();
+
+        FleetRestartCommand.ReportVerdict(
+            new FleetRestartResult("demo", "demo-key", "graceful", 4242, 9999),
+            console);
+
+        console.Output.ShouldContain("restarted (pid 4242 stopped graceful, new pid 9999)");
     }
 
     [Fact]
@@ -395,9 +481,11 @@ public sealed class FleetManagementTests : IAsyncLifetime
 
     private static string CreateFakeSqueezrBinary() => CreateFakeExecutable("squeezr");
 
+    private static string CreateFakeSqueezrBinaryThatExits() => CreateFakeExecutable("squeezr", staysUp: false);
+
     private static string CreateFakeMuxerdBinary() => CreateFakeExecutable("dotnet");
 
-    private static string CreateFakeExecutable(string fileName)
+    private static string CreateFakeExecutable(string fileName, bool staysUp = true)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -410,7 +498,7 @@ public sealed class FleetManagementTests : IAsyncLifetime
             path,
             "#!/bin/sh\n" +
             "echo \"$PWD|$@\" > \"$(dirname \"$0\")/marker\"\n" +
-            "while :; do sleep 1; done\n");
+            (staysUp ? "while :; do sleep 1; done\n" : "exit 0\n"));
         File.SetUnixFileMode(
             path,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |

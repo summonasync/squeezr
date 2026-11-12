@@ -4,4 +4,5 @@ public sealed record SupervisorSweep(
     DateTime StartedAtUtc,
     IReadOnlyList<StoreSupervision> Stores,
     string? Fault = null,
-    OwnBinaryDrift? OwnDrift = null);
+    OwnBinaryDrift? OwnDrift = null,
+    string? StateWarning = null);

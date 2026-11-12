@@ -32,11 +32,12 @@ public sealed class FleetStopCommand : AsyncCommand<FleetStopCommand.Settings>
     {
         try
         {
-            var entry = FleetStoreKeyResolver.Require(settings.StoreKey);
+            var entry = FleetStoreKeyResolver.RequireResolvable(
+                FleetStoreKeyResolver.Require(settings.StoreKey), "stop");
             // The desire lands before any kill: a supervisor sweeping between the two would otherwise
             // see a dead daemon under a still-running desire and respawn the process we are stopping.
             _state.SetDesire(entry.StoreKey, WatchDesire.Stopped);
-            var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
+            var storeDir = SqueezrPaths.StoreDir(entry);
             var now = DateTime.UtcNow;
             var (targets, observers, noOwnerReason) = ResolveKillTargets(storeDir, now);
 

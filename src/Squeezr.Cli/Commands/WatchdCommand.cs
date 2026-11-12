@@ -37,6 +37,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
             cts.Cancel();
         };
         Console.CancelKeyPress += onStop;
+        using var onTerminate = DaemonShutdownSignal.Watch(cts);
         try
         {
             SqueezrHome.RequireHabitableProfileHome();
@@ -229,6 +230,12 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
                     table.AddRow(string.Empty, string.Empty, string.Empty, "[red]sweep failed[/]", Markup.Escape(fault));
                 }
 
+                if (_sweep?.StateWarning is { } warning)
+                {
+                    table.AddRow(
+                        string.Empty, string.Empty, string.Empty, "[yellow]state unreadable[/]", Markup.Escape(warning));
+                }
+
                 if (_sweep?.OwnDrift is { } drift)
                 {
                     table.AddRow(
@@ -268,6 +275,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
     {
         private readonly Dictionary<string, string> _lastLines = [];
         private string? _lastFault;
+        private string? _lastStateWarning;
 
         public void Update(SupervisorSweep sweep)
         {
@@ -275,6 +283,12 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
             {
                 _lastFault = fault;
                 Console.WriteLine($"{Stamp()} registry sweep failed: {fault}");
+            }
+
+            if (sweep.StateWarning is { } warning && _lastStateWarning != warning)
+            {
+                _lastStateWarning = warning;
+                Console.WriteLine($"{Stamp()} {warning}");
             }
 
             foreach (var store in sweep.Stores)

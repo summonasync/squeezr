@@ -22,6 +22,14 @@ public static class SqueezrPaths
             ? storeDir
             : Path.Combine(root, StoreDirName);
 
+    // The store dir a registry row names, read off the row instead of looked up by root path: a row already
+    // in hand is the snapshot, and looking it up again is a second read of workspaces.json whose answer can
+    // come from a different row than the one the caller is acting on.
+    public static string StoreDir(WorkspaceRegistryEntry entry) =>
+        WorkspaceStorePaths.IsSingleSegmentKey(entry.StoreKey)
+            ? Path.Combine(SqueezrHome.WorkspacesDir, entry.StoreKey)
+            : Path.Combine(entry.RootPath, StoreDirName);
+
     public static string ManifestPath(string root) =>
         WorkspaceRegistry.TryGetStoreDir(root, out var storeDir)
             ? Path.Combine(storeDir, StoreManifestFileName)
@@ -30,6 +38,8 @@ public static class SqueezrPaths
     public static string ConfigPath(string root) => Path.Combine(StoreDir(root), ConfigFileName);
 
     public static string MetaDbPath(string root) => Path.Combine(StoreDir(root), MetaDbFileName);
+
+    public static string MetaDbPath(WorkspaceRegistryEntry entry) => Path.Combine(StoreDir(entry), MetaDbFileName);
 
     public static string TrigramIndexPath(string root) => Path.Combine(StoreDir(root), TrigramIndexFileName);
 

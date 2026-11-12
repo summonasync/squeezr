@@ -102,14 +102,16 @@ public sealed class TuiWatchdSupervisorTests : IDisposable
         var source = RealSource([entry], state, health: _ =>
         {
             healthCalls++;
-            return healthCalls == 1
+            // The table render eats the first probe, so the watcher has to still be alive for the
+            // panel's own first ask; from the second ask on it is gone and the restart can be requested.
+            return healthCalls <= 2
                 ? new WatchStoreHealth(WatchIndexerState.Alive, 4711, "watch", null, 0)
                 : new WatchStoreHealth(WatchIndexerState.None, null, null, null, 0);
         });
         await TuiWatchdSupervisor.RunAsync(console, source, state);
 
         state.DesireOf(entry.StoreKey).ShouldBe(WatchDesire.Running);
-        healthCalls.ShouldBeGreaterThan(1);
+        healthCalls.ShouldBeGreaterThan(2);
         console.Output.ShouldContain("restart requested");
     }
 
@@ -158,6 +160,82 @@ public sealed class TuiWatchdSupervisorTests : IDisposable
 
         console.Output.ShouldContain("watchd is not running — the wish is saved and applies on its start");
         state.DesireOf(entry.StoreKey).ShouldBe(WatchDesire.Stopped);
+    }
+
+    [Fact]
+    public async Task Run_WantedStoreUnderLiveWatchd_ReadsStartingNotStopped()
+    {
+        var console = TuiTestHarness.InteractiveConsole();
+        var row = NewRow("demo", WatchdSessionState.Running) with { State = WatchdSessionState.Starting };
+        TuiTestHarness.PushMenuChoice(console, 1);
+
+        await TuiWatchdSupervisor.RunAsync(console, FakeSource(row), NewState());
+
+        console.Output.ShouldContain("starting");
+        console.Output.ShouldNotContain("stopped");
+    }
+
+    [Fact]
+    public async Task Run_WantedStoreWithoutWatchd_ReadsIdleNoSupervisor_NotStopped()
+    {
+        var console = TuiTestHarness.InteractiveConsole();
+        var row = NewRow("demo", WatchdSessionState.Running) with { State = WatchdSessionState.NoSupervisor };
+        TuiTestHarness.PushMenuChoice(console, 1);
+
+        await TuiWatchdSupervisor.RunAsync(console, FakeSource(row), NewState());
+
+        console.Output.ShouldContain("idle (no supervisor)");
+        console.Output.ShouldNotContain("stopped");
+    }
+
+    [Fact]
+    public async Task Run_StateFileUnreadable_ShowsUnknownDesireAndNamesTheFault()
+    {
+        var entry = NewEntry("demo");
+        WriteRawState("{ \"stores\": oops");
+        var console = TuiTestHarness.InteractiveConsole();
+        TuiTestHarness.PushMenuChoice(console, 1);
+
+        await TuiWatchdSupervisor.RunAsync(console, RealSource([entry], NewState()), NewState());
+
+        console.Output.ShouldContain("unknown");
+        console.Output.ShouldContain("watchd state is unreadable");
+    }
+
+    [Fact]
+    public async Task StartAction_OnRowThatDoesNotResolve_Refuses_AndWritesNoDesire()
+    {
+        var entry = NewEntry("demo");
+        Directory.Delete(entry.RootPath, recursive: true);
+        var state = NewState();
+        var console = TuiTestHarness.InteractiveConsole();
+        TuiTestHarness.PushMenuChoice(console, 0);
+        TuiTestHarness.PushMenuChoice(console, 0);
+        TuiTestHarness.PushMenuChoice(console, 1);
+
+        await TuiWatchdSupervisor.RunAsync(console, RealSource([entry], state), state);
+
+        console.Output.ShouldContain("wish not saved");
+        console.Output.ShouldContain("does not resolve on this machine");
+        state.Read().Desires.ContainsKey(entry.StoreKey).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task StopAction_OnRowThatDoesNotResolve_Refuses_AndWritesNoDesire()
+    {
+        var entry = NewEntry("demo");
+        Directory.Delete(entry.RootPath, recursive: true);
+        var state = NewState();
+        var console = TuiTestHarness.InteractiveConsole();
+        TuiTestHarness.PushMenuChoice(console, 0);
+        TuiTestHarness.PushMenuChoice(console, 1);
+        TuiTestHarness.PushMenuChoice(console, 1);
+
+        await TuiWatchdSupervisor.RunAsync(console, RealSource([entry], state), state);
+
+        console.Output.ShouldContain("wish not saved");
+        console.Output.ShouldNotContain("desired state set to stopped");
+        state.Read().Desires.ContainsKey(entry.StoreKey).ShouldBeFalse();
     }
 
     private static WatchdSupervisorView EmptyView { get; } = new(WatchdDaemonStatus.NotRunning, []);
@@ -215,9 +293,20 @@ public sealed class TuiWatchdSupervisorTests : IDisposable
         return root;
     }
 
+    private void WriteRawState(string json)
+    {
+        var path = Path.Combine(_dir, "watchd", "state.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, json);
+    }
+
     public void Dispose()
     {
-        _roots.ForEach(root => Directory.Delete(root, recursive: true));
+        foreach (var root in _roots.Where(root => Directory.Exists(root)))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
         Directory.Delete(_dir, recursive: true);
     }
 
