@@ -204,6 +204,23 @@ public class SymbolMembersTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Cli_Symbol_SingleMemberRowRefused_NamesTheOmittedMemberInSingular()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        // 18 tokens carry the header and signature but never the 10-token member row:
+        // the member cannot fit at any plausible header price, so the refusal count is exactly 1
+        var pretty = await CliTestProcess.RunAsync(workspace, "symbol", "Solo", "--max-tokens", "18");
+        output.WriteLine($"symbol Solo --max-tokens 18 -> exit {pretty.ExitCode}" +
+                         $"\n{pretty.StdOut}\n{pretty.StdErr}");
+        pretty.ExitCode.ShouldBe(0);
+        pretty.StdOut.ShouldContain("body: omitted (budget) — 1 member did not fit (raise --max-tokens)");
+        pretty.StdOut.ShouldNotContain("1 members did not fit");
+        pretty.StdOut.ShouldNotContain("UnreachableUnderBudget (method)");
+        pretty.StdOut.ShouldNotContain("use --body or raise --max-tokens");
+    }
+
+    [Fact]
     public void Symbol_TypeBodyOverBudget_FullMemberMap_ReportsMappedState()
     {
         var workspace = NewIndexedWorkspace();
@@ -305,6 +322,7 @@ public class SymbolMembersTests(ITestOutputHelper output)
         WriteFile(workspace, "repo/src/Huge.cs", HugeClass());
         WriteFile(workspace, "repo/src/Box.cs", GenericBoxClass());
         WriteFile(workspace, "repo/src/Hollow.cs", HollowClass());
+        WriteFile(workspace, "repo/src/Solo.cs", SoloClass());
         manager.AddRepo("repo", "demo");
         new WorkspaceIndexer().Index(workspace);
         return workspace;
@@ -354,6 +372,21 @@ public class SymbolMembersTests(ITestOutputHelper output)
     private static string HollowClass()
     {
         var text = new StringBuilder("namespace Demo;\n\npublic class Hollow\n{\n");
+        foreach (var index in Enumerable.Range(1, 120))
+        {
+            text.Append($"    // filler {index} widens the body span without declaring a member symbol\n");
+        }
+
+        return text.Append("}\n").ToString();
+    }
+
+    private static string SoloClass()
+    {
+        var text = new StringBuilder("namespace Demo;\n\npublic class Solo\n{\n");
+        text.Append("    public int UnreachableUnderBudget(int a)\n");
+        text.Append("    {\n");
+        text.Append("        return a;\n");
+        text.Append("    }\n\n");
         foreach (var index in Enumerable.Range(1, 120))
         {
             text.Append($"    // filler {index} widens the body span without declaring a member symbol\n");
