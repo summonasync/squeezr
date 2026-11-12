@@ -7,4 +7,5 @@ public sealed record McpRemoveResult(
     string ConfigPath,
     bool InstructionsRemoved,
     string? Warning,
-    string? Error);
+    string? Error,
+    bool HooksRemoved = false);

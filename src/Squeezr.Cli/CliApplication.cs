@@ -128,7 +128,7 @@ public static class CliApplication
             {
                 hook.SetDescription("Produce payloads for AI client hooks (advisory, never blocks a tool call)");
                 hook.AddCommand<HookPreReadCommand>("pre-read")
-                    .WithDescription("PreToolUse nudge for Read: point large reads at the indexed navigation tools");
+                    .WithDescription("PreToolUse nudge on read-tool calls: point large reads at the indexed navigation tools");
             });
             McpCommandRegistration.AddMcpBranch(config);
         });

@@ -546,6 +546,84 @@ public sealed class McpCommandsTests
         }
     }
 
+    [Fact]
+    public async Task Install_QwenUserJson_ArmsHookAndReportsHooksArmed()
+    {
+        var workspace = TestDirs.NewTempDir();
+        string? homeDir = null;
+
+        var (exitCode, _, output, _) = await RunAsync(
+            workspace, ["mcp", "install", "--client", "qwen", "--yes", "--json"],
+            configureHome: home => homeDir = home);
+
+        exitCode.ShouldBe(0);
+        using var document = JsonDocument.Parse(output);
+        var qwen = document.RootElement.EnumerateArray()
+            .Single(element => element.GetProperty("client").GetString() == "qwen");
+        qwen.GetProperty("hooksArmed").GetBoolean().ShouldBeTrue();
+        var root = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".qwen", "settings.json")))!.AsObject();
+        root["mcpServers"]!.AsObject().ContainsKey("squeezr").ShouldBeTrue();
+        var matcher = root["hooks"]!.AsObject()["PreToolUse"]!.AsArray()[0]!["matcher"]!.GetValue<string>();
+        matcher.ShouldBe($"^{HookPreReadToolNames.PayloadIdFor("qwen")}$");
+    }
+
+    [Fact]
+    public async Task Install_ClaudeUser_WritesHooksToSettingsFileNotTheServerConfigFile()
+    {
+        var workspace = TestDirs.NewTempDir();
+        string? homeDir = null;
+
+        var (exitCode, _, _, _) = await RunAsync(
+            workspace, ["mcp", "install", "--client", "claude", "--yes", "--json"],
+            configureHome: home => homeDir = home);
+
+        exitCode.ShouldBe(0);
+        var claudeJson = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".claude.json")))!.AsObject();
+        claudeJson["mcpServers"]!.AsObject().ContainsKey("squeezr").ShouldBeTrue();
+        claudeJson.ContainsKey("hooks").ShouldBeFalse();
+        var settings = File.ReadAllText(Path.Combine(homeDir!, ".claude", "settings.json"));
+        settings.ShouldContain("hook pre-read");
+        settings.ShouldContain($"\"{HookPreReadToolNames.PayloadIdFor("claude")}\"");
+    }
+
+    [Fact]
+    public async Task Remove_QwenProjectAfterInstall_StripshooksAndReportsInHumanOutput()
+    {
+        var workspace = TestDirs.NewTempDir();
+        await RunAsync(workspace, ["mcp", "install", "--client", "qwen", "--scope", "project", "--yes"]);
+
+        var (exitCode, console, _, _) = await RunAsync(
+            workspace, ["mcp", "remove", "--client", "qwen", "--scope", "project"]);
+
+        exitCode.ShouldBe(0);
+        console.Output.ShouldContain("hook pre-read removed");
+        File.ReadAllText(Path.Combine(workspace, ".qwen", "settings.json")).ShouldNotContain("hook pre-read");
+    }
+
+    [Fact]
+    public async Task Doctor_QwenProjectArmed_PrintsHookStatusLine()
+    {
+        var workspace = TestDirs.NewTempDir();
+        await RunAsync(workspace, ["mcp", "install", "--client", "qwen", "--scope", "project", "--yes"]);
+
+        var (exitCode, console, _, _) = await RunAsync(workspace, ["mcp", "doctor", "--client", "qwen"]);
+
+        exitCode.ShouldBe(0);
+        console.Output.ShouldContain("hook pre-read: armed (project scope)");
+    }
+
+    [Fact]
+    public async Task Doctor_Kimi_PrintsUnverifiedReasonInsteadOfInventingAPath()
+    {
+        var workspace = TestDirs.NewTempDir();
+        await RunAsync(workspace, ["mcp", "install", "--client", "kimi", "--scope", "project", "--yes"]);
+
+        var (exitCode, console, _, _) = await RunAsync(workspace, ["mcp", "doctor", "--client", "kimi"]);
+
+        exitCode.ShouldBe(0);
+        console.Output.ShouldContain("hook pre-read: not armed (hook layout unverified)");
+    }
+
     private static TestConsole NewInteractiveConsole()
     {
         var console = new TestConsole();

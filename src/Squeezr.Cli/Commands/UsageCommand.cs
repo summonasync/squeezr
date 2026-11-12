@@ -290,14 +290,56 @@ public sealed class UsageCommand : Command<UsageCommand.Settings>
     }
 
     // explicit zero sides beat silent ratios: a missing hook or a dead index each say exactly what is missing
-    public static string AdoptionLine(SessionAdoption adoption) => adoption.HookSessions switch
+    public static string AdoptionLine(SessionAdoption adoption)
     {
-        0 when adoption.McpSessions == 0 => "Adoption: no session-attributed usage recorded yet.",
-        0 => $"Adoption: {adoption.McpSessions} session(s) used MCP tools; read side unknown — 0 hook sessions recorded (install the pre-read hook).",
-        _ => adoption.McpSessions == 0
-            ? $"Adoption: 0 sessions used MCP tools; {adoption.HookSessions} session(s) read code via the hook."
-            : $"Adoption: {adoption.McpSessions} of {adoption.HookSessions} reading session(s) used MCP tools (ratio {adoption.Ratio})."
-    };
+        var head = adoption.HookSessions switch
+        {
+            0 when adoption.McpSessions == 0 => "Adoption: no session-attributed usage recorded yet",
+            0 => $"Adoption: {adoption.McpSessions} session(s) used MCP tools; read side unknown — 0 hook sessions recorded (install the pre-read hook)",
+            _ => adoption.McpSessions == 0
+                ? $"Adoption: 0 sessions used MCP tools; {adoption.HookSessions} session(s) read code via the hook"
+                : $"Adoption: {adoption.McpSessions} of {adoption.HookSessions} reading session(s) used MCP tools (ratio {adoption.Ratio})"
+        };
+
+        if (adoption is { HookSessions: > 0, HookSessionsByTool: { } buckets })
+        {
+            head += $" — {ReadSide(buckets, adoption.HookSessionsWithoutTool)}";
+        }
+
+        return head + ".";
+    }
+
+    // a label table, not a matcher: which tool name belongs to which runtime is decided where the payload is
+    // read (HookPreReadToolNames), so a name the hook learns to accept later still shows up here verbatim.
+    // the measured names are spoken even at zero — a runtime nobody reads through is the fact adoption changed to show.
+    private static readonly (string Recorded, string Runtime)[] MeasuredRuntimes =
+    [
+        ("Read", "Claude Code"),
+        ("read_file", "Qwen Code"),
+    ];
+
+    private static string ReadSide(IReadOnlyList<HookToolSessions> buckets, int withoutTool)
+    {
+        var sides = MeasuredRuntimes
+            .Select(side => (Name: side.Runtime, Sessions: SessionsFor(buckets, side.Recorded)))
+            .ToList();
+
+        sides.AddRange(buckets
+            .Where(bucket => MeasuredRuntimes.All(side => !string.Equals(side.Recorded, bucket.Tool, StringComparison.Ordinal)))
+            .Select(bucket => (Name: bucket.Tool, Sessions: bucket.Sessions)));
+
+        sides.Add((Name: "unrecorded tool name", Sessions: withoutTool));
+
+        var spoken = sides
+            .OrderByDescending(side => side.Sessions)
+            .ThenBy(side => side.Name, StringComparer.Ordinal)
+            .Select(side => $"{side.Name} {side.Sessions}");
+
+        return $"reads: {string.Join(", ", spoken)}";
+    }
+
+    private static int SessionsFor(IReadOnlyList<HookToolSessions> buckets, string recorded) =>
+        buckets.FirstOrDefault(bucket => string.Equals(bucket.Tool, recorded, StringComparison.Ordinal))?.Sessions ?? 0;
 
     private sealed class UsageLiveView
     {
