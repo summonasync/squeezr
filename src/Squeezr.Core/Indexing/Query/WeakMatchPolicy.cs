@@ -15,9 +15,17 @@ public static class WeakMatchPolicy
     public static string Warning(int deliveredSemanticHits, string? kind)
     {
         var noun = deliveredSemanticHits == 1 ? "hit" : "hits";
-        var move = kind == DocKindDetector.Code
-            ? "narrow with prefix"
-            : $"narrow with kind={DocKindDetector.Code} or prefix";
-        return $"no exact-arm match; {deliveredSemanticHits} semantic {noun} at low confidence — {move}";
+        var moves = new List<string>();
+        if (DocKindDetector.FilterKind(kind) is null)
+        {
+            moves.Add($"kind={DocKindDetector.Code}");
+        }
+
+        moves.Add("prefix");
+
+        var offered = moves.Count == 1
+            ? moves[0]
+            : $"{string.Join(", ", moves.Take(moves.Count - 1))} or {moves[^1]}";
+        return $"no exact-arm match; {deliveredSemanticHits} semantic {noun} at low confidence — narrow with {offered}";
     }
 }

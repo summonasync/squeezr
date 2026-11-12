@@ -55,7 +55,25 @@ public class WeakMatchPolicyTests
     {
         var warning = WeakMatchPolicy.Warning(3, DocKindDetector.Code);
 
-        warning.ShouldContain("narrow with prefix");
+        warning.ShouldBe("no exact-arm match; 3 semantic hits at low confidence — narrow with prefix");
         warning.ShouldNotContain("kind=");
+    }
+
+    [Fact]
+    public void Warning_DocsKind_NeverSuggestsSwitchingKind()
+    {
+        var warning = WeakMatchPolicy.Warning(4, DocKindDetector.Docs);
+
+        warning.ShouldBe("no exact-arm match; 4 semantic hits at low confidence — narrow with prefix");
+        warning.ShouldNotContain("kind=code");
+    }
+
+    [Fact]
+    public void Warning_ExplicitAllKind_StillOffersTheKindMove()
+    {
+        var warning = WeakMatchPolicy.Warning(2, DocKindDetector.All);
+
+        warning.ShouldContain("kind=code");
+        warning.ShouldBe(WeakMatchPolicy.Warning(2, null));
     }
 }
