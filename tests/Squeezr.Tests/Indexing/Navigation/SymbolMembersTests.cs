@@ -17,6 +17,7 @@ public class SymbolMembersTests(ITestOutputHelper output)
     private const int MembersFitBudget = 120;
     private const int MembersOverflowBudget = 40;
     private const int GenericFitBudget = 60;
+    private const int NoMembersBudget = 40;
     private const int MethodCount = 12;
     private const int HugeBodyTokens = 225;
 
@@ -104,7 +105,7 @@ public class SymbolMembersTests(ITestOutputHelper output)
         var hit = result.Matches.ShouldHaveSingleItem();
         hit.BodyOmitted.ShouldBeTrue();
         hit.Members.ShouldBeEmpty();
-        hit.MembersOmitted.ShouldBe(0);
+        hit.MembersOmitted.ShouldBe(MethodCount);
         result.Truncated.ShouldBeTrue();
         result.Hint.ShouldNotBeNull().Render(p => p)
             .ShouldBe("narrow the query (repo, kind) or raise maxTokens");
@@ -202,6 +203,21 @@ public class SymbolMembersTests(ITestOutputHelper output)
         var hit = result.Matches.ShouldHaveSingleItem();
         hit.BodyOmitted.ShouldBeTrue();
         hit.Members.ShouldBeEmpty();
+        hit.MembersOmitted.ShouldBe(MethodCount);
+        result.State.ShouldBe(AnswerState.Clipped);
+    }
+
+    [Fact]
+    public void Symbol_TypeWithoutMembers_OverBudgetBody_ReportsOmittedZero()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        // the container declares no member symbols at all: the refused body must not invent a count
+        var result = new SymbolLookup(workspace).Find("Hollow", null, null, NoMembersBudget, body: true);
+
+        var hit = result.Matches.ShouldHaveSingleItem();
+        hit.BodyOmitted.ShouldBeTrue();
+        hit.Members.ShouldBeEmpty();
         hit.MembersOmitted.ShouldBe(0);
         result.State.ShouldBe(AnswerState.Clipped);
     }
@@ -254,6 +270,7 @@ public class SymbolMembersTests(ITestOutputHelper output)
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/src/Huge.cs", HugeClass());
         WriteFile(workspace, "repo/src/Box.cs", GenericBoxClass());
+        WriteFile(workspace, "repo/src/Hollow.cs", HollowClass());
         manager.AddRepo("repo", "demo");
         new WorkspaceIndexer().Index(workspace);
         return workspace;
@@ -295,6 +312,17 @@ public class SymbolMembersTests(ITestOutputHelper output)
             text.Append("    {\n");
             text.Append($"        return a + {index};\n");
             text.Append("    }\n\n");
+        }
+
+        return text.Append("}\n").ToString();
+    }
+
+    private static string HollowClass()
+    {
+        var text = new StringBuilder("namespace Demo;\n\npublic class Hollow\n{\n");
+        foreach (var index in Enumerable.Range(1, 120))
+        {
+            text.Append($"    // filler {index} widens the body span without declaring a member symbol\n");
         }
 
         return text.Append("}\n").ToString();
