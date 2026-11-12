@@ -12,7 +12,11 @@ public class McpSymbolMembersTests
 {
     private const int MembersFitBudget = 120;
     private const int MembersPartialBudget = 40;
+    private const int MembersAllRefusedBudget = 15;
     private const int MethodCount = 12;
+
+    // the price the engine puts on the refused Huge body; the same fixture text is pinned engine-side
+    private const int HugeBodyPrice = 225;
 
     [Fact]
     public async Task SymbolLookup_OversizedType_CarriesMembersInsteadOfDeadEnd()
@@ -68,6 +72,34 @@ public class McpSymbolMembersTests
         envelope.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!)
             .ShouldContain(w => w ==
                 "truncated: 36 of 40 token ceiling — read a member with expand_span or raise maxTokens");
+    }
+
+    [Fact]
+    public async Task SymbolLookup_AllMemberRowsRefused_CarriesHonestCountAndBodyPriceRemedy()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "symbol_lookup",
+            new Dictionary<string, object?> { ["name"] = "Huge", ["maxTokens"] = MembersAllRefusedBudget },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        var hit = envelope.GetProperty("data").EnumerateArray().ShouldHaveSingleItem();
+        hit.TryGetProperty("members", out _).ShouldBeFalse();
+        hit.GetProperty("membersOmitted").GetInt32().ShouldBe(MethodCount);
+        hit.GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
+
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
+
+        var tokensUsed = envelope.GetProperty("tokensUsed").GetInt32();
+        envelope.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!)
+            .ShouldContain(w => w ==
+                $"truncated: {tokensUsed} of {MembersAllRefusedBudget} token ceiling — " +
+                $"raise maxTokens (the body alone needs ~{HugeBodyPrice} tokens)");
     }
 
     [Fact]

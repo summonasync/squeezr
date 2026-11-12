@@ -308,11 +308,6 @@ public sealed class SymbolLookup
             taken.Add(new SymbolMember(candidate.Name, candidate.Kind, candidate.StartLine));
         }
 
-        if (taken.Count == 0)
-        {
-            return ([], 0);
-        }
-
         return (taken, omitted);
     }
 
