@@ -95,15 +95,6 @@ public sealed class SearchEngine
             }
         }
 
-        if (fileScope is not { Count: 0 })
-        {
-            var capped = CappedArmPolicy.Warning(semantic, query.Repo, query.Prefix, query.Kind, query.PathGlob);
-            if (capped is not null)
-            {
-                warnings.Add(capped);
-            }
-        }
-
         var phraseLocations = new HashSet<(string Path, int Line)>(
             exact.Select(hit => (hit.Match.Path, hit.Match.Line)));
         var dedupedIdentifier = identifierHits
@@ -114,6 +105,19 @@ public sealed class SearchEngine
             .Concat(dedupedIdentifier)
             .Select(hit => (hit.Key!, hit.Match))
             .ToList();
+
+        // sits after the exact ranking settles: exactRanked.Count is the same number Finalize
+        // hands to WeakMatchPolicy, and both policies must answer for one exact arm
+        if (fileScope is not { Count: 0 })
+        {
+            var capped = CappedArmPolicy.Warning(
+                semantic, exactRanked.Count, query.Repo, query.Prefix, query.Kind, query.PathGlob);
+            if (capped is not null)
+            {
+                warnings.Add(capped);
+            }
+        }
+
         var merged = RrfMerger.Merge(exactRanked, semantic.Hits, tuning);
         var semanticScores = semantic.Hits.Select(hit => hit.Match.Score).ToList();
         return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores, embeddings?.ModelKey);
