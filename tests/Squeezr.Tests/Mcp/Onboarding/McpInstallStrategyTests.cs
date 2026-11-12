@@ -65,4 +65,40 @@ public class McpInstallStrategyTests
         decision.Method.ShouldBe(McpInstallMethod.Writer);
         decision.Warning.ShouldNotBeNull().ShouldContain("qwen");
     }
+
+    [Theory]
+    [InlineData(McpClientId.Claude, ".claude/settings.json", ".claude/settings.json")]
+    [InlineData(McpClientId.Qwen, ".qwen/settings.json", ".qwen/settings.json")]
+    public void GetHooksPath_ArmedClients_ReturnsScopeSpecificPath(
+        McpClientId id, string userRelative, string projectRelative)
+    {
+        var descriptor = McpClientRegistry.Get(id);
+
+        descriptor.GetHooksPath("/home/testhome", "/repo", McpScope.User)
+            .ShouldBe(Path.Combine(["/home/testhome", .. userRelative.Split('/')]));
+        descriptor.GetHooksPath("/home/testhome", "/repo", McpScope.Project)
+            .ShouldBe(Path.Combine(["/repo", .. projectRelative.Split('/')]));
+    }
+
+    [Fact]
+    public void GetHooksPath_UnverifiedClients_ReturnNullInEveryScope()
+    {
+        McpClientRegistry.Get(McpClientId.Kimi).GetHooksPath("/home/testhome", "/repo", McpScope.User).ShouldBeNull();
+        McpClientRegistry.Get(McpClientId.Kimi).GetHooksPath("/home/testhome", "/repo", McpScope.Project).ShouldBeNull();
+        McpClientRegistry.Get(McpClientId.Codex).GetHooksPath("/home/testhome", "/repo", McpScope.User).ShouldBeNull();
+        McpClientRegistry.Get(McpClientId.Codex).GetHooksPath("/home/testhome", "/repo", McpScope.Project).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Resolve_KimiUserScope_HooksUnarmedBecauseLayoutUnverified()
+    {
+        var binDir = TestDirs.NewTempDir();
+        FakeCli.Install(binDir, "kimi");
+
+        var decision = McpInstallStrategy.Resolve(McpClientRegistry.Get(McpClientId.Kimi), McpScope.User, new ClientCliLocator(binDir));
+
+        decision.Method.ShouldBe(McpInstallMethod.Writer);
+        HooksBlock.ForClient(McpClientRegistry.Get(McpClientId.Kimi), "/opt/squeezr/squeezr").ShouldBeNull();
+        HooksBlock.ForClient(McpClientRegistry.Get(McpClientId.Codex), "/opt/squeezr/squeezr").ShouldBeNull();
+    }
 }

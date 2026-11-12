@@ -30,9 +30,14 @@ public sealed record McpClientDescriptor
 
     public required Func<string, string, McpScope, string> InstructionPathResolver { get; init; }
 
+    public Func<string, string, McpScope, string>? HooksPathResolver { get; init; }
+
     public string GetConfigPath(string homeDir, string workspaceRoot, McpScope scope) =>
         ConfigPathResolver(homeDir, workspaceRoot, scope);
 
     public string GetInstructionPath(string homeDir, string workspaceRoot, McpScope scope) =>
         InstructionPathResolver(homeDir, workspaceRoot, scope);
+
+    public string? GetHooksPath(string homeDir, string workspaceRoot, McpScope scope) =>
+        HooksPathResolver?.Invoke(homeDir, workspaceRoot, scope);
 }

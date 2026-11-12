@@ -158,29 +158,35 @@ re-run the same command after a squeezr upgrade to refresh it;
 `squeezr mcp remove --project` strips the block from all carrier files (files
 themselves are never deleted).
 
-Claude Code also has an optional advisory hook. `squeezr hook pre-read` reads the
-PreToolUse payload from stdin and, when the Read targets a large file or wide
-range inside a registered workspace, adds `additionalContext` pointing at
-`expand_span` / `symbol_lookup`; otherwise it prints nothing and exits 0. It is
-advisory only (never sets `permissionDecision`). The wiring is human-applied —
-never edit hook configs from an agent session. Other clients (qwen, kimi) can
-wire the same pattern when their hook surface allows. In
-`~/.claude/settings.json` (project scope: `.claude/settings.json`):
+`squeezr mcp install` also arms the advisory PreToolUse hook in the same pass
+that registers a client, for the two runtimes whose hook layout is verified:
+Claude Code (`Read`, in `~/.claude/settings.json`) and Qwen Code
+(`^read_file$`, in the same `~/.qwen/settings.json` that carries `mcpServers`).
+Kimi Code and Codex CLI come back `not armed (hook layout unverified)` — no
+path is invented for a layout nobody checked. `squeezr hook pre-read` reads the
+payload from stdin and, when the read targets a large file or a wide range
+inside a registered workspace, answers with
+`hookSpecificOutput.additionalContext` pointing at `code_search` /
+`symbol_lookup` / `expand_span`. That JSON shape is what puts the advice in the
+model's context: bare text on stdout at exit 0 reaches the human as a UI
+`systemMessage` and the model never sees it. Advisory only — it never sets
+`permissionDecision` and never blocks a read. `tool_name` in the payload
+carries the runtime's own id (Qwen sends `read_file`, Claude sends `Read`;
+`Read`/`ReadFile` are accepted matcher aliases on Qwen while the delivered name
+still says `read_file`), and the telemetry row keeps that value verbatim —
+which is how `squeezr usage` names the runtime behind each reading session.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Read",
-        "hooks": [
-          { "type": "command", "command": "squeezr hook pre-read" }
-        ]
-      }
-    ]
-  }
-}
-```
+Check it with `squeezr mcp doctor`: one `hook pre-read: <state>` line per
+client (`armed` / `armed (project scope)` / `not armed` / `not armed (hook layout unverified)`),
+additive `hookStatus` in `--json`. `squeezr mcp remove` strips the
+managed entry. A snippet applied by hand before this existed counts as managed
+— install normalizes it to the canonical command, remove takes it back.
+`mcp install --project` alone arms nothing, and there is no flag to skip the
+arm. <removed 2026-11-11 — 114/T3>~~The wiring is human-applied — never edit
+hook configs from an agent session. Other clients (qwen, kimi) can wire the
+same pattern when their hook surface allows.~~</removed> Wiring is the
+command's job now; still never hand-edit a hook config from an agent session —
+run `mcp install` and read the verdict from `mcp doctor`.
 
 ## 5. Tool cheat-sheet (MCP)
 

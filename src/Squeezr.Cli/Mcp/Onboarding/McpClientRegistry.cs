@@ -18,6 +18,9 @@ public static class McpClientRegistry
             InstructionPathResolver = static (home, root, scope) => scope == McpScope.User
                 ? Path.Combine(home, ".claude", "CLAUDE.md")
                 : Path.Combine(root, "CLAUDE.md"),
+            HooksPathResolver = static (home, root, scope) => scope == McpScope.User
+                ? Path.Combine(home, ".claude", "settings.json")
+                : Path.Combine(root, ".claude", "settings.json"),
         },
         new McpClientDescriptor
         {
@@ -53,6 +56,10 @@ public static class McpClientRegistry
             InstructionPathResolver = static (home, root, scope) => scope == McpScope.User
                 ? Path.Combine(home, ".qwen", "QWEN.md")
                 : Path.Combine(root, "QWEN.md"),
+            // Qwen keeps mcpServers and hooks in the same settings file — the hooks block is an additive sibling key.
+            HooksPathResolver = static (home, root, scope) => scope == McpScope.User
+                ? Path.Combine(home, ".qwen", "settings.json")
+                : Path.Combine(root, ".qwen", "settings.json"),
         },
         new McpClientDescriptor
         {

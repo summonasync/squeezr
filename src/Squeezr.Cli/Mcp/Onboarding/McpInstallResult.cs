@@ -7,4 +7,5 @@ public sealed record McpInstallResult(
     string ConfigPath,
     bool InstructionsWritten,
     string? Warning,
-    string? Error);
+    string? Error,
+    bool HooksArmed = false);
