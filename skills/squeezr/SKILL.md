@@ -280,9 +280,10 @@ ceiling answers with its own envelope; only an identical ceiling replays.
 `code_search` defaults to
 maxTokens 2000 and sets `truncated` when it overflows — narrow the query or
 adjust maxTokens instead of reading files. When `truncated: true` and not one
-member row fit, there is no `members` key and `membersOmitted: N` names the
-rows that never made it — a counter without a map means none shown, not a
-complete map. In big workspaces prefer `prefix` over raising
+member row fit, `symbol_lookup` drops the `members` key and `membersOmitted: N`
+names the rows that never made it (`code_pack` shows `members: []` beside the
+counter — its record shape is non-nullable); a counter without a map means none
+shown, not a complete map. In big workspaces prefer `prefix` over raising
 maxTokens: a scoped map or search usually fits the default budget. Pass `topK`
 to cap how many files come back when a few strong hits are enough — `code_search`
 returns one hit per file, so `topK` counts distinct files, not spans. The
