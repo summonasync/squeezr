@@ -1525,8 +1525,10 @@ machine can actually read — the desire file, the claim probe, the watchd
 lock: `supervised` (a live watchd owns the watcher), `managed elsewhere` (a
 live owner belongs to an MCP client or another host), `wedged` (a live pid
 holding a stale claim — the pathology every other cell would cosmeticize),
-`stopped` (the operator's recorded wish), `starting` (watchd is alive and the
-indexer is not up yet — the supervisor brings it up on its next sweep), and
+`stopped` (the operator's recorded wish), `starting` (watchd is alive, the
+recorded wish is `running` and no indexer is up yet — those three facts and
+nothing else choose the word, so a store the crash-loop guard has wedged
+still reads `starting` here, see the rules below), and
 `idle (no supervisor)` — the store wants watching (`desired=running`) but no
 live watchd is left to carry the wish out. `stopped` and
 `idle (no supervisor)` are the two faces of nothing running and stay
@@ -1544,18 +1546,24 @@ Supervision rules, in one place:
   an upgrade the new code picks up without a manual step. Without watchd the
   upgrade flow is `squeezr fleet restart`.
 - **Crash-loop guard.** More than 5 restarts of one store within 10 minutes
-  wedges it: restarts stop, the status shows `wedged`, and the supervisor's
-  row names the cause — `restarts stopped after 5 starts inside 10 minutes`.
+  wedges it: restarts stop, and the supervisor's own row says
+  `watch <store> is wedged:` with the cause after it — `restarts stopped
+  after 5 starts inside 10 minutes`. That row is where a crash-loop wedge is
+  voiced; the `wedged` cell of `fleet status` comes only from a live pid
+  holding a stale claim, so a guard-wedged store whose daemon already died
+  reads `starting` in the column.
   The wedge marker lives in `state.json`, so `fleet restart` is a real
   reset even against a live supervisor: the command writes the wish back to
   `running` and removes the marker from the file, and the supervisor's own
   guard is just a cache over that file — it releases the store and hands out
   a fresh restart budget on its next sweep. The one exception is told
   instead of hidden: when the marker write itself failed, the wedge holds in
-  the supervisor's memory until the flush lands (retried every sweep, and
-  the row appends `the marker never reached state.json (…)`), because an
-  unflushed wedge released to a fresh budget every sweep would be a restart
-  flap nobody sees.
+  the supervisor's memory until the flush lands (retried on every sweep that
+  reaches the guard — a state file that cannot be read fails the sweep
+  closed before the guard is synced, so that flush waits for the repair
+  below, and the row appends `the marker never reached state.json (…)`),
+  because an unflushed wedge released to a fresh budget every sweep would be
+  a restart flap nobody sees.
 - **SIGTERM stops both processes the way Ctrl+C does.** `watchd` and a
   watched `squeezr watch` register SIGTERM onto the same shutdown their
   console handler drives: the watchd lock or the watch claim is released,
@@ -1597,8 +1605,10 @@ start supervision from the running default`. Readers tell the same truth in
 their own voice: `fleet status` prints `unknown` in the Desired column with
 a stderr fault line (`warning: watchd state '…' — no desired state is known,
 the supervisor applies nothing until the file is repaired; the supervision
-column shows live facts only`) while the Supervision column keeps answering
-from live facts, `fleet status --json` carries the fault in an additive
+column shows live facts only.`) while the Supervision column keeps answering
+from live facts and the TUI answers the same way — `unknown` in the
+supervisor table's `desire` column and in the session panel's
+`desired:` line, `fleet status --json` carries the fault in an additive
 `stateFault` member omitted while the file is clean, and a starting `serve`
 promises no watcher it cannot bring — `no watcher is coming until the file
 is repaired` instead of the supervised promise. Desire writers refuse rather
@@ -1606,7 +1616,12 @@ than overwrite: `fleet start`, `fleet stop`, `fleet restart` and the TUI's
 Start/Stop/Restart report `supervision state '<path>' …; it is not
 overwritten — rebuilding it from what cannot be read would drop the desires
 of every other store` and write nothing — every other store's wishes and
-wedge markers live in that same file.
+wedge markers live in that same file. The refusal is not a promise that
+nothing happened: `fleet start`, `fleet stop` and the TUI refuse before
+touching anything, but `fleet restart` stops the live watcher first and
+throws only when it then writes the wish — a restart against a corrupt
+`state.json` can leave the watcher stopped, the desire unwritten and the
+command at exit 1.
 
 ### Autostart: `watchd install` / `uninstall` / `installed`
 
