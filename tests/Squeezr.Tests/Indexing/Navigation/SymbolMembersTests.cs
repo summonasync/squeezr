@@ -170,6 +170,40 @@ public class SymbolMembersTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Cli_Symbol_BudgetRefusesEveryMemberRow_NamesTheOmittedCount()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var pretty = await CliTestProcess.RunAsync(workspace, "symbol", "Huge", "--max-tokens", "15");
+        output.WriteLine($"symbol Huge --max-tokens 15 -> exit {pretty.ExitCode}" +
+                         $"\n{pretty.StdOut}\n{pretty.StdErr}");
+        pretty.ExitCode.ShouldBe(0);
+        pretty.StdOut
+            .ShouldContain($"body: omitted (budget) — {MethodCount} members did not fit (raise --max-tokens)");
+        pretty.StdOut.ShouldNotContain("use --body or raise --max-tokens");
+    }
+
+    [Fact]
+    public async Task Cli_Symbol_BodyRefusedWithoutMemberMap_KeepsTheBareHint()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        // a method has no member rows to omit; a hollow type declares none at all:
+        // neither may be handed an invented count
+        var method = await CliTestProcess.RunAsync(workspace, "symbol", "Method01", "--max-tokens", "25");
+        output.WriteLine($"symbol Method01 --max-tokens 25 -> exit {method.ExitCode}\n{method.StdOut}\n{method.StdErr}");
+        method.ExitCode.ShouldBe(0);
+        method.StdOut.ShouldContain("body: omitted (budget); use --body or raise --max-tokens");
+        method.StdOut.ShouldNotContain("members did not fit");
+
+        var hollow = await CliTestProcess.RunAsync(workspace, "symbol", "Hollow", "--max-tokens", NoMembersBudget.ToString());
+        output.WriteLine($"symbol Hollow --max-tokens {NoMembersBudget} -> exit {hollow.ExitCode}\n{hollow.StdOut}\n{hollow.StdErr}");
+        hollow.ExitCode.ShouldBe(0);
+        hollow.StdOut.ShouldContain("body: omitted (budget); use --body or raise --max-tokens");
+        hollow.StdOut.ShouldNotContain("did not fit");
+    }
+
+    [Fact]
     public void Symbol_TypeBodyOverBudget_FullMemberMap_ReportsMappedState()
     {
         var workspace = NewIndexedWorkspace();
