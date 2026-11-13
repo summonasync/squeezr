@@ -199,7 +199,7 @@ public sealed class WorktreeReconcileTests : IDisposable
     // null count, different remedy, and a machine-reader must not have to parse prose to tell them apart.
     [LinuxFact]
     [SupportedOSPlatform("linux")]
-    public void Reconcile_MetaDbWillNotOpen_IsPendingUnreadableWithTheRepairRemedy()
+    public void Reconcile_MetaDbWillNotOpen_IsPendingUnreadableAndNamesDropNotRepairTheDoor()
     {
         var (main, child) = IndexedMainAndLane(out var collection);
         var (registered, fill) = FillLane(main, child, collection);
@@ -217,7 +217,14 @@ public sealed class WorktreeReconcileTests : IDisposable
         outcome.Code.ShouldBe(WorktreeReconcileOutcome.StoreUnreadableCode);
         outcome.CollectionPoints.ShouldBeNull();
         var unreadableReason = outcome.Reason.ShouldNotBeNull();
-        unreadableReason.ShouldContain("workspace repair");
+        unreadableReason.ShouldContain(RemedyText.DropCommand);
+        // D8 is a prohibition, so the pin that satisfies it has to be one too: grepping the sentence for the
+        // word 'workspace repair' stays green whether the remedy offers repair or refuses it, and refusing it
+        // is the half this state was measured into the text for.
+        unreadableReason.Contains($"Run '{RemedyText.WorkspaceRepairCommand}'", StringComparison.Ordinal)
+            .ShouldBeFalse(
+                "workspace repair sweeps registry rows and never opens a meta.db, so it is not the door this "
+                + "sentence may send a reader through");
         // the services are not the broken half here, and pointing at them wastes the reader's next step
         unreadableReason.ShouldNotContain(RemedyText.ServicesUp);
     }
@@ -238,7 +245,13 @@ public sealed class WorktreeReconcileTests : IDisposable
         outcome.State.ShouldBe(WorktreeReconcileState.Pending);
         outcome.Code.ShouldBe(WorktreeReconcileOutcome.StoreUnreadableCode);
         outcome.CollectionPoints.ShouldBeNull();
-        outcome.Reason.ShouldNotBeNull().ShouldContain("workspace repair");
+        var corruptedReason = outcome.Reason.ShouldNotBeNull();
+        corruptedReason.ShouldContain(RemedyText.DropCommand);
+        // the same prohibition as the chmod form above: the sentence may mention repair to refuse it, but it
+        // may not hand the reader the sweep of registry rows as the verb that opens a meta.db.
+        corruptedReason.Contains($"Run '{RemedyText.WorkspaceRepairCommand}'", StringComparison.Ordinal)
+            .ShouldBeFalse(
+                "workspace repair never opens a meta.db, so this remedy must not name it as the door");
     }
 
     // The loud pass failure is the shape AC7 refuses: the verb says what did not land and which door finishes
@@ -538,6 +551,70 @@ public sealed class WorktreeReconcileTests : IDisposable
         second.CoveredChunks.ShouldBe(0);
     }
 
+    // The window review-116-18 B1 is made of: the pass ran and closed while the collection would not answer,
+    // so the record kept the store pending with an arm it never measured. The service comes back and the ids
+    // the record names are all in it — nothing here says short any more, and a verb that only reads the
+    // record would print 'reconciled' over a flag it refuses to rewrite. Then the warning is a permanent
+    // lease and every remedy it names provably fails to clear it. The disagreement owes the pass, and the
+    // pass closes the record with a measurement of its own.
+    [Fact]
+    public void Reconcile_RecordPendingFromASilentPass_CollectionRestoredOwesThePassThatClosesIt()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        var provider = new FakeEmbeddingProvider();
+        // the service that is not in the room: the pass runs, its measurement comes back silent, and the
+        // record it writes says so instead of pretending the arm landed
+        var silent = new FakeVectorStore { AnswerThrows = true };
+
+        var first = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false, () => Runtime(silent, provider));
+
+        first.State.ShouldBe(WorktreeReconcileState.Pending);
+        first.Code.ShouldBe(WorktreeReconcileOutcome.StoreSilentCode);
+        var leftBehind = WorkspaceManifestFile.Load(registered.RootPath).Reconcile.ShouldNotBeNull();
+        leftBehind.PassCompleted.ShouldBeTrue("the pass did run; only its accounting came back silent");
+        leftBehind.SemanticArmLanded.ShouldNotBeNull().ShouldBeFalse();
+        leftBehind.Pending.ShouldBeTrue();
+        leftBehind.ObligationChunks.ShouldNotBe(0,
+            "the claim this recovery has to answer for is the store's own, not one this test invented");
+
+        // the service is back, answering for the collection that holds this store's points: the sample the
+        // next start pays finds no gap, so nothing measures the pending any more except the record itself
+        var adopted = WorktreeRegistration.Register(child, null);
+        var kept = WorktreeStoreFill.Fill(adopted, true, ModelKey(main), null,
+            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
+        kept.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex,
+            "the fill owes nothing here — only the disagreement between the record and the store can");
+
+        var second = WorktreeReconcile.Run(
+            adopted, kept, noSemantic: false, () => Runtime(collection, provider));
+
+        second.PassRan.ShouldBeTrue(
+            "a record that says pending and a measurement that says reconciled cannot both stand, and the "
+            + "record is the half that owes the work — this is what makes 're-run this verb' a remedy");
+        second.State.ShouldBe(WorktreeReconcileState.Reconciled);
+        second.Basis.ShouldBe("pass", "the recovery answers with a measurement, not with the remembered one");
+        second.CoveredChunks.ShouldNotBeNull()
+            .ShouldBe(second.ObligationChunks, "every hash the store calls embedded was asked by id and found");
+
+        var closed = WorkspaceManifestFile.Load(registered.RootPath).Reconcile.ShouldNotBeNull();
+        closed.Pending.ShouldBeFalse("the store now holds the record the recovery measured");
+        closed.SemanticArmLanded.ShouldNotBeNull().ShouldBeTrue();
+        closed.Code.ShouldBeNull();
+        closed.CoveredChunks.ShouldBe(closed.ObligationChunks,
+            "and the numbers it carries are the ones this pass counted, not the frozen silent ones");
+
+        var again = WorktreeRegistration.Register(child, null);
+        var againFill = WorktreeStoreFill.Fill(again, true, ModelKey(main), null,
+            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
+        var third = WorktreeReconcile.Run(
+            again, againFill, noSemantic: false, () => Runtime(collection, provider));
+
+        third.PassRan.ShouldBeFalse(
+            "the recovery is once, not a fresh every-start bill: the closed record settles on its sample");
+    }
+
     // A lane born before its main worktree was indexed has nothing inherited and nothing short. That is a
     // deferred word, not a failure, and it must not leave the lane pending forever.
     [Fact]
@@ -764,7 +841,9 @@ public sealed class WorktreeReconcileTests : IDisposable
 
         // One flag for one fact: this collection is not in the room. Both doors a measurement can be asked
         // through refuse, so a reconcile that reaches for the count instead of the ids gets the same answer.
-        public bool AnswerThrows { get; init; }
+        // Settable rather than init-only because a recovery has to bring the service back between two runs
+        // of the same verb, with the points the first run wrote staying where they landed.
+        public bool AnswerThrows { get; set; }
 
         public int MeasurementCallCount { get; private set; }
 

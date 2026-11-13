@@ -232,6 +232,59 @@ public sealed class PendingSurfaceTests : IDisposable
             "the coordinates were proved by a pass over this tree, so the verdict stands on its own evidence");
     }
 
+    // review-116-18 B1 at the surface a reader actually stands at. The warning an unaccounted vector arm
+    // leaves behind names 'squeezr worktree init' as one of its doors; before the fix that door attested its
+    // own record and returned without rewriting it, so the lane paid the same sentence at every start and
+    // the verb it pointed at provably did nothing. Both halves of the recovery are asserted here: the run
+    // that closes the record, and the 'status --json' that stops saying the word.
+    [Fact]
+    public async Task WarningThatNamesWorktreeInit_AsksForThePassThatClearsItAndSilencesStatus()
+    {
+        var lane = await FilledLaneWithoutAPassAsync("surface-recovery");
+        var opened = WorkspaceManifestFile.Load(lane).Reconcile.ShouldNotBeNull();
+        var obligation = EmbeddedHashCount(lane);
+
+        // the record a silent pass leaves: the coordinates are proved, the vector arm is not accounted for
+        WorkspaceManifestFile.WriteReconcileAt(SqueezrPaths.ManifestPath(lane), lane,
+            opened.ClosedPass(passCompleted: true, semanticArmLanded: false, obligationChunks: obligation,
+                coveredChunks: null, code: WorktreeReconcileOutcome.StoreSilentCode));
+
+        var warned = await RunAsync(lane, "status", "--json");
+
+        warned.ExitCode.ShouldBe(0, warned.StdErr);
+        using (var doc = JsonDocument.Parse(warned.StdOut.Trim()))
+        {
+            doc.RootElement.GetProperty("reconcile").GetProperty("pending").GetBoolean().ShouldBeTrue();
+            WarningsOf(doc.RootElement).ShouldContain(line =>
+                line.Contains("reconcile pending", StringComparison.Ordinal)
+                && line.Contains(RemedyText.WorktreeInitCommand, StringComparison.Ordinal),
+                "the premise is the remedy loop itself: the sentence that warns names this very verb");
+        }
+
+        var recovered = await RunAsync(lane, "worktree", "init", "--no-semantic", "--json");
+
+        recovered.ExitCode.ShouldBe(0, recovered.StdErr);
+        using var report = JsonDocument.Parse(recovered.StdOut.Trim());
+        var reconcile = report.RootElement.GetProperty("reconcile");
+        reconcile.GetProperty("passRan").GetBoolean().ShouldBeTrue(
+            "the verb the warning sent the reader to did the work instead of attesting the record and shrugging");
+        reconcile.GetProperty("state").GetString().ShouldBe("Reconciled");
+        reconcile.GetProperty("record").GetProperty("pending").GetBoolean().ShouldBeFalse(
+            "and the record it reports back is the one the store now holds");
+
+        var cleared = await RunAsync(lane, "status", "--json");
+
+        cleared.ExitCode.ShouldBe(0, cleared.StdErr);
+        using (var doc = JsonDocument.Parse(cleared.StdOut.Trim()))
+        {
+            doc.RootElement.GetProperty("reconcile").GetProperty("pending").GetBoolean().ShouldBeFalse();
+            WarningsOf(doc.RootElement).ShouldNotContain(line =>
+                line.Contains("reconcile pending", StringComparison.Ordinal));
+        }
+        cleared.StdErr.Contains("reconcile pending").ShouldBeFalse(
+            "the channel a session-start hook reads is quiet too, not only the payload a machine parses");
+    }
+
     // The fill without the pass, through the product's own doors and stopped where a session that never
     // reached the reconcile would stop: registration, copy, manifest seed — no pass over this tree.
     private async Task<string> FilledLaneWithoutAPassAsync(string name)
@@ -273,6 +326,14 @@ public sealed class PendingSurfaceTests : IDisposable
             ? []
             : [.. store.ListFiles(repo.Id).Select(file => file.Path)
                 .OrderBy(path => path, StringComparer.Ordinal)];
+    }
+
+    // The store's own vector claim, read rather than assumed: a forged record that names a number this
+    // database does not hold would test the shape of a sentence instead of the recovery of a state.
+    private static int EmbeddedHashCount(string root)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(root));
+        return store.ListEmbeddedChunkHashes().Count;
     }
 
     // The tool speaks repo-relative paths; an absolute one is not a coordinate it indexes, and a test that

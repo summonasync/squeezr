@@ -26,7 +26,9 @@ namespace Squeezr.Core.Workspace;
 // bounded sample of the ids the claim names is what says the collection still holds this store's points and
 // not somebody else's of the same size. A sample that finds a gap owes the pass again; a sample that does
 // not answer is not a gap, and re-scanning the same tree at every session because a service is down is
-// doubled work, not progress.
+// doubled work, not progress. Where the record and the measurement disagree — the store still calls its
+// semantic arm unaccounted while nothing here says it is — the record is the half that has to answer, since
+// a pending flag no verb rewrites is a warning that outlives every remedy it names (review-116-18 B1).
 public static class WorktreeReconcile
 {
     public static WorktreeReconcileOutcome Run(
@@ -96,8 +98,20 @@ public static class WorktreeReconcile
         if (!owed)
         {
             var settled = Judge(before, noSemantic, byRecord ?? ClaimCheck.NothingToAsk(), passFailure: null);
-            return Outcome(settled, passRan: false, before, obligation, byRecord,
-                pass: null, runtime: Runtime(), basis: "record", marker: marker);
+            // The record and the measurement disagree in exactly one window: the store still says its
+            // semantic arm never landed, while the rows and the ids it names answer nothing short of that.
+            // A record this verb will not rewrite cannot be outlived, so the disagreement owes the pass
+            // rather than printing the verdict the store refuses to believe — otherwise the pending word
+            // repeats at every start and the remedy it names never closes the record it asks to close
+            // (review-116-18 B1). Outside this window nothing changes: a verdict that already reads pending
+            // is the same answer the record gives, and a closed record needs no measurement to be trusted.
+            if (settled.State != WorktreeReconcileState.Reconciled || marker?.Pending != true)
+            {
+                return Outcome(settled, passRan: false, before, obligation, byRecord,
+                    pass: null, runtime: Runtime(), basis: "record", marker: marker);
+            }
+
+            owed = true;
         }
 
         var runtime = Runtime();
@@ -153,11 +167,10 @@ public static class WorktreeReconcile
         public int ObligationChunks => EmbeddedHashes.Count;
     }
 
-    // What a pass found about the collection, in the claim's own unit, and whether that is the whole claim or
-    // a sample of it. 'Whole' is the difference between a measurement a lane may be trusted for and a word
-    // that only says the record still describes points this store wrote: a sample never answers how much of
-    // the claim the collection reaches, and no reader may read it as if it did.
-    private sealed record ClaimCheck(long? Points, int? Uncovered, string? Failure, bool Whole, int Probed)
+    // What a measurement of the collection found, in the claim's own unit. Whether a reader may take these
+    // numbers as this call's measurement or only as an attestation of the record is not carried here — the
+    // outcome's 'basis' says it, and a sample never answers how much of the claim the collection reaches.
+    private sealed record ClaimCheck(long? Points, int? Uncovered, string? Failure, int Probed)
     {
         public bool Gap => Uncovered is > 0;
 
@@ -165,7 +178,7 @@ public static class WorktreeReconcile
 
         // The shape a store with no vector claim is measured against: nothing was asked, so nothing is
         // reported, and the verdict comes from the rows alone.
-        public static ClaimCheck NothingToAsk() => new(null, null, null, Whole: true, Probed: 0);
+        public static ClaimCheck NothingToAsk() => new(null, null, null, Probed: 0);
     }
 
     // Null is 'this store holds no database at all', which is the lane born before its main worktree was
@@ -206,7 +219,7 @@ public static class WorktreeReconcile
     {
         if (store is null)
         {
-            return new ClaimCheck(null, null, "this worktree has no vector store to ask", Whole: true, 0);
+            return new ClaimCheck(null, null, "this worktree has no vector store to ask", Probed: 0);
         }
 
         if (rows.ObligationChunks > ReconcileProbeBudget.FullClaimIdCeiling)
@@ -216,7 +229,7 @@ public static class WorktreeReconcile
                 $"this store names {rows.ObligationChunks} chunk hash(es), past the "
                 + $"{ReconcileProbeBudget.FullClaimIdCeiling} ids one reconcile pass will ask a collection "
                 + "for",
-                Whole: true, Probed: rows.ObligationChunks);
+                Probed: rows.ObligationChunks);
         }
 
         var ids = Ids(rows.EmbeddedHashes);
@@ -224,11 +237,11 @@ public static class WorktreeReconcile
         {
             var missing = store.MissingPointIdsAsync(ids, ct).GetAwaiter().GetResult();
             var points = store.CountAsync(ct).GetAwaiter().GetResult();
-            return new ClaimCheck(points, missing.Count, null, Whole: true, Probed: ids.Count);
+            return new ClaimCheck(points, missing.Count, null, Probed: ids.Count);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            return new ClaimCheck(null, null, ex.Message, Whole: true, Probed: ids.Count);
+            return new ClaimCheck(null, null, ex.Message, Probed: ids.Count);
         }
     }
 
@@ -238,18 +251,18 @@ public static class WorktreeReconcile
     {
         if (store is null)
         {
-            return new ClaimCheck(null, null, "this worktree has no vector store to ask", Whole: false, 0);
+            return new ClaimCheck(null, null, "this worktree has no vector store to ask", Probed: 0);
         }
 
         var ids = Sample(rows.EmbeddedHashes, ReconcileProbeBudget.AttestationSampleIds);
         try
         {
             var missing = store.MissingPointIdsAsync(ids, ct).GetAwaiter().GetResult();
-            return new ClaimCheck(null, missing.Count, null, Whole: false, Probed: ids.Count);
+            return new ClaimCheck(null, missing.Count, null, Probed: ids.Count);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            return new ClaimCheck(null, null, ex.Message, Whole: false, Probed: ids.Count);
+            return new ClaimCheck(null, null, ex.Message, Probed: ids.Count);
         }
     }
 
