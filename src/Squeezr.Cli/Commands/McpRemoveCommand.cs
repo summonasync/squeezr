@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Storage;
 
 namespace Squeezr.Cli.Commands;
 
@@ -38,10 +39,11 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
     {
         var interactive = AnsiConsole.Profile.Capabilities.Interactive;
         McpOnboardingEnvironment environment;
+        WorkspaceResolution resolution;
         try
         {
-            environment = McpOnboardingEnvironment.Create(
-                WorkspaceRootResolver.ResolveCurrentDirectory().RootPath);
+            resolution = WorkspaceRootResolver.ResolveCurrentDirectory();
+            environment = McpOnboardingEnvironment.Create(resolution.RootPath);
         }
         catch (InvalidOperationException ex)
         {
@@ -51,7 +53,10 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
 
         if (settings.Client is not { Length: > 0 } && settings.Project)
         {
-            return StripProjectBlockOnly(environment, settings.Json);
+            // Stripped from the same checkout install wrote to: a lane that carries its own block must be able
+            // to lose it by running the verb where the block lives, not only where the parent store was made.
+            return StripProjectBlockOnly(
+                ProjectCheckout.From(WorkspaceRootResolver.LaunchDirectory(), resolution), settings.Json);
         }
 
         IReadOnlyList<McpClientDescriptor> clients;
@@ -89,18 +94,19 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
             }
         }
 
-        IReadOnlyList<string>? stripped = null;
-        if (settings.Project)
-        {
-            stripped = ProjectInstructionsWriter.Strip(environment.WorkspaceRoot);
-        }
+        ProjectCheckout? checkout = settings.Project
+            ? ProjectCheckout.From(WorkspaceRootResolver.LaunchDirectory(), resolution)
+            : null;
+        IReadOnlyList<string>? stripped = checkout is null
+            ? null
+            : ProjectInstructionsWriter.Strip(checkout.Root);
 
         if (settings.Json)
         {
-            if (stripped is not null)
+            if (checkout is not null && stripped is not null)
             {
                 results.Add(new McpRemoveResult(
-                    "project", "project", "writer", environment.WorkspaceRoot, stripped.Count > 0, null, null));
+                    "project", "project", "writer", checkout.Root, stripped.Count > 0, null, null));
             }
             JsonOutput.Write(results);
         }
@@ -116,14 +122,14 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
         return results.Any(result => result.Error is not null) ? 1 : 0;
     }
 
-    private static int StripProjectBlockOnly(McpOnboardingEnvironment environment, bool json)
+    private static int StripProjectBlockOnly(ProjectCheckout checkout, bool json)
     {
-        var stripped = ProjectInstructionsWriter.Strip(environment.WorkspaceRoot);
+        var stripped = ProjectInstructionsWriter.Strip(checkout.Root);
         if (json)
         {
             JsonOutput.Write(new[]
             {
-                new McpRemoveResult("project", "project", "writer", environment.WorkspaceRoot, stripped.Count > 0, null, null),
+                new McpRemoveResult("project", "project", "writer", checkout.Root, stripped.Count > 0, null, null),
             });
         }
         else

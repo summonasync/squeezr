@@ -2,7 +2,13 @@ namespace Squeezr.Cli.Mcp.Onboarding;
 
 public static class ProjectInstructionsWriter
 {
-    public static ProjectBlockChange Refresh(string projectRoot)
+    public static ProjectBlockChange Refresh(string projectRoot) => Refresh(projectRoot, ProjectInstructions.Block);
+
+    // The block a root is told about its own index is not one constant: a checkout that is answered by another
+    // tree's store must be told that, or the file it carries teaches its agents to trust an index it does not
+    // have. The text is handed in rather than derived here, so the writer stays a byte-level editor and the
+    // decision about which checkout is which stays with the door that resolved it.
+    public static ProjectBlockChange Refresh(string projectRoot, string block)
     {
         ArgumentNullException.ThrowIfNull(projectRoot);
         var targets = ProjectInstructionTargets.Resolve(projectRoot);
@@ -15,7 +21,7 @@ public static class ProjectInstructionsWriter
                 orphaned.Add(target);
                 continue;
             }
-            Upsert(target);
+            Upsert(target, block);
             written.Add(target);
         }
         return new ProjectBlockChange(written, orphaned);
@@ -43,7 +49,9 @@ public static class ProjectInstructionsWriter
         return stripped;
     }
 
-    public static void Upsert(string path)
+    public static void Upsert(string path) => Upsert(path, ProjectInstructions.Block);
+
+    public static void Upsert(string path, string block)
     {
         if (HasOrphanMarker(path))
         {
@@ -51,7 +59,7 @@ public static class ProjectInstructionsWriter
         }
         InstructionsWriter.Upsert(
             path,
-            ProjectInstructions.StartMarker, ProjectInstructions.EndMarker, ProjectInstructions.Block,
+            ProjectInstructions.StartMarker, ProjectInstructions.EndMarker, block,
             SqueezrInstructions.StartMarker, SqueezrInstructions.EndMarker);
     }
 

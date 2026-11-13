@@ -30,9 +30,13 @@ public static class ToolErrors
             ? ex.Message
             : $"Internal error: {ex.Message}";
         var (cause, nextSteps) = RemedyFor(code, workspace);
+        // A refusal is an answer about a tree, and the gate that stamps envelopes skips this shape, so the
+        // naming happens here: "No symbol named 'X' in the index" without the subject is a refusal about
+        // nobody, and in a crossed session the reader has two candidate indices to guess between.
+        var subject = AnswerSubjectNotice.BodyOf(workspace.Subject);
         return nextSteps is null
-            ? new ToolErrorPayload(code, message)
-            : new ToolErrorPayload(code, message, workspace.Root, nextSteps, cause);
+            ? new ToolErrorPayload(code, message, Subject: subject)
+            : new ToolErrorPayload(code, message, workspace.Root, nextSteps, cause, subject);
     }
 
     internal static (string? Cause, IReadOnlyList<string> NextSteps) IndexRemedyFor(string root, string? provider)

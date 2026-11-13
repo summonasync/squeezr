@@ -107,4 +107,29 @@ public class ProjectInstructionsTests
         ProjectInstructions.Block.ShouldEndWith(ProjectInstructions.EndMarker);
         ProjectInstructions.Block.ShouldContain("squeezr:project-instructions");
     }
+
+    // The nested wording is the one place this block is allowed to name another tree, and the pin is on the
+    // emitted text rather than on a resolution: what the block must not do is claim the parent as this
+    // checkout's index, and what it must do is name the store that answers and the verb that mints its own.
+    [Fact]
+    public void BlockServedByOtherStore_DeniesTheClaimItCannotSupport_KeepsEveryGuidanceSection()
+    {
+        var block = ProjectInstructions.BlockServedByOtherStore("/repo/main", "main-1a2b3c4d");
+
+        block.ShouldNotContain("This project is indexed by squeezr");
+        block.ShouldContain("'/repo/main'");
+        block.ShouldContain("store main-1a2b3c4d");
+        block.ShouldContain("squeezr worktree init");
+        block.ShouldContain("Pick the tool by scenario");
+        block.ShouldContain("re-run `squeezr mcp install --project`");
+        block.ShouldStartWith(ProjectInstructions.StartMarker);
+        block.ShouldEndWith(ProjectInstructions.EndMarker);
+    }
+
+    [Fact]
+    public void BlockServedByOtherStore_WithoutAStoreKeyToName_SaysUnknownRatherThanNothing()
+    {
+        ProjectInstructions.BlockServedByOtherStore("/repo/main", null)
+            .ShouldContain("store unknown");
+    }
 }

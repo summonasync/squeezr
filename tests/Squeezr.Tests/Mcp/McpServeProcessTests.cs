@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Cli.Mcp;
+using Squeezr.Core.Storage;
+using Squeezr.Tests.Indexing.Ignore;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -302,6 +305,133 @@ public sealed class McpServeProcessTests
     private static string ToolCallResponse(string stdout, int id) =>
         stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Single(line => line.Contains($"\"id\":{id}"));
+
+    // AC1 of 116/T11: the store serve binds comes from the cwd, and the startup line names which one it is and
+    // which rule picked it. A registered worktree is the case the parent's index used to wear unnoticed.
+    [Fact]
+    public async Task Serve_CwdIsARegisteredWorktree_BindsTheChildStoreAndSaysSoOnTheBindingLine()
+    {
+        var home = TestDirs.NewTempDir();
+        var main = await IndexedCheckoutAsync(home, "wire-bind");
+        var lane = Path.Combine(main, ".lanes", "116-serve-bind");
+        TestGitRepo.AddWorktree(main, lane, "feat/116-serve-bind");
+        // --reindex keeps this pin off the vector arm entirely: nothing is copied, so no collection is named
+        (await CliTestProcess.RunWithHomeAsync(home, lane, "worktree", "init", "--reindex", "--no-semantic", "--json"))
+            .ExitCode.ShouldBe(0);
+
+        var (stdout, stderr) = await ServeToolCallAsync(home, lane, null,
+            """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"index_status","arguments":{}}}""");
+
+        stderr.ShouldContain(
+            $"squeezr serve: workspace '{SessionLocation.Display(lane)}' store '{StoreKeyOf(home, lane)}' " +
+            "(this directory is a registered workspace root)");
+        // a checkout that owns a store is not told to mint one
+        stderr.ShouldNotContain("has no store of its own");
+
+        using var envelope = JsonDocument.Parse(EnvelopeJson(ToolCallResponse(stdout)));
+        envelope.RootElement.GetProperty("data").GetProperty("rootPath").GetString()
+            .ShouldBe(SessionLocation.Display(lane),
+                "the answer names the lane tree, not the main worktree it was copied from");
+    }
+
+    // W-3: a refusal is an answer about a tree too, and the gate that stamps envelopes skips this payload shape,
+    // so the naming is measured on the bytes of a session that stands in one checkout while another store answers.
+    // The symbol is branch-only by construction: the dogfood that opened 116 was a lane told its own code was
+    // missing, and the sentence it was told named nobody.
+    [Fact]
+    public async Task Serve_CrossedSession_BranchOnlySymbolRefusalNamesTheAnsweringStore()
+    {
+        var home = TestDirs.NewTempDir();
+        var main = await IndexedCheckoutAsync(home, "wire-cross");
+        var lane = Path.Combine(main, ".lanes", "116-cross");
+        TestGitRepo.AddWorktree(main, lane, "feat/116-cross");
+        WriteBranchOnlySymbol(lane);
+
+        var (stdout, stderr) = await ServeToolCallAsync(home, lane, null, FindReferencesCall(BranchOnlySymbol));
+
+        var answer = ToolCallResponse(stdout);
+        // the advice block is a nested JSON object on the wire, so its names are measured as raw bytes
+        answer.ShouldContain("\"code\":\"workspace_error\"");
+        answer.ShouldContain("\"subject\":{");
+        answer.ShouldContain($"\"rootPath\":\"{SessionLocation.Display(main)}\"");
+        // which index refused, or the reader has two trees to guess between
+        answer.ShouldContain($"\"storeKey\":\"{StoreKeyOf(home, main)}\"");
+        RefusalText(answer).ShouldBe(
+            $"No symbol named '{BranchOnlySymbol}' in the index. Run 'squeezr index' if the code changed.",
+            "the sentence the CLI door has always said, unchanged: the naming rides beside it, not inside it");
+
+        stderr.ShouldContain("has no store of its own");
+        stderr.ShouldContain("squeezr worktree init");
+    }
+
+    // The control and the other half of the additive rule (035): the same symbol, refused by the same store for
+    // a session that stands in that store's own root, keeps the bytes it always had — no subject key.
+    [Fact]
+    public async Task Serve_SessionAtTheAnsweringRoot_SameRefusalCarriesNoSubjectKey()
+    {
+        var home = TestDirs.NewTempDir();
+        var main = await IndexedCheckoutAsync(home, "wire-plain");
+        var lane = Path.Combine(main, ".lanes", "116-plain");
+        TestGitRepo.AddWorktree(main, lane, "feat/116-plain");
+        WriteBranchOnlySymbol(lane);
+
+        var (stdout, _) = await ServeToolCallAsync(home, main, null, FindReferencesCall(BranchOnlySymbol));
+
+        var answer = ToolCallResponse(stdout);
+        RefusalText(answer).ShouldStartWith($"No symbol named '{BranchOnlySymbol}' in the index");
+        answer.ShouldNotContain("\"subject\"");
+    }
+
+    // the refusal's own sentence, read off the content block the agent actually sees
+    private static string RefusalText(string answerLine)
+    {
+        using var message = JsonDocument.Parse(answerLine);
+        return message.RootElement.GetProperty("result").GetProperty("content")[0]
+            .GetProperty("text").GetString()!;
+    }
+
+    private const string BranchOnlySymbol = "LaneOnlyCoordinator";
+
+    private static void WriteBranchOnlySymbol(string lane) =>
+        File.WriteAllText(
+            Path.Combine(lane, "repo", "Lane.cs"),
+            $"public class {BranchOnlySymbol} {{ public void Run() {{ }} }}\n");
+
+    // three opening braces (message, params, arguments), so the tail closes exactly three
+    private static string FindReferencesCall(string symbol) =>
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":" +
+        "{\"name\":\"find_references\",\"arguments\":{\"symbol\":\"" + symbol + "\"}}}";
+
+    // --no-semantic keeps the fixture off the embedding arm entirely: the not-found leg needs rows, not vectors.
+    private static async Task<string> IndexedCheckoutAsync(string squeezrHome, string name)
+    {
+        var root = TestDirs.NewTempDir();
+        TestGitRepo.Init(root);
+        Directory.CreateDirectory(Path.Combine(root, "repo"));
+        File.WriteAllText(
+            Path.Combine(root, "repo", "Alpha.cs"),
+            "public class Alpha { public string Term = \"uniqneedle\"; }\n");
+        TestGitRepo.Add(root, "repo/Alpha.cs");
+        TestGitRepo.Commit(root, "seed");
+        (await CliTestProcess.RunWithHomeAsync(squeezrHome, root, "init", "--name", name, "--json"))
+            .ExitCode.ShouldBe(0);
+        (await CliTestProcess.RunWithHomeAsync(squeezrHome, root, "add", "repo", "--name", "demo", "--json"))
+            .ExitCode.ShouldBe(0);
+        (await CliTestProcess.RunWithHomeAsync(squeezrHome, root, "index", "--no-semantic", "--json"))
+            .ExitCode.ShouldBe(0);
+        return root;
+    }
+
+    private static string StoreKeyOf(string squeezrHome, string rootPath)
+    {
+        var canonical = WorkspaceCanonicalPath.Canonicalize(rootPath);
+        using var doc = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(squeezrHome, SqueezrPaths.RegistryFileName)));
+        return doc.RootElement.EnumerateArray()
+            .Single(row => row.GetProperty("rootPath").GetString() == canonical)
+            .GetProperty("storeKey")
+            .GetString()!;
+    }
 
     private static CancellationToken TestTimeout() =>
         new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;

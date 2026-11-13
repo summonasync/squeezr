@@ -111,7 +111,8 @@ public static class CliApplication
                 worktree.AddCommand<WorktreeResolveCommand>("resolve")
                     .WithDescription(
                         "Answer what store a path maps to and what that store says about itself — reads git's " +
-                        "files, the registry and the store manifests, and writes nothing");
+                        "files, the registry and the store manifests, and writes nothing this verb decided: a " +
+                        "registry file that is missing or unreadable is rebuilt from those manifests first");
                 worktree.AddCommand<WorktreeListCommand>("list")
                     .WithDescription(
                         "Show one family: the parent checkout's row and the worktree rows that name it, with the " +

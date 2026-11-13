@@ -2,6 +2,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Cli.Output;
+using Squeezr.Core.Storage;
 
 namespace Squeezr.Cli.Commands;
 
@@ -64,10 +65,11 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
 
         var interactive = AnsiConsole.Profile.Capabilities.Interactive;
         McpOnboardingEnvironment environment;
+        WorkspaceResolution resolution;
         try
         {
-            environment = McpOnboardingEnvironment.Create(
-                WorkspaceRootResolver.ResolveCurrentDirectory().RootPath);
+            resolution = WorkspaceRootResolver.ResolveCurrentDirectory();
+            environment = McpOnboardingEnvironment.Create(resolution.RootPath);
         }
         catch (InvalidOperationException ex)
         {
@@ -83,7 +85,8 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
 
         if (clientValues is not { Length: > 0 } && settings.Project)
         {
-            return WriteProjectBlockOnly(environment, settings.Json);
+            return WriteProjectBlockOnly(
+                ProjectCheckout.From(WorkspaceRootResolver.LaunchDirectory(), resolution), settings.Json);
         }
 
         if (settings.Yes && clientValues is not { Length: > 0 })
@@ -152,18 +155,22 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             }
         }
 
-        ProjectBlockChange? projectChange = null;
-        if (writeProjectBlock)
+        ProjectCheckout? checkout = writeProjectBlock
+            ? ProjectCheckout.From(WorkspaceRootResolver.LaunchDirectory(), resolution)
+            : null;
+        ProjectBlockChange? projectChange = checkout is null
+            ? null
+            : ProjectInstructionsWriter.Refresh(checkout.Root, checkout.Block);
+        if (projectChange is not null)
         {
-            projectChange = ProjectInstructionsWriter.Refresh(environment.WorkspaceRoot);
             WarnOrphans(projectChange.Orphaned);
         }
 
         if (settings.Json)
         {
-            if (projectChange is not null)
+            if (checkout is not null && projectChange is not null)
             {
-                results.Add(ProjectInstallResult(environment, projectChange));
+                results.Add(ProjectInstallResult(checkout, projectChange));
             }
             JsonOutput.Write(results);
         }
@@ -179,13 +186,13 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         return results.Any(result => result.Error is not null) ? 1 : 0;
     }
 
-    private static int WriteProjectBlockOnly(McpOnboardingEnvironment environment, bool json)
+    private static int WriteProjectBlockOnly(ProjectCheckout checkout, bool json)
     {
-        var change = ProjectInstructionsWriter.Refresh(environment.WorkspaceRoot);
+        var change = ProjectInstructionsWriter.Refresh(checkout.Root, checkout.Block);
         WarnOrphans(change.Orphaned);
         if (json)
         {
-            JsonOutput.Write(new[] { ProjectInstallResult(environment, change) });
+            JsonOutput.Write(new[] { ProjectInstallResult(checkout, change) });
         }
         else
         {
@@ -198,8 +205,8 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         return 0;
     }
 
-    private static McpInstallResult ProjectInstallResult(McpOnboardingEnvironment environment, ProjectBlockChange change) =>
-        new("project", "project", "writer", environment.WorkspaceRoot, change.Written.Count > 0,
+    private static McpInstallResult ProjectInstallResult(ProjectCheckout checkout, ProjectBlockChange change) =>
+        new("project", "project", "writer", checkout.Root, change.Written.Count > 0,
             change.Orphaned.Count > 0 ? string.Join("; ", change.Orphaned) : null, null);
 
     private static void WarnOrphans(IReadOnlyList<string> orphaned)

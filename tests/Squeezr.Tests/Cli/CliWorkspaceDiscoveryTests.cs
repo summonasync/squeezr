@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Cli.Mcp;
+using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Tests.Indexing.Ignore;
 
@@ -228,6 +231,104 @@ public sealed class CliWorkspaceDiscoveryTests
         process.ExitCode.ShouldBe(0);
         stdErr.ShouldContain($"workspace root resolved via CLAUDE_PROJECT_DIR: {Path.GetFullPath(root)}");
         stdErr.ShouldContain("squeezr serve: workspace");
+    }
+
+    // The second FindContainingPath call site of the hook: the advice leg consults the guard ledger of whichever
+    // row the resolution hands it, so a child whose own config guards nothing must answer where the parent's
+    // config says to stay silent. The two paths are the same relative path in two trees, and only the nearest
+    // child rule tells them apart.
+    [Fact]
+    public async Task HookPreRead_AdviceLegInRegisteredChild_GuardsWithTheChildLedger()
+    {
+        var home = TestDirs.NewTempDir();
+        var main = TestDirs.NewTempDir();
+        TestGitRepo.Init(main);
+        File.WriteAllText(Path.Combine(main, "seed.txt"), "seed\n");
+        TestGitRepo.Add(main, "seed.txt");
+        TestGitRepo.Commit(main, "seed");
+        var child = Path.Combine(main, ".lanes", "lane-guard");
+        TestGitRepo.AddWorktree(main, child, "feat/116-hook-guard");
+
+        (await CliTestProcess.RunWithHomeAsync(home, main, "init", "--name", "guardparent", "--json"))
+            .ExitCode.ShouldBe(0);
+        (await CliTestProcess.RunWithHomeAsync(home, child, "worktree", "init", "--reindex", "--no-semantic", "--json"))
+            .ExitCode.ShouldBe(0);
+
+        // guarded only in the parent's ledger: a resolution that slipped to the parent for the child's path
+        // would answer that read with the parent's silence. Written into the parent's store dir by path,
+        // because this process does not carry the child's pinned SQUEEZR_HOME.
+        GuardInStore(home, main, "infra/VaultKeys.cs");
+        var big = new string('x', 300 * 1024);
+        foreach (var root in new[] { main, child })
+        {
+            Directory.CreateDirectory(Path.Combine(root, "infra"));
+            File.WriteAllText(Path.Combine(root, "infra", "VaultKeys.cs"), big);
+        }
+
+        var childRun = await CliTestProcess.RunPipedAsync(
+            home, ReadPayload(Path.Combine(child, "infra", "VaultKeys.cs")), child, "hook", "pre-read");
+        var parentRun = await CliTestProcess.RunPipedAsync(
+            home, ReadPayload(Path.Combine(main, "infra", "VaultKeys.cs")), main, "hook", "pre-read");
+
+        childRun.ExitCode.ShouldBe(0);
+        // the child ledger does not guard this path, so the size question is answered
+        childRun.StdOut.ShouldContain("expand_span");
+        parentRun.StdOut.ShouldBeEmpty();
+
+        // the store the hook resolved is the child's own: the row lands under the child's registry key
+        var childKey = StoreKeyOf(home, child);
+        File.Exists(Path.Combine(StoreDir(home, childKey), SqueezrPaths.QueriesLogFileName)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Install_ProjectFromUnregisteredNestedCheckout_WritesTheBlockThereAndDoesNotClaimTheParent()
+    {
+        var home = TestDirs.NewTempDir();
+        var main = TestDirs.NewTempDir();
+        TestGitRepo.Init(main);
+        File.WriteAllText(Path.Combine(main, "seed.txt"), "seed\n");
+        TestGitRepo.Add(main, "seed.txt");
+        TestGitRepo.Commit(main, "seed");
+        (await CliTestProcess.RunWithHomeAsync(home, main, "init", "--name", "nestedparent", "--json"))
+            .ExitCode.ShouldBe(0);
+        var lane = Path.Combine(main, ".lanes", "lane-block");
+        TestGitRepo.AddWorktree(main, lane, "feat/116-nested-block");
+
+        var run = await CliTestProcess.RunWithHomeAsync(home, lane, "mcp", "install", "--project");
+
+        run.ExitCode.ShouldBe(0);
+        var written = File.ReadAllText(Path.Combine(lane, "AGENTS.md"));
+        written.ShouldContain(ProjectInstructions.StartMarker);
+        // the block for a checkout with no store must not claim one, and must not be written at the parent
+        written.ShouldNotContain("This project is indexed by squeezr");
+        written.ShouldContain(SessionLocation.Display(main));
+        written.ShouldContain("squeezr worktree init");
+        written.ShouldContain("re-run `squeezr mcp install --project`");
+        File.Exists(Path.Combine(main, "AGENTS.md")).ShouldBeFalse();
+
+        // once the lane owns a store the same door tells the ordinary story at the same path
+        (await CliTestProcess.RunWithHomeAsync(home, lane, "worktree", "init", "--reindex", "--no-semantic", "--json"))
+            .ExitCode.ShouldBe(0);
+        await CliTestProcess.RunWithHomeAsync(home, lane, "mcp", "install", "--project");
+
+        // a checkout that owns its store is indexed, and the block says so
+        File.ReadAllText(Path.Combine(lane, "AGENTS.md"))
+            .ShouldContain("This project is indexed by squeezr");
+    }
+
+    private static string ReadPayload(string filePath) =>
+        "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"" + filePath + "\"}}";
+
+    // The guard ledger lives in the store the resolution names, and this process does not carry the home a CLI
+    // child pinned, so the config is written by path rather than through the in-process config helper.
+    private static void GuardInStore(string home, string rootPath, params string[] globs)
+    {
+        var config = SqueezrConfig.CreateDefault();
+        File.WriteAllText(
+            Path.Combine(StoreDir(home, StoreKeyOf(home, rootPath)), SqueezrPaths.ConfigFileName),
+            JsonSerializer.Serialize(
+                config with { Indexing = config.Indexing with { SecretGuardExtra = globs } },
+                SqueezrJson.FileOptions));
     }
 
     private static string StoreDir(string home, string storeKey) =>

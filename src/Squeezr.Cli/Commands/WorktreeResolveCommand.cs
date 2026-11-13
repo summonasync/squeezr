@@ -31,8 +31,12 @@ public sealed class WorktreeResolveCommand : Command<WorktreeResolveCommand.Sett
         {
             // The home check is the one this verb shares with every registry reader — a dangling profile is a
             // named refusal rather than an empty world — and GuardRegistryIo keeps a registry that goes busy
-            // reading as contention instead of as a broken answer. Nothing past this line writes: no store dir,
-            // no row, no manifest, no lock beyond the shared reads the registry itself does.
+            // reading as contention instead of as a broken answer. What this verb adds is nothing: no store dir,
+            // no manifest, no row of its own. The one write that can still happen behind it is the registry's own
+            // recovery, measured at live scale in audits/t11-load-2026-11-14: with 1630 store dirs present and
+            // workspaces.json missing or unparseable, Load() rebuilds that document (+45 ms on a 262 ms run),
+            // and with a healthy document it leaves the bytes and the mtime alone. The SessionStart hook and every
+            // serve start walk the same read, so the recovery is a property of the read path, not of this verb.
             SqueezrHome.RequireHabitableProfileHome();
             report = WorktreeResolveReport.From(
                 WorkspaceRootResolver.GuardRegistryIo(() => WorktreeResolve.Resolve(target)));

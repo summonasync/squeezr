@@ -28,7 +28,7 @@ public static class McpServerHost
         }
 
         WarnIfSessionOutsideWorkspace(resolution.RootPath, startDirectory, Console.Error);
-        Console.Error.WriteLine($"squeezr serve: workspace '{resolution.RootPath}'");
+        ServeBindingLine.Write(resolution, startDirectory, Console.Error);
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
         StaleRegistrationNudge.TryWrite(Console.Error, homeDir, Environment.ProcessPath);
         var inputPipe = new Pipe();
