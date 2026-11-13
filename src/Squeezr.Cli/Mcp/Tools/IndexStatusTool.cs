@@ -102,6 +102,8 @@ public sealed class IndexStatusTool
             }
 
             var siblings = WorkspaceSiblingSnapshot.Build(root);
+            var reconcile = ReconcilePendingNotice.Read(root);
+            warnings.AddRange(ReconcilePendingNotice.Lines(reconcile));
             if (status.Repos.Count == 1)
             {
                 var scopeHint = RemedyText.ScopeBlindSiblings(siblings.LiveSiblings);
@@ -121,11 +123,13 @@ public sealed class IndexStatusTool
                 new QdrantData(qdrant.Available, qdrant.Points),
                 kindChunks,
                 BuildWorkspaceRows(siblings),
-                siblings.Omitted);
+                siblings.Omitted,
+                reconcile);
 
             warnings.Add(
                 "per-file freshness is not part of this aggregate report — fileFreshness rides the answers of the " +
-                "file-naming tools (code_search, symbol_lookup, find_references, expand_span, code_pack)");
+                "file-naming tools (code_search, symbol_lookup, find_references, expand_span, code_pack), and a "
+                + "store whose reconcile record has no proved pass answers those rows 'unknown', not 'fresh'");
 
             var envelope = ToolEnvelope.Wrap(data, 0, false, warnings, root, staleFiles: null);
             QueryTelemetry.Record(root, _workspace.SessionId, "index_status",
@@ -218,7 +222,12 @@ public sealed class IndexStatusTool
         [property: JsonPropertyName("workspaces"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<WorkspaceData>? Workspaces = null,
         [property: JsonPropertyName("workspacesOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        int WorkspacesOmitted = 0);
+        int WorkspacesOmitted = 0,
+        // What this store's own record says about its reconcile state — filled / exact arm / a proved pass /
+        // the vectors that pass counted. Absent means no record, which is the state of a workspace nothing
+        // was copied into, not a pending one.
+        [property: JsonPropertyName("reconcile"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        WorktreeRecord? Reconcile = null);
 
     private sealed record WorkspaceData(
         [property: JsonPropertyName("name")] string Name,

@@ -22,16 +22,23 @@ public sealed record WorkspaceStatusReport(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyDictionary<string, int>? KindChunks = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    FleetWatchAdoption? WatchAdoption = null)
+    FleetWatchAdoption? WatchAdoption = null,
+    // What this store says about its own reconcile state, as data: a reader that has to decide whether the
+    // numbers below describe this checkout gets the answer without parsing the warning line. Absent is the
+    // state a workspace nobody filled from a main worktree carries, not a pending one.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    WorktreeRecord? Reconcile = null)
 {
     public static WorkspaceStatusReport Create(
         WorkspaceStatus status,
         IReadOnlyList<string> staleFiles,
         string? embeddingsProvider = null,
         WorkspaceSiblingSnapshot? siblings = null,
-        FleetWatchAdoption? watchAdoption = null)
+        FleetWatchAdoption? watchAdoption = null,
+        WorktreeRecord? reconcile = null)
     {
         var warnings = new List<string>();
+        warnings.AddRange(ReconcilePendingNotice.Lines(reconcile));
         var repos = status.Repos
             .Select(r =>
             {
@@ -70,7 +77,8 @@ public sealed record WorkspaceStatusReport(
             warnings,
             ListedWorkspaces(siblings),
             siblings?.Omitted ?? 0,
-            WatchAdoption: watchAdoption);
+            WatchAdoption: watchAdoption,
+            Reconcile: reconcile);
     }
 
     private static IReadOnlyList<WorkspaceSiblingEntry>? ListedWorkspaces(WorkspaceSiblingSnapshot? siblings) =>

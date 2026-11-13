@@ -69,11 +69,21 @@ public sealed class MetaStore : IDisposable
         _db.GetCollection(ChunksCollection).EnsureIndex("repoId");
     }
 
-    public static MetaStore? TryOpen(string dbPath)
+    public static MetaStore? TryOpen(string dbPath) =>
+        TryOpen(dbPath, out _);
+
+    // The same door with the refusal class attached. The one-bit answer stayed for every caller that only
+    // asks 'will this open'; the callers that report WHY it would not are the ones that were being handed a
+    // null and inventing a cause. Each class is named off the exception type the open actually raised — see
+    // StoreOpenCause for what this box measures — and an exception this switch cannot attribute stays
+    // Unattributed rather than becoming a guess.
+    public static MetaStore? TryOpen(string dbPath, out StoreOpenCause cause)
     {
         try
         {
-            return new MetaStore(dbPath);
+            var store = new MetaStore(dbPath);
+            cause = StoreOpenCause.None;
+            return store;
         }
         // A header whose LiteDB magic stands while the fields behind it do not dies on a DateTime rather
         // than on a LiteException, and every consumer of this door (fleet, stats, search, the worktree
@@ -82,9 +92,22 @@ public sealed class MetaStore : IDisposable
             when (ex is WorkspaceException or IOException or UnauthorizedAccessException or LiteException
                 or InvalidOperationException or ArgumentOutOfRangeException)
         {
+            cause = Classify(ex);
             return null;
         }
     }
+
+    private static StoreOpenCause Classify(Exception ex) => ex switch
+    {
+        // the only 'missing' this door can state: MetaStore's own probe before the file is handed to LiteDB,
+        // because LiteDB's shared connection creates lazily and would answer an absent path with a handle
+        WorkspaceException => StoreOpenCause.Missing,
+        UnauthorizedAccessException => StoreOpenCause.Denied,
+        // the bytes did not parse as a database this reader can use — LiteException 103 for a bad header,
+        // the mapper's own range and shape crashes for a header that stood over fields that did not
+        LiteException or InvalidOperationException or ArgumentOutOfRangeException => StoreOpenCause.Unparseable,
+        _ => StoreOpenCause.Unattributed,
+    };
 
     public void AddRepo(RepoDocument repo)
     {

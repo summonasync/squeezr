@@ -54,7 +54,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                 var staleFiles = DetectStaleFilesIfReadable(workspaceRoot);
                 var report = WorkspaceStatusReport.Create(
                     status, staleFiles, config?.Embeddings.Provider, siblings,
-                    FleetWatchAdoption.FromStore(workspaceRoot)) with
+                    FleetWatchAdoption.FromStore(workspaceRoot),
+                    ReconcilePendingNotice.Read(workspaceRoot)) with
                 { KindChunks = kindChunks };
                 if (onnxStore)
                 {
@@ -107,6 +108,14 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             if (RepoGuardReport.FromTally(status.Repos) is { } guard)
             {
                 AnsiConsole.MarkupLine($"[grey]{guard.Warning().EscapeMarkup()}[/]");
+            }
+
+            // The store's own reconcile record, on the same surface that prints its file counts: a lane that
+            // answers with the main worktree's coordinates has to say so where a reader looks at the numbers,
+            // not only on the stderr channel a machine reads.
+            foreach (var line in ReconcilePendingNotice.Lines(ReconcilePendingNotice.Read(workspaceRoot)))
+            {
+                AnsiConsole.MarkupLine($"[yellow]{line.EscapeMarkup()}[/]");
             }
 
             RenderWorkspaces(siblings);

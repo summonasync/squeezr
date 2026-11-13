@@ -44,15 +44,15 @@ public sealed record WorktreeInitReport(
             ServeCommand: outcome.StoreKey is null ? null : RemedyText.RebindServe(outcome.RootPath),
             IsLinked: outcome.IsLinked,
             IsDetached: outcome.IsDetached,
-            // The registration answers for a store it minted empty; once a reconcile pass has read this lane's
-            // own rows against its own collection, that measurement is the better answer and it replaces the
-            // guess. An assumed match is not that measurement — it is two copied numbers agreeing — so it
-            // stays pending until a pass or 116/T7's marker proves the tree. A deferred reconcile reports no
-            // measurement, so the registration's word stands.
+            // The registration answers for a store it minted empty, so pending is a fact there; once a pass
+            // has read this lane's own rows against its own collection, the verdict is the better answer and
+            // it replaces the guess. A deferred reconcile reports no measurement, so the registration's word
+            // stands, and the store's own record (reconcile.record) is what a later session start reads
+            // instead of paying for the measurement again.
             ReconcilePending: reconcile?.State switch
             {
                 WorktreeReconcileState.Reconciled => false,
-                WorktreeReconcileState.Pending or WorktreeReconcileState.Assumed => true,
+                WorktreeReconcileState.Pending => true,
                 _ => outcome.ReconcilePending,
             },
             Reason: outcome.Reason,

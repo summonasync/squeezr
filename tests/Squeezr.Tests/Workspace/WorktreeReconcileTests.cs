@@ -369,12 +369,12 @@ public sealed class WorktreeReconcileTests : IDisposable
         outcome.CollectionPoints.ShouldBe(0);
     }
 
-    // The verb runs at every session start. A lane that already answers for its rows is measured, not
-    // rescanned, and the measurement costs one round trip instead of a second pass over the tree. Being owed
-    // nothing is not the same fact as being proven, though: the state that prints here is assumed, because
-    // nothing in this session has shown that these rows describe this checkout.
+    // A pass that ran here is the proof, and the store keeps it: the next session start reads that record,
+    // owes no second pass over the same tree, and pays one bounded ask of the ids its own claim names
+    // instead of walking the collection. That ask is an attestation, not a measurement — the numbers this
+    // verdict reports are the ones the record carries, and 'basis' is the field that says so.
     [Fact]
-    public void Reconcile_LaneAlreadyReconciled_SecondRunOwesNoPassAndNeverClaimsProof()
+    public void Reconcile_LaneAlreadyReconciled_SecondRunOwesNoPassAndClaimsTheRecordNotAMeasurement()
     {
         var (main, child) = IndexedMainAndLane(out var collection);
         var (registered, fill) = FillLane(main, child, collection);
@@ -385,25 +385,115 @@ public sealed class WorktreeReconcileTests : IDisposable
         first.State.ShouldBe(WorktreeReconcileState.Reconciled);
         first.PassRan.ShouldBeTrue();
         var callsAfterFirst = provider.EmbedCallCount;
+        var askedAfterFirst = collection.AskedIds.Count;
+        askedAfterFirst.ShouldBe(first.ObligationChunks,
+            "the pass that proved the tree asked its whole claim by id, once — and the walk that used to "
+            + "answer the same question is gone from this path");
 
         var adopted = WorktreeRegistration.Register(child, null);
         var kept = WorktreeStoreFill.Fill(adopted, true, ModelKey(main), null,
             _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
         kept.State.ShouldBe(WorktreeFillState.Skipped);
         kept.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex);
+        var askedBefore = collection.AskedIds.Count;
 
         var second = WorktreeReconcile.Run(
             adopted, kept, noSemantic: false,
             () => Runtime(collection, provider));
 
         second.PassRan.ShouldBeFalse("no second pass over the same tree at the next session start");
-        second.State.ShouldBe(WorktreeReconcileState.Assumed);
-        second.Code.ShouldBe(WorktreeReconcileOutcome.AssumedCode);
-        second.CoveredChunks.ShouldBe(second.ObligationChunks,
-            "the measurement says nothing is missing, which is the whole thing this state claims");
-        // the door that turns the assumption into proof runs today
-        second.Reason.ShouldNotBeNull().ShouldContain(RemedyText.IndexCommand);
+        second.State.ShouldBe(WorktreeReconcileState.Reconciled,
+            "the store remembers the pass that proved it, which is what retired the answer that hedged");
+        second.Basis.ShouldBe("record");
+        second.CoveredChunks.ShouldBeNull("a record-backed verdict measures nothing, so it reports nothing new");
+        second.CollectionPoints.ShouldBeNull("and the collection's size is not a number this call asked for");
+        second.Record!.CoveredChunks.ShouldBe(second.ObligationChunks,
+            "what the record counted is still on the wire — remembered, and labelled as remembered");
+        second.ProbedIds.ShouldBe(Math.Min(ReconcileProbeBudget.AttestationSampleIds, second.ObligationChunks),
+            "the attestation is a spread of the claim's own ids, not the whole claim and not the collection");
+        collection.MeasurementCallCount.ShouldBe(0,
+            "the cost clause of review-116-11 §3: no walk of the collection on a healthy session start, and "
+            + "none on the pass either — the claim is asked by id");
+        collection.AskedIds.Count.ShouldBe(askedBefore + second.ProbedIds!.Value);
         provider.EmbedCallCount.ShouldBe(callsAfterFirst, "a pass that was not owed asked for no embeddings");
+        WorkspaceManifestFile.TryRead(registered.RootPath)!.PassCompleted.ShouldBeTrue(
+            "the record the verdict reads is the record the pass wrote, on disk, not in this call");
+    }
+
+    // The record proves the coordinates the pass rewrote; it does not freeze the tree afterwards. A file the
+    // branch deleted is drift, and drift has its own doors — the stale list on 'status' and the per-file
+    // verdict on the tools that name files — so the reconcile word stays what it always meant: was this tree
+    // ever passed over.
+    [Fact]
+    public void Reconcile_RecordProvenThenBranchDeletedAFile_DriftSurfacesWhereDriftLives()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        var first = WorktreeReconcile.Run(
+            registered, fill, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+        first.State.ShouldBe(WorktreeReconcileState.Reconciled);
+
+        // the branch deleted a file the main worktree still holds rows for
+        File.Delete(Path.Combine(child, "src", "Kept.cs"));
+        var adopted = WorktreeRegistration.Register(child, null);
+        var kept = WorktreeStoreFill.Fill(adopted, true, ModelKey(main), null,
+            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
+        kept.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex);
+
+        var outcome = WorktreeReconcile.Run(
+            adopted, kept, noSemantic: false,
+            () => Runtime(collection, new FakeEmbeddingProvider()));
+
+        outcome.PassRan.ShouldBeFalse();
+        outcome.State.ShouldBe(WorktreeReconcileState.Reconciled,
+            "a pass over this root did run and did prove the rows it rewrote; the deletion is after that");
+        StoreRows(registered.RootPath).Files.ShouldBeGreaterThan(1,
+            "the deleted file is still a row here, which is the drift the next pass will reap");
+        StaleFileDetector.Detect(child).ShouldContain($"{RepoName}/src/Kept.cs",
+            "and the drift is named on the door that owns drift rather than hidden behind a reconcile word");
+    }
+
+
+    // The recovery half of ruling C: the record is not only a reporting surface, it is the predicate that
+    // makes an interrupted pass retryable. A lane whose store kept its rows and whose record never closed —
+    // the state a killed session leaves — owes the pass on the next start, and the start that runs it closes
+    // the record so the following one does not pay again.
+    [Fact]
+    public void Reconcile_StoreKeptItsRowsWithAnOpenRecord_OwesThePassAndClosesTheRecord()
+    {
+        var (main, child) = IndexedMainAndLane(out var collection);
+        var (registered, fill) = FillLane(main, child, collection);
+        var provider = new FakeEmbeddingProvider();
+        WorktreeReconcile.Run(registered, fill, noSemantic: false, () => Runtime(collection, provider))
+            .State.ShouldBe(WorktreeReconcileState.Reconciled);
+
+        // what a killed pass leaves behind: the rows, and a record that never saw the pass finish
+        var manifestPath = SqueezrPaths.ManifestPath(registered.RootPath);
+        WorkspaceManifestFile.WriteReconcileAt(manifestPath, registered.RootPath,
+            ReconcileMarker.Opened().FilledFrom(exactArmLanded: true, code: null));
+
+        var adopted = WorktreeRegistration.Register(child, null);
+        var kept = WorktreeStoreFill.Fill(adopted, true, ModelKey(main), null,
+            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
+        kept.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex,
+            "the fill is not what owes this pass — the store kept its rows, so only the record can");
+
+        var second = WorktreeReconcile.Run(
+            adopted, kept, noSemantic: false, () => Runtime(collection, provider));
+
+        second.PassRan.ShouldBeTrue("an open record owes the pass, which is what makes the interruption heal");
+        var reopened = WorkspaceManifestFile.Load(registered.RootPath).Reconcile.ShouldNotBeNull();
+        reopened.PassCompleted.ShouldBeTrue("and the start that ran it closed the record for the next one");
+
+        var again = WorktreeRegistration.Register(child, null);
+        var againFill = WorktreeStoreFill.Fill(again, true, ModelKey(main), null,
+            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
+        againFill.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex);
+        var third = WorktreeReconcile.Run(
+            again, againFill, noSemantic: false, () => Runtime(collection, provider));
+
+        third.PassRan.ShouldBeFalse("once, not every start: the closed record is what the next session reads");
     }
 
     // The other half of the session-start rule: a lane that kept its index is not a lane that stayed
@@ -446,36 +536,6 @@ public sealed class WorktreeReconcileTests : IDisposable
             "the collection answered a full set of points, so a count has nothing to complain about and it is "
             + "the coverage that owes this lane its pass");
         second.CoveredChunks.ShouldBe(0);
-    }
-
-    // A pass that never ran is not a proof, and a lane whose rows still describe another checkout must not
-    // read as reconciled just because its copied numbers agree with each other.
-    [Fact]
-    public void Reconcile_CopyLandedButNoPassEverRanHere_AnAgreementOfCopiedNumbersIsNotReconciled()
-    {
-        var (main, child) = IndexedMainAndLane(out var collection);
-        var (registered, fill) = FillLane(main, child, collection);
-        var first = WorktreeReconcile.Run(
-            registered, fill, noSemantic: false,
-            () => Runtime(collection, new FakeEmbeddingProvider()));
-        first.State.ShouldBe(WorktreeReconcileState.Reconciled);
-
-        // the branch deleted a file the main worktree still holds rows for, and no pass here has reaped them
-        File.Delete(Path.Combine(child, "src", "Kept.cs"));
-        var adopted = WorktreeRegistration.Register(child, null);
-        var kept = WorktreeStoreFill.Fill(adopted, true, ModelKey(main), null,
-            _ => WorktreeVectorCopyStats.Moved(0, 0, collection.Points.Count));
-        kept.Skip.ShouldBe(WorktreeFillSkip.LaneKeepsItsIndex);
-
-        var outcome = WorktreeReconcile.Run(
-            adopted, kept, noSemantic: false,
-            () => Runtime(collection, new FakeEmbeddingProvider()));
-
-        outcome.PassRan.ShouldBeFalse();
-        outcome.State.ShouldBe(WorktreeReconcileState.Assumed,
-            "the store still answers for its own rows and that is all the measurement can say");
-        StoreRows(registered.RootPath).Files.ShouldBeGreaterThan(1,
-            "the deleted file is still a row here — a pass that could have reaped it never ran");
     }
 
     // A lane born before its main worktree was indexed has nothing inherited and nothing short. That is a
@@ -708,6 +768,11 @@ public sealed class WorktreeReconcileTests : IDisposable
 
         public int MeasurementCallCount { get; private set; }
 
+        // The ids this collection was asked about, in the order it was asked, so a test can tell the walk of
+        // every point from one bounded spread of the claim's own ids — the two doors cost differently and the
+        // cost clause of review-116-11 §3 is about exactly that difference.
+        public List<ulong> AskedIds { get; } = [];
+
         public int UpsertedPointCount { get; private set; }
 
         public Task<bool> IsAvailableAsync(CancellationToken ct) => Task.FromResult(true);
@@ -740,6 +805,17 @@ public sealed class WorktreeReconcileTests : IDisposable
             MeasurementCallCount++;
             ThrowIfUnreachable();
             return Task.FromResult<IReadOnlyList<ulong>>(Points.Keys.ToList());
+        }
+
+        // The door the reconcile pass asks through, answered off the points this fake holds — so a test can
+        // count the ids a session start paid for separately from a walk of the whole collection.
+        public Task<IReadOnlyList<ulong>> MissingPointIdsAsync(
+            IReadOnlyList<ulong> pointIds,
+            CancellationToken ct)
+        {
+            AskedIds.AddRange(pointIds);
+            ThrowIfUnreachable();
+            return Task.FromResult<IReadOnlyList<ulong>>(pointIds.Where(id => !Points.ContainsKey(id)).ToList());
         }
 
         public void ReplaceWithForeignIdsOf(int count)

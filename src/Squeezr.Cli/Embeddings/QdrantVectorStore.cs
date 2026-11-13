@@ -12,6 +12,7 @@ public sealed class QdrantVectorStore : IVectorStore
 {
     private const int BatchSize = 100;
     private const uint ScrollPageSize = 500;
+    private const int PointIdReadBatch = 512;
     private static readonly TimeSpan AvailabilityTimeout = TimeSpan.FromSeconds(2);
 
     private readonly QdrantClient _client;
@@ -276,6 +277,56 @@ public sealed class QdrantVectorStore : IVectorStore
         catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
         {
             return ids;
+        }
+    }
+
+    // The claim asked by id, in batches, so the price is the obligation's size and never the collection's.
+    // A collection this product never created answers NotFound: every id asked about is then an id it does
+    // not hold, which is the same answer the id walk gives for that state and the one the reconcile pass
+    // refuses a lane over.
+    public async Task<IReadOnlyList<ulong>> MissingPointIdsAsync(
+        IReadOnlyList<ulong> pointIds,
+        CancellationToken ct)
+    {
+        var missing = new List<ulong>();
+        var page = new List<PointId>(PointIdReadBatch);
+        var walked = 0;
+        try
+        {
+            while (walked < pointIds.Count)
+            {
+                page.Clear();
+                for (var taken = 0; taken < PointIdReadBatch && walked + taken < pointIds.Count; taken++)
+                {
+                    page.Add(new PointId { Num = pointIds[walked + taken] });
+                }
+
+                var found = await _client.RetrieveAsync(
+                    _collection,
+                    page,
+                    withPayload: false,
+                    withVectors: false,
+                    cancellationToken: ct);
+                var present = found
+                    .Where(point => point.Id.HasNum)
+                    .Select(point => point.Id.Num)
+                    .ToHashSet();
+                foreach (var id in page)
+                {
+                    if (!present.Contains(id.Num))
+                    {
+                        missing.Add(id.Num);
+                    }
+                }
+
+                walked += page.Count;
+            }
+
+            return missing;
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        {
+            return pointIds;
         }
     }
 

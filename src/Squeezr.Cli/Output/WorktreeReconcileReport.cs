@@ -39,7 +39,20 @@ public sealed record WorktreeReconcileReport(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? Skipped,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    int? Reembedded)
+    int? Reembedded,
+    // Where the verdict came from: 'pass' measured it this session, 'record' read the store's own closed
+    // proof and attested it against a sample of ids. 'probedIds' is how many ids that attestation asked for,
+    // so a reader can see the size of what a healthy start paid instead of a full walk.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Basis = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? ProbedIds = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    WorktreeRecord? Record = null,
+    // The class of the refusal, measured at the open rather than inferred from a null, for the store whose
+    // meta.db would not answer at all (review-116-12 W-2).
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? StoreFailure = null)
 {
     public static WorktreeReconcileReport From(WorktreeReconcileOutcome outcome) => new(
         State: outcome.State.ToString(),
@@ -58,5 +71,9 @@ public sealed record WorktreeReconcileReport(
         Modified: outcome.Modified,
         Deleted: outcome.Deleted,
         Skipped: outcome.Skipped,
-        Reembedded: outcome.Reembedded);
+        Reembedded: outcome.Reembedded,
+        Basis: outcome.Basis == "none" ? null : outcome.Basis,
+        ProbedIds: outcome.ProbedIds,
+        Record: outcome.Record,
+        StoreFailure: outcome.StoreFailure?.ToString());
 }

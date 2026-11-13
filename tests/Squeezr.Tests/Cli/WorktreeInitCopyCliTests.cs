@@ -122,15 +122,15 @@ public sealed class WorktreeInitCopyCliTests
         StoreFixture.Counts(childStoreDir).ShouldBe((1, 1));
     }
 
-    // The third state's carriers, measured through the CLI rather than in the core: the payload names the
-    // state and keeps the pending word, and the assumption reaches the channel a session-start hook reads.
-    // A hook that treats a copied store as proven is the reader this state exists to stop, and it reads
-    // stderr, not the reconcile block.
+    // The proof a session start needs is the one the store keeps. Before the marker, a healthy lane paid the
+    // 'no pass over this tree' warning at every start because the proof evaporated with the pass that made
+    // it (review-116-11 D4); now the second start reads the record the first one wrote, owes no pass, and
+    // says nothing on the warning channel — because there is nothing left to warn about.
     [Fact]
-    public async Task WorktreeInit_SecondPassOverAHealthyLane_ReportsAssumedAndWarnsOnStdErr()
+    public async Task WorktreeInit_SecondPassOverAHealthyLane_ReadsTheStoresRecordAndStopsWarning()
     {
-        const string branch = "feat/116-cli-assumed";
-        var main = IndexedMainWithPendingContent("cli-assumed-main");
+        const string branch = "feat/116-cli-record";
+        var main = IndexedMainWithPendingContent("cli-record-main");
         var child = AddWorktree(main, branch);
         PreMintLaneStore(child, branch, provider: "ollama", model: null, probeFails: true);
 
@@ -142,6 +142,7 @@ public sealed class WorktreeInitCopyCliTests
             doc.RootElement.GetProperty("fill").GetProperty("state").GetString().ShouldBe("Filled");
             doc.RootElement.GetProperty("reconcile").GetProperty("state").GetString().ShouldBe("Reconciled",
                 "the session that ran the pass over this tree is the one allowed to say reconciled");
+            doc.RootElement.GetProperty("reconcile").GetProperty("basis").GetString().ShouldBe("pass");
         }
 
         var second = await Run(child, "worktree", "init", "--no-semantic", "--json");
@@ -150,13 +151,19 @@ public sealed class WorktreeInitCopyCliTests
         using var again = JsonDocument.Parse(second.StdOut.Trim());
         again.RootElement.GetProperty("fill").GetProperty("state").GetString().ShouldBe("Skipped");
         var repeat = again.RootElement.GetProperty("reconcile");
-        repeat.GetProperty("state").GetString().ShouldBe("Assumed");
-        repeat.GetProperty("code").GetString().ShouldBe(WorktreeReconcileOutcome.AssumedCode);
-        repeat.GetProperty("passRan").GetBoolean().ShouldBeFalse();
-        again.RootElement.GetProperty("reconcilePending").GetBoolean().ShouldBeTrue(
-            "an assumed match is two copied numbers agreeing, so the reader keeps the pending word");
-        // the warning channel is where a hook that reads no payload learns the difference
-        second.StdErr.ShouldContain("no pass over this tree");
+        repeat.GetProperty("state").GetString().ShouldBe("Reconciled");
+        repeat.GetProperty("passRan").GetBoolean().ShouldBeFalse(
+            "the record says a pass over this root closed, so this start owes no second one");
+        repeat.GetProperty("basis").GetString().ShouldBe("record");
+        var record = repeat.GetProperty("record");
+        record.GetProperty("filled").GetBoolean().ShouldBeTrue();
+        record.GetProperty("passCompleted").GetBoolean().ShouldBeTrue();
+        record.GetProperty("semanticArmLanded").GetBoolean().ShouldBeTrue();
+        record.GetProperty("pending").GetBoolean().ShouldBeFalse();
+        again.RootElement.GetProperty("reconcilePending").GetBoolean().ShouldBeFalse(
+            "a remembered proof is still a proof: the pending word retires with it");
+        second.StdErr.Contains("no pass over this tree").ShouldBeFalse(
+            "the sentence that promised a proof this store could not keep is gone from stderr");
     }
 
     // The query pins here run against the lane right after the verb: since T6 the verb itself lands one

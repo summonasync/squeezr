@@ -27,5 +27,43 @@ public static class WorkspaceManifestFile
         File.WriteAllText(manifestPath, json);
     }
 
+    // A reporting surface asks 'what does this store say about itself' and must not die over the answer: a
+    // manifest that will not read is the same no-marker as a manifest that was never written, and the store's
+    // own rows stay the subject of the report. Read surfaces never claim a cause they did not measure, so a
+    // failed read here is silent by contract, not by accident.
+    public static ReconcileMarker? TryRead(string root) => TryReadAt(SqueezrPaths.ManifestPath(root));
+
+    public static ReconcileMarker? TryReadAt(string manifestPath)
+    {
+        try
+        {
+            return File.Exists(manifestPath) ? LoadAt(manifestPath).Reconcile : null;
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            return null;
+        }
+    }
+
+    // The marker write is the fill's and the pass's own bookkeeping, so it goes through this door rather
+    // than a Load/Save pair at each call site. It is deliberately NOT safe: a fill that could not record
+    // that it is about to move bytes must not move them, and a pass that could not record its proof must
+    // not claim one. Both callers say so in their own words.
+    public static void WriteReconcileAt(string manifestPath, string root, ReconcileMarker marker)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
+        var manifest = File.Exists(manifestPath)
+            ? LoadAt(manifestPath)
+            : new WorkspaceManifest
+            {
+                Name = new DirectoryInfo(root).Name,
+                RootPath = WorkspaceCanonicalPath.Canonicalize(root),
+            };
+        SaveAt(manifestPath, manifest with { Reconcile = marker });
+    }
+
+    private static bool IsRecoverable(Exception ex) =>
+        ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException;
+
     private static string ManifestPathOf(string root) => SqueezrPaths.ManifestPath(root);
 }

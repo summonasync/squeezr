@@ -17,13 +17,21 @@ internal static class WorktreeReconcileLine
             nameof(WorktreeReconcileState.Deferred) => $"  reconcile [grey]deferred[/]{reason}",
             nameof(WorktreeReconcileState.Reconciled) when reconcile.PassRan =>
                 $"  reconcile [green]reconciled[/] — {PassText(reconcile)}",
-            nameof(WorktreeReconcileState.Assumed) =>
-                $"  reconcile [grey]assumed[/] — the numbers match, and no pass over this tree proved they "
-                + $"are this branch's ({CollectionText(reconcile)})",
+            nameof(WorktreeReconcileState.Reconciled) =>
+                // The proof this line names is the store's own: a pass over this root closed it, and this
+                // session start read that record and asked the collection for a spread of the ids it counted.
+                // Saying 'this pass proved it' here would credit work another session did.
+                $"  reconcile [green]reconciled[/] — on this store's record: a pass over this tree closed "
+                + $"the proof{AttestationText(reconcile)}",
             _ => $"  reconcile [yellow]pending[/] — {(reconcile.PassRan ? PassText(reconcile) + "; " : "")}"
                 + $"{CollectionText(reconcile)}{reason}",
         };
     }
+
+    private static string AttestationText(WorktreeReconcileReport reconcile) =>
+        reconcile.ProbedIds is int probed and > 0
+            ? $", attested by {probed} point id(s) the collection answered for"
+            : ", with no vector claim on it to attest";
 
     private static string PassText(WorktreeReconcileReport reconcile) =>
         $"pass over this tree: {reconcile.RescannedFiles} file(s) rescanned, "

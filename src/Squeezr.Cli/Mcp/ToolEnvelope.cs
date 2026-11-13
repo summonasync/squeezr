@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 
@@ -41,10 +42,36 @@ public sealed record ToolEnvelope(
         // the three states 115 froze and the coverage rule 017 froze compose instead of undoing each other
         var resolved = cost ?? AnswerCost.Unknown(tokensUsed, !truncated);
         var complete = resolved.Complete && (freshness is null || freshness.CarriesWholeVerdict);
-        return new(data, tokensUsed, truncated, warnings ?? [], ResolveIndexAge(workspaceRoot), staleFiles ?? [],
-            didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = complete }, fileFreshness,
+        // The record is read only on the path that ships per-file verdicts, because that is the only claim
+        // this gate can make or break; an aggregate answer that names no file owes no manifest read.
+        var record = fileFreshness is not null && workspaceRoot is not null
+            ? ReconcilePendingNotice.Read(workspaceRoot)
+            : null;
+        var unproven = ReconcilePendingNotice.CoordinatesUnproven(record);
+        var lines = warnings ?? [];
+        if (unproven)
+        {
+            // The demotion has to be said, not just performed: an answer that reads 'unknown' about files it
+            // could have read 'fresh' about is a change the caller can only act on if it is named.
+            lines = [.. lines, .. ReconcilePendingNotice.Lines(record)];
+        }
+
+        return new(data, tokensUsed, truncated, lines, ResolveIndexAge(workspaceRoot), staleFiles ?? [],
+            didYouMean, definitions, resolved with { TokensUsed = tokensUsed, Complete = complete },
+            unproven ? WithholdFreshness(fileFreshness) : fileFreshness,
             freshness);
     }
+
+    // A copied store that no pass has proved answers 'unknown' about a file it has never indexed here, not
+    // 'fresh': the row's size and stamp came off another checkout, so the verdict this door would otherwise
+    // ship claims a match against a file this store never saw. 'Lagging' stays — it is a claim of drift, and
+    // drift is a direction this reading can still support.
+    private static IReadOnlyList<FileFreshness>? WithholdFreshness(IReadOnlyList<FileFreshness>? rows) =>
+        rows is null
+            ? null
+            : [.. rows.Select(row => row.Verdict == FreshnessVerdict.Fresh
+                ? row with { Verdict = FreshnessVerdict.Unknown }
+                : row)];
 
     public ToolEnvelope WithWarning(string? warning) =>
         warning is null ? this : this with { Warnings = [.. Warnings, warning] };

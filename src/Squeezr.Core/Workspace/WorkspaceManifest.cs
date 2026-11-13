@@ -7,4 +7,6 @@ public sealed record WorkspaceManifest
     public string? RootPath { get; init; }
 
     public IReadOnlyList<RepoEntry> Repos { get; init; } = [];
+
+    public ReconcileMarker? Reconcile { get; init; }
 }

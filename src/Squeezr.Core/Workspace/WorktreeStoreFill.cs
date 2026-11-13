@@ -15,8 +15,10 @@ namespace Squeezr.Core.Workspace;
 // which pass created it: a store holding no rows is unfinished work and is filled again, while a store that
 // already holds content keeps it — re-copying over a lane's own index would bury work the lane did. A pass
 // that died before landing rows is therefore completed by a later session instead of waiting on a manual
-// drop, which is the only shape a hook that reruns forever can live with. The durable 'has this store ever
-// been filled' marker is 116/T7's; until it exists, content is the honest predicate.
+// drop, which is the only shape a hook that reruns forever can live with. The store's own record of that
+// state is ReconcileMarker, written here before the first byte moves; the database stays the retry predicate
+// because it is the one source a killed pass cannot have left lying, while the marker is what a reader is
+// allowed to be honest FROM (a lane with rows and no closed pass is pending, whatever its bytes look like).
 //
 // A skip is reported, not thrown. The model question this pass asks costs a provider round trip, and a
 // provider that cannot answer is a reason to copy nothing this time — not a reason to fail a session start
@@ -103,14 +105,28 @@ public static class WorktreeStoreFill
             }
         }
 
+        var manifestPath = SqueezrPaths.ManifestPath(childRow.RootPath);
         var request = new WorkspaceStoreCopyRequest(
             parentStoreDir,
             childStoreDir,
             childRow.RootPath,
-            SqueezrPaths.ManifestPath(childRow.RootPath),
+            manifestPath,
             WorkspaceManifestFile.Load(parentRow.RootPath).Repos);
 
+        // The store says it is pending before a byte moves, so a pass that dies mid-copy cannot leave a lane
+        // that reads as earned: the marker is the crash-honest half of this verb, and the invariant is the
+        // short one — no record, no copy. The record this write opens says 'nothing has landed yet', which is
+        // true at the moment it is written and stays true through any failure of the copy below it.
+        OpenMarker(manifestPath, childRow.RootPath);
+
         var files = WorkspaceStoreCopy.Copy(request, targetModelKey, onStaleTakeover);
+
+        // Which arms the copy actually brought. The exact arm is reported here because the database cannot
+        // tell it: a main worktree that never built a trigram.idx hands over rows that keep answering
+        // symbol and span questions and permanently answer no exact search, and a store holding those rows is
+        // not the same store as one holding both arms (review-116-08 §2 caveat 1). The reconcile pass is what
+        // closes the record, including the semantic answer this copy cannot claim.
+        MarkFilled(manifestPath, childRow.RootPath, files.Trigram.Copied);
 
         // The vector half runs after both store locks are down and never inside them: a collection of this
         // size is pages of round trips, and holding the parent's lock across them would freeze a store
@@ -124,6 +140,53 @@ public static class WorktreeStoreFill
 
         return WorktreeFillOutcome.Filled(files, vectors);
     }
+
+    private static void OpenMarker(string manifestPath, string root)
+    {
+        TryWriteMarker(manifestPath, root, ReconcileMarker.Opened(), "open the pending record");
+    }
+
+    private static void MarkFilled(string manifestPath, string root, bool exactArmLanded)
+    {
+        // The bytes landed and the record did not, which is the state this verb is not allowed to paper over:
+        // the marker stays at 'nothing has landed', so the lane keeps reading pending and the next run fills
+        // it again, and the command says so instead of reporting a fill the store cannot vouch for.
+        try
+        {
+            var current = WorkspaceManifestFile.TryReadAt(manifestPath) ?? ReconcileMarker.Opened();
+            WorkspaceManifestFile.WriteReconcileAt(manifestPath, root, current.FilledFrom(exactArmLanded, null));
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            throw new WorkspaceException(
+                $"The copy landed, but this worktree's manifest at '{manifestPath}' would not take the record "
+                + $"that says so ({ex.GetType().Name}: {ex.Message}). The lane stays pending and a later run of "
+                + "'squeezr worktree init' fills it again; make the store directory writable and re-run.",
+                WorkspaceException.StorageUnavailableCode,
+                ex);
+        }
+    }
+
+    private static void TryWriteMarker(string manifestPath, string root, ReconcileMarker marker, string asking)
+    {
+        try
+        {
+            WorkspaceManifestFile.WriteReconcileAt(manifestPath, root, marker);
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            throw new WorkspaceException(
+                $"This fill could not {asking} in '{manifestPath}' ({ex.GetType().Name}: {ex.Message}), so no "
+                + "byte was moved: a store that cannot say it is pending must not be handed a copy it would "
+                + "read as earned. Make this worktree's store directory writable and re-run "
+                + "'squeezr worktree init'.",
+                WorkspaceException.StorageUnavailableCode,
+                ex);
+        }
+    }
+
+    private static bool IsRecoverable(Exception ex) =>
+        ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException;
 
     // Every row that resolves to this tree is gathered, not the first hit: the fold lookup answers with
     // whichever row the registry lists first, so it cannot tell one store from a fork, and a fork is the
