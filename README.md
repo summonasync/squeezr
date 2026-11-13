@@ -180,18 +180,29 @@ troubleshooting lives in [`skills/squeezr/SKILL.md`](skills/squeezr/SKILL.md);
 short version:
 
 ```bash
-curl -fsSL http://REDACTED-LAN-HOST:3000/REDACTED-FORGE-NS/Squeezr/raw/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/summonasync/squeezr/main/scripts/install-release.sh | bash
 squeezr services up
 squeezr init && squeezr add . && squeezr index --events
 squeezr mcp install --all --scope user --yes
 ```
 
-1. The installer resolves the latest published Gitea release, unpacks it into
-   `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if
-   that dir is not on PATH, the script says so — fix the shell profile and open
-   a new terminal). Pin or roll back with `--version <tag>`. **Linux only** —
-   releases are published for `linux-x64` alone. On Windows, build the setup
-   executable locally (`powershell -File scripts\build-installer.ps1`) or
+1. The installer resolves the latest published release through the GitHub Releases
+   API (`https://api.github.com/repos/summonasync/squeezr`, or the tag given via
+   `--version <tag>` to pin or roll back), unpacks it into `~/apps/squeezr/<tag>/`
+   and repoints the `~/.local/bin/squeezr` symlink (if that dir is not on PATH, the
+   script says so — fix the shell profile and open a new terminal). `SQUEEZR_RELEASES_BASE`
+   retargets the resolution at another repo's release API base; it covers the API
+   base only, so the releases page the script prints on a miss stays the GitHub page.
+   `SQUEEZR_GITEA` is a deprecated fallback, consulted only when
+   `SQUEEZR_RELEASES_BASE` is unset: the script derives the old API layout from it,
+   warns on stderr and names the replacement variable.
+   **This line does not work anonymously yet:** the repository is currently private,
+   so an unauthenticated curl of it answers `404` (measured, not assumed), and the
+   script sends no credentials of its own. The distribution plumbing ships here;
+   the public store arrives when the owner flips the repository's visibility. Until
+   then install from a checkout with `scripts/install.sh`.
+   **Linux only** — releases are published for `linux-x64` alone. On Windows, build
+   the setup executable locally (`powershell -File scripts\build-installer.ps1`) or
    install from source with `powershell -File scripts\install.ps1`.
 2. Starts the managed Qdrant + Ollama stack; the first run pulls ~3.6 GB of
    images. If docker is missing, stop and ask the human — do not improvise.
@@ -693,9 +704,10 @@ registers in "Apps & features" — uninstall goes from there, not from hunting
 a script in a forgotten checkout. Run with elevation, it offers a
 per-machine install into `%ProgramFiles%\Squeezr`.
 
-No ready Windows builds exist anywhere and none will: Gitea releases are built
-for `linux-x64` only, there is no Windows runner. The package is built
-locally, on any Windows machine:
+No ready Windows builds exist anywhere and none will: published releases carry
+`linux-x64` only — publishing is a local procedure that builds that one archive
+and nothing else (see [Publishing a release](#publishing-a-release) below) — so
+the package is built locally, on any Windows machine:
 
 ```powershell
 # prerequisite: Inno Setup 6 (plus the .NET 10 SDK)
@@ -734,6 +746,56 @@ Moved from an old Windows machine? The migration checklist —
 Project still on the old layout with `.squeezr/` in the root? Migration to the
 central store happens by itself —
 [docs/migration-central-store.md](docs/migration-central-store.md).
+
+## Publishing a release
+
+No CI publishes anything and nothing is planned to: releases are assembled
+locally by whoever is holding the tag. The whole procedure, on a Linux box with
+the .NET 10 SDK, from the repository root:
+
+```bash
+version=1.1.0                                  # the tag is v$version
+
+# Self-contained single-file publish. The archive carries the whole publish
+# output, not just the binary: MSBuildWorkspace ships out-of-proc BuildHost
+# folders next to the exe, required for semantic indexing, and a single-file
+# bundle does not embed them.
+dotnet publish src/Squeezr.Cli/Squeezr.Cli.csproj -c Release -r linux-x64 --self-contained true \
+  -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
+  -p:DebugType=none -p:DebugSymbols=false -o dist/squeezr-linux-x64
+
+tar -czf "squeezr-$version-linux-x64.tar.gz" -C dist squeezr-linux-x64
+
+git tag "v$version" && git push origin "v$version"
+gh release create "v$version" "squeezr-$version-linux-x64.tar.gz" \
+  --notes "See CHANGELOG.md in the repository."
+```
+
+Two shapes are a contract with `scripts/install-release.sh`, not taste:
+
+- **Asset name** must end in `-linux-x64.tar.gz` — the script matches the
+  advertised `browser_download_url` against `-linux-x64[.]tar[.]gz$`, and a
+  release without a matching asset dies with `release <tag> has no linux-x64
+  tar.gz asset - check <releases page>`.
+- **Archive layout** must be `squeezr-linux-x64/squeezr` — the directory the
+  publish `-o` flag creates, packed with `tar -C dist squeezr-linux-x64`. The
+  unpack step probes for that exact path and dies with `archive layout changed -
+  expected a squeezr-linux-x64/squeezr binary inside <asset>` on anything else.
+
+Both shapes are what the release-resolution harness installs through —
+`audits/120-t1-harness/harness.sh` arms 1-4 resolve an asset named exactly this
+way and unpack it from exactly this layout (arm 7 covers the integrity check on a
+truncated archive). The two refusals quoted above are what the script answers a
+release that deviates from them; they are not separately armed.
+
+Two gates stay with the owner, and this section is where they are named rather
+than discovered later: **the first real publication** has not happened — the
+GitHub releases of this repository (`v1.0.10`, `v1.0.11`, `v1.1.0`) carry zero
+assets as of this writing, so there is nothing for `install-release.sh` to
+resolve until someone runs the procedure above for real — and the
+**repository visibility** is still private, which is the same gate the install
+command in [For AI agents](#for-ai-agents) answers with a `404`: publishing an
+asset does not make the anonymous `curl -fsSL … | bash` work.
 
 ## TUI: the human interface
 

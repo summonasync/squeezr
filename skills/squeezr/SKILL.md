@@ -23,15 +23,27 @@ squeezr --version
 If missing, install the latest published release (no sudo, user dirs only):
 
 ```bash
-curl -fsSL http://REDACTED-LAN-HOST:3000/REDACTED-FORGE-NS/Squeezr/raw/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/summonasync/squeezr/main/scripts/install-release.sh | bash
 ```
 
-The script resolves the latest Gitea release, unpacks into `~/apps/squeezr/<tag>/`
+The script resolves the latest published release through the GitHub Releases API
+(`https://api.github.com/repos/summonasync/squeezr`), unpacks into `~/apps/squeezr/<tag>/`
 and repoints the `~/.local/bin/squeezr` symlink, then prints the installed version.
 If `~/.local/bin` is not on PATH, add it to the shell profile and open a new terminal
 before re-checking. Pin or roll back with `--version <tag>` (e.g. `v1.0.0`); force a
-re-download of an installed tag with `--force`. The script is the single source of
-install truth — install evolution changes the script, never this skill.
+re-download of an installed tag with `--force`. `SQUEEZR_RELEASES_BASE` retargets the
+release API base and nothing else — the releases page the script names on a miss stays
+the GitHub page; `SQUEEZR_GITEA` is a deprecated fallback, consulted only when
+`SQUEEZR_RELEASES_BASE` is unset, and says so in a stderr warning. The script is the
+single source of install truth — install evolution changes the script, never this skill.
+
+**A `404` on that curl is the visibility gate, not a wrong URL.** The repository is
+private as of this writing, so an anonymous request has nothing to serve; the script
+carries no credentials of its own. Report the gate to the human and stop there: do not
+improvise tokens or auth headers, do not retry the fetch through a proxy or a mirror,
+do not substitute another install source. If the human wants the machine running today,
+they decide between a checkout install (`scripts/install.sh`) and flipping the
+repository's visibility.
 
 ## 2. Services (Qdrant + Ollama)
 
