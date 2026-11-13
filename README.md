@@ -792,10 +792,10 @@ Two gates stay with the owner, and this section is where they are named rather
 than discovered later: **the first real publication** has not happened — the
 GitHub releases of this repository (`v1.0.10`, `v1.0.11`, `v1.1.0`) carry zero
 assets as of this writing, so there is nothing for `install-release.sh` to
-resolve until someone runs the four commands above for real — and the
+resolve until someone runs the procedure above for real — and the
 **repository visibility** is still private, which is the same gate the install
-line above answers with a `404`: publishing an asset does not make the
-anonymous `curl -fsSL … | bash` work.
+command in [For AI agents](#for-ai-agents) answers with a `404`: publishing an
+asset does not make the anonymous `curl -fsSL … | bash` work.
 
 ## TUI: the human interface
 
