@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Shouldly;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -47,6 +48,84 @@ public sealed class DoctorCommandTests
         run.StdOut.ShouldContain("fail");
         run.StdOut.ShouldContain(DoctorRemedyText);
         run.StdOut.ShouldContain("nothing was changed");
+    }
+
+    // the model key this fixture invents: no other workspace in the run-wide registry can name it,
+    // so the finding is pinned to this stand even though doctor walks every registered workspace.
+    private const string UniqueKey = "openai/vis-112t4/42";
+
+    [Fact]
+    public async Task Doctor_ActiveEmbeddingModel_NamesKeyAndForeignCount_ThenGoesSilentWhenResolutionStops()
+    {
+        var root = TestDirs.NewTempDir();
+        (await CliTestProcess.RunAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
+        SaveEmbeddings(root, provider: "openai", model: "vis-112t4", dimensions: 42);
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "Calc.cs"),
+            "public class Calc { public int Add(int a, int b) => a + b; public int Sub(int a, int b) => a - b; }");
+        (await CliTestProcess.RunAsync(root, "add", ".")).ExitCode.ShouldBe(0);
+        (await CliTestProcess.RunAsync(root, "index")).ExitCode.ShouldBe(0);
+        PlantForeignVintage(root);
+
+        var checks = (await ModelChecksAsync(root)).ToList();
+        var model = checks.Single(c =>
+            c.GetProperty("name").GetString() == "embedding model" &&
+            c.GetProperty("detail").GetString()!.Contains(UniqueKey, StringComparison.Ordinal));
+        model.GetProperty("state").GetString().ShouldBe("info");
+        model.GetProperty("detail").GetString()
+            .ShouldBe($"{UniqueKey} — 1 chunk(s) carry vectors from another embedding model");
+
+        var text = await CliTestProcess.RunAsync(root, "doctor");
+        text.StdOut.ShouldContain($"{UniqueKey} — 1 chunk(s) carry vectors from another embedding model");
+
+        SaveEmbeddings(root, provider: "auto", model: null, dimensions: null, ollamaEndpoint: TestWorkspaceConfig.DeadOllamaEndpoint);
+
+        var after = (await ModelChecksAsync(root)).ToList();
+        after.ShouldNotContain(c => c.GetProperty("detail").GetString()!.Contains(UniqueKey, StringComparison.Ordinal));
+    }
+
+    private static async Task<IReadOnlyList<JsonElement>> ModelChecksAsync(string root)
+    {
+        var run = await CliTestProcess.RunAsync(root, "doctor", "--json");
+        run.ExitCode.ShouldNotBe(2, $"doctor failed to produce a report: {run.StdErr}");
+        using var doc = JsonDocument.Parse(run.StdOut);
+        return [.. doc.RootElement.GetProperty("checks").EnumerateArray().Select(element => element.Clone())];
+    }
+
+    private static void PlantForeignVintage(string root)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(root));
+        var first = store.ListRepos()
+            .SelectMany(repo => store.ListFiles(repo.Id))
+            .SelectMany(file => store.ListChunksByFile(file.Id))
+            .Select(chunk => chunk.Id)
+            .First();
+        store.MarkChunksEmbedded([first], "ollama/vis-112t4-other/42");
+    }
+
+    private static void SaveEmbeddings(
+        string root, string provider, string? model, int? dimensions, string? ollamaEndpoint = null)
+    {
+        var config = ConfigFile.Load(root);
+        ConfigFile.Save(root, config with
+        {
+            Embeddings = config.Embeddings with
+            {
+                Provider = provider,
+                OpenAiCompatible = model is null
+                    ? config.Embeddings.OpenAiCompatible
+                    : config.Embeddings.OpenAiCompatible with
+                    {
+                        Model = model,
+                        Dimensions = dimensions!.Value,
+                        // nothing answers here: the index pass must not reach out to the real api.openai.com
+                        Endpoint = "http://127.0.0.1:1/v1",
+                    },
+                Ollama = ollamaEndpoint is null
+                    ? config.Embeddings.Ollama
+                    : config.Embeddings.Ollama with { Endpoint = ollamaEndpoint }
+            }
+        });
     }
 
     private const string DoctorRemedyText = "squeezr services up";

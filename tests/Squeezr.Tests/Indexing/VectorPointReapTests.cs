@@ -659,6 +659,8 @@ public class VectorPointReapTests
     {
         public int Dimensions { get; init; } = 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(text =>
             {

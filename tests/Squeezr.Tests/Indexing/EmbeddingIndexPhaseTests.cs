@@ -620,6 +620,8 @@ public class EmbeddingIndexPhaseTests
     {
         public int Dimensions { get; init; } = 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public int EmbedCallCount { get; private set; }
 
         public int EmbeddedTextCount { get; private set; }

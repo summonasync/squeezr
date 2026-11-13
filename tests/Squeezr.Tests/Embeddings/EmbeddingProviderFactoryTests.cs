@@ -2,12 +2,52 @@ using System.Net;
 using Shouldly;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
+using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Embeddings;
 
 public class EmbeddingProviderFactoryTests
 {
+    [Fact]
+    public void Create_OllamaProvider_CarriesTheKeyFromComputesForThatConfig()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{"models":[{"name":"bge-code:latest"}]}"""));
+        var config = new EmbeddingsConfig
+        {
+            Provider = "ollama",
+            Ollama = new OllamaOptions
+            {
+                Model = "bge-code",
+                Dimensions = 1536,
+                ModelProfile = "bge-code-v1"
+            }
+        };
+
+        var provider = EmbeddingProviderFactory.Create(config, TestDirs.NewTempDir(), handler);
+
+        provider.ModelKey.ShouldBe(EmbeddingModelKey.From(config));
+        provider.ModelKey.ShouldBe("ollama/bge-code/1536/bge-code-v1");
+        WeakMatchPolicy.HasCalibratedFloor(provider.ModelKey).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Create_OllamaDefaultConfig_CarriesTheCalibratedKey()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{"models":[{"name":"nomic-embed-text:latest"}]}"""));
+        var config = new EmbeddingsConfig { Provider = "ollama" };
+
+        var provider = EmbeddingProviderFactory.Create(config, TestDirs.NewTempDir(), handler);
+
+        provider.ModelKey.ShouldBe(EmbeddingModelKey.From(config));
+        WeakMatchPolicy.HasCalibratedFloor(provider.ModelKey).ShouldBeTrue();
+    }
+
     [Fact]
     public void Create_UnknownProvider_ThrowsWorkspaceExceptionWithProviderName()
     {

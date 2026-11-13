@@ -26,13 +26,26 @@ public static class EmbeddingsHealthProbe
             var cpu = resolution.Provider == "ollama"
                 ? await CpuOnlyAsync(config.Embeddings.Ollama, ct, handler)
                 : null;
-            return new EmbeddingsHealth(resolution.Provider, null, cpu);
+            return new EmbeddingsHealth(
+                resolution.Provider, null, cpu, ActiveModelKey(config.Embeddings, resolution.Provider));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return ex is WorkspaceException { Code: WorkspaceException.OnnxProviderCode }
                 ? new EmbeddingsHealth(null, OnnxStoreDiagnostic.Text(), null)
                 : EmbeddingsHealth.Silent;
+        }
+    }
+
+    private static string? ActiveModelKey(EmbeddingsConfig config, string resolvedProvider)
+    {
+        try
+        {
+            return EmbeddingModelKey.From(config with { Provider = resolvedProvider });
+        }
+        catch (Exception ex) when (ex is WorkspaceException or ArgumentException)
+        {
+            return null;
         }
     }
 

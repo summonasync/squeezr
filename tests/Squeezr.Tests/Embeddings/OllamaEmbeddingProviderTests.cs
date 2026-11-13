@@ -8,6 +8,11 @@ namespace Squeezr.Tests.Embeddings;
 
 public class OllamaEmbeddingProviderTests
 {
+    // what EmbeddingModelKey.From computes for Options(): no profile, so no profile suffix
+    private const string ModelKey = "ollama/nomic-embed-text/768";
+
+    private const string ProfiledModelKey = "ollama/nomic-embed-text/768/nomic-embed-text-v1.5";
+
     private static OllamaOptions Options(string endpoint = "http://localhost:11434") => new()
     {
         Endpoint = endpoint,
@@ -21,7 +26,7 @@ public class OllamaEmbeddingProviderTests
     {
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[1.0]]}"""));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -38,7 +43,7 @@ public class OllamaEmbeddingProviderTests
     {
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[1.0,2.0,3.0],[4.0,5.0,6.0]]}"""));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         var vectors = await provider.EmbedAsync(["first text", "second text"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -55,7 +60,7 @@ public class OllamaEmbeddingProviderTests
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, $"{{\"embeddings\":{firstBatch}}}"),
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[2.0]]}"""));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         var vectors = await provider.EmbedAsync(texts, EmbeddingUsage.Document, CancellationToken.None);
 
@@ -71,7 +76,7 @@ public class OllamaEmbeddingProviderTests
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[1.0]]}"""));
         var options = Options() with { ModelProfile = "nomic-embed-text-v1.5" };
-        var provider = new OllamaEmbeddingProvider(options, handler);
+        var provider = new OllamaEmbeddingProvider(options, ProfiledModelKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -84,7 +89,7 @@ public class OllamaEmbeddingProviderTests
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[1.0]]}"""));
         var options = Options() with { ModelProfile = "nomic-embed-text-v1.5" };
-        var provider = new OllamaEmbeddingProvider(options, handler);
+        var provider = new OllamaEmbeddingProvider(options, ProfiledModelKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
 
@@ -97,7 +102,7 @@ public class OllamaEmbeddingProviderTests
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[1.0]]}"""));
         var options = Options() with { ModelProfile = null };
-        var provider = new OllamaEmbeddingProvider(options, handler);
+        var provider = new OllamaEmbeddingProvider(options, ModelKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
 
@@ -110,7 +115,7 @@ public class OllamaEmbeddingProviderTests
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json((HttpStatusCode)429, """{"error":"busy"}"""),
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[7.0]]}"""));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         var vectors = await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -123,7 +128,7 @@ public class OllamaEmbeddingProviderTests
     {
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.BadRequest, """{"error":"bad request"}"""));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         var error = await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None));
 
@@ -138,7 +143,7 @@ public class OllamaEmbeddingProviderTests
             StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"),
             StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"),
             StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None));
 
@@ -151,7 +156,7 @@ public class OllamaEmbeddingProviderTests
         var handler = new StubHttpMessageHandler(
             new HttpRequestException("connection refused"),
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"embeddings":[[7.0]]}"""));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         var vectors = await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -166,7 +171,7 @@ public class OllamaEmbeddingProviderTests
             new HttpRequestException("connection refused"),
             new HttpRequestException("connection refused"),
             new HttpRequestException("connection refused"));
-        var provider = new OllamaEmbeddingProvider(Options(), handler);
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, handler);
 
         var error = await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None));
 
@@ -177,8 +182,9 @@ public class OllamaEmbeddingProviderTests
     [Fact]
     public void Dimensions_ComesFromConfig()
     {
-        var provider = new OllamaEmbeddingProvider(Options(), new StubHttpMessageHandler());
+        var provider = new OllamaEmbeddingProvider(Options(), ModelKey, new StubHttpMessageHandler());
 
         provider.Dimensions.ShouldBe(768);
+        provider.ModelKey.ShouldBe(ModelKey);
     }
 }

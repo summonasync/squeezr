@@ -7,9 +7,23 @@ public static class CappedArmPolicy
         && arm.StoreCandidates >= arm.RequestedTopK
         && arm.Hits.Count < ScopedVectorBudget.BaseTopK;
 
-    public static string? Warning(SemanticArm arm, string? repo, string? prefix, string? kind, string? pathGlob)
+    public static string? Warning(
+        SemanticArm arm,
+        int exactArmHits,
+        string? repo,
+        string? prefix,
+        string? kind,
+        string? pathGlob)
     {
         if (!IsCapped(arm))
+        {
+            return null;
+        }
+
+        // the complaint needs a victim: either every in-scope candidate was delivered, or the
+        // exact arm answered while the semantic arm left the whole scope undelivered
+        if (arm.Hits.Count == arm.InScopeCandidates
+            || (arm.Hits.Count == 0 && exactArmHits > 0))
         {
             return null;
         }

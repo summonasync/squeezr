@@ -213,6 +213,76 @@ public class HybridSearchTests
     }
 
     [Fact]
+    public void Hybrid_BgeCodeProfileBelowFloor_HintsInsteadOfTheLowConfidenceSentence()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First();
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.3)]
+        };
+
+        var response = Search(workspace, "zzznotaword", store, modelKey: TestEmbeddingKeys.BgeCodeV1);
+
+        response.Matches.ShouldNotBeEmpty();
+        response.Warnings.ShouldHaveSingleItem().ShouldBe(
+            $"weak-match floor uncalibrated for {TestEmbeddingKeys.BgeCodeV1} — no low-confidence claim made until a floor is measured for it");
+        response.Warnings.ShouldNotContain(w => w.Contains("at low confidence", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Hybrid_BgeCodeProfileAboveFloor_HintsToo_TheFloorJudgesNothingUnderIt()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First();
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.95)]
+        };
+
+        var response = Search(workspace, "zzznotaword", store, modelKey: TestEmbeddingKeys.BgeCodeV1);
+
+        response.Warnings.ShouldHaveSingleItem().ShouldContain("weak-match floor uncalibrated");
+    }
+
+    [Fact]
+    public void Hybrid_UnregisteredOpenAiModelNameBelowFloor_HintsTheSameWay()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First();
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.3)]
+        };
+
+        var response = Search(workspace, "zzznotaword", store, modelKey: TestEmbeddingKeys.UnregisteredOpenAiModel);
+
+        response.Warnings.ShouldHaveSingleItem().ShouldBe(
+            $"weak-match floor uncalibrated for {TestEmbeddingKeys.UnregisteredOpenAiModel} — no low-confidence claim made until a floor is measured for it");
+        response.Warnings.ShouldNotContain(w => w.Contains("at low confidence", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Hybrid_NoProviderAtAll_AnswersInSilenceAboutConfidence()
+    {
+        var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
+        var chunk = chunks.First();
+        var store = new FakeVectorStore
+        {
+            Hits = [new VectorHit(1, "h", chunk.FileId, repoId, chunk.StartLine, chunk.EndLine, 0.3)]
+        };
+
+        var response = await new SearchEngine(workspace).SearchHybridAsync(
+            new SearchQuery("zzznotaword", false, null, null, null, null, null, null, null, null),
+            null,
+            store,
+            CancellationToken.None);
+
+        response.Matches.ShouldBeEmpty();
+        response.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Hybrid_IdentifierFallbackHit_LowSemanticScore_NoWarning()
     {
         var workspace = NewIndexedWorkspace(out var chunks, out var repoId);
@@ -396,12 +466,12 @@ public class HybridSearchTests
     private static SearchResponse Search(
         string workspace, string query, FakeVectorStore store, string? repo = null,
         string? kind = null, SemanticCoverage? coverage = null,
-        int? maxTokens = null, int? topK = null)
+        int? maxTokens = null, int? topK = null, string? modelKey = null)
     {
         var engine = new SearchEngine(workspace);
         return engine.SearchHybridAsync(
             new SearchQuery(query, false, null, repo, null, null, topK, maxTokens, null, kind),
-            new FakeEmbeddingProvider(),
+            new FakeEmbeddingProvider { ModelKey = modelKey ?? TestEmbeddingKeys.Calibrated },
             store,
             CancellationToken.None,
             coverage).GetAwaiter().GetResult();
@@ -456,6 +526,8 @@ public class HybridSearchTests
     private sealed class FakeEmbeddingProvider : IEmbeddingProvider
     {
         public int Dimensions => 4;
+
+        public string ModelKey { get; init; } = TestEmbeddingKeys.Calibrated;
 
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(text =>
