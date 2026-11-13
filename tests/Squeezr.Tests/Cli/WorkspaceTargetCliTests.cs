@@ -146,6 +146,74 @@ public sealed class WorkspaceTargetCliTests
         TryDelete(main);
     }
 
+    // One dead tree, three spellings of it. The lane's checkout is gone while its row survives, and the state
+    // used to split in two: the key door handed the dead root to the query engine, which answered with an
+    // unremedied workspace_error, while the path door spoke the read verb's gone sentence with the surviving
+    // key and both reap remedies. Targeting now goes through the read door whichever way it was asked, so the
+    // refusal is one message and the naming never fires for a run that produced no answer.
+    [Fact]
+    public async Task WorkspaceOfADeletedLane_RefusesTheGoneState_TheSameWordsFromEverySpelling()
+    {
+        var (main, lane) = await IndexedParentAndFilledLane("target-dead");
+        var laneKey = StoreKeyOf(lane);
+        var laneRoot = WorkspaceRegistry.FindByStoreKey(laneKey)!.RootPath;
+        var registryBefore = RegistryText();
+        TryDelete(lane);
+
+        var byKey = await Run(main, "search", ParentToken, "--workspace", laneKey, "--json");
+        var byWorkspacePath = await Run(main, "search", ParentToken, "--workspace", laneRoot, "--json");
+        var byAt = await Run(main, "search", ParentToken, "--at", laneRoot, "--json");
+
+        var gone = ErrorOf(byAt.StdErr).GetProperty("message").GetString();
+        foreach (var run in new[] { byKey, byWorkspacePath, byAt })
+        {
+            run.ExitCode.ShouldBe(1, "a tree nothing can enter is not an empty answer");
+            var error = ErrorOf(run.StdErr);
+            error.GetProperty("code").GetString().ShouldBe(WorkspaceException.WorktreeNotRegisteredCode);
+            var message = error.GetProperty("message").GetString()!;
+            message.ShouldContain("does not exist");
+            message.ShouldContain(laneKey);
+            message.ShouldContain(RemedyText.WorkspaceRepairCommand);
+            message.ShouldContain(RemedyText.DropCommand);
+            DoesNotSay(run, "subject:", "a run that answered nothing has no subject to name");
+            DoesNotSay(run, "cross-tree", "and no tree it crossed");
+            run.StdOut.ShouldNotContain(ParentToken);
+        }
+
+        ErrorOf(byKey.StdErr).GetProperty("message").GetString().ShouldBe(gone);
+        ErrorOf(byWorkspacePath.StdErr).GetProperty("message").GetString().ShouldBe(gone);
+        RegistryText().ShouldBe(registryBefore, "the targeting door reaps nothing; that is workspace repair's work");
+        TryDelete(main);
+    }
+
+    // An option with no value selects no store. Before this refusal was pinned both spellings fell through to
+    // the nearest store and exited 0, which makes an unfilled flag mean the opposite of a missing one.
+    [Theory]
+    [InlineData("--workspace", "")]
+    [InlineData("--at", "")]
+    [InlineData("--workspace", "   ")]
+    [InlineData("--at", " ")]
+    public async Task SelectorOptionWithNoValue_RefusesAsInvalidQuery_AndAnswersNothing(
+        string option, string value)
+    {
+        var (main, lane) = await IndexedParentAndFilledLane("target-empty");
+
+        var run = await Run(lane, "search", BranchToken, option, CommandLineValue(value), "--json");
+
+        run.ExitCode.ShouldBe(1, "an unfilled option must not quietly mean the nearest store");
+        var error = ErrorOf(run.StdErr);
+        error.GetProperty("code").GetString().ShouldBe(WorkspaceException.InvalidQueryCode);
+        var message = error.GetProperty("message").GetString()!;
+        message.ShouldContain(option);
+        // The remedy half of the sentence has to point at a door the option actually has: `--at' reads a path or
+        // the parent sugar and takes no store key, so offering one here is the impossible-remedy defect again.
+        message.ShouldContain(option == "--at" ? "'parent'" : "store key");
+        message.ShouldNotContain(option == "--at" ? "registered store key" : "'parent' for this checkout");
+        run.StdOut.ShouldNotContain(BranchToken);
+        DoesNotSay(run, "subject:");
+        TryDelete(main);
+    }
+
     // A targeted query reads and reads: the witness is that the registry bytes and the store listing are what
     // they were, the same property that makes `worktree resolve' safe to call twice a day from a hook. BOTH
     // spellings are witnessed, because each reaches the registry through a different door — the key looks its row
@@ -300,6 +368,12 @@ public sealed class WorkspaceTargetCliTests
 
     private static Task<(int ExitCode, string StdOut, string StdErr)> Run(
         string workingDir, params string[] args) => CliTestProcess.RunAsync(workingDir, args);
+
+    // CliTestProcess joins its args into one command line, so a value that must reach the child EMPTY cannot
+    // be passed as an empty string — it would vanish and leave the child reading `--workspace --json', which is
+    // a different run than the one being pinned. The quoted token is what the shell-equivalent parser turns
+    // back into an empty argument.
+    private static string CommandLineValue(string value) => $"\"{value}\"";
 
     // The naming travels on the warning channel, so every claim about it is a claim about stderr — and a failure
     // has to say what went missing with the run's own text next to it.

@@ -82,6 +82,22 @@ public sealed class ToolEnvelopeSubjectTests
             .ShouldNotBeNull("the warning names BOTH trees, or a reader cannot tell which side it stands on");
     }
 
+    // This line is emitted when the target is chosen, which is before anyone knows whether the run answers: a
+    // refusal after the naming — the repo filter rejecting a repo the selected store does not own — carries the
+    // warning and has no rows to describe. So the sentence claims the two trees, and keeps its coordinate half
+    // modal instead of asserting an answer that never existed.
+    [Fact]
+    public void CrossTreeWarning_ClaimsTheTreesItMeasured_AndNoRowsTheRunNeverReturned()
+    {
+        var warning = Squeezr.Cli.Output.AnswerSubjectNotice.CrossTreeWarningOf(
+            new AnswerSubject("/repo/main", "master", "main-1a2b3c4d", "/repo/.lanes/lane", CrossTree: true))!;
+
+        warning.ShouldStartWith("cross-tree:");
+        warning.ShouldContain("/repo/main");
+        warning.ShouldContain("/repo/.lanes/lane");
+        warning.ShouldNotContain("in this answer");
+    }
+
     // The gate is the seam the subject rides: it stamps every envelope the session answers with, so no tool has
     // to remember the naming and a forgotten one is structurally impossible.
     [Fact]

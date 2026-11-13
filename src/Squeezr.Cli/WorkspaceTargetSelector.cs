@@ -16,13 +16,19 @@ namespace Squeezr.Cli;
 // answer with would create exactly the litter the feature's death path exists to reap.
 public static class WorkspaceTargetSelector
 {
+    private const string WorkspaceOption = "--workspace";
+    private const string AtOption = "--at";
+
     public static WorkspaceTarget Require(string? workspace, string? at)
     {
+        RequireValue(workspace, WorkspaceOption);
+        RequireValue(at, AtOption);
+
         if (workspace is not null && at is not null)
         {
             throw new WorkspaceException(
-                $"--workspace '{workspace}' and --at '{at}' both name a store, and one query answers from one. "
-                + "Pass the store key or the path, or --at parent to point at this checkout's parent.",
+                $"{WorkspaceOption} '{workspace}' and {AtOption} '{at}' both name a store, and one query answers from one. "
+                + $"Pass the store key or the path, or {AtOption} parent to point at this checkout's parent.",
                 WorkspaceException.InvalidQueryCode);
         }
 
@@ -40,6 +46,27 @@ public static class WorkspaceTargetSelector
         return Name(root);
     }
 
+    // An option passed with nothing in it names no store, and the honest answer is to say so: falling back on the
+    // nearest store would make an unfilled flag mean the opposite of a missing one, and the caller would read
+    // rows out of the tree it was trying to leave behind.
+    private static void RequireValue(string? spelling, string option)
+    {
+        if (spelling is not null && spelling.Trim().Length == 0)
+        {
+            throw new WorkspaceException(
+                $"'{option}' was passed with no value, so it names no store. {ValueAdvice(option)} "
+                + $"To answer from the nearest store, drop {option} instead of emptying it.",
+                WorkspaceException.InvalidQueryCode);
+        }
+    }
+
+    // The advice has to name a spelling the option actually takes: `--at' reads a checkout or the sugar, never a
+    // store key, and a remedy pointing at a door that option does not have is the same defect this round closed
+    // on the gone-tree side.
+    private static string ValueAdvice(string option) => option == AtOption
+        ? "Give it a path inside the checkout to read, or 'parent' for this checkout's parent store."
+        : "Give it a registered store key, or a path inside the checkout that owns the store.";
+
     // Every answer carries the same naming, targeted or not: a lane whose own store answers must still say which
     // branch it is describing, because the rows it returns do not tell the reader that by themselves.
     private static WorkspaceTarget Name(string root) =>
@@ -54,11 +81,15 @@ public static class WorkspaceTargetSelector
         var byKey = WorkspaceRootResolver.GuardRegistryIo(() => WorkspaceRegistry.FindByStoreKey(spelling));
         if (byKey is not null)
         {
-            return byKey.RootPath;
+            // A row is a claim about a tree, not the tree. A lane whose checkout was removed keeps its row until
+            // `workspace repair' reaps it, and handing the dead root straight back sent the query to a deeper
+            // engine that answered with an unremedied workspace_error. The read door owns the gone sentence —
+            // the surviving keys, the reap remedy — so one dead tree is refused the same words from either side.
+            return StoreAtResolvedPath(byKey.RootPath);
         }
 
         var directory = ResolveAgainstLaunch(spelling);
-        if (Directory.Exists(directory))
+        if (Directory.Exists(directory) || RegistryClaimsThePath(directory))
         {
             return StoreAtResolvedPath(directory);
         }
@@ -69,6 +100,14 @@ public static class WorkspaceTargetSelector
             + "checkout that has no store yet.",
             WorkspaceException.WorktreeNotRegisteredCode);
     }
+
+    // A missing directory the registry still claims is the gone state, not a mistyping, and the two refusals
+    // owe different remedies: one names the keys that survived and how to reap them, the other points at the
+    // keys that exist. Without this check a deleted lane spelled as a path was told to run `worktree init' in
+    // a checkout nothing can enter.
+    private static bool RegistryClaimsThePath(string directory) =>
+        WorkspaceRootResolver.GuardRegistryIo(() => WorkspaceRegistry.Load()
+            .Any(row => WorkspaceCanonicalPath.SamePhysicalPath(row.RootPath, directory)));
 
     private static string StoreAtResolvedPath(string spelling)
     {

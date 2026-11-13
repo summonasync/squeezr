@@ -24,11 +24,16 @@ internal static class AnswerSubjectNotice
     // A cross-tree claim names BOTH trees or it is not a claim: the answering root and the caller's own checkout.
     // The facts door only ever sets CrossTree with a caller root it measured, and this pattern is where that
     // invariant is read rather than assumed.
+    //
+    // The coordinate half is deliberately modal. This line is emitted when the target is chosen, which is before
+    // anyone knows whether the run returns rows — and a refusal after the naming (the repo filter rejecting a
+    // repo the selected store does not own) has no paths or line numbers in it. "the paths in this answer" would
+    // describe an answer that never was; "it returns" is true for the run that answers and for the one that dies.
     internal static string? CrossTreeWarningOf(AnswerSubject? subject) =>
         subject is { CrossTree: true, CallerRootPath: { } caller } cross
-            ? $"cross-tree: the paths and line numbers in this answer name "
+            ? $"cross-tree: this query reads "
               + $"'{SessionLocation.Display(cross.RootPath)}', not '{SessionLocation.Display(caller)}', "
-              + "the checkout this query was asked in"
+              + "the checkout this query was asked in — paths and line numbers it returns are the read store's"
             : null;
 
     // A naming, not a complaint: the line is printed even when the caller asked for this store on purpose, and
