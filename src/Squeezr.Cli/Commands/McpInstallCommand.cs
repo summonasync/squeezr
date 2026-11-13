@@ -235,6 +235,10 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             {
                 AnsiConsole.MarkupLine("  [green]+[/] hook pre-read armed");
             }
+            if (result.PostEditHooksArmed)
+            {
+                AnsiConsole.MarkupLine("  [green]+[/] hook post-edit armed");
+            }
         }
         if (projectChange is not null)
         {

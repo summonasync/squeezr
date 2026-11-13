@@ -8,4 +8,6 @@ public sealed record McpInstallResult(
     bool InstructionsWritten,
     string? Warning,
     string? Error,
-    bool HooksArmed = false);
+    bool HooksArmed = false,
+    // Additive per 025/R5: the PostToolUse arm reported apart from the pre-read arm, 035 envelope discipline.
+    bool PostEditHooksArmed = false);

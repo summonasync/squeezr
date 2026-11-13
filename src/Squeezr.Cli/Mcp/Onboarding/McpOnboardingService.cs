@@ -52,11 +52,21 @@ public sealed class McpOnboardingService
             instructionsWritten = true;
         }
         var hooksArmed = false;
-        if (HooksBlock.ForClient(client, environment.CommandPath) is { } block &&
-            McpClientPaths.HooksPath(client, environment, scope) is { } hooksPath)
+        var postEditHooksArmed = false;
+        if (McpClientPaths.HooksPath(client, environment, scope) is { } hooksPath)
         {
-            await ManagedHooksWriter.UpsertAsync(hooksPath, block, cancellationToken);
-            hooksArmed = true;
+            foreach (var block in HooksBlock.ArmsFor(client, environment.CommandPath))
+            {
+                await ManagedHooksWriter.UpsertAsync(hooksPath, block, cancellationToken);
+                if (block.CommandName == HooksBlock.PreReadCommandName)
+                {
+                    hooksArmed = true;
+                }
+                else if (block.CommandName == HooksBlock.PostEditCommandName)
+                {
+                    postEditHooksArmed = true;
+                }
+            }
         }
         return new McpInstallResult(
             ClientName(client),
@@ -66,7 +76,8 @@ public sealed class McpOnboardingService
             instructionsWritten,
             decision.Warning,
             null,
-            hooksArmed);
+            hooksArmed,
+            postEditHooksArmed);
     }
 
     public async Task<McpRemoveResult> RemoveAsync(
@@ -91,10 +102,15 @@ public sealed class McpOnboardingService
         var instructionsRemoved = InstructionBlockExists(instructionPath);
         InstructionsWriter.Remove(instructionPath);
         var hooksRemoved = false;
-        if (HooksBlock.ForClient(client, environment.CommandPath) is { } block &&
-            McpClientPaths.HooksPath(client, environment, scope) is { } hooksPath)
+        var postEditHooksRemoved = false;
+        if (McpClientPaths.HooksPath(client, environment, scope) is { } hooksPath)
         {
-            hooksRemoved = await ManagedHooksWriter.RemoveAsync(hooksPath, block, cancellationToken);
+            foreach (var block in HooksBlock.ArmsFor(client, environment.CommandPath))
+            {
+                var removed = await ManagedHooksWriter.RemoveAsync(hooksPath, block, cancellationToken);
+                hooksRemoved |= removed && block.CommandName == HooksBlock.PreReadCommandName;
+                postEditHooksRemoved |= removed && block.CommandName == HooksBlock.PostEditCommandName;
+            }
         }
         return new McpRemoveResult(
             ClientName(client),
@@ -104,7 +120,8 @@ public sealed class McpOnboardingService
             instructionsRemoved,
             decision.Warning,
             null,
-            hooksRemoved);
+            hooksRemoved,
+            postEditHooksRemoved);
     }
 
     public async Task<McpClientDiagnostics> DoctorAsync(
@@ -148,7 +165,7 @@ public sealed class McpOnboardingService
         {
             warnings.AddRange(TrustedProjectWarning);
         }
-        var hookStatus = await ResolveHookStatusAsync(client, environment, cancellationToken);
+        var (hookStatus, postEditHookStatus) = await ResolveHookStatusesAsync(client, environment, cancellationToken);
         return new McpClientDiagnostics(
             ClientName(client),
             ClientDetector.IsInstalled(client, environment, _locator),
@@ -167,16 +184,38 @@ public sealed class McpOnboardingService
             expectedPath,
             indexState,
             watch,
-            hookStatus);
+            hookStatus,
+            postEditHookStatus);
     }
 
-    private static async Task<string> ResolveHookStatusAsync(
+    // Per-arm honesty: a config armed by 114 carries the pre-read block and no post-edit block, and the
+    // doctor must name that transitional state instead of collapsing both events into one verdict. An
+    // event this client has no measured arm for answers with the layout-unverified reason, not "not armed".
+    private static async Task<(string PreRead, string PostEdit)> ResolveHookStatusesAsync(
         McpClientDescriptor client,
         McpOnboardingEnvironment environment,
         CancellationToken cancellationToken)
     {
-        if (HooksBlock.ForClient(client, environment.CommandPath) is not { } block ||
-            McpClientPaths.HooksPath(client, environment, McpScope.User) is not { } userHooksPath)
+        var arms = HooksBlock.ArmsFor(client, environment.CommandPath);
+        if (arms.Count == 0 || McpClientPaths.HooksPath(client, environment, McpScope.User) is not { } userHooksPath)
+        {
+            return (HooksBlock.LayoutUnverifiedReason, HooksBlock.LayoutUnverifiedReason);
+        }
+        var preRead = HooksBlock.ForClient(client, environment.CommandPath);
+        var postEdit = HooksBlock.PostEditForClient(client, environment.CommandPath);
+        var projectHooksPath = McpClientPaths.HooksPath(client, environment, McpScope.Project);
+        return (
+            await ResolveArmStatusAsync(userHooksPath, projectHooksPath, preRead, cancellationToken),
+            await ResolveArmStatusAsync(userHooksPath, projectHooksPath, postEdit, cancellationToken));
+    }
+
+    private static async Task<string> ResolveArmStatusAsync(
+        string userHooksPath,
+        string? projectHooksPath,
+        HooksBlock? block,
+        CancellationToken cancellationToken)
+    {
+        if (block is null)
         {
             return HooksBlock.LayoutUnverifiedReason;
         }
@@ -184,7 +223,6 @@ public sealed class McpOnboardingService
         {
             return HooksBlock.ArmedState;
         }
-        var projectHooksPath = McpClientPaths.HooksPath(client, environment, McpScope.Project);
         return projectHooksPath is not null &&
             await ManagedHooksWriter.IsArmedAsync(projectHooksPath, block, cancellationToken)
             ? HooksBlock.ProjectArmedState

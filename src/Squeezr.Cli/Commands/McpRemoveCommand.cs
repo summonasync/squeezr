@@ -161,6 +161,10 @@ public sealed class McpRemoveCommand : AsyncCommand<McpRemoveCommand.Settings>
             {
                 AnsiConsole.MarkupLine("  [green]-[/] hook pre-read removed");
             }
+            if (result.PostEditHooksRemoved)
+            {
+                AnsiConsole.MarkupLine("  [green]-[/] hook post-edit removed");
+            }
         }
         if (stripped is { Count: > 0 })
         {

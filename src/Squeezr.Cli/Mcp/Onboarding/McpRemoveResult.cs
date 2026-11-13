@@ -8,4 +8,6 @@ public sealed record McpRemoveResult(
     bool InstructionsRemoved,
     string? Warning,
     string? Error,
-    bool HooksRemoved = false);
+    bool HooksRemoved = false,
+    // Additive per 025/R5: the PostToolUse arm reported apart from the pre-read arm, 035 envelope discipline.
+    bool PostEditHooksRemoved = false);
