@@ -194,8 +194,9 @@ public sealed class HookPostEditCommand : Command<HookPostEditCommand.Settings>
                 // no embedding runtime is built here: the vectors stay pending in the store and the next
                 // watcher, serve or index pass drains them — the same deferral a watcher pass runs with
                 // runtime == null, and the only shape a hook may take because it must never wait on
-                // provider health inline
-                indexer.Index(workspaceRoot, changedPaths: announced);
+                // provider health inline. IndexScoped and not the walk route: the door answers for the
+                // announced paths only, and the one cost it accepts is opening the workspace once.
+                indexer.IndexScoped(workspaceRoot, announced);
                 return;
             }
             catch (WorkspaceLockedException) when (DateTime.UtcNow < deadline)
