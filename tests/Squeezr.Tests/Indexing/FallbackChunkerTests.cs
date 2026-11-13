@@ -202,6 +202,8 @@ public class FallbackChunkerTests
     {
         public int Dimensions => 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(text =>
             {

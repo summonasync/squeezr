@@ -273,6 +273,89 @@ public sealed class DoctorRunnerTests : IDisposable
     }
 
     [Fact]
+    public void SemanticFacts_ActiveModelKeyWithForeignVintage_NamesKeyAndCount()
+    {
+        _ = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 498, 2, 500),
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 7)));
+
+        report.Healthy.ShouldBeTrue();
+        var finding = report.Findings.Single(f => f.Name == "embedding model");
+        finding.State.ShouldBe(DoctorRunner.StateInfo);
+        finding.Detail.ShouldContain(TestEmbeddingKeys.Calibrated);
+        finding.Detail.ShouldContain("7 chunk(s) carry vectors from another embedding model");
+    }
+
+    [Fact]
+    public void SemanticFacts_ActiveModelKeyWithNoForeignVintage_ReportsTheZeroNotABlank()
+    {
+        _ = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 498, 2, 500),
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 0)));
+
+        var finding = report.Findings.Single(f => f.Name == "embedding model");
+        finding.Detail.ShouldContain("0 chunk(s) carry vectors from another embedding model");
+    }
+
+    [Fact]
+    public void SemanticFacts_ModelKeyWithoutStoreCount_SaysNothingAboutVintages()
+    {
+        _ = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 498, 2, 500),
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated)));
+
+        var finding = report.Findings.Single(f => f.Name == "embedding model");
+        finding.Detail.ShouldBe($"{TestEmbeddingKeys.Calibrated} (vintage count unavailable)");
+    }
+
+    [Fact]
+    public void SemanticFacts_SilentHealth_NamesNoModelAtAll()
+    {
+        _ = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 498, 2, 500), EmbeddingsHealth.Silent));
+
+        report.Findings.ShouldNotContain(f => f.Name == "embedding model");
+    }
+
+    [Fact]
+    public void SemanticFacts_ModelProblem_NeverRendersAModelLine()
+    {
+        _ = NewIndexedWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 4, 0, 4),
+                new EmbeddingsHealth(null, "Embeddings provider 'onnx' is no longer supported.", null)));
+
+        report.Findings.ShouldNotContain(f => f.Name == "embedding model");
+    }
+
+    [Fact]
+    public void SemanticFacts_EmptyStore_KeepsTheWholeSemanticArmQuiet()
+    {
+        var root = NewInitOnlyWorkspace();
+
+        var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
+            _ => new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 0, 0, 0),
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 0)));
+
+        report.Findings.ShouldNotContain(f => f.Name == "embedding model");
+    }
+
+    [Fact]
     public void FixtureFinding_PlantedTree_ReportsDirsSizeAndOldestAge()
     {
         var now = DateTime.UtcNow;

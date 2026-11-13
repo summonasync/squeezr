@@ -16,9 +16,15 @@ public sealed class OpenAiCompatibleEmbeddingProvider : IEmbeddingProvider, IEmb
 
     public int Dimensions => _options.Dimensions;
 
-    public OpenAiCompatibleEmbeddingProvider(OpenAiCompatibleOptions options, HttpMessageHandler? handler = null)
+    public string ModelKey { get; }
+
+    public OpenAiCompatibleEmbeddingProvider(
+        OpenAiCompatibleOptions options,
+        string modelKey,
+        HttpMessageHandler? handler = null)
     {
         _options = options;
+        ModelKey = modelKey;
         var apiKey = Environment.GetEnvironmentVariable(options.ApiKeyEnv);
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new InvalidOperationException($"Environment variable '{options.ApiKeyEnv}' is not set. Export it with the API key for the embeddings endpoint '{options.Endpoint}'.");

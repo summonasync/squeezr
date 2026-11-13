@@ -22,14 +22,20 @@ public sealed record WorkspaceStatusReport(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyDictionary<string, int>? KindChunks = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    FleetWatchAdoption? WatchAdoption = null)
+    FleetWatchAdoption? WatchAdoption = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? EmbeddingModelKey = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? OtherModelChunks = null)
 {
     public static WorkspaceStatusReport Create(
         WorkspaceStatus status,
         IReadOnlyList<string> staleFiles,
         string? embeddingsProvider = null,
         WorkspaceSiblingSnapshot? siblings = null,
-        FleetWatchAdoption? watchAdoption = null)
+        FleetWatchAdoption? watchAdoption = null,
+        string? embeddingModelKey = null,
+        int? otherModelChunks = null)
     {
         var warnings = new List<string>();
         var repos = status.Repos
@@ -70,7 +76,9 @@ public sealed record WorkspaceStatusReport(
             warnings,
             ListedWorkspaces(siblings),
             siblings?.Omitted ?? 0,
-            WatchAdoption: watchAdoption);
+            WatchAdoption: watchAdoption,
+            EmbeddingModelKey: embeddingModelKey,
+            OtherModelChunks: otherModelChunks);
     }
 
     private static IReadOnlyList<WorkspaceSiblingEntry>? ListedWorkspaces(WorkspaceSiblingSnapshot? siblings) =>

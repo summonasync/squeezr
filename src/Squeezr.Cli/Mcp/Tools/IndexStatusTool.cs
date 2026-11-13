@@ -5,6 +5,7 @@ using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Health;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Indexing.Navigation;
@@ -30,7 +31,7 @@ public sealed class IndexStatusTool
         _identity = identity;
     }
 
-    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, semantic coverage (embedded share of chunks, 0..1; null when there is nothing to embed), per-kind chunk counts (data.kindChunks maps \"code\" and \"docs\" to chunk totals; the values sum to the per-repo chunks counts), Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed. When more than one workspace is registered, data.workspaces also lists them as {name, rootPath, storeKey, current, stale} (up to 12 rows, the rest counted in workspacesOmitted) — an absent workspaces key means this session's workspace is the only one the registry knows.")]
+    [Description("Workspace freshness and coverage: per-repo file/symbol/chunk counts, pending embeddings, semantic coverage (embedded share of chunks, 0..1; null when there is nothing to embed), per-kind chunk counts (data.kindChunks maps \"code\" and \"docs\" to chunk totals; the values sum to the per-repo chunks counts), the active embedding model key with the count of embedded chunks that carry a different one (data.embeddings.modelKey / otherModelChunks, both absent when the provider does not resolve), Qdrant availability and point count, index age, and the resolved workspace rootPath — if rootPath is not your project's root, this session serves a different workspace. Check it before heavy querying to see which repos and files the index covers and whether a reindex is needed. When more than one workspace is registered, data.workspaces also lists them as {name, rootPath, storeKey, current, stale} (up to 12 rows, the rest counted in workspacesOmitted) — an absent workspaces key means this session's workspace is the only one the registry knows.")]
     [McpServerTool(Name = "index_status", Title = "Index status")]
     public Task<object> GetAsync(CancellationToken cancellationToken = default) =>
         _gate.RunAsync(GetCore, cancellationToken);
@@ -52,14 +53,17 @@ public sealed class IndexStatusTool
 
             var manager = new WorkspaceManager(root);
             var status = manager.GetStatus();
+            var health = await EmbeddingsHealthProbe.ProbeAsync(root, cancellationToken);
             QdrantStatus qdrant;
             GhostRefLag refsLag;
             IReadOnlyDictionary<string, int> kindChunks;
+            EmbeddingsHealth vintages;
             using (var metaStore = new MetaStore(SqueezrPaths.MetaDbPath(root)))
             {
                 qdrant = await QdrantStatusProbe.ProbeAsync(_vectorStore, metaStore, cancellationToken);
                 refsLag = RefLookup.MeasureLag(metaStore);
                 kindChunks = metaStore.CountChunksByKind();
+                vintages = EmbeddingVintages.Measure(health, metaStore);
             }
 
             if (qdrant.ExcessPoints is { } excess)
@@ -117,7 +121,9 @@ public sealed class IndexStatusTool
                 repos,
                 new EmbeddingsData(
                     qdrant.PendingChunks,
-                    new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio),
+                    new SemanticCoverage(qdrant.TotalChunks, qdrant.PendingChunks).Ratio,
+                    vintages.ModelKey,
+                    vintages.OtherModelChunks),
                 new QdrantData(qdrant.Available, qdrant.Points),
                 kindChunks,
                 BuildWorkspaceRows(siblings),
@@ -246,7 +252,11 @@ public sealed class IndexStatusTool
 
     private sealed record EmbeddingsData(
         [property: JsonPropertyName("pending")] int Pending,
-        [property: JsonPropertyName("coverage")] double? Coverage);
+        [property: JsonPropertyName("coverage")] double? Coverage,
+        [property: JsonPropertyName("modelKey"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? ModelKey = null,
+        [property: JsonPropertyName("otherModelChunks"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int? OtherModelChunks = null);
 
     private sealed record QdrantData(
         [property: JsonPropertyName("available")] bool Available,

@@ -72,6 +72,7 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
             using (var meta = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
             {
                 qdrant = await QdrantStatusProbe.ProbeAsync(vectorStore, meta, cancellationToken);
+                health = EmbeddingVintages.Measure(health, meta);
             }
 
             return new WorkspaceSemanticFacts(qdrant, health);
