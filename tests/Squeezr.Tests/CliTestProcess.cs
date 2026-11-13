@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Squeezr.Core.Storage;
+using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests;
 
@@ -83,17 +84,47 @@ internal static partial class CliTestProcess
     private static async Task<(int ExitCode, string StdOut, string StdErr)> StartAsync(
         string workingDir, string[] args, string? squeezrHome, string? stdin = null, string? childHome = null)
     {
-        var effectiveHome = squeezrHome ?? TestRunHome;
+        var startInfo = BuildStartInfo(workingDir, args, squeezrHome, stdin is not null, childHome);
+        using var process = Process.Start(startInfo)!;
+        if (stdin is not null)
+        {
+            await process.StandardInput.WriteAsync(stdin);
+            await process.StandardInput.FlushAsync();
+            process.StandardInput.Close();
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        return (process.ExitCode, StripAnsi(await stdoutTask), StripAnsi(await stderrTask));
+    }
+
+    // For the daemon-shaped cases: the caller has to watch the child run, not only await its exit,
+    // so the pipes stay open and the caller owns the process. Same isolation as every other child.
+    public static Process StartLiveChild(string squeezrHome, string workingDir, params string[] args) =>
+        Process.Start(BuildStartInfo(workingDir, args, squeezrHome, redirectStdin: false, childHome: null))
+        ?? throw new WorkspaceException("Failed to start the squeezr CLI child process.");
+
+    internal static string CliAssemblyPath => CliDll;
+
+    private static ProcessStartInfo BuildStartInfo(
+        string workingDir,
+        string[] args,
+        string? squeezrHome,
+        bool redirectStdin,
+        string? childHome)
+    {
         var startInfo = new ProcessStartInfo("dotnet", $"\"{CliDll}\" {string.Join(" ", args)}")
         {
             WorkingDirectory = workingDir,
-            RedirectStandardInput = stdin is not null,
+            RedirectStandardInput = redirectStdin,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
         };
         startInfo.Environment["NO_COLOR"] = "1";
-        startInfo.Environment["SQUEEZR_HOME"] = effectiveHome;
+        startInfo.Environment["SQUEEZR_HOME"] = squeezrHome ?? TestRunHome;
         // ProcessStartInfo.Environment starts as a copy of ours, so an unset variable
         // here means the child inherits the developer's real store and profile. No test
         // has a reason to touch either, so isolation is the default rather than a request.
@@ -112,19 +143,7 @@ internal static partial class CliTestProcess
             startInfo.Environment.Remove("HOME");
         }
 
-        using var process = Process.Start(startInfo)!;
-        if (stdin is not null)
-        {
-            await process.StandardInput.WriteAsync(stdin);
-            await process.StandardInput.FlushAsync();
-            process.StandardInput.Close();
-        }
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return (process.ExitCode, StripAnsi(await stdoutTask), StripAnsi(await stderrTask));
+        return startInfo;
     }
 
     [GeneratedRegex("\\u001B\\[[0-9;?]*[ -/]*[@-~]")]

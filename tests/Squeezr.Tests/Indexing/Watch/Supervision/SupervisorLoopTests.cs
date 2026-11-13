@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Indexing.Watch;
@@ -11,8 +12,17 @@ public sealed class SupervisorLoopTests : IDisposable
 {
     private static readonly DateTime Now = new(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc);
 
+    private static readonly UnixFileMode DirWritable =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+        UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+
+    private const string OwnBinary = "/opt/squeezr/squeezr";
+
     private readonly List<string> _storeDirs = [];
     private readonly string _root = TestDirs.NewTempDir();
+
+    private string StateFile => Path.Combine(_root, "state.json");
 
     [Fact]
     public void NoLiveOwner_DesiredRunning_LaunchesTheWatchDaemon()
@@ -88,6 +98,163 @@ public sealed class SupervisorLoopTests : IDisposable
 
         loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
         workspace.Launcher.Roots.Count.ShouldBe(CrashLoopGuard.RestartLimit);
+    }
+
+    [Fact]
+    public void WedgeMarkerWrittenByAnotherProcessIntoStateJson_BlocksTheStart_WithoutTouchingTheLauncher()
+    {
+        var workspace = NewWorkspace("demo");
+        new SupervisionState(StateFile).SetWedged(workspace.StoreKey, true);
+        var loop = NewLoop(workspace);
+
+        var sweep = loop.RunOnce();
+
+        var store = sweep.Stores.ShouldHaveSingleItem();
+        store.Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+        store.StoreKey.ShouldBe(workspace.StoreKey);
+        workspace.Launcher.Roots.ShouldBeEmpty("the marker came from the file, not from this process's counting");
+    }
+
+    [Fact]
+    public void WedgeMarkerClearedInStateJsonByAnotherProcess_ReleasesTheStoreForTheNextSweep()
+    {
+        var workspace = NewWorkspace("demo");
+        var channel = new SupervisionState(StateFile);
+        channel.SetWedged(workspace.StoreKey, true);
+        var loop = NewLoop(workspace);
+
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+
+        channel.SetWedged(workspace.StoreKey, false);
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+        workspace.Launcher.Roots.ShouldHaveSingleItem();
+    }
+
+    // The R1 round trip in the shape the two doors really take: the live loop wedges the store with its
+    // own guard, the CLI clears it through CrashLoopGuard.Reset (the call fleet restart makes), and the
+    // same loop reads the clearance off the file on its next sweep.
+    [Fact]
+    public void WedgeTheLoopItselfMade_ClearedByACliShapedGuard_ReleasesTheStoreOnTheNextSweep()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(exited: true);
+        var loop = NewLoop(workspace);
+
+        for (var sweep = 0; sweep < CrashLoopGuard.RestartLimit; sweep++)
+        {
+            loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+        }
+
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+        new SupervisionState(StateFile).Read().IsWedged(workspace.StoreKey).ShouldBeTrue();
+
+        new CrashLoopGuard(new SupervisionState(StateFile)).Reset(workspace.StoreKey);
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+        workspace.Launcher.Roots.Count.ShouldBe(CrashLoopGuard.RestartLimit + 1);
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void WedgeMarkerThatCannotBeWritten_KeepsTheStoreBlocked_AndTheRowNamesTheFault()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(exited: true);
+        var locked = Path.Combine(_root, "locked");
+        Directory.CreateDirectory(locked);
+        var state = new SupervisionState(Path.Combine(locked, "state.json"));
+        state.SetDesire(workspace.StoreKey, WatchDesire.Running);
+        var loop = NewLoop([workspace.Entry], state: state, launcher: workspace.Launcher);
+        File.SetUnixFileMode(locked, DirWritable & ~UnixFileMode.UserWrite);
+        try
+        {
+            for (var sweep = 0; sweep < CrashLoopGuard.RestartLimit; sweep++)
+            {
+                loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+            }
+
+            var sixth = loop.RunOnce().Stores[0];
+            sixth.Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+            sixth.Detail.ShouldNotBeNull().ShouldContain("never reached state.json");
+
+            for (var sweep = 0; sweep < 3; sweep++)
+            {
+                loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.BlockedByCrashLoop);
+            }
+
+            workspace.Launcher.Roots.Count.ShouldBe(CrashLoopGuard.RestartLimit,
+                "an unwritable marker must not turn the wedge into a restart flap");
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, DirWritable);
+        }
+    }
+
+    [Fact]
+    public void UnreadableStateJson_FailClosed_NobodyIsStarted_AndTheLiveWatcherIsNotStopped()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(id: 1001, startedUtc: Now);
+        var loop = NewLoop(workspace);
+
+        loop.RunOnce().Stores[0].Action.ShouldBe(SupervisionAction.Started);
+        var child = workspace.Launcher.Handle;
+        workspace.State.SetDesire(workspace.StoreKey, WatchDesire.Stopped);
+        File.WriteAllText(StateFile, "{ not json at all");
+
+        var sweep = loop.RunOnce();
+
+        sweep.Fault.ShouldBeNull();
+        sweep.Stores.ShouldBeEmpty("no desire can be trusted out of an unparseable file");
+        workspace.Launcher.Roots.ShouldHaveSingleItem();
+        child.StopCalled.ShouldBeFalse("stopping a watcher on a file we cannot read is an unasked-for action");
+    }
+
+    [Fact]
+    public void UnreadableStateJson_WarnsThroughTheSweep_WithThePathAndTheRepair()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(workspace);
+        File.WriteAllText(StateFile, "{ not json at all");
+
+        var warning = loop.RunOnce().StateWarning.ShouldNotBeNull();
+
+        warning.ShouldContain(StateFile);
+        warning.ShouldContain("not valid JSON");
+        warning.ShouldContain("nothing is started", Case.Insensitive);
+        warning.ShouldContain("running watchers are left alone", Case.Insensitive);
+        warning.ShouldContain("repair", Case.Insensitive);
+        warning.ShouldContain("retire", Case.Insensitive,
+            "the warn must name the second casualty: an unreadable channel also stalls the upgrade retire");
+        warning.ShouldContain("already running", Case.Insensitive);
+    }
+
+    [Fact]
+    public void UnreadableStateJson_IsNeverRewritten_AndSupervisionResumesOnceTheFileIsGone()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(workspace);
+        workspace.State.SetDesire(workspace.StoreKey, WatchDesire.Stopped);
+        File.WriteAllText(StateFile, "{ not json at all");
+
+        loop.RunOnce().StateWarning.ShouldNotBeNull();
+        File.ReadAllText(StateFile).ShouldBe("{ not json at all");
+
+        File.Delete(StateFile);
+        loop.RunOnce().Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+    }
+
+    [Fact]
+    public void AbsentStateJson_SweepsTheFleet_AndWritesNoChannel()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(workspace);
+
+        var sweep = loop.RunOnce();
+
+        sweep.StateWarning.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+        File.Exists(StateFile).ShouldBeFalse("a healthy sweep touches the channel only when a wedge lands");
     }
 
     [Fact]
@@ -238,8 +405,19 @@ public sealed class SupervisorLoopTests : IDisposable
         TestWorkspace workspace,
         Func<int, bool>? isProcessAlive = null,
         Func<string, DateTime>? binaryModifiedUtc = null,
-        Func<string, WatchStoreHealth>? health = null) =>
-        NewLoop([workspace.Entry], workspace.State, workspace.Launcher, isProcessAlive, binaryModifiedUtc, health);
+        Func<string, WatchStoreHealth>? health = null,
+        SupervisorSelfCheck? selfCheck = null,
+        TimeSpan? pollInterval = null) =>
+        NewLoop(
+            [workspace.Entry],
+            workspace.State,
+            workspace.Launcher,
+            isProcessAlive,
+            binaryModifiedUtc,
+            health,
+            registry: null,
+            selfCheck,
+            pollInterval);
 
     private SupervisorLoop NewLoop(
         IReadOnlyList<WorkspaceRegistryEntry> entries,
@@ -248,16 +426,275 @@ public sealed class SupervisorLoopTests : IDisposable
         Func<int, bool>? isProcessAlive = null,
         Func<string, DateTime>? binaryModifiedUtc = null,
         Func<string, WatchStoreHealth>? health = null,
-        Func<IReadOnlyList<WorkspaceRegistryEntry>>? registry = null) =>
-        new(
+        Func<IReadOnlyList<WorkspaceRegistryEntry>>? registry = null,
+        SupervisorSelfCheck? selfCheck = null,
+        TimeSpan? pollInterval = null)
+    {
+        var supervision = state ?? new SupervisionState(StateFile);
+        return new(
             launcher ?? new FakeLauncher(),
-            state ?? new SupervisionState(),
-            new CrashLoopGuard(),
+            supervision,
+            new CrashLoopGuard(supervision),
             registry ?? (() => entries),
             health ?? (storeDir => WatchStoreHealth.Probe(storeDir, Now, isProcessAlive ?? (_ => false))),
             binaryModifiedUtc ?? (_ => Now),
             () => Now,
-            SupervisorLoop.PollInterval);
+            pollInterval ?? SupervisorLoop.PollInterval,
+            selfCheck);
+    }
+
+    [Fact]
+    public void OwnBinaryNewerThanTheSupervisorStart_RetiresTheSweep_AndTouchesNoStore()
+    {
+        var launcher = new FakeLauncher();
+        var loop = NewLoop(
+            [],
+            launcher: launcher,
+            binaryModifiedUtc: OwnThen(Now, Now),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        loop.RunOnce().OwnDrift.ShouldBeNull();
+
+        var sweep = loop.RunOnce();
+
+        var drift = sweep.OwnDrift.ShouldNotBeNull();
+        drift.BinaryPath.ShouldBe(OwnBinary);
+        drift.ProcessStartUtc.ShouldBe(Now.AddHours(-1));
+        drift.BinaryModifiedUtc.ShouldBe(Now);
+        sweep.Stores.ShouldBeEmpty();
+        sweep.Fault.ShouldBeNull();
+        launcher.Roots.ShouldBeEmpty();
+    }
+
+    // review-110-08 BLOCKER-1: children survive the retire by omission — nothing on that path calls
+    // Stop() — so this is the pin that fails if somebody adds a stop-all to the exit path.
+    [Fact]
+    public void OwnBinaryDrift_RetiresWithALiveManagedChild_AndNeverStopsIt()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(id: 1001, startedUtc: Now.AddHours(-1));
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now, Now.AddHours(-2)),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        loop.RunOnce().Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+        var child = workspace.Launcher.Handle;
+
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldNotBeNull();
+        child.StopCalled.ShouldBeFalse();
+        sweep.Stores.ShouldBeEmpty();
+        workspace.Launcher.Roots.ShouldBe([workspace.RootPath]);
+    }
+
+    // review-110-08 WARN-1, measured 3/3: the start stamp read from a live process via its StartTime
+    // property is floored on Linux, so a stamp a few milliseconds ahead of the start is not evidence
+    // of an upgrade. The first tick has to do its sweep instead of exiting, and only the next one
+    // may retire.
+    [Fact]
+    public void OwnBinaryFiveMillisecondsAheadOfTheStart_SupervisesTheFirstTick_AndRetiresOnTheSecond()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now.AddMilliseconds(5), Now),
+            selfCheck: OwnCheck(Now, restartsOnUnsuccessfulExit: true));
+
+        var first = loop.RunOnce();
+
+        first.OwnDrift.ShouldBeNull("a stamp ahead by milliseconds retired a supervisor that saw no fleet");
+        first.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+
+        var second = loop.RunOnce();
+
+        var drift = second.OwnDrift.ShouldNotBeNull();
+        drift.ProcessStartUtc.ShouldBe(Now);
+        drift.BinaryModifiedUtc.ShouldBe(Now.AddMilliseconds(5));
+    }
+
+    [Fact]
+    public void OwnBinaryStampExactlyAtTheSupervisorStart_KeepsSupervisingTheFleet()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now, Now),
+            selfCheck: OwnCheck(Now, restartsOnUnsuccessfulExit: true));
+
+        loop.RunOnce();
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.LeftRunning);
+        workspace.Launcher.Roots.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void RegistryFault_DoesNotCountAsTheSweepThatUnlocksTheRetirement()
+    {
+        var workspace = NewWorkspace("demo");
+        var failing = true;
+        var loop = NewLoop(
+            [workspace.Entry],
+            registry: () =>
+            {
+                if (failing)
+                {
+                    throw new IOException("registry is unreadable");
+                }
+
+                return [workspace.Entry];
+            },
+            binaryModifiedUtc: OwnThen(Now, Now),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        var broken = loop.RunOnce();
+        broken.Fault.ShouldBe("registry is unreadable");
+        broken.OwnDrift.ShouldBeNull();
+
+        failing = false;
+        loop.RunOnce().Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+
+        loop.RunOnce().OwnDrift.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void OwnBinaryDrift_WhenTheEntryWillNotStartItAgain_KeepsSupervising()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now, Now.AddHours(-2)),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: false));
+
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+    }
+
+    [Fact]
+    public void OwnBinaryOlderThanTheSupervisorStart_KeepsSupervising()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now.AddHours(-2), Now.AddHours(-2)),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+    }
+
+    [Fact]
+    public void OwnStartTimeUnknown_RetirementStaysOffEvenForAFreshBinary()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now, Now.AddHours(-2)),
+            selfCheck: new SupervisorSelfCheck(OwnBinary, null, true));
+
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+    }
+
+    [Fact]
+    public void SelfCheckOn_OwnBinaryCurrent_ChildDriftStillRestartsTheChild()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(id: 1001, startedUtc: Now.AddHours(-1));
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now.AddHours(-2), Now),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+
+        loop.RunOnce();
+        var stale = workspace.Launcher.Handle;
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.DriftRestarted);
+        stale.StopCalled.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void NoSelfCheck_SupervisesTheStoresAndNeverStatsTheOwnBinary()
+    {
+        var workspace = NewWorkspace("demo");
+        workspace.Launcher.OnStart = _ => new FakeHandle(id: 1001, startedUtc: Now);
+        var asked = new List<string>();
+        var loop = NewLoop(workspace, binaryModifiedUtc: path =>
+        {
+            asked.Add(path);
+            return Now;
+        });
+
+        loop.RunOnce().Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+        var sweep = loop.RunOnce();
+
+        sweep.OwnDrift.ShouldBeNull();
+        sweep.Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.LeftRunning);
+        asked.ShouldContain("squeezr-fake-binary");
+        asked.ShouldNotContain(OwnBinary);
+    }
+
+    [Fact]
+    public void Run_ReturnsOwnBinaryDrifted_AndReportsTheRetiringSweepOnce()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now, Now),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true),
+            pollInterval: TimeSpan.FromMilliseconds(10));
+        var sweeps = new List<SupervisorSweep>();
+        using var never = new CancellationTokenSource();
+
+        var reason = loop.Run(never.Token, sweeps.Add);
+
+        reason.ShouldBe(SupervisorExitReason.OwnBinaryDrifted);
+        sweeps[0].OwnDrift.ShouldBeNull();
+        sweeps[0].Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+        var retiring = sweeps[1];
+        retiring.OwnDrift.ShouldNotBeNull();
+        retiring.Stores.ShouldBeEmpty();
+        workspace.Launcher.Roots.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Run_EndsCancelled_WhileTheOwnBinaryIsCurrent()
+    {
+        var workspace = NewWorkspace("demo");
+        var loop = NewLoop(
+            workspace,
+            binaryModifiedUtc: OwnThen(Now.AddHours(-2), Now.AddHours(-2)),
+            selfCheck: OwnCheck(Now.AddHours(-1), restartsOnUnsuccessfulExit: true));
+        using var cts = new CancellationTokenSource();
+        var sweeps = new List<SupervisorSweep>();
+
+        var reason = loop.Run(cts.Token, sweep =>
+        {
+            sweeps.Add(sweep);
+            cts.Cancel();
+        });
+
+        reason.ShouldBe(SupervisorExitReason.Cancelled);
+        sweeps.ShouldHaveSingleItem().OwnDrift.ShouldBeNull();
+        sweeps[0].Stores.ShouldHaveSingleItem().Action.ShouldBe(SupervisionAction.Started);
+    }
+
+    private static SupervisorSelfCheck OwnCheck(DateTime? startedUtc, bool restartsOnUnsuccessfulExit) =>
+        new(OwnBinary, startedUtc, restartsOnUnsuccessfulExit);
+
+    private static Func<string, DateTime> OwnThen(DateTime own, DateTime managed) =>
+        path => path == OwnBinary ? own : managed;
 
     private TestWorkspace NewWorkspace(string name)
     {
@@ -270,7 +707,7 @@ public sealed class SupervisorLoopTests : IDisposable
             storeKey,
             storeDir,
             new WorkspaceRegistryEntry(name, _root, storeKey, DateTimeOffset.Now, DateTimeOffset.Now),
-            new SupervisionState(),
+            new SupervisionState(StateFile),
             new FakeLauncher());
     }
 

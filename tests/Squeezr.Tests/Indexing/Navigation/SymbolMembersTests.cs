@@ -17,6 +17,7 @@ public class SymbolMembersTests(ITestOutputHelper output)
     private const int MembersFitBudget = 120;
     private const int MembersOverflowBudget = 40;
     private const int GenericFitBudget = 60;
+    private const int NoMembersBudget = 40;
     private const int MethodCount = 12;
     private const int HugeBodyTokens = 225;
 
@@ -104,7 +105,7 @@ public class SymbolMembersTests(ITestOutputHelper output)
         var hit = result.Matches.ShouldHaveSingleItem();
         hit.BodyOmitted.ShouldBeTrue();
         hit.Members.ShouldBeEmpty();
-        hit.MembersOmitted.ShouldBe(0);
+        hit.MembersOmitted.ShouldBe(MethodCount);
         result.Truncated.ShouldBeTrue();
         result.Hint.ShouldNotBeNull().Render(p => p)
             .ShouldBe("narrow the query (repo, kind) or raise maxTokens");
@@ -169,6 +170,57 @@ public class SymbolMembersTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Cli_Symbol_BudgetRefusesEveryMemberRow_NamesTheOmittedCount()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        var pretty = await CliTestProcess.RunAsync(workspace, "symbol", "Huge", "--max-tokens", "15");
+        output.WriteLine($"symbol Huge --max-tokens 15 -> exit {pretty.ExitCode}" +
+                         $"\n{pretty.StdOut}\n{pretty.StdErr}");
+        pretty.ExitCode.ShouldBe(0);
+        pretty.StdOut
+            .ShouldContain($"body: omitted (budget) — {MethodCount} members did not fit (raise --max-tokens)");
+        pretty.StdOut.ShouldNotContain("use --body or raise --max-tokens");
+    }
+
+    [Fact]
+    public async Task Cli_Symbol_BodyRefusedWithoutMemberMap_KeepsTheBareHint()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        // a method has no member rows to omit; a hollow type declares none at all:
+        // neither may be handed an invented count
+        var method = await CliTestProcess.RunAsync(workspace, "symbol", "Method01", "--max-tokens", "25");
+        output.WriteLine($"symbol Method01 --max-tokens 25 -> exit {method.ExitCode}\n{method.StdOut}\n{method.StdErr}");
+        method.ExitCode.ShouldBe(0);
+        method.StdOut.ShouldContain("body: omitted (budget); use --body or raise --max-tokens");
+        method.StdOut.ShouldNotContain("members did not fit");
+
+        var hollow = await CliTestProcess.RunAsync(workspace, "symbol", "Hollow", "--max-tokens", NoMembersBudget.ToString());
+        output.WriteLine($"symbol Hollow --max-tokens {NoMembersBudget} -> exit {hollow.ExitCode}\n{hollow.StdOut}\n{hollow.StdErr}");
+        hollow.ExitCode.ShouldBe(0);
+        hollow.StdOut.ShouldContain("body: omitted (budget); use --body or raise --max-tokens");
+        hollow.StdOut.ShouldNotContain("did not fit");
+    }
+
+    [Fact]
+    public async Task Cli_Symbol_SingleMemberRowRefused_NamesTheOmittedMemberInSingular()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        // 18 tokens carry the header and signature but never the 10-token member row:
+        // the member cannot fit at any plausible header price, so the refusal count is exactly 1
+        var pretty = await CliTestProcess.RunAsync(workspace, "symbol", "Solo", "--max-tokens", "18");
+        output.WriteLine($"symbol Solo --max-tokens 18 -> exit {pretty.ExitCode}" +
+                         $"\n{pretty.StdOut}\n{pretty.StdErr}");
+        pretty.ExitCode.ShouldBe(0);
+        pretty.StdOut.ShouldContain("body: omitted (budget) — 1 member did not fit (raise --max-tokens)");
+        pretty.StdOut.ShouldNotContain("1 members did not fit");
+        pretty.StdOut.ShouldNotContain("UnreachableUnderBudget (method)");
+        pretty.StdOut.ShouldNotContain("use --body or raise --max-tokens");
+    }
+
+    [Fact]
     public void Symbol_TypeBodyOverBudget_FullMemberMap_ReportsMappedState()
     {
         var workspace = NewIndexedWorkspace();
@@ -198,6 +250,21 @@ public class SymbolMembersTests(ITestOutputHelper output)
         var workspace = NewIndexedWorkspace();
 
         var result = new SymbolLookup(workspace).Find("Huge", null, null, 15, body: true);
+
+        var hit = result.Matches.ShouldHaveSingleItem();
+        hit.BodyOmitted.ShouldBeTrue();
+        hit.Members.ShouldBeEmpty();
+        hit.MembersOmitted.ShouldBe(MethodCount);
+        result.State.ShouldBe(AnswerState.Clipped);
+    }
+
+    [Fact]
+    public void Symbol_TypeWithoutMembers_OverBudgetBody_ReportsOmittedZero()
+    {
+        var workspace = NewIndexedWorkspace();
+
+        // the container declares no member symbols at all: the refused body must not invent a count
+        var result = new SymbolLookup(workspace).Find("Hollow", null, null, NoMembersBudget, body: true);
 
         var hit = result.Matches.ShouldHaveSingleItem();
         hit.BodyOmitted.ShouldBeTrue();
@@ -254,6 +321,8 @@ public class SymbolMembersTests(ITestOutputHelper output)
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         WriteFile(workspace, "repo/src/Huge.cs", HugeClass());
         WriteFile(workspace, "repo/src/Box.cs", GenericBoxClass());
+        WriteFile(workspace, "repo/src/Hollow.cs", HollowClass());
+        WriteFile(workspace, "repo/src/Solo.cs", SoloClass());
         manager.AddRepo("repo", "demo");
         new WorkspaceIndexer().Index(workspace);
         return workspace;
@@ -295,6 +364,32 @@ public class SymbolMembersTests(ITestOutputHelper output)
             text.Append("    {\n");
             text.Append($"        return a + {index};\n");
             text.Append("    }\n\n");
+        }
+
+        return text.Append("}\n").ToString();
+    }
+
+    private static string HollowClass()
+    {
+        var text = new StringBuilder("namespace Demo;\n\npublic class Hollow\n{\n");
+        foreach (var index in Enumerable.Range(1, 120))
+        {
+            text.Append($"    // filler {index} widens the body span without declaring a member symbol\n");
+        }
+
+        return text.Append("}\n").ToString();
+    }
+
+    private static string SoloClass()
+    {
+        var text = new StringBuilder("namespace Demo;\n\npublic class Solo\n{\n");
+        text.Append("    public int UnreachableUnderBudget(int a)\n");
+        text.Append("    {\n");
+        text.Append("        return a;\n");
+        text.Append("    }\n\n");
+        foreach (var index in Enumerable.Range(1, 120))
+        {
+            text.Append($"    // filler {index} widens the body span without declaring a member symbol\n");
         }
 
         return text.Append("}\n").ToString();

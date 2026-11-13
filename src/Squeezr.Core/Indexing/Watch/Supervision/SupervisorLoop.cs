@@ -15,14 +15,20 @@ public sealed class SupervisorLoop
     private readonly Func<string, DateTime> _binaryModifiedUtc;
     private readonly Func<DateTime> _utcNow;
     private readonly TimeSpan _pollInterval;
+    private readonly SupervisorSelfCheck? _selfCheck;
     private readonly Dictionary<string, IWatchDaemonHandle> _managed = [];
+    private bool _hasSweptTheFleet;
 
     public SupervisorLoop(IWatchDaemonLauncher launcher)
         : this(launcher, new SupervisionState(), new CrashLoopGuard())
     {
     }
 
-    public SupervisorLoop(IWatchDaemonLauncher launcher, SupervisionState state, CrashLoopGuard guard)
+    public SupervisorLoop(
+        IWatchDaemonLauncher launcher,
+        SupervisionState state,
+        CrashLoopGuard guard,
+        SupervisorSelfCheck? selfCheck = null)
         : this(
             launcher,
             state,
@@ -31,7 +37,8 @@ public sealed class SupervisorLoop
             storeDir => WatchStoreHealth.Probe(storeDir, DateTime.UtcNow),
             static path => File.GetLastWriteTimeUtc(path),
             static () => DateTime.UtcNow,
-            PollInterval)
+            PollInterval,
+            selfCheck)
     {
     }
 
@@ -43,7 +50,8 @@ public sealed class SupervisorLoop
         Func<string, WatchStoreHealth> health,
         Func<string, DateTime> binaryModifiedUtc,
         Func<DateTime> utcNow,
-        TimeSpan pollInterval)
+        TimeSpan pollInterval,
+        SupervisorSelfCheck? selfCheck = null)
     {
         _launcher = launcher;
         _state = state;
@@ -53,21 +61,46 @@ public sealed class SupervisorLoop
         _binaryModifiedUtc = binaryModifiedUtc;
         _utcNow = utcNow;
         _pollInterval = pollInterval;
+        _selfCheck = selfCheck;
     }
 
-    public void Run(CancellationToken cancellationToken, Action<SupervisorSweep>? onSweep = null)
+    public SupervisorExitReason Run(CancellationToken cancellationToken, Action<SupervisorSweep>? onSweep = null)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            onSweep?.Invoke(RunOnce());
+            var sweep = RunOnce();
+            onSweep?.Invoke(sweep);
+            if (sweep.OwnDrift is not null)
+            {
+                return SupervisorExitReason.OwnBinaryDrifted;
+            }
+
             cancellationToken.WaitHandle.WaitOne(_pollInterval);
         }
+
+        return SupervisorExitReason.Cancelled;
     }
 
     public SupervisorSweep RunOnce()
     {
         var now = _utcNow();
+        if (DetectOwnDrift() is { } drift)
+        {
+            // Retiring is the whole point of this sweep: touching the stores would hand work to a
+            // supervisor that is about to be replaced by the one the platform starts.
+            return new SupervisorSweep(now, [], OwnDrift: drift);
+        }
+
         PruneExited();
+        var supervision = _state.Read();
+        if (supervision.Status == SupervisionStateStatus.Unreadable)
+        {
+            // Fail closed: the operator's will is unknown, so nobody is started from desires. Live
+            // watchers keep running — stopping them would be an action taken on a file we cannot read.
+            return new SupervisorSweep(now, [], StateWarning: UnreadableStateWarning(supervision));
+        }
+
+        _guard.SyncWedged(supervision.Wedged);
         IReadOnlyList<WorkspaceRegistryEntry> entries;
         try
         {
@@ -82,14 +115,16 @@ public sealed class SupervisorLoop
             return new SupervisorSweep(now, [], ex.Message);
         }
 
-        return new SupervisorSweep(now, entries.Select(entry => Supervise(entry, now)).ToList());
+        var stores = entries.Select(entry => Supervise(entry, supervision, now)).ToList();
+        _hasSweptTheFleet = true;
+        return new SupervisorSweep(now, stores);
     }
 
-    private StoreSupervision Supervise(WorkspaceRegistryEntry entry, DateTime now)
+    private StoreSupervision Supervise(WorkspaceRegistryEntry entry, SupervisionSnapshot supervision, DateTime now)
     {
         try
         {
-            return SuperviseStore(entry, now);
+            return SuperviseStore(entry, supervision, now);
         }
         catch (OperationCanceledException)
         {
@@ -99,7 +134,7 @@ public sealed class SupervisorLoop
         {
             return Report(
                 entry,
-                _state.DesireOf(entry.StoreKey),
+                supervision.DesireOf(entry.StoreKey),
                 null,
                 WatchIndexerState.None,
                 SupervisionAction.ProbeFailed,
@@ -107,9 +142,9 @@ public sealed class SupervisorLoop
         }
     }
 
-    private StoreSupervision SuperviseStore(WorkspaceRegistryEntry entry, DateTime now)
+    private StoreSupervision SuperviseStore(WorkspaceRegistryEntry entry, SupervisionSnapshot supervision, DateTime now)
     {
-        var desire = _state.DesireOf(entry.StoreKey);
+        var desire = supervision.DesireOf(entry.StoreKey);
         if (!WorkspaceStorePaths.IsSingleSegmentKey(entry.StoreKey) || !Directory.Exists(entry.RootPath))
         {
             return Report(entry, desire, null, WatchIndexerState.None, SupervisionAction.SkippedRoot,
@@ -131,7 +166,7 @@ public sealed class SupervisorLoop
         if (_guard.IsWedged(entry.StoreKey))
         {
             return Report(entry, desire, null, WatchIndexerState.None, SupervisionAction.BlockedByCrashLoop,
-                WedgedDetail());
+                WedgedDetail(entry.StoreKey));
         }
 
         if (_managed.TryGetValue(entry.StoreKey, out var managed))
@@ -178,7 +213,7 @@ public sealed class SupervisorLoop
         if (!_guard.RegisterRestart(entry.StoreKey, now))
         {
             return Report(entry, WatchDesire.Running, null, indexerState, SupervisionAction.BlockedByCrashLoop,
-                WedgedDetail());
+                WedgedDetail(entry.StoreKey));
         }
 
         try
@@ -199,6 +234,26 @@ public sealed class SupervisorLoop
         handle.StartedUtc is { } started
         && handle.BinaryPath is { } binary
         && VersionDriftDetector.IsDrifted(started, _binaryModifiedUtc(binary));
+
+    private OwnBinaryDrift? DetectOwnDrift()
+    {
+        // Invariant: the first tick never retires. Linux floors Process.StartTime, so a binary written
+        // milliseconds before exec reads as an upgrade that postdates this start, and an instance that
+        // has supervised nothing would exit before it showed the fleet anything. Unlocking on the first
+        // fault-free pass over the registry also bounds a genuinely future-ahead stamp: every
+        // incarnation does a full sweep of real work before stepping aside, so a flap costs restarts
+        // instead of idling the fleet.
+        if (!_hasSweptTheFleet
+            || _selfCheck is not { RestartsOnUnsuccessfulExit: true, ProcessStartUtc: { } started })
+        {
+            return null;
+        }
+
+        var modified = _binaryModifiedUtc(_selfCheck.BinaryPath);
+        return VersionDriftDetector.IsDrifted(started, modified)
+            ? new OwnBinaryDrift(_selfCheck.BinaryPath, started, modified)
+            : null;
+    }
 
     private void PruneExited()
     {
@@ -221,6 +276,19 @@ public sealed class SupervisorLoop
         int? managedPid = null) =>
         new(entry.StoreKey, entry.Name, entry.RootPath, desire, indexerState, ownerPid, managedPid, action, detail);
 
-    private static string WedgedDetail() =>
-        $"restarts stopped after {CrashLoopGuard.RestartLimit} starts inside {CrashLoopGuard.Window.TotalMinutes:F0} minutes";
+    private string WedgedDetail(string storeKey)
+    {
+        var detail =
+            $"restarts stopped after {CrashLoopGuard.RestartLimit} starts inside {CrashLoopGuard.Window.TotalMinutes:F0} minutes";
+        return _guard.WedgeWriteFault(storeKey) is { } fault
+            ? $"{detail}; the marker never reached state.json ({fault}) — the wedge holds in this process " +
+              "only until the write lands"
+            : detail;
+    }
+
+    private static string UnreadableStateWarning(SupervisionSnapshot supervision) =>
+        $"supervision state '{supervision.FilePath}' {supervision.Fault}; nothing is started from the recorded " +
+        "desires and running watchers are left alone, and with the fleet never swept an upgraded watchd cannot " +
+        "retire this one either — it exits as already running until the file is fixed. Repair the JSON, or move " +
+        "the file away to start supervision from the running default";
 }

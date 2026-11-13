@@ -9,6 +9,11 @@ namespace Squeezr.Cli.Output;
 // watchd reads as supervised only when it is the watch kind on this host; a serve --watch belongs to
 // its MCP client and a foreign claim lives where this machine cannot reach, so both stay managed
 // elsewhere no matter who runs a supervisor here.
+//
+// "stopped" and "idle (no supervisor)" are the two faces of nothing running: the first is a wish the
+// operator wrote, the second is a wish nobody is left to carry out. Collapsing them cost an operator
+// an afternoon reading a fleet that wanted watching with no watchd alive (113/R5), so the words stay
+// distinct even though every live fact behind them is the same.
 public static class FleetSupervisionPosture
 {
     public const string Supervised = "supervised";
@@ -16,13 +21,14 @@ public static class FleetSupervisionPosture
     public const string Wedged = "wedged";
     public const string Stopped = "stopped";
     public const string Starting = "starting";
+    public const string Idle = "idle (no supervisor)";
 
     public static string Resolve(WatchDesire desired, WatchStoreHealth health, bool watchdRunning) =>
         health.State == WatchIndexerState.Wedged ? Wedged
         : health.IndexerRunning ? ResolveLiveOwner(desired, health, watchdRunning)
         : desired == WatchDesire.Stopped ? Stopped
         : watchdRunning ? Starting
-        : Stopped;
+        : Idle;
 
     private static string ResolveLiveOwner(WatchDesire desired, WatchStoreHealth health, bool watchdRunning)
     {

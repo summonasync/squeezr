@@ -96,7 +96,18 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
                     }
                     else if (hit.BodyOmitted)
                     {
-                        AnsiConsole.MarkupLine("  body: omitted (budget); use --body or raise --max-tokens");
+                        if (hit.MembersOmitted == 1)
+                        {
+                            AnsiConsole.MarkupLine("  body: omitted (budget) — [grey]1 member did not fit (raise --max-tokens)[/]");
+                        }
+                        else if (hit.MembersOmitted > 1)
+                        {
+                            AnsiConsole.MarkupLine($"  body: omitted (budget) — [grey]{hit.MembersOmitted} members did not fit (raise --max-tokens)[/]");
+                        }
+                        else
+                        {
+                            AnsiConsole.MarkupLine("  body: omitted (budget); use --body or raise --max-tokens");
+                        }
                     }
                 }
 

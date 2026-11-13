@@ -15,6 +15,7 @@ public class CodePackToolTests
     private const int MappedPackBudget = 120;
     private const int MemberRowsBudget = 25;
     private const int BodyOnlyBudget = 20;
+    private const int AllRowsRefusedBudget = 15;
 
     [Fact]
     public async Task CodePack_KnownSymbol_CompletePackWithoutRemedyNoise()
@@ -160,6 +161,35 @@ public class CodePackToolTests
         Warnings(envelope).ShouldContain(w => w ==
             $"truncated: {data.GetProperty("lookupTokens").GetInt32()} of {MemberRowsBudget} token ceiling " +
             "— read a member with expand_span or raise maxTokens");
+    }
+
+    [Fact]
+    public async Task CodePack_AllMemberRowsRefused_CarriesHonestCountAndBodyPriceRemedy()
+    {
+        var workspace = NewIndexedWorkspace();
+        await using var harness = await McpTestHarness.StartAsync(workspace);
+
+        var result = await harness.Client.CallToolAsync(
+            "code_pack",
+            new Dictionary<string, object?> { ["name"] = "Widget", ["maxTokens"] = AllRowsRefusedBudget },
+            cancellationToken: CancellationToken.None);
+
+        result.IsError.ShouldNotBe(true);
+        var envelope = ParseEnvelope(result);
+        envelope.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        envelope.GetProperty("cost").GetProperty("complete").GetBoolean().ShouldBeFalse();
+
+        var data = envelope.GetProperty("data");
+        data.GetProperty("bodyOmitted").GetBoolean().ShouldBeTrue();
+        data.TryGetProperty("members", out _).ShouldBeTrue();
+        data.GetProperty("members").EnumerateArray().ShouldBeEmpty();
+        data.GetProperty("membersOmitted").GetInt32().ShouldBe(MemberCount);
+        data.GetProperty("complete").GetBoolean().ShouldBeFalse();
+        data.GetProperty("lookupTruncated").GetBoolean().ShouldBeTrue();
+
+        Warnings(envelope).Single(w => w.StartsWith("truncated: ")).ShouldMatch(
+            $@"^truncated: {data.GetProperty("lookupTokens").GetInt32()} of {AllRowsRefusedBudget} token ceiling " +
+            @"— raise maxTokens \(the body alone needs ~\d+ tokens\)$");
     }
 
     [Fact]

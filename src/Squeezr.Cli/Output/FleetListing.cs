@@ -16,7 +16,7 @@ public static class FleetListing
         var entries = WorkspaceRegistry.Load();
         var collidingNames = CollidingNames.SharedByLiveEntries(entries);
         var rosters = entries
-            .Select(entry => ProbeDaemons(SqueezrPaths.StoreDir(entry.RootPath), now))
+            .Select(entry => ProbeDaemons(SqueezrPaths.StoreDir(entry), now))
             .ToList();
         var samples = SampleOnce(rosters, sampleResources);
         return entries
@@ -85,8 +85,8 @@ public static class FleetListing
         IReadOnlyList<FleetDaemonProcess> daemons,
         IReadOnlyDictionary<int, DaemonResourceSample> samples)
     {
-        var storeDir = SqueezrPaths.StoreDir(entry.RootPath);
-        using var meta = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(entry.RootPath));
+        var storeDir = SqueezrPaths.StoreDir(entry);
+        using var meta = MetaStore.TryOpen(SqueezrPaths.MetaDbPath(entry));
         return new FleetEntry(
             entry.Name,
             entry.RootPath,
@@ -98,7 +98,7 @@ public static class FleetListing
             PendingChunks: meta?.CountPendingChunks(null),
             LastIndexedAt: meta?.GetLatestFullIndexAt(),
             NameCollision: nameCollision ? true : null,
-            Adoption: FleetWatchAdoption.FromStore(entry.RootPath));
+            Adoption: FleetWatchAdoption.FromStore(entry));
     }
 
     private static FleetDaemonState ProbeDaemon(string storeDir, string kind, DateTime now)

@@ -79,15 +79,35 @@ squeezr index --events
   `--events` streams machine-readable progress events instead of the interactive
   progress bar. Other switches: `--full` (complete rebuild), `--no-semantic`
   (literal-only), `--reembed` (re-embed everything after a model change).
-  Symbol-aware languages: C# through Roslyn; JavaScript, TypeScript, TSX and Rust
-  through tree-sitter. Rust answers with functions, structs, enums, unions, traits,
+  Symbol-aware languages: C# through Roslyn; JavaScript, TypeScript, TSX, Rust, Python and
+  Go through tree-sitter. Rust answers with functions, structs, enums, unions, traits,
   impl blocks, modules, type aliases, consts, statics and macro definitions as
   symbols, and with `use` trees, calls, trait/impl targets and macro invocations as
   references; its `impl<T> path::Type<T>` targets resolve by the bare type name, so a
   generic or qualified impl block still lands on the row the struct owns. Trait-impl
   blocks carry the composite row name `Trait for Type`, and `symbol_lookup` on a type
   answers its struct row plus any inherent-impl rows of the same name — the impl is a
-  row, not a member of the struct row. Anything
+  row, not a member of the struct row. Python answers with functions (an `async def` is
+  one function row that keeps the keyword in its signature), classes, methods and
+  UPPER_SNAKE module or class constants; a decorator belongs to the definition under it,
+  so the row's span starts at the `@` line while its signature stays on the `def` line.
+  Its references are imports, calls and base classes, and the import rule is python's
+  own: `import a.b.c` binds the TOP package `a` and keeps the whole path in the module
+  column, `import a.b.c as d` binds `d`, `from a.b import c` binds `c`, `from x import *`
+  binds the module `x` itself and no individual names behind the star, and a relative
+  form keeps its column (`from .text import x` says `.text`) — so grepping the leaf of a
+  dotted import finds nothing, because the importing file never has that name. Go answers
+  with functions, methods, structs, interfaces, type declarations, aliases and
+  package-level consts and vars, and a method is named by its receiver: `func (r *Registry)
+  Add` is owned by `Registry`, which is also how `symbol_lookup` pairs the two rows — the
+  same for an unnamed receiver (`func (*Registry) All`) and a generic one
+  (`func (g *Generic[T]) Get` → `Generic.Get`). Its references are imports, calls, type
+  uses and embedded fields, and `import "net/http"` binds the LAST element (`http`) with
+  an explicit alias winning over it, so the two grammars keep separate import rules
+  instead of one shared guess. What the three do not ship: a go blank identifier (`_`), a
+  multi-name const/var spec, a go const or var written inside a function body, and doc
+  comments — rust `///`, python docstrings and go `//` are indexed as text, not as
+  documentation. Anything
   else (Markdown, YAML, JSON, plain text) gets the sliding-window fallback chunker —
   searchable, never symbol-aware.
 
@@ -138,29 +158,35 @@ re-run the same command after a squeezr upgrade to refresh it;
 `squeezr mcp remove --project` strips the block from all carrier files (files
 themselves are never deleted).
 
-Claude Code also has an optional advisory hook. `squeezr hook pre-read` reads the
-PreToolUse payload from stdin and, when the Read targets a large file or wide
-range inside a registered workspace, adds `additionalContext` pointing at
-`expand_span` / `symbol_lookup`; otherwise it prints nothing and exits 0. It is
-advisory only (never sets `permissionDecision`). The wiring is human-applied —
-never edit hook configs from an agent session. Other clients (qwen, kimi) can
-wire the same pattern when their hook surface allows. In
-`~/.claude/settings.json` (project scope: `.claude/settings.json`):
+`squeezr mcp install` also arms the advisory PreToolUse hook in the same pass
+that registers a client, for the two runtimes whose hook layout is verified:
+Claude Code (`Read`, in `~/.claude/settings.json`) and Qwen Code
+(`^read_file$`, in the same `~/.qwen/settings.json` that carries `mcpServers`).
+Kimi Code and Codex CLI come back `not armed (hook layout unverified)` — no
+path is invented for a layout nobody checked. `squeezr hook pre-read` reads the
+payload from stdin and, when the read targets a large file or a wide range
+inside a registered workspace, answers with
+`hookSpecificOutput.additionalContext` pointing at `code_search` /
+`symbol_lookup` / `expand_span`. That JSON shape is what puts the advice in the
+model's context: bare text on stdout at exit 0 reaches the human as a UI
+`systemMessage` and the model never sees it. Advisory only — it never sets
+`permissionDecision` and never blocks a read. `tool_name` in the payload
+carries the runtime's own id (Qwen sends `read_file`, Claude sends `Read`;
+`Read`/`ReadFile` are accepted matcher aliases on Qwen while the delivered name
+still says `read_file`), and the telemetry row keeps that value verbatim —
+which is how `squeezr usage` names the runtime behind each reading session.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Read",
-        "hooks": [
-          { "type": "command", "command": "squeezr hook pre-read" }
-        ]
-      }
-    ]
-  }
-}
-```
+Check it with `squeezr mcp doctor`: one `hook pre-read: <state>` line per
+client (`armed` / `armed (project scope)` / `not armed` / `not armed (hook layout unverified)`),
+additive `hookStatus` in `--json`. `squeezr mcp remove` strips the
+managed entry. A snippet applied by hand before this existed counts as managed
+— install normalizes it to the canonical command, remove takes it back.
+`mcp install --project` alone arms nothing, and there is no flag to skip the
+arm. <removed 2026-11-11 — 114/T3>~~The wiring is human-applied — never edit
+hook configs from an agent session. Other clients (qwen, kimi) can wire the
+same pattern when their hook surface allows.~~</removed> Wiring is the
+command's job now; still never hand-edit a hook config from an agent session —
+run `mcp install` and read the verdict from `mcp doctor`.
 
 ## 5. Tool cheat-sheet (MCP)
 
@@ -253,9 +279,11 @@ next call on the same connection: the resolved ceiling is part of
 ceiling answers with its own envelope; only an identical ceiling replays.
 `code_search` defaults to
 maxTokens 2000 and sets `truncated` when it overflows — narrow the query or
-adjust maxTokens instead of reading files. A member map is not authoritative
-while `truncated: true`: an empty map still reports nothing omitted
-(`BUGS/023`). In big workspaces prefer `prefix` over raising
+adjust maxTokens instead of reading files. When `truncated: true` and not one
+member row fit, `symbol_lookup` drops the `members` key and `membersOmitted: N`
+names the rows that never made it (`code_pack` shows `members: []` beside the
+counter — its record shape is non-nullable); a counter without a map means none
+shown, not a complete map. In big workspaces prefer `prefix` over raising
 maxTokens: a scoped map or search usually fits the default budget. Pass `topK`
 to cap how many files come back when a few strong hits are enough — `code_search`
 returns one hit per file, so `topK` counts distinct files, not spans. The

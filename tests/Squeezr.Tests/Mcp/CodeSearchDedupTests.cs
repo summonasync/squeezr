@@ -56,7 +56,7 @@ public class CodeSearchDedupTests
 
         using var doc = JsonDocument.Parse(result.Content.ShouldHaveSingleItem().ToString()!);
         doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal)
-            .ShouldBe(["cost", "data", "fileFreshness", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"]);
+            .ShouldBe(["cost", "data", "fileFreshness", "freshness", "indexAge", "staleFiles", "tokensUsed", "truncated", "warnings"]);
     }
 
     private static JsonElement ParseData(CallToolResult result)

@@ -28,6 +28,7 @@ public sealed class WatchCommand : Command<WatchCommand.Settings>
             cts.Cancel();
         };
         Console.CancelKeyPress += onStop;
+        using var onTerminate = DaemonShutdownSignal.Watch(cts);
         try
         {
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();

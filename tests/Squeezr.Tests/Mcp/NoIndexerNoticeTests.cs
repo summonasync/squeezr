@@ -93,6 +93,77 @@ public sealed class NoIndexerNoticeTests
         NoIndexerNotice.StartupLine(alive, supervised: true).ShouldBe(NoIndexerNotice.StartupLine(alive));
     }
 
+    [Fact]
+    public void ForAgent_WhenTheStateFileIsUnreadable_SaysNoWatcherIsComing_AndNamesTheRepair()
+    {
+        var notice = NoIndexerNotice.ForAgent(Unowned, NoIndexerNotice.Supervision.StateUnreadable);
+
+        notice.ShouldContain("desired state is unknown");
+        notice.ShouldContain("state file cannot be read");
+        notice.ShouldContain("no watcher is coming until the file is repaired");
+        notice.ShouldNotContain("watchd supervision and the supervisor will bring the watcher up");
+    }
+
+    [Fact]
+    public void StartupLine_WhenTheStateFileIsUnreadable_SaysTheSameOnStderr()
+    {
+        var line = NoIndexerNotice.StartupLine(Unowned, NoIndexerNotice.Supervision.StateUnreadable);
+
+        line.ShouldStartWith("warning: no background indexer on this store:");
+        line.ShouldContain("state file cannot be read");
+        line.ShouldContain("no watcher is coming until the file is repaired");
+        line.ShouldNotContain("will start the watcher");
+    }
+
+    [Fact]
+    public void ForAgent_WhenWedgedAndTheStateFileIsUnreadable_DoesNotPromiseASupervisor()
+    {
+        var notice = NoIndexerNotice.ForAgent(WedgedOwner, NoIndexerNotice.Supervision.StateUnreadable);
+
+        notice.ShouldContain("wedged");
+        notice.ShouldContain("pid 4242");
+        notice.ShouldContain("cannot supervise anything until its state file parses again");
+        notice.ShouldNotContain("the supervisor may be blocked from restarting it");
+    }
+
+    [Fact]
+    public void StartupLine_WhenWedgedAndTheStateFileIsUnreadable_StillAsksForNoActionItCannotTake()
+    {
+        var line = NoIndexerNotice.StartupLine(WedgedOwner, NoIndexerNotice.Supervision.StateUnreadable);
+
+        line.ShouldStartWith("warning: watch claim held by wedged pid 4242");
+        line.ShouldContain("supervision is paused while its state file cannot be read");
+        line.ShouldContain("'squeezr fleet restart'");
+    }
+
+    // A store whose watcher is alive gets no notice at all, unreadable state or not: nothing is missing.
+    [Fact]
+    public void ForAgent_WhenIndexerRuns_UnreadableStateDoesNotChangeTheVerdict()
+    {
+        var alive = new WatchStoreHealth(WatchIndexerState.Alive, 77, "watch", "h", 0);
+
+        NoIndexerNotice.ForAgent(alive, NoIndexerNotice.Supervision.StateUnreadable)
+            .ShouldBe(NoIndexerNotice.ForAgent(alive));
+        NoIndexerNotice.StartupLine(alive, NoIndexerNotice.Supervision.StateUnreadable)
+            .ShouldBe(NoIndexerNotice.StartupLine(alive));
+    }
+
+    [Theory]
+    [InlineData(WatchIndexerState.None)]
+    [InlineData(WatchIndexerState.Gone)]
+    [InlineData(WatchIndexerState.Wedged)]
+    public void SupervisionReadings_DifferFromEachOtherOnEveryState(WatchIndexerState state)
+    {
+        var health = Health(state);
+
+        NoIndexerNotice.ForAgent(health, NoIndexerNotice.Supervision.None)
+            .ShouldNotBe(NoIndexerNotice.ForAgent(health, NoIndexerNotice.Supervision.WillBringItUp));
+        NoIndexerNotice.ForAgent(health, NoIndexerNotice.Supervision.StateUnreadable)
+            .ShouldNotBe(NoIndexerNotice.ForAgent(health, NoIndexerNotice.Supervision.WillBringItUp));
+        NoIndexerNotice.ForAgent(health, NoIndexerNotice.Supervision.StateUnreadable)
+            .ShouldNotBe(NoIndexerNotice.ForAgent(health, NoIndexerNotice.Supervision.None));
+    }
+
     private static WatchStoreHealth Health(WatchIndexerState state) => state switch
     {
         WatchIndexerState.Gone => DeadOwner,

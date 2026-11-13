@@ -173,6 +173,53 @@ startup_timeout_sec = 30
         root.TryGetProperty("installed", out _).ShouldBeTrue();
         root.TryGetProperty("userScopeEntry", out _).ShouldBeTrue();
         root.TryGetProperty("projectScopeEntry", out _).ShouldBeTrue();
+        root.TryGetProperty("hookStatus", out var hookStatusProp).ShouldBeTrue();
+        hookStatusProp.GetString().ShouldBe(HooksBlock.LayoutUnverifiedReason);
+    }
+
+    [Fact]
+    public async Task Doctor_QwenUserArmed_ReportsArmedState()
+    {
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var environment = new McpOnboardingEnvironment(home, workspace, Path.Combine(home, "bin", "squeezr"), null);
+        var service = new McpOnboardingService(new ClientCliLocator(string.Empty));
+        var client = McpClientRegistry.Get(McpClientId.Qwen);
+        await service.InstallAsync(client, McpScope.User, watch: false, writeInstructions: false, environment, CancellationToken.None);
+
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+
+        diagnostics.HookStatus.ShouldBe(HooksBlock.ArmedState);
+    }
+
+    [Fact]
+    public async Task Doctor_QwenProjectArmedOnly_ReportsProjectScopeState()
+    {
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var environment = new McpOnboardingEnvironment(home, workspace, Path.Combine(home, "bin", "squeezr"), null);
+        var service = new McpOnboardingService(new ClientCliLocator(string.Empty));
+        var client = McpClientRegistry.Get(McpClientId.Qwen);
+        await service.InstallAsync(client, McpScope.Project, watch: false, writeInstructions: false, environment, CancellationToken.None);
+
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+
+        diagnostics.HookStatus.ShouldBe(HooksBlock.ProjectArmedState);
+    }
+
+    [Fact]
+    public async Task Doctor_Codex_ReportsUnverifiedReasonWithoutInventingAPath()
+    {
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var environment = new McpOnboardingEnvironment(home, workspace, Path.Combine(home, "bin", "squeezr"), null);
+        var service = new McpOnboardingService(new ClientCliLocator(string.Empty));
+        var client = McpClientRegistry.Get(McpClientId.Codex);
+
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+
+        diagnostics.HookStatus.ShouldBe(HooksBlock.LayoutUnverifiedReason);
+        client.GetHooksPath(home, workspace, McpScope.User).ShouldBeNull();
     }
 
     [Fact]

@@ -42,6 +42,22 @@ public class TreeSitterProviderTests
         provider.CanHandle("app.rs", "typescript").ShouldBeFalse();
     }
 
+    [Fact]
+    public void CanHandle_PythonAndGoExtensions_AcceptOwnHintsAndRejectForeign()
+    {
+        var provider = new TreeSitterProvider(Config);
+
+        provider.CanHandle("app.py", null).ShouldBeTrue();
+        provider.CanHandle("app.py", "python").ShouldBeTrue();
+        provider.CanHandle("app.py", "py").ShouldBeTrue();
+        provider.CanHandle("src/MODEL.PY", "PYTHON").ShouldBeTrue();
+        provider.CanHandle("app.py", "javascript").ShouldBeFalse();
+        provider.CanHandle("main.go", null).ShouldBeTrue();
+        provider.CanHandle("main.go", "go").ShouldBeTrue();
+        provider.CanHandle("cmd/Main.GO", "GO").ShouldBeTrue();
+        provider.CanHandle("main.go", "rust").ShouldBeFalse();
+    }
+
     [Theory]
     [InlineData("src/app.js", "JavaScript", "javascript")]
     [InlineData("src/app.jsx", "JavaScript", "javascript")]
@@ -51,6 +67,10 @@ public class TreeSitterProviderTests
     [InlineData("src/Badge.tsx", "TSX", "tsx")]
     [InlineData("src/lib.rs", "Rust", "rust")]
     [InlineData("src/LIB.RS", "Rust", "rust")]
+    [InlineData("src/main.py", "Python", "python")]
+    [InlineData("src/MAIN.PY", "Python", "python")]
+    [InlineData("cmd/server.go", "Go", "go")]
+    [InlineData("cmd/SERVER.GO", "Go", "go")]
     [InlineData("notes.md", "JavaScript", "javascript")]
     public void GrammarAndLanguageArms_PerExtension_ResolvesOffTheDefault(string path, string grammar, string language)
     {
@@ -431,6 +451,59 @@ public class TreeSitterProviderTests
         chunks[0].Text.ShouldStartWith("function big()\n");
         chunks.ShouldAllBe(c => c.Text.Contains("function big()"));
         chunks[^1].Span.EndLine.ShouldBe(symbol.Span.EndLine);
+    }
+
+    // T1's two placeholder arms are both gone: python took its table in T2 and go in T4, so no
+    // registered language answers with an empty vocabulary any more. What the tripwire was protecting
+    // — 'a registered language that is not routed keeps the fallback chunker' — is now pinned against
+    // an unknown label in the registration tests. The go row below is the T4 fence flipped on schedule:
+    // same source, same symbol row, and now the two edges T5 was hired to sign
+    [Fact]
+    public void Go_RoutedWithReferenceRules_EmitsImportAndQualifiedCallRows()
+    {
+        var provider = new TreeSitterProvider(Config);
+        var result = provider.Parse(
+            new FileRef("demo", "cmd/server.go"),
+            Encoding.UTF8.GetBytes(
+                "package main\n\nimport \"fmt\"\n\nfunc Serve(path string) string {\n  fmt.Println(path)\n  return path\n}\n"));
+
+        provider.Warnings.ShouldBeEmpty();
+        result.Language.ShouldBe("go");
+        result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([("Serve", SymbolKind.Function)]);
+
+        // the import names the package the file can now type ('fmt', read off the last element of the
+        // quoted path) and keeps that path in the module column; the qualified call names its MEMBER,
+        // 'Println', because 'fmt' is the package and a member is what an agent searches for. Both sit
+        // inside 'Serve' the way the python rows sit inside 'load' above
+        result.Refs.Select(r => (r.ToSymbolId, r.ToName, r.Kind, r.Line, r.EnclosingName)).ShouldBe(
+        [
+            ("fmt", "fmt", RefKind.Import, 3, null),
+            (null, "Println", RefKind.Call, 6, "Serve"),
+        ]);
+        result.Chunks.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Python_RoutedWithReferenceRules_EmitsCallAndImportRows()
+    {
+        var provider = new TreeSitterProvider(Config);
+        var result = provider.Parse(
+            new FileRef("demo", "src/loader.py"),
+            Encoding.UTF8.GetBytes("import os\n\ndef load(path):\n    return open(path).read()\n"));
+
+        // the T2 fence, flipped on schedule. That test pinned the in-between state — routed with symbols
+        // and deliberately no edges — and T3 was hired to end it, so the same source now answers with its
+        // rows: the import statement first, then the chained call's outer callee before the inner one,
+        // each named from inside 'load' because that function is the enclosing container
+        provider.Warnings.ShouldBeEmpty();
+        result.Language.ShouldBe("python");
+        result.Symbols.Select(s => (s.Name, s.Kind)).ShouldBe([("load", SymbolKind.Function)]);
+        result.Refs.Select(r => (r.ToSymbolId, r.ToName, r.Kind, r.Line, r.EnclosingName)).ShouldBe(
+        [
+            (null, "os", RefKind.Import, 1, null),
+            (null, "read", RefKind.Call, 4, "load"),
+            (null, "open", RefKind.Call, 4, "load"),
+        ]);
     }
 
     [Fact]

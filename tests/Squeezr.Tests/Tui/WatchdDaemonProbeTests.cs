@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Cli.Tui;
@@ -9,6 +10,8 @@ public sealed class WatchdDaemonProbeTests : IDisposable
 {
     private readonly string _dir = TestDirs.NewTempDir();
 
+    private static readonly DateTime OwnStartUtc = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+
     [Fact]
     public void MissingLockFile_NotRunning()
     {
@@ -18,7 +21,45 @@ public sealed class WatchdDaemonProbeTests : IDisposable
     [Fact]
     public void LiveHolderOnThisHost_RunningWithPid()
     {
-        WriteLock(Environment.MachineName);
+        WriteLock(Environment.MachineName, OwnStartUtc);
+
+        var status = new WatchdDaemonProbe(LockPath, _ => true).Inspect();
+
+        status.Running.ShouldBeTrue();
+        status.OwnerPid.ShouldBe(Environment.ProcessId);
+    }
+
+    // A supervisor that came up seconds ago answers the drift question with a different clock reading than the
+    // one it wrote, and the panel must not report it dead for that.
+    [Fact]
+    public void HolderStartedASecondAgo_IsFreshNotDead()
+    {
+        WriteLock(Environment.MachineName, OwnStartUtc.AddSeconds(1));
+
+        new WatchdDaemonProbe(LockPath, _ => true).Inspect().Running.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void HolderOnAReusedPid_IsNotRunning()
+    {
+        WriteLock(Environment.MachineName, OwnStartUtc.AddHours(-3));
+
+        new WatchdDaemonProbe(LockPath, _ => true).Inspect().Running.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HolderWhoseLiveStartCannotBeRead_IsNotRunning()
+    {
+        WriteLock(Environment.MachineName, OwnStartUtc);
+
+        new WatchdDaemonProbe(LockPath, _ => true, _ => null).Inspect().Running.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HolderWithoutARecordedStartTime_LivePidIsEnough()
+    {
+        WriteLock(Environment.MachineName, startedAtUtc: null);
+
         var status = new WatchdDaemonProbe(LockPath, _ => true).Inspect();
 
         status.Running.ShouldBeTrue();
@@ -28,7 +69,7 @@ public sealed class WatchdDaemonProbeTests : IDisposable
     [Fact]
     public void DeadHolderOnThisHost_NotRunning()
     {
-        WriteLock(Environment.MachineName);
+        WriteLock(Environment.MachineName, OwnStartUtc);
 
         new WatchdDaemonProbe(LockPath, _ => false).Inspect().Running.ShouldBeFalse();
     }
@@ -36,7 +77,7 @@ public sealed class WatchdDaemonProbeTests : IDisposable
     [Fact]
     public void HolderOnAnotherHost_CountsAsRunning()
     {
-        WriteLock("some-other-box");
+        WriteLock("some-other-box", OwnStartUtc.AddHours(-5));
 
         new WatchdDaemonProbe(LockPath, _ => false).Inspect().Running.ShouldBeTrue();
     }
@@ -52,10 +93,15 @@ public sealed class WatchdDaemonProbeTests : IDisposable
 
     private string LockPath => Path.Combine(_dir, "watchd", "watchd.lock");
 
-    private void WriteLock(string host)
+    private void WriteLock(string host, DateTime? startedAtUtc)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(LockPath)!);
-        var owner = new { Pid = Environment.ProcessId, Host = host, StartedAtUtc = DateTime.UtcNow };
+        var owner = new
+        {
+            pid = Environment.ProcessId,
+            host,
+            startedAtUtc = startedAtUtc?.ToString("O"),
+        };
         File.WriteAllText(LockPath, JsonSerializer.Serialize(owner, SqueezrJson.FileOptions));
     }
 

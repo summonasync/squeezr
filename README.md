@@ -224,9 +224,26 @@ that is the deal.
   aliases, import graph; Rust gets that same layer over its own vocabulary —
   functions, structs, enums, unions, traits, impl blocks, modules, type
   aliases, consts, statics and macro definitions, with `use` trees, calls,
-  trait/impl targets and macro invocations as its reference graph; every other
+  trait/impl targets and macro invocations as its reference graph; Python gets
+  it over functions, async functions, classes, methods, module and class
+  constants, with imports (plain, aliased, `from`, relative, wildcard), calls
+  and base classes as its reference graph — and a dotted `import a.b.c` binds
+  the top package `a`, never the leaf; Go gets it over functions, methods
+  named by their receiver (`Store.Put`), structs, interfaces, type aliases,
+  type declarations and package-level consts and vars, with imports, calls,
+  type uses and embedded fields as its reference graph — and `import
+  "net/http"` binds the last element `http`, so the two grammars keep their
+  own import rule instead of sharing one; every other
   text (Markdown, YAML, JSON…) is indexed by a sliding-window fallback chunker
   — searchable, but not symbol-aware.
+- **Per-language reference pools, because the same name is not the same
+  thing.** `mul` in JavaScript and `mul` in Rust are unrelated symbols, so a
+  reference edge is name-matched only inside its own language pool — js/ts/tsx
+  share one, and rust, python and go each got their own. No language is
+  declared a symbol source before its own vocabulary lands in the index home
+  (`TreeSitterLanguages`), and the refusals are stated rather than smoothed
+  over: a go blank identifier and a multi-name const/var spec name nothing, and
+  rust, python and go capture no doc comments yet — js/ts keep theirs.
 - **Adoption is the hard part, not the tech.** Agents must be *allowed* to
   call it. Tool allowlists and flow gates decide whether the index gets used
   at all.
@@ -810,7 +827,12 @@ Codex — AGENTS.md, Qwen — QWEN.md); `mcp remove` takes it back out.
 
 `squeezr mcp doctor` — the attach checkup: client found, entry present
 (user/project), binary on PATH, workspace indexed, headless status through the
-client's CLI. Plus detection of **stale registrations**: if a client config
+client's CLI. It also reads the managed hook block that `mcp install` arms in
+the same pass and `mcp remove` strips: one `hook pre-read: <state>` line per
+client (`armed`, `armed (project scope)`, `not armed`, or the reason the layout
+cannot be armed at all — hook layout unverified), plus an additive `hookStatus`
+per entry in `--json`; the arming rules are under **Advisory hook**. Plus
+detection of **stale registrations**: if a client config
 names a path other than the stable one, doctor shows `stale` with the pair
 "registered → expected" and a ready repair command (`squeezr mcp install
 --client <id> --yes`); in `--json` — additive
@@ -900,34 +922,82 @@ by `serve` itself from the process cwd (and `CLAUDE_PROJECT_DIR`, see above).
 
 ### Advisory hook: `squeezr hook pre-read`
 
-A hook for Claude Code (PreToolUse on Read): squeezr reads the hook payload
-from stdin and, if the file lives in a registered workspace and looks like a
-bulk read — ≥ 256 KB on disk, or a wide range requested (limit ≥ 400 lines) —
-it appends a soft nudge into the agent's context: "the workspace is indexed —
-consider code_search / symbol_lookup + expand_span instead of reading it
-whole". An explicitly narrow limit suppresses the nudge: the agent is already
-reading a targeted span.
+A PreToolUse hook on the read tool, for every runtime whose hook layout squeezr
+has verified. The command reads the hook payload from stdin and, if the file
+lives in a registered workspace and looks like a bulk read — ≥ 256 KB on disk,
+or a wide range requested (limit ≥ 400 lines) — it answers with a soft nudge,
+verbatim: "This workspace is indexed by squeezr. For a read this size,
+code_search or symbol_lookup can locate the relevant lines, and
+expand_span(file, startLine, endLine) returns just that span from the live
+file. If the file or repo is not in the index, a plain Read is correct." An
+explicitly narrow limit suppresses the nudge: the agent is already reading a
+targeted span. The hook only ever sees calls the host's matcher routes to it,
+and the advice lands only when the payload parses and the rule above says
+"bulk". A payload that quotes its numbers — the shape a paged Qwen read takes
+when the host forwards the model's raw arguments (`"offset":"437"`) — parses
+exactly like the numeric one: quoted decimal integers are read as numbers
+(leading zeros and a sign parse too), and a quoted non-digit fails the whole
+payload open — no advice and no telemetry row, on `offset` as well as `limit`.
+Measured delivery: the whole-file read in
+an armed live Qwen session (`audits/hook-live-2026-11-11/`); the quoted-number
+arms by in-process A/B replay against the armed command
+(`audits/t6-028-fix-2026-11-12/`).
 
-Everything else — silence: a non-workspace path, a small file, a missing
-file, malformed stdin → empty stdout, exit 0. The hook is advisory-only — it
-sets no `permissionDecision` and never blocks Read; internal errors are
+**`tool_name` carries the runtime's own id.** Qwen sends `read_file`, Claude
+sends `Read`. Nothing is normalized: the command accepts a declared set —
+`Read`, `read_file`, `ReadFile` — compared Ordinal-exact, so a name nobody
+measured stays silent instead of being lowercased into something invented.
+`Read`/`ReadFile` are accepted *matcher aliases* on Qwen (its hook surface lets
+a pattern name the read tool either way), while the payload Qwen actually
+delivers still says `read_file` — which is why the armed Qwen pattern is
+`^read_file$` and not an alias. The telemetry row keeps whatever the payload
+carried, verbatim, because that verbatim value is the runtime evidence `usage`
+reads back.
+
+**The advice is a JSON object, never bare text:**
+
+```json
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"…"}}
+```
+
+The shape is load-bearing: the Qwen aggregator collects `additionalContext`
+without requiring `permissionDecision`, so the text arrives in the model's
+context. Plain text on stdout at exit 0 would reach the human as a UI
+`systemMessage` and never touch the model — a nudge nobody reads.
+
+Everything else — silence: a non-workspace path, a small file, a missing or
+guarded file at a narrow or absent limit, malformed stdin → empty stdout,
+exit 0. (A wide requested limit of ≥ 400 lines answers before the guard and
+before the disk is consulted — that over-answer is the open defect BUGS/027,
+not documented behavior.) The hook is advisory-only — it
+sets no `permissionDecision` and never blocks a read; internal errors are
 fail-open (silent, code 0). No network — only the workspace registry and a
-stat of the file, so it is cheap to run on every Read.
+stat of the file, so it is cheap to run on every read.
 
-The snippet is applied by hand (crew policy: agents are forbidden from
-writing hook configs). In `~/.claude/settings.json` (user scope; for a single
-project — `.claude/settings.json`):
+**Arming is `squeezr mcp install`'s job now.** `<removed 2026-11-11 — 114/T3>`
+~~The snippet is applied by hand (crew policy: agents are forbidden from
+writing hook configs).~~</removed> One command writes the managed block,
+`mcp doctor` reports the state it measured, `mcp remove` takes it back out:
+
+| Client | armed matcher | hooks file (user scope) | doctor state |
+|---|---|---|---|
+| Claude Code | `Read` | `~/.claude/settings.json` — a different file from the `~/.claude.json` server entry | `armed` |
+| Qwen Code | `^read_file$` (anchored: Qwen evaluates matchers as regex) | `~/.qwen/settings.json` — `hooks` lands as an additive sibling of `mcpServers` | `armed` |
+| Kimi Code, Codex CLI | — | not armed (hook layout unverified) | `not armed (hook layout unverified)` |
+
+The written entry takes this shape — the command is the canonical absolute path
+of the binary, quoted when it contains a space:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read",
+        "matcher": "^read_file$",
         "hooks": [
           {
             "type": "command",
-            "command": "squeezr hook pre-read"
+            "command": "/home/you/.local/bin/squeezr hook pre-read"
           }
         ]
       }
@@ -936,13 +1006,50 @@ project — `.claude/settings.json`):
 }
 ```
 
+`--scope project` arms the workspace's own settings file instead
+(`<root>/.claude/settings.json`, `<root>/.qwen/settings.json`); `mcp install
+--project` alone — block-only mode, no clients — arms nothing, and no flag
+skips the arm: it rides with the client registration. There is no
+hook-specific opt-out.
+
+What counts as managed is defined strictly: the command equals the one install
+computes, or it is `<exe> hook pre-read` with the executable named `squeezr`.
+So a snippet applied by hand before this feature is managed too — install
+normalizes it into the canonical form, remove strips it. Merge-safety, stated
+at the altitude it was proven: foreign entries under `PreToolUse` are preserved
+by canonical serialization, and whole-file byte-identity is proven against the
+canonical pre-image — the JSON round-trip reformats the file (the same posture
+as the direct config writer), a foreign shape the merge cannot resolve refuses
+the write before touching it, and a second install writes neither the block nor
+a `.bak`. The `.bak` a re-install does leave behind comes from the
+server-entry write; the hook upsert stays silent because the block is already
+canonical.
+
+The `hook pre-read armed` line and the additive `hooksArmed` key claim a state,
+not a write: they are true for any client whose hook layout resolves, so an
+idempotent re-run still says armed having moved no byte. `mcp doctor` is the
+place that answers what is actually on disk.
+
+**Why the hook exists, in the numbers.** Every matching call into a registered
+workspace appends a telemetry row (`client: "hook"`), and `squeezr usage --json`
+rolls them up under `totals.sessions`: `hookSessions` is the distinct set of
+reading sessions and stays the denominator the adoption ratio divides by, while
+`hookSessionsByTool` holds one bucket per verbatim recorded tool name and
+`hookSessionsWithoutTool` counts the distinct sessions whose rows named no tool
+at all. Read the buckets as *observed under this name*: a session that read
+through two tools is counted in both, so buckets overlap and are not exhaustive
+— **never sum them to get `hookSessions`**, and `hookSessionsWithoutTool` sits
+outside the per-tool list. The runtime name beside a tool is a reading rule,
+not a matcher: a `Read` row is called Claude Code because that is what the row
+says, not because some other host was ruled out.
+
 ### Tools
 
 | Tool | Parameters (defaults) | Returns |
 |---|---|---|
 | `repo_map` | `repo?`, `prefix?`, `depth?` (2), `maxTokens?` (4000) | the repo tree: directories → files → members with signatures. No bodies, a map for navigation only. `prefix` (e.g. `"src/"`) narrows the output to a subtree — directory names render relative to the prefix, `depth` keeps its structural meaning (1 = directories, 2 = files, 3 = members) |
 | `code_search` | `query` (required), `repo?`, `prefix?`, `topK?`, `maxTokens?` (2000), `kind?` (`all`/`code`/`docs`, default `all`) | hybrid matches `{repo, file, line, score, source, snippet}`; source = `exact`/`semantic`/`both`; snippets are capped previews — the matched-ish line plus a bounded window, ≤ ~200 chars, so one hit can no longer spend the whole `maxTokens` (`expand_span` reveals the body); bodies are never returned. One hit = one file: the best span wins, the file's other spans collapse into `alsoMatched` (the field appears only when ≥1), so `topK` bounds distinct files, not spans. `prefix` filters both arms (exact and semantic) by a directory subtree. Ranking honors the `indexing.rankExclude` config: excluded trees never surface but stay indexed. The hybrid branch gained an identifier-exact arm: multi-token queries with code-shaped tokens (camelCase, `snake_case`, length ≥ 12) or rare tokens (df ≤ 5% of docs) take a separate branch with `source=exact` — more precise than phrase-literal for compound names. The `repo`/`language`/`pathGlob`/`prefix`/rankExclude filters narrow that branch too — through the same `BuildFilter` as the phrase arm. Branch limitation: trigram case-expansion is capped (`CaseVariantCap = 64` divided across the token's trigrams, 8 variants per trigram), so a lowercase token longer than ~10 chars cannot reach a spelling that exists only in PascalCase and silently drops out of the discriminants — a quiet recall loss (the phrase arm in the same case goes to a FullScan over disk; single literals never lose). The cure is case-folded trigrams in the index: an index-format change with a rebuild, no backlog feature for it yet. `kind` filters what a hit can be: `all` (default) matches everything, `code` keeps program sources, `docs` keeps prose and config (markdown/text/json/yaml/toml/xml); it applies to both hybrid arms — Qdrant payload filter on the indexed `kind` field, meta.db file-kind join on the exact side — and unknown values are rejected with the allowed list instead of silently meaning `all`. Points without a `kind` payload (orphans, or points written by pre-057 binaries until the backfill converges them) match only `kind=all` |
-| `symbol_lookup` | `name` (required), `kind?`, `repo?`, `maxTokens?` (300) | the symbol's definition: signature, doc comment, `span`, body — if it fits the budget. When a type's body does not fit → `members` (name, kind, line) in the same budget + a `membersOmitted` counter: every line is a ready coordinate for `expand_span`, no more dead ends. A body that was refused **and replaced by the full member map** is the designed outcome, not a cut answer: `truncated: false`, `cost.complete: true`, no `truncated:` warning, and the hit says `bodyOmitted: true` — read the state through that flag, never through the absence of a `body` key (the JSON writer drops nulls, so a mapped hit has no `body` field at all). `truncated: true` means the answer really lost something (a dropped hit, `membersOmitted > 0`, a dropped `did you mean`, or a body no map can stand in for), and the warning then names which loss it was — the no-substitute case prices the body instead of offering to narrow a query that already lost its only hit: `… — raise maxTokens (the body alone needs ~N tokens)`. A member map is NOT authoritative while `truncated: true`: an empty map still reports nothing omitted (`BUGS/023`, open). Symbol not found → empty `data` + `didYouMean` (top-3 candidates by trigram-Jaccard, threshold 0.34), not an error |
+| `symbol_lookup` | `name` (required), `kind?`, `repo?`, `maxTokens?` (300) | the symbol's definition: signature, doc comment, `span`, body — if it fits the budget. When a type's body does not fit → `members` (name, kind, line) in the same budget + a `membersOmitted` counter: every line is a ready coordinate for `expand_span`, no more dead ends. A body that was refused **and replaced by the full member map** is the designed outcome, not a cut answer: `truncated: false`, `cost.complete: true`, no `truncated:` warning, and the hit says `bodyOmitted: true` — read the state through that flag, never through the absence of a `body` key (the JSON writer drops nulls, so a mapped hit has no `body` field at all). `truncated: true` means the answer really lost something (a dropped hit, `membersOmitted > 0`, a dropped `did you mean`, or a body no map can stand in for), and the warning then names which loss it was — the no-substitute case prices the body instead of offering to narrow a query that already lost its only hit: `… — raise maxTokens (the body alone needs ~N tokens)`. When `truncated: true` because not one member row fit, there is no `members` key and `membersOmitted: N` names the rows that never fit — a counter without a map means N refused and none shown, never a silently complete map (a symbol with genuinely no members carries neither field). Symbol not found → empty `data` + `didYouMean` (top-3 candidates by trigram-Jaccard, threshold 0.34), not an error |
 | `find_references` | `symbol` (required), `repo?` | every call site `{repo, file, line, kind, enclosingSymbol}` — `repo` on each row distinguishes byte-identical paths from different repositories (a checkout plus its worktree). Same-name definitions sharing one call list yield one row set, and the envelope carries additive `definitions` — `{repo, kind, file, startLine, endLine}` per declaration behind the collapsed rows (the same fields as `refs --json`). The field appears in exactly two cases: two or more same-name declarations share one call list, or the symbol has no calls at all (otherwise an empty `data` would say nothing about declarations); in other answers the field is absent and the envelope stays six-keyed. `definitions` is metadata of the collapsed rows: it does not count into `tokensUsed`, same as the CLI. enclosingSymbol is captured by Roslyn at index time (exact, partial classes included); for indexes built before capture the value is inferred from symbol spans (a fallback inference). Symbol not found → tool error (like `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (required), `endLine?`, `contextLines?` (3), `maxTokens?` (1500) | the span's lines + context from the live file on disk (sees edits made after indexing). The only tool that returns source lines |
 | `code_pack` | `name` (required), `repo?`, `kind?`, `maxTokens?` (2000) | the task-shaped front door: one call answers "what is this symbol and who touches it" — definition (signature, doc comment, `span`), the defining member's body (`bodyLines`, or the `members` mode for oversized types), every caller as `{repo, file, line, kind, enclosingSymbol}`, trust signals (`guardWarnings`, `laggingDeclarations`, `additionalMatches`), and the per-file `cost` block. Budget order: definition and body spend first, callers truncate — `withheldCallers` counts what did not fit, `complete:false` names it. `complete` follows the answer state, not the budget's mood: `complete = withheldCallers == 0 && the lookup was not clipped`, so a pack whose oversized type body was replaced by the full member map answers `complete: true` with `lookupTruncated: false` and `bodyOmitted: true` (the pack's own flag, read from the one hit it rendered — with several matches it describes the rendered pack, not every candidate), while `withheldCallers > 0` still answers `complete: false` with its own warning line. Measured live on a 2.6k-file store: ~2.3× faster than the equivalent `symbol_lookup` → `expand_span` → `find_references` chain (one store session instead of three; the ratio narrows on bigger stores — the saved overhead is constant). Prefer the per-tool calls when you need only one of the three answers — the pack buys breadth, not depth |
@@ -970,8 +1077,11 @@ guard stays the content-exact authority — a file it refreshed inline reads
 `fresh` afterwards, and one whose inline refresh failed stays `lagging` even
 when its mtime reads young. A live watcher on the store is named in the same
 answer (`active writer on this store: pid N, watch beat Ns old`) so a verdict
-about to flip is never mistaken for a settled one; `index_status` and
-`repo_map` aggregate rather than name files and say so in `warnings`.
+about to flip is never mistaken for a settled one. `index_status` aggregates
+rather than names files and says so in `warnings`; `repo_map` names a bounded
+sample of up to 50 rows of its own scope in `staleFiles` and declares what it
+left out in `freshness` — the vanished rows are listed first (`listedMissing`
+of them), the lagging rows after.
 
 ### Navigation flow
 
@@ -996,7 +1106,10 @@ Every tool answers in one envelope:
   means "this answer lost something the caller asked for", not "the budget
   refused at least once"; `cost.complete` means "the answer holds everything it
   claims" — true for a whole answer and for a mapped one, false only when
-  something really went missing.
+  something really went missing, and an answer that carries less of its own
+  freshness verdict than its check found is not holding everything it claims.
+  The freshness story an answer ships beside its content is priced separately,
+  in `freshness.freshnessTokens`.
   <removed 2026-11-10 — 115/T6>~~`truncated: true` → narrow the query (`repo`,
   `kind`) or raise `maxTokens`~~</removed> — that rule conflated a substituted
   body with a lost one. Read the three states below.
@@ -1005,10 +1118,71 @@ Every tool answers in one envelope:
   chunks pending embedding)" in `code_search` when the semantic layer is not
   fully pumped — at 100% the line is absent), trimming hints, and "cache:
   invalidated (index changed)" — the cache-death mark (see below).
-- `indexAge` / `staleFiles` — freshness. Modified files refresh inline on
-  read; what could not be refreshed lands honestly in `staleFiles` — the
-  agent sees the data for those files is stale and may suggest `squeezr
-  index`. The final call on a reindex belongs to the workspace owner.
+- `indexAge` / `staleFiles` — freshness. `staleFiles` names indexed rows the
+  answer can no longer vouch for, in one of two classes: on `repo_map` it is
+  the verdict of a structure pass (a row whose file is gone, or whose size or
+  mtime moved — no content is read there and nothing is refreshed), on
+  `code_search` / `symbol_lookup` / `find_references` it is the content guard
+  (modified files refresh inline on read, inside a per-call budget — a file
+  count and a wall bound, both named by the warning line that appears when a
+  re-read was refused; `RefreshBudget` is the one place they are declared).
+  Whatever could not be refreshed — refused by that budget, or attempted and
+  failed — lands honestly in `staleFiles`, and `unrefreshedFiles` says how
+  many of them the budget refused. Either way the agent sees the data behind
+  those files is not confirmed and may suggest `squeezr index`. The final call
+  on a reindex belongs to the workspace owner.
+- `freshness` — the attestation of a check, carried by the four tools that run
+  one (`repo_map`, `code_search`, `symbol_lookup`, `find_references`) on every
+  answer they produce, and additive over the core keys above:
+  `{check, checked, scopeRows | namedFiles, staleTotal, listed,
+  freshnessTokens}`, plus `listedMissing`, `missing` and `changed` on the map's
+  structure pass and `laggingFiles` and `unrefreshedFiles` on the content
+  tools. A stored answer that
+  the cache hands back keeps the block it was produced with and marks itself
+  (`replayed`, third sub-bullet): the block attests a check, and on a replay the
+  check ran in the earlier call. It says which class of check ran
+  (`structure` or `content`), how many positions it examined against the volume
+  the answer speaks for (`scopeRows` — the rows of a map scope, withheld and
+  unresolvable ones included; `namedFiles` — the distinct files a query answer
+  names), how many came back stale, and how many of those the answer actually
+  lists. An empty `staleFiles` with `checked: 0` means nothing was examined, not
+  that everything is fine; a `listed` below `staleTotal` means the answer
+  carries a sample, and `cost.complete` says so.
+  - `freshnessTokens` is what this story costs the caller and `tokensUsed`
+    does not count: the `staleFiles` sample, the `warnings` lines that explain
+    the check, and this block itself, measured on the wire basis (a quote
+    travelling inside the MCP content string costs six bytes, and the product's
+    own estimator prices those bytes). Folding them into `tokensUsed` was
+    rejected — that number is what the caller's budget governs — so telemetry
+    records `tokensUsed + freshnessTokens`, the number actually paid.
+  - `laggingFiles` counts the files this answer calls `lagging` in
+    `fileFreshness`. Those are stat verdicts (size or mtime against the stamp,
+    never a content read), so a `staleTotal` of `0` says nothing about them and
+    the answer no longer reads as a clean verdict while naming them.
+  - `unrefreshedFiles` counts the stale files this call examined and then
+    refused to re-read because the inline-refresh budget was spent. The budget
+    is two numbers declared once, in `RefreshBudget` — a count of re-reads a
+    call may start and a wall bound read between candidates — and the
+    `warnings` line that appears with it says both. Absent means the budget
+    never bound: either nothing was stale, or the call never reached a
+    candidate (a store it could not open collapses every candidate and
+    attributes no cause, and that shape is never charged to the budget). A
+    refused row costs the answer nothing extra: it is still named in
+    `staleFiles`, still counted in `staleTotal`, still `lagging` in
+    `fileFreshness`. What the budget buys is the caller's wall time — a
+    re-measured `code_search` over a repo naming 24 stale files spent 46.7 s of
+    inline re-reads before the budget existed and 5.9 s after it (at 12 stale
+    files, 27.9 s → 6.0 s; medians of ten cold `squeezr serve` runs per arm,
+    harness `scripts/bench-guard-017.sh`), and the 23 rows it left unread are
+    named in the answer instead of being silent. `tokensUsed` did not move
+    between those arms — 815 before, 815 after — while `freshnessTokens` rose
+    from 127 to 601, which is exactly what disclosure costs.
+  - `replayed: true` appears **only** on an answer the response cache handed
+    back (see below). File mtimes move no cache generation, so on a replay the
+    numbers in this block — and `staleFiles` and `indexAge` beside them —
+    describe the call that produced the stored envelope, not this one. A
+    replayed answer attests no check of its own; the mark is how the reader
+    knows.
 
 **Budget states: complete, mapped, clipped.** `symbol_lookup` and `code_pack`
 spend their answers out of one `TokenBudget`, and since 115 the engine keeps
@@ -1098,7 +1272,12 @@ and `repo_map` key the value as it was passed, so leaving `maxTokens` out and
 passing the default are two different entries there. An
 identical query in the same session = an instant replay of the stored
 envelope; telemetry marks it `cacheHit: true` (and it shows in the hit-rate
-of `squeezr stats`). Any reindex — a watch pass or an external `squeezr index`
+of `squeezr stats`). A replayed answer says so in its own block —
+`freshness.replayed: true`, present only on hits and costing 15 text bytes (26
+on the wire, which `freshnessTokens` re-prices) — because the generation is
+the mtime pair of `meta.db` and `config.json`: files that changed on disk, or
+vanished from it, never invalidate a stored answer, so the numbers a replay
+carries describe the call that produced it. Any reindex — a watch pass or an external `squeezr index`
 — changes the cache generation (mtime of meta.db): dead entries are dropped
 immediately, not left for LRU eviction, and the first answer after the change
 carries `cache: invalidated (index changed)` in `warnings` — once per
@@ -1380,12 +1559,28 @@ squeezr fleet restart <storeKey>  # restart the watch daemon
   `not-running`, exit 0.
 - `restart` works with `watch` only: a live watch owner is stopped cleanly, then a
   detached `squeezr watch` process is spawned with cwd = the workspace's
-  rootPath (rootPath gone — an error with a `drop` hint). A claimed
+  rootPath (rootPath gone — an error with a `drop` hint). The spawn is the
+  supervisor's own launch path (`--await-claim`, see the Watchd section), and
+  the verdict is alive-gated: `started`/`restarted` prints only while the new
+  daemon is still alive after a short settle window (750 ms) — a daemon
+  already gone at report time gets `watch: restart pending — the daemon (pid N)
+  was gone before it settled; the supervisor will converge on its next pass`,
+  and the pid in the payload is never a claim that anything is running.
+  `--json` carries this as additive `watcherAlive` (defaulted `true` for
+  readers predating the field). A claimed
   `serve --watch` is not restarted and not stopped: the MCP client owns it,
   and trying honestly errors with a hint naming the owner pid (`squeezr mcp
   install` or an agent restart); beside an owner or a gone claim, observers do
   not block the restart.
-- Both commands do `--json`: one NDJSON result object, clean stdout (the 035
+- All three write-side verbs — `start`, `stop`, `restart` — first refuse a
+  registry row whose root does not resolve on this machine: exit 1 with
+  `Cannot stop workspace '…': root path '…' does not exist; remove the stale
+  entry with 'squeezr drop --store-key …'` (same shape for `start`/`restart`)
+  — and write no desire. A wish for a store this machine cannot reach would
+  outlive the workspace it names and make the next status row look wanted.
+  The TUI answers the same refusal with `wish not saved` plus the `drop`
+  hint, and its Start/Stop/Restart never reach a dead root either.
+- All three commands do `--json`: one NDJSON result object, clean stdout (the 035
   contract).
 
 ## Watchd: the global watch supervisor
@@ -1395,18 +1590,41 @@ session, a terminal, an MCP client. `squeezr watchd` is the answer to "and who
 brings the watcher back": one long-lived supervisor process per machine that
 owns the watch daemons of every workspace in the registry and applies a
 desired state per store (`running` / `stopped`), persisted across watchd
-restarts in `~/.squeezr/watchd/state.json`.
+restarts in `~/.squeezr/watchd/state.json`. The file carries the crash-loop
+wedge markers too, as an additive `wedged` key that stays absent while no
+store is wedged (a clean fleet writes byte-for-byte the pre-113 shape):
+`state.json` is the live channel between the supervisor and the `fleet`
+commands, not just a restart snapshot — a wedge written by one process is
+honoured by every other, and cleared by every other.
 
 ```bash
 squeezr watchd                    # start the supervisor (singleton per machine)
 squeezr fleet stop <store-key>    # desired=stopped: the daemon goes down and stays down
 squeezr fleet start <store-key>   # desired=running: watchd brings it back
-squeezr fleet restart <store-key> # restart now, reset the wedged flag
-squeezr fleet status              # desired vs actual, supervised/wedged/managed elsewhere
+squeezr fleet restart <store-key> # restart now: waits out the claim grace, clears the wedge through the state file
+squeezr fleet status              # desired vs actual: supervised / starting / wedged / stopped / idle (no supervisor) / managed elsewhere
 ```
 
 The same actions live in the TUI under `Watchd supervisor` — a session list
-with per-session start / stop / restart.
+with per-session start / stop / restart. The dead-cell words are the
+fleet's on both surfaces: `stopped`, `starting` and `idle (no supervisor)`
+answer the same facts in the TUI row and the `fleet status` column alike.
+
+`fleet status` resolves one supervision word per store from what this
+machine can actually read — the desire file, the claim probe, the watchd
+lock: `supervised` (a live watchd owns the watcher), `managed elsewhere` (a
+live owner belongs to an MCP client or another host), `wedged` (a live pid
+holding a stale claim — the pathology every other cell would cosmeticize),
+`stopped` (the operator's recorded wish), `starting` (watchd is alive, the
+recorded wish is `running` and no indexer is up yet — those three facts and
+nothing else choose the word, so a store the crash-loop guard has wedged
+still reads `starting` here, see the rules below), and
+`idle (no supervisor)` — the store wants watching (`desired=running`) but no
+live watchd is left to carry the wish out. `stopped` and
+`idle (no supervisor)` are the two faces of nothing running and stay
+distinct: the first is a wish the operator wrote, the second is a wish
+nobody performs, and collapsing them reads as a fleet that is wanted when it
+is orphaned.
 
 Supervision rules, in one place:
 
@@ -1418,7 +1636,33 @@ Supervision rules, in one place:
   an upgrade the new code picks up without a manual step. Without watchd the
   upgrade flow is `squeezr fleet restart`.
 - **Crash-loop guard.** More than 5 restarts of one store within 10 minutes
-  wedges it: restarts stop, the status shows `wedged`, `fleet restart` resets.
+  wedges it: restarts stop, and the supervisor's own row says
+  `watch <store> is wedged:` with the cause after it — `restarts stopped
+  after 5 starts inside 10 minutes`. That row is where a crash-loop wedge is
+  voiced; the `wedged` cell of `fleet status` comes only from a live pid
+  holding a stale claim, so a guard-wedged store whose daemon already died
+  reads `starting` in the column.
+  The wedge marker lives in `state.json`, so `fleet restart` is a real
+  reset even against a live supervisor: the command writes the wish back to
+  `running` and removes the marker from the file, and the supervisor's own
+  guard is just a cache over that file — it releases the store and hands out
+  a fresh restart budget on its next sweep. The one exception is told
+  instead of hidden: when the marker write itself failed, the wedge holds in
+  the supervisor's memory until the flush lands (retried on every sweep that
+  reaches the guard — a state file that cannot be read fails the sweep
+  closed before the guard is synced, so that flush waits for the repair
+  below, and the row appends `the marker never reached state.json (…)`),
+  because an unflushed wedge released to a fresh budget every sweep would be
+  a restart flap nobody sees.
+- **SIGTERM stops both processes the way Ctrl+C does.** `watchd` and a
+  watched `squeezr watch` register SIGTERM onto the same shutdown their
+  console handler drives: the watchd lock or the watch claim is released,
+  the heartbeat carriers are dropped, the process exits 0. That is the path
+  an init system takes — `systemctl --user stop` signals every process in
+  the unit, and the upgrade retire's `KillMode=control-group` sweep reaches
+  the supervised daemons the same way (below in the autostart section) — so
+  a stopped fleet now goes down clean instead of leaving a dead pid's lock
+  and claim for the staleness rules to sort out.
 - **A second watchd refuses to start** — the lock names the running instance.
 - **Live foreign owners are respected.** A store watched by an agent session
   or an MCP client reads `managed elsewhere`: watchd does not touch it.
@@ -1428,7 +1672,224 @@ One nuance to know: a watch claim is intentionally held for a grace window
 claim until the window passes, so a takeover race cannot steal it. Supervised
 watchers wait that window out (`--await-claim`) and take over when it expires,
 so kill→respawn converges within ~30s. A manual `squeezr watch` started inside
-the window declines immediately, as before.
+the window declines immediately, as before. `squeezr fleet restart` spawns its
+daemon on the supervised path — the same `--await-claim` launch the
+supervisor uses — so a restart right after a killed owner waits the grace out
+instead of declining to the dead pid's claim.
+
+**When state.json cannot be read.** An absent file is business as usual —
+the running default, no wedge markers. A file that exists but cannot be
+read (unparseable JSON, or a path the process cannot open) is never treated
+as absent, and nothing guesses across it. The supervisor fails closed: its
+sweep starts nobody from the recorded desires and leaves every live watcher
+alone — starting or stopping on wishes it cannot read is still an action
+taken — and because the fleet never completes a sweep behind the fault, the
+upgrade retire is stalled behind it too: an upgraded `watchd --autostart`
+cannot take over from this instance until the file is fixed. The warning
+names both stalls and the repair: `supervision state '<path>' is not valid
+JSON (…)` / `… could not be read (…); nothing is started from the recorded
+desires and running watchers are left alone, and with the fleet never swept
+an upgraded watchd cannot retire this one either — it exits as already
+running until the file is fixed. Repair the JSON, or move the file away to
+start supervision from the running default`. Readers tell the same truth in
+their own voice: `fleet status` prints `unknown` in the Desired column with
+a stderr fault line (`warning: watchd state '…' — no desired state is known,
+the supervisor applies nothing until the file is repaired; the supervision
+column shows live facts only.`) while the Supervision column keeps answering
+from live facts and the TUI answers the same way — `unknown` in the
+supervisor table's `desire` column and in the session panel's
+`desired:` line, `fleet status --json` carries the fault in an additive
+`stateFault` member omitted while the file is clean, and a starting `serve`
+promises no watcher it cannot bring — `no watcher is coming until the file
+is repaired` instead of the supervised promise. Desire writers refuse rather
+than overwrite: `fleet start`, `fleet stop`, `fleet restart` and the TUI's
+Start/Stop/Restart report `supervision state '<path>' …; it is not
+overwritten — rebuilding it from what cannot be read would drop the desires
+of every other store` and write nothing — every other store's wishes and
+wedge markers live in that same file. The refusal is not a promise that
+nothing happened: `fleet start`, `fleet stop` and the TUI refuse before
+touching anything, but `fleet restart` stops the live watcher first and
+throws only when it then writes the wish — a restart against a corrupt
+`state.json` can leave the watcher stopped, the desire unwritten and the
+command at exit 1.
+
+### Autostart: `watchd install` / `uninstall` / `installed`
+
+A manually started watchd lives and dies with the shell that started it. Three
+verbs hand its lifetime to the operating system, take it back, and report what
+actually happened:
+
+```bash
+squeezr watchd install     # register autostart for this account (idempotent)
+squeezr watchd installed   # read-only verdict: is it registered, and will it start?
+squeezr watchd uninstall   # remove the entry squeezr manages; a no-op when there is none
+```
+
+What `install` writes, per platform:
+
+| Platform | The entry | Start semantics |
+|---|---|---|
+| Linux | `~/.config/systemd/user/squeezr-watchd.service` (an absolute `XDG_CONFIG_HOME` moves it, same as systemd does) | `systemctl --user enable --now` at install; `Restart=on-failure`, `RestartSec=5` in the unit |
+| macOS | `~/Library/LaunchAgents/dev.summonasync.squeezr-watchd.plist` | `launchctl bootstrap gui/<uid>` at install; `RunAtLoad` + `KeepAlive`/`SuccessfulExit=false` in the plist |
+| Windows | a Task Scheduler task `squeezr-watchd` created with `/SC ONLOGON` (deliberately an ONLOGON task, not a service) | fires at the next logon and nothing else — no restart-on-exit semantics at all |
+
+The command line baked into every entry ends with `watchd --autostart`. The
+flag is a declared option of the `watchd` command that tells the supervisor the
+init system started it and will bring it back; that pair is what makes the
+upgrade policy below possible. A manually started `squeezr watchd` (without the
+flag) never retires itself.
+
+**Upgrade retire.** Under `--autostart`, once per sweep the supervisor compares
+the modification time of its own binary against its own process start time.
+When the disk is newer — an upgrade landed — the drift check is the first
+thing the next sweep runs: it prints `watchd is retiring after an upgrade:
+<path> changed at <stamp>, this process started at <stamp>`, and exits **75**
+at the top of that sweep without touching the fleet; the retire only unlocks
+once at least one full useful fleet sweep has already completed in this
+process's lifetime. 75 is sysexits'
+`EX_TEMPFAIL`: a temporary failure the starter is invited to retry, and
+`Restart=on-failure` (systemd) and `KeepAlive`+`SuccessfulExit=false` (launchd)
+both bring the process back on any non-zero exit. The number cannot be 0 —
+that reads as "finished cleanly, don't restart", and the fleet freezes on the
+old code — and cannot be 1/2/3, because those steps belong to the
+`watchd installed` verdict ladder. On Windows the retire question does not
+arise: `/SC ONLOGON` never brings a process back, so the policy refuses
+self-exit there and the running supervisor keeps its binary until the next
+logon.
+
+**What an upgrade does to the supervised daemons.** The generated systemd unit
+leaves `KillMode` at the systemd default — `control-group` — so retiring the
+supervisor stops its whole cgroup: every supervised watch daemon takes a
+fleet-wide SIGTERM — taken gracefully on both sides, watchd dropping its lock
+and each daemon releasing its claim and dropping its beats the way Ctrl+C
+does, exit 0 — and roughly 5–10 seconds pass (`RestartSec=5`, then the new
+instance's first sweep, which runs immediately at start — the 2 s cadence
+never waits before relaunching; on launchd the default throttle caps the same
+window at 10 s), and the whole fleet comes up on the new binary. On launchd
+the children survive the retire
+(the default `AbandonProcessGroup` keeps them), and the new supervisor reads
+them as `SkippedLiveOwner` — `watch <store> is managed elsewhere (pid N)` — and
+does not restart children it does not own: the fleet runs a mix of old and new
+daemons until each survivor dies on its own. Both shapes are deliberate
+(review-110-08 owner rulings), not accidents. One practical consequence: during
+that 5–10 s idle window a starting `squeezr serve` sees the retired supervisor
+as gone — the watchd lock is released and the claim's owner pid is not alive —
+so it prints the plain no-indexer warning and asks the operator to run
+`squeezr watch` by hand. That is the trap to know: the incoming supervisor
+relaunches the daemon on its own within seconds, so the manual `watch` is
+unnecessary here. The wedged-under-supervision warning (advice: "if the
+supervisor does not clear it, run `squeezr fleet restart`") needs a live
+supervisor and a live wedged owner, so it belongs to a genuinely wedged,
+blocked store outside this window — and there that manual `fleet restart` is
+exactly what it is for.
+
+**Trap 1: linger on a headless machine.** A systemd *user* manager exists only
+while the account has a session: without more, the unit will not start at boot
+at all — it waits for the first login, and a logout takes the user manager (and
+watchd) down with it. On a server you only reach over ssh, enable lingering
+once:
+
+```bash
+loginctl enable-linger $USER
+```
+
+The account's units then start at boot and survive logout. (Platform behaviour;
+owner-verifiable on the target box — after a reboot, `squeezr watchd installed`
+should read `watchd=running`.) On macOS and Windows the entry is a plain
+login-time agent/task and there is nothing to enable.
+
+**Trap 2: the start limit parks a failing unit.** The unit names its own
+window — `StartLimitIntervalSec=60` plus `StartLimitBurst=5` in `[Unit]`
+(systemd's 10 s default cannot count a `RestartSec=5` flap) — so a binary that
+dies at start is retried every 5 s, and after five starts inside 60 s systemd
+stops trying: the unit comes to rest in `failed` instead of flapping forever.
+That parked state is a *feature* against a broken binary — the crash loop has a
+full stop. `squeezr watchd installed` reads it as `status=unit-failed` with
+`failed=yes` and exit 2, and the hint says to look it up with the platform
+tool. To recover: fix or replace the binary, then
+
+```bash
+systemctl --user reset-failed squeezr-watchd && systemctl --user restart squeezr-watchd
+```
+
+`reset-failed` flushes the counter instead of waiting for the declared 60 s
+window to pass — until it does (or you reset), systemd keeps refusing the start
+with "Start request repeated too quickly". Re-running `squeezr watchd install`
+also works: it rewrites the unit and `enable --now` starts it again.
+
+**`installed` is the instrument panel.** One `key=value` line per dimension —
+byte-stable, scriptable — plus the exit-code ladder:
+
+| Exit | `status=` | Means |
+|---|---|---|
+| 0 | `installed` | the entry is registered, hooked, and names a program this platform can exec |
+| 1 | `not-installed` | nothing is registered |
+| 2 | `installed-but-binary-missing` / `unit-failed` / `present-but-not-enabled` | registered, and it will not start the daemon as it stands |
+| 3 | `probe-unsupported` / `probe-unknown` | the platform refused to answer, or has no question to ask here |
+
+The other lines answer the neighbouring questions: `platform=`, `unit=` (where
+the entry lives), `present=`/`enabled=`/`failed=`/`loaded=` (each `yes`, `no`,
+`couldn't-ask` where the tool would not talk, or `not-supported` where the
+platform has no such question — launchd for `failed=`, Windows for `loaded=`;
+`failed=` also prints `not-supported` where the question exists but the
+platform has no answer yet: a Windows task that never ran has no run outcome
+to read, and systemd answers exit 4 for a unit its running manager has not
+read),
+`program=`/`arguments=`/`program-state=` (what the entry execs and whether it
+can), `watchd=running`/`watchd=not-running` with `pid=` (the singleton lock —
+registered and running are two facts, and a linger-less box after a reboot is
+exactly where they disagree). `install` and `installed` deliberately stay
+separate: the status command never fixes anything on its way past.
+
+**`install` over a live manual watchd.** Before applying the entry, install
+reads `~/.squeezr/watchd/watchd.lock` and warns (stderr) when a live instance
+holds it — install takes nothing, steals nothing and kills nothing, because
+whose instance owns the singleton is the operator's call. The warning names
+what the entry will then do about the refusing instance: systemd restarts it on
+failure until the start limit parks the unit in `failed`; launchd respawns it on
+every unsuccessful exit; the Windows task's instance refuses at every logon.
+Stop that instance and run install again. The success line is
+`watchd autostart installed — <target>`, plus `(with SQUEEZR_HOME=<path>)` when
+the installing shell had `SQUEEZR_HOME` explicitly set — only then is the
+variable baked into the entry (the default home is whatever the account
+resolves at logon anyway). `uninstall` prints `watchd autostart removed —
+<target>`; nothing of ours to remove is not a failure either — it says `warning:
+no squeezr watchd autostart entry at <target>; nothing was removed.` on stderr
+and still exits 0.
+
+**The release path.** Upgrading through `scripts/install-release.sh` keeps
+autostart honest: the script restamps the unpacked binary with `touch` (a
+published tar carries archived mtimes, and an unstamped file gives the drift
+detector nothing to see), asks the new build `watchd installed`, and when
+autostart is registered it rewrites the entry onto the new tag and restarts the
+supervisor (`systemctl --user restart` on Linux, `launchctl kickstart -k` on
+macOS). The step closes with a machine-readable line:
+`autostart=rewritten+restarted` when the handover completed;
+`autostart=rewritten+restart-deferred` when the entry moved on a platform leg
+that performs no restart — the rewritten scheduled task simply waits for the
+next logon, and the flag says deferred instead of claiming a restart this leg
+never performed (no released artifact reaches that arm today);
+`autostart=rewired+restart-failed` when the entry moved but the restart was
+refused (stderr names the manual restart commands); `autostart=touched` when
+the probe gave no verdict, so the entry stays pointed where it was; and
+`autostart=skipped:<reason>` (`no-new-build`, `touch-failed`,
+`autostart-not-installed`, `install-failed`) when nothing needed rewiring.
+Upgrading by unpacking a release tar by hand is the blind case — no restamp,
+archived mtime preserved, so drift may never fire and the old supervisor runs
+the old binary until you act: run `squeezr watchd install` from the new binary
+(it re-points the entry — the unit names the concrete install path, not the
+`~/.local/bin` symlink) and restart the entry yourself.
+
+**Legacy LaunchAgent name.** During the pre-release drafts of this feature the
+macOS file was `squeezr-watchd.plist`; current tooling writes and manages only
+the reverse-DNS `dev.summonasync.squeezr-watchd.plist`. A machine that ran the
+drafts can still carry the old file in `~/Library/LaunchAgents`, and neither
+`uninstall` nor `install` touches it — it loads a second supervisor every login
+(whose instance refuses the lock; launchd then respawns the refuser). If that
+is your machine: `launchctl bootout gui/$(id -u)/squeezr-watchd`, delete the
+old plist, re-run install. No released version ever wrote the legacy name, so
+this paragraph is almost certainly not you. (Owner-verifiable on a macOS box
+that ran feature-branch builds.)
 
 ## Vector hygiene: `squeezr vectors reconcile`
 
@@ -1516,7 +1977,13 @@ carry the same arithmetic in their own envelope: the additive `cost` block
 (`tokensUsed`, `baselineTokens`, `savedTokens`, `ratio`, `complete`) shows
 the whole-file price of the returned files at the moment of the call, and
 telemetry records that same per-call `baselineTokens`, so the dashboard
-and the transcript cannot disagree:
+and the transcript cannot disagree. `tokensUsed` there is the content the
+`maxTokens` budget governs; the freshness story shipped beside it prices
+itself in `freshness.freshnessTokens`, and the telemetry line records the sum.
+`complete` is a claim about the verdict, not about the budget: it reads false
+when `staleFiles` carries a sample of a bigger verdict, and a reader who sees
+`complete: false` with `truncated: false` should go to `freshness`, not raise
+`maxTokens`:
 
 ```bash
 squeezr stats           # per-tool table + savings + cache

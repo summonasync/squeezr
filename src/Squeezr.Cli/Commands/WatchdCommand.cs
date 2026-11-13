@@ -1,8 +1,11 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Spectre.Console.Rendering;
 using Squeezr.Cli.Daemons;
+using Squeezr.Cli.Infra.Autostart;
+using Squeezr.Core.Infra.Autostart;
 using Squeezr.Core.Indexing.Watch.Supervision;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -11,8 +14,18 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class WatchdCommand : Command<WatchdCommand.Settings>
 {
+    // Invariant: this has to stay non-zero. Restart=on-failure (systemd) and KeepAlive with
+    // SuccessfulExit=false (launchd) bring a program back only when it left non-zero, so a zero here
+    // means a retired supervisor is never replaced. The value sits outside this command's own 0 and 1
+    // (clean stop, operator-facing refusal) and outside the watchd-installed ladder of 1..3, and 75 is
+    // sysexits' EX_TEMPFAIL — a temporary failure the starter is invited to retry.
+    public const int UpgradeExitCode = 75;
+
     public sealed class Settings : CommandSettings
     {
+        [CommandOption(WatchdUnitGenerator.AutostartFlag)]
+        [Description("Started by the autostart entry: retire after an upgrade and let the entry start the new binary")]
+        public bool Autostart { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -24,6 +37,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
             cts.Cancel();
         };
         Console.CancelKeyPress += onStop;
+        using var onTerminate = DaemonShutdownSignal.Watch(cts);
         try
         {
             SqueezrHome.RequireHabitableProfileHome();
@@ -38,23 +52,28 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
                 return 1;
             }
 
+            var launcher = new DaemonLauncher();
             var loop = new SupervisorLoop(
-                new DaemonLauncherAdapter(new DaemonLauncher()), new SupervisionState(), new CrashLoopGuard());
+                new DaemonLauncherAdapter(launcher),
+                new SupervisionState(),
+                new CrashLoopGuard(),
+                SelfCheckFor(launcher, settings.Autostart));
+            var exitReason = SupervisorExitReason.Cancelled;
             if (AnsiConsole.Profile.Capabilities.Interactive)
             {
                 var live = new LiveWatchdStatus();
                 AnsiConsole.Live(live.Render()).Start(liveContext =>
                 {
                     live.Bind(liveContext);
-                    loop.Run(cts.Token, live.Update);
+                    exitReason = loop.Run(cts.Token, live.Update);
                 });
             }
             else
             {
-                loop.Run(cts.Token, new PlainWatchdStatus().Update);
+                exitReason = loop.Run(cts.Token, new PlainWatchdStatus().Update);
             }
 
-            return 0;
+            return exitReason == SupervisorExitReason.OwnBinaryDrifted ? UpgradeExitCode : 0;
         }
         catch (WorkspaceException ex)
         {
@@ -64,6 +83,47 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
         finally
         {
             Console.CancelKeyPress -= onStop;
+        }
+    }
+
+    private static SupervisorSelfCheck? SelfCheckFor(DaemonLauncher launcher, bool autostart)
+    {
+        if (!autostart)
+        {
+            return null;
+        }
+
+        AutostartPlatform platform;
+        try
+        {
+            platform = AutostartEnvironment.CurrentPlatform;
+        }
+        catch (AutostartException ex)
+        {
+            // Nothing is known to start this process again on a platform whose entry we cannot name,
+            // so an upgrade retire would take the supervisor down for good. It keeps what it has.
+            Console.Error.WriteLine(
+                $"warning: {ex.Message} — {WatchdUnitGenerator.AutostartFlag} cannot retire this process, " +
+                "watchd keeps running the binary it started on");
+            return null;
+        }
+
+        return new SupervisorSelfCheck(
+            launcher.DaemonBinaryPath(),
+            OwnProcessStartUtc(),
+            WatchdRestartPolicy.RestartsOnUnsuccessfulExit(platform));
+    }
+
+    private static DateTime? OwnProcessStartUtc()
+    {
+        try
+        {
+            using var self = Process.GetCurrentProcess();
+            return self.StartTime.ToUniversalTime();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
         }
     }
 
@@ -170,6 +230,22 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
                     table.AddRow(string.Empty, string.Empty, string.Empty, "[red]sweep failed[/]", Markup.Escape(fault));
                 }
 
+                if (_sweep?.StateWarning is { } warning)
+                {
+                    table.AddRow(
+                        string.Empty, string.Empty, string.Empty, "[yellow]state unreadable[/]", Markup.Escape(warning));
+                }
+
+                if (_sweep?.OwnDrift is { } drift)
+                {
+                    table.AddRow(
+                        string.Empty,
+                        string.Empty,
+                        string.Empty,
+                        "[yellow]retiring[/]",
+                        Markup.Escape(drift.Reason));
+                }
+
                 return table;
             }
         }
@@ -199,6 +275,7 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
     {
         private readonly Dictionary<string, string> _lastLines = [];
         private string? _lastFault;
+        private string? _lastStateWarning;
 
         public void Update(SupervisorSweep sweep)
         {
@@ -206,6 +283,12 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
             {
                 _lastFault = fault;
                 Console.WriteLine($"{Stamp()} registry sweep failed: {fault}");
+            }
+
+            if (sweep.StateWarning is { } warning && _lastStateWarning != warning)
+            {
+                _lastStateWarning = warning;
+                Console.WriteLine($"{Stamp()} {warning}");
             }
 
             foreach (var store in sweep.Stores)
@@ -218,6 +301,11 @@ public sealed class WatchdCommand : Command<WatchdCommand.Settings>
 
                 _lastLines[store.StoreKey] = line;
                 Console.WriteLine($"{Stamp()} {line}");
+            }
+
+            if (sweep.OwnDrift is { } drift)
+            {
+                Console.WriteLine($"{Stamp()} {drift.Reason}");
             }
         }
 

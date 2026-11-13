@@ -154,6 +154,109 @@ public class UsageAnalyticsTests
         rollup.Period.To.ShouldBeNull();
     }
 
+    [Fact]
+    public void Rollup_SplitsHookSessionsByVerbatimRecordedTool()
+    {
+        var root = TestDirs.NewTempDir();
+        var claude = Guid.NewGuid();
+        var qwen = Guid.NewGuid();
+        var workspaces = new List<(WorkspaceRegistryEntry, IReadOnlyList<QueryTelemetryEntry>)>
+        {
+            (RegistryEntry("alpha", root),
+            [
+                HookEntry(claude, "Read"),
+                HookEntry(qwen, "read_file"),
+                HookEntry(qwen, "read_file", minutes: 5),
+                Entry(T3, "cli", null),
+            ]),
+        };
+
+        var sessions = UsageAnalytics.Rollup(workspaces, NoStale()).Totals.Sessions!;
+
+        sessions.HookSessions.ShouldBe(2);
+        sessions.McpSessions.ShouldBe(1);
+        sessions.HookSessionsByTool!.Select(b => (b.Tool, b.Sessions)).ToArray()
+            .ShouldBe([("Read", 1), ("read_file", 1)]);
+        sessions.HookSessionsWithoutTool.ShouldBe(0);
+        sessions.Ratio.ShouldBe(0.5);
+    }
+
+    [Fact]
+    public void Rollup_HookRowsWithoutARecordedToolName_JoinOnlyTheUnknownBucket()
+    {
+        var root = TestDirs.NewTempDir();
+        var bare = Guid.NewGuid();
+        var fileOnly = Guid.NewGuid();
+        var workspaces = new List<(WorkspaceRegistryEntry, IReadOnlyList<QueryTelemetryEntry>)>
+        {
+            (RegistryEntry("alpha", root),
+            [
+                new QueryTelemetryEntry(T1, bare, "pre-read", null, 0, false, 0, 0, false, null, "hook", "1.0"),
+                HookEntry(fileOnly, null),
+                HookEntry(Guid.NewGuid(), "Read"),
+            ]),
+        };
+
+        var sessions = UsageAnalytics.Rollup(workspaces, NoStale()).Totals.Sessions!;
+
+        sessions.HookSessions.ShouldBe(3);
+        sessions.HookSessionsWithoutTool.ShouldBe(2);
+        sessions.HookSessionsByTool!.Select(b => b.Tool).ShouldBe(["Read"]);
+    }
+
+    [Fact]
+    public void Rollup_LegacyHookRows_AreBucketedByTheRecordedNameAndNothingElse()
+    {
+        var root = TestDirs.NewTempDir();
+        var legacy = Guid.NewGuid();
+        var workspaces = new List<(WorkspaceRegistryEntry, IReadOnlyList<QueryTelemetryEntry>)>
+        {
+            (RegistryEntry("alpha", root), [HookEntry(legacy, "Read")]),
+        };
+
+        var sessions = UsageAnalytics.Rollup(workspaces, NoStale()).Totals.Sessions!;
+
+        sessions.HookSessionsByTool!.Select(b => (b.Tool, b.Sessions)).ToArray().ShouldBe([("Read", 1)]);
+        sessions.HookSessionsWithoutTool.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Rollup_DoesNotFoldToolNamesThatDifferByCaseOrSpacing()
+    {
+        var root = TestDirs.NewTempDir();
+        var workspaces = new List<(WorkspaceRegistryEntry, IReadOnlyList<QueryTelemetryEntry>)>
+        {
+            (RegistryEntry("alpha", root),
+            [
+                HookEntry(Guid.NewGuid(), "Read"),
+                HookEntry(Guid.NewGuid(), "READ"),
+                HookEntry(Guid.NewGuid(), "Read "),
+            ]),
+        };
+
+        var sessions = UsageAnalytics.Rollup(workspaces, NoStale()).Totals.Sessions!;
+
+        sessions.HookSessionsByTool!.Select(b => b.Tool).ShouldBe(["READ", "Read", "Read "]);
+        sessions.HookSessions.ShouldBe(3);
+    }
+
+    private static QueryTelemetryEntry HookEntry(Guid session, string? tool, int minutes = 0) =>
+        new(
+            T1.AddMinutes(minutes),
+            session,
+            "pre-read",
+            tool is null
+                ? new { file = "src/Program.cs" }
+                : new { tool, file = "src/Program.cs" },
+            0,
+            false,
+            0,
+            0,
+            false,
+            null,
+            "hook",
+            "1.0");
+
     private static WorkspaceRegistryEntry RegistryEntry(string name, string rootPath) =>
         new(name, rootPath, WorkspaceStoreKeys.Create(name, WorkspaceCanonicalPath.Canonicalize(rootPath)), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 

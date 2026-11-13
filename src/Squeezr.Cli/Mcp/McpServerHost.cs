@@ -177,9 +177,9 @@ public static class McpServerHost
                 var health = WatchStoreHealth.Probe(SqueezrPaths.StoreDir(workspace.Root), DateTime.UtcNow);
                 if (!health.IndexerRunning)
                 {
-                    var supervised = NoIndexerNotice.WatchdSupervises(workspace.Root);
-                    workspace.WatchNotice = NoIndexerNotice.ForAgent(health, supervised);
-                    stderr.WriteLine(NoIndexerNotice.StartupLine(health, supervised));
+                    var supervision = NoIndexerNotice.ReadSupervision(workspace.Root);
+                    workspace.WatchNotice = NoIndexerNotice.ForAgent(health, supervision);
+                    stderr.WriteLine(NoIndexerNotice.StartupLine(health, supervision));
                 }
             }
 

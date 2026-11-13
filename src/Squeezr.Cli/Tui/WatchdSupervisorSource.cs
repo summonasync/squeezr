@@ -1,3 +1,4 @@
+using Squeezr.Cli.Daemons;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Indexing.Watch.Supervision;
 using Squeezr.Core.Storage;
@@ -36,20 +37,33 @@ public sealed class WatchdSupervisorSource : IWatchdSupervisorSource
     public WatchdSupervisorView Read()
     {
         var daemon = _daemon.Inspect();
+        var supervision = _state.Read();
         var sessions = _registry()
             .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(entry => entry.StoreKey, StringComparer.Ordinal)
-            .Select(Describe)
+            .Select(entry => Describe(entry, daemon.Running, supervision))
             .ToList();
-        return new WatchdSupervisorView(daemon, sessions);
+        return new WatchdSupervisorView(
+            daemon,
+            sessions,
+            supervision.Status == SupervisionStateStatus.Unreadable
+                ? $"{supervision.FilePath} {supervision.Fault}"
+                : null);
     }
 
     public bool IsWatcherRunning(string storeKey) => _health(StoreDirOf(storeKey)).IndexerRunning;
 
-    private WatchdSessionRow Describe(WorkspaceRegistryEntry entry)
+    private WatchdSessionRow Describe(
+        WorkspaceRegistryEntry entry,
+        bool supervisorAlive,
+        SupervisionSnapshot supervision)
     {
-        var desire = _state.DesireOf(entry.StoreKey);
-        if (!WorkspaceStorePaths.IsSingleSegmentKey(entry.StoreKey) || !Directory.Exists(entry.RootPath))
+        // The snapshot's own DesireOf answers the running default for an unreadable file. That is fine for the
+        // state cell — the wish is not what the body is doing there — and is never fine for the wish column,
+        // so the row carries the distinction and the renderer prints the unknown where the guess would be.
+        var desireKnown = supervision.Status != SupervisionStateStatus.Unreadable;
+        var desire = supervision.DesireOf(entry.StoreKey);
+        if (!FleetStoreKeyResolver.Resolves(entry.StoreKey, entry.RootPath))
         {
             return new WatchdSessionRow(
                 entry.StoreKey,
@@ -59,7 +73,8 @@ public sealed class WatchdSupervisorSource : IWatchdSupervisorSource
                 WatchdSessionState.Stopped,
                 "unresolved",
                 "store row does not resolve on this machine",
-                null);
+                null)
+            { DesireKnown = desireKnown, RootResolves = false };
         }
 
         var storeDir = StoreDirOf(entry.StoreKey);
@@ -72,13 +87,21 @@ public sealed class WatchdSupervisorSource : IWatchdSupervisorSource
             entry.Name,
             entry.RootPath,
             desire,
-            ClassifyState(desire, health),
+            ClassifyState(desire, supervisorAlive, health),
             liveness.State.ToString().ToLowerInvariant(),
             DescribePass(pass, now),
-            health.OwnerPid);
+            health.OwnerPid)
+        { DesireKnown = desireKnown };
     }
 
-    private static WatchdSessionState ClassifyState(WatchDesire desire, WatchStoreHealth health) =>
+    // The same dead body answers three different words, and the pair is the fleet's: stopped is a wish the
+    // operator wrote, starting is a wish the live supervisor is on its way to carry out, idle is a wish nobody
+    // is left to carry out. Naming the middle one "stopped" here while the fleet column called it "starting"
+    // made the two surfaces contradict each other about one store (113/R7, review-113-t4-01 obstacle 5).
+    private static WatchdSessionState ClassifyState(
+        WatchDesire desire,
+        bool supervisorAlive,
+        WatchStoreHealth health) =>
         desire == WatchDesire.Stopped
             ? WatchdSessionState.Stopped
             : health.State switch
@@ -86,7 +109,7 @@ public sealed class WatchdSupervisorSource : IWatchdSupervisorSource
                 WatchIndexerState.Alive => WatchdSessionState.Running,
                 WatchIndexerState.Foreign => WatchdSessionState.ManagedElsewhere,
                 WatchIndexerState.Wedged => WatchdSessionState.Wedged,
-                _ => WatchdSessionState.Stopped,
+                _ => supervisorAlive ? WatchdSessionState.Starting : WatchdSessionState.NoSupervisor,
             };
 
     private string DescribePass(PassPhaseStamp? pass, DateTime now)

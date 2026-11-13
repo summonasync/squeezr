@@ -50,13 +50,21 @@ public static class TuiWatchdSupervisor
             table.AddRow(
                 Markup.Escape(session.Name),
                 Markup.Escape(session.StoreKey),
-                DesireCell(session.Desire),
+                DesireCell(session),
                 StateCell(session.State),
                 Markup.Escape(session.Health),
                 Markup.Escape(session.LastPass));
         }
 
         console.Write(table);
+        if (view.StateFault is { } fault)
+        {
+            console.MarkupLine("[red]watchd state is unreadable[/] — no desire below is read from that file.");
+            console.MarkupLine(
+                "[red]the supervisor applies nothing[/] until the file is repaired; its rows still show live facts.");
+            console.MarkupLine($"[grey]state file: {Markup.Escape(fault)}[/]");
+        }
+
         if (!view.Daemon.Running)
         {
             console.MarkupLine("[yellow]watchd is not running — rows are the last known state.[/]");
@@ -64,15 +72,19 @@ public static class TuiWatchdSupervisor
         }
     }
 
-    private static string DesireCell(WatchDesire desire) => desire == WatchDesire.Running
-        ? "[green]running[/]"
-        : "[grey]stopped[/]";
+    private static string DesireCell(WatchdSessionRow session) => session.DesireKnown
+        ? session.Desire == WatchDesire.Running
+            ? "[green]running[/]"
+            : "[grey]stopped[/]"
+        : "[red]unknown[/]";
 
     private static string StateCell(WatchdSessionState state) => state switch
     {
         WatchdSessionState.Running => "[green]running[/]",
+        WatchdSessionState.Starting => "[yellow]starting[/]",
         WatchdSessionState.Stopped => "[grey]stopped[/]",
         WatchdSessionState.Wedged => "[red]wedged[/]",
+        WatchdSessionState.NoSupervisor => "[yellow]idle (no supervisor)[/]",
         _ => "[yellow]managed elsewhere[/]",
     };
 

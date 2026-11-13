@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Spectre.Console.Cli;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -7,7 +8,6 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
 {
-    private const string ReadToolName = "Read";
     private const string PreToolUseEvent = "PreToolUse";
 
     private const long LargeFileBytes = 256 * 1024;
@@ -17,6 +17,14 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
     public sealed class Settings : CommandSettings
     {
     }
+
+    // hosts forward the model's raw tool arguments, and Qwen quotes its numbers: a paged read arrives as
+    // "offset":"437","limit":"400". Reading a string token as a number is the only tolerance this payload
+    // gets — a genuinely broken body still throws and the hook still fails open.
+    private static readonly JsonSerializerOptions PayloadOptions = new()
+    {
+        NumberHandling = JsonNumberHandling.AllowReadingFromString
+    };
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
@@ -46,8 +54,8 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
     {
         try
         {
-            var input = JsonSerializer.Deserialize<HookPreReadInput>(payload);
-            if (input is null || !string.Equals(input.ToolName, ReadToolName, StringComparison.Ordinal))
+            var input = JsonSerializer.Deserialize<HookPreReadInput>(payload, PayloadOptions);
+            if (input is null || !HookPreReadToolNames.IsReadTool(input.ToolName))
             {
                 return;
             }
@@ -115,14 +123,14 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
         HookPreReadInput? input;
         try
         {
-            input = JsonSerializer.Deserialize<HookPreReadInput>(payload);
+            input = JsonSerializer.Deserialize<HookPreReadInput>(payload, PayloadOptions);
         }
         catch (JsonException)
         {
             return null;
         }
 
-        if (!string.Equals(input?.ToolName, ReadToolName, StringComparison.Ordinal))
+        if (!HookPreReadToolNames.IsReadTool(input?.ToolName))
         {
             return null;
         }

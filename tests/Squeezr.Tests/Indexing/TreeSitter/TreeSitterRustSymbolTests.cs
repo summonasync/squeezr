@@ -179,6 +179,34 @@ public class TreeSitterRustSymbolTests
     }
 
     [Fact]
+    public void Rust_BlockLevelConstAndStatic_KeepTheirRowsUnderTheFunctionThatHoldsThem()
+    {
+        var result = Parse("src/block.rs", """
+            fn main() {
+                const K: u32 = 1;
+                static S: u32 = 2;
+                let scratch = 3;
+            }
+            """);
+
+        // the fact this class measured in its carrier and never pinned: rust's const_item and static_item
+        // sit inside a block as happily as at module scope, and the table keys them wherever they are
+        // found, so a block-level binding is a row. Go reads the same shape the other way on purpose
+        // (Go_BodyLevelBindings_AreNotRows_WhilePackageLevelOnesAre) — a divergence chosen per language,
+        // and a divergence is only worth something once both sides of it carry a pin
+        result.Symbols.Select(s => (s.Name, s.Kind, s.ContainerName)).ShouldBe(
+        [
+            ("main", SymbolKind.Function, null),
+            ("K", SymbolKind.Field, "main"),
+            ("S", SymbolKind.Field, "main"),
+        ]);
+
+        // 'let' is the block-level form rust spells differently and the table does not key, so a local
+        // binding stays a local and yields no row of its own
+        result.Symbols.ShouldNotContain(s => s.Name == "scratch");
+    }
+
+    [Fact]
     public void Rust_Chunks_AreBuiltPerSymbolWithMatchingSpans()
     {
         var result = Parse("src/lib.rs", ItemsSource);
@@ -210,24 +238,34 @@ public class TreeSitterRustSymbolTests
     }
 
     [Fact]
-    public void Extract_UnknownLanguageLabel_YieldsNoRowsWhileRoutedLabelsYieldTheirOwn()
+    public void CrossGrammarSilence_HoldsForEveryLabelExceptTheFunctionDeclarationTwin()
     {
         using var jsGrammar = new Language("JavaScript");
         using var jsParser = new Parser(jsGrammar);
         using var jsTree = jsParser.Parse("function add(a, b) {\n  return a + b;\n}\n")!;
 
-        // the unrouted label has to be tried against a tree whose node names the js/ts table does
-        // match: function_declaration is exactly the name tree-sitter-go shares with javascript, so a
-        // js/ts fallback for an unknown label is only visible when the pin is built this way
+        // This pin was written as 'an unrouted label must not borrow the js/ts table', and the shape it
+        // chose was right: a tree whose node names the js/ts table DOES match, so a fallback would show
+        // up. What it asserted about go was true only because go had no table yet — a vacuous green of
+        // exactly the kind T2/T3 kept naming. 'function_declaration' is the one kind name javascript
+        // and tree-sitter-go share, so with the go table landed in T4 this call answers one row, and the
+        // line says that out loud instead of pretending the silence was structural.
+        // The exposure (a file whose label disagrees with the grammar that parsed it gets partial rows)
+        // is reported as an obstacle; what production guarantees is that the pair cannot be assembled —
+        // pinned by Provider_CouplesEveryRoutedExtensionToOneGrammarAndOneTable
         TsSymbolExtractor.Extract(jsTree.RootNode!, "javascript").Count.ShouldBe(1);
         TsSymbolExtractor.Extract(jsTree.RootNode!, "python").ShouldBe([]);
-        TsSymbolExtractor.Extract(jsTree.RootNode!, "go").ShouldBe([]);
+        TsSymbolExtractor.Extract(jsTree.RootNode!, "go").Select(s => (s.Name, s.Kind)).ShouldBe(
+            [("add", SymbolKind.Function)]);
 
         using var rustGrammar = new Language("Rust");
         using var rustParser = new Parser(rustGrammar);
         using var rustTree = rustParser.Parse(ItemsSource)!;
 
+        // rust shares only its root kind with go, so every foreign label stays silent on a rust tree
         TsSymbolExtractor.Extract(rustTree.RootNode!, "rust").Count.ShouldBe(16);
+        TsSymbolExtractor.Extract(rustTree.RootNode!, "go").ShouldBe([]);
+        TsSymbolExtractor.Extract(rustTree.RootNode!, "python").ShouldBe([]);
     }
 
     [Fact]

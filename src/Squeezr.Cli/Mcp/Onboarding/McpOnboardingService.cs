@@ -51,6 +51,13 @@ public sealed class McpOnboardingService
             InstructionsWriter.Upsert(instructionPath);
             instructionsWritten = true;
         }
+        var hooksArmed = false;
+        if (HooksBlock.ForClient(client, environment.CommandPath) is { } block &&
+            McpClientPaths.HooksPath(client, environment, scope) is { } hooksPath)
+        {
+            await ManagedHooksWriter.UpsertAsync(hooksPath, block, cancellationToken);
+            hooksArmed = true;
+        }
         return new McpInstallResult(
             ClientName(client),
             ScopeName(scope),
@@ -58,7 +65,8 @@ public sealed class McpOnboardingService
             configPath,
             instructionsWritten,
             decision.Warning,
-            null);
+            null,
+            hooksArmed);
     }
 
     public async Task<McpRemoveResult> RemoveAsync(
@@ -82,6 +90,12 @@ public sealed class McpOnboardingService
         }
         var instructionsRemoved = InstructionBlockExists(instructionPath);
         InstructionsWriter.Remove(instructionPath);
+        var hooksRemoved = false;
+        if (HooksBlock.ForClient(client, environment.CommandPath) is { } block &&
+            McpClientPaths.HooksPath(client, environment, scope) is { } hooksPath)
+        {
+            hooksRemoved = await ManagedHooksWriter.RemoveAsync(hooksPath, block, cancellationToken);
+        }
         return new McpRemoveResult(
             ClientName(client),
             ScopeName(scope),
@@ -89,7 +103,8 @@ public sealed class McpOnboardingService
             configPath,
             instructionsRemoved,
             decision.Warning,
-            null);
+            null,
+            hooksRemoved);
     }
 
     public async Task<McpClientDiagnostics> DoctorAsync(
@@ -133,6 +148,7 @@ public sealed class McpOnboardingService
         {
             warnings.AddRange(TrustedProjectWarning);
         }
+        var hookStatus = await ResolveHookStatusAsync(client, environment, cancellationToken);
         return new McpClientDiagnostics(
             ClientName(client),
             ClientDetector.IsInstalled(client, environment, _locator),
@@ -150,7 +166,29 @@ public sealed class McpOnboardingService
             projectStale,
             expectedPath,
             indexState,
-            watch);
+            watch,
+            hookStatus);
+    }
+
+    private static async Task<string> ResolveHookStatusAsync(
+        McpClientDescriptor client,
+        McpOnboardingEnvironment environment,
+        CancellationToken cancellationToken)
+    {
+        if (HooksBlock.ForClient(client, environment.CommandPath) is not { } block ||
+            McpClientPaths.HooksPath(client, environment, McpScope.User) is not { } userHooksPath)
+        {
+            return HooksBlock.LayoutUnverifiedReason;
+        }
+        if (await ManagedHooksWriter.IsArmedAsync(userHooksPath, block, cancellationToken))
+        {
+            return HooksBlock.ArmedState;
+        }
+        var projectHooksPath = McpClientPaths.HooksPath(client, environment, McpScope.Project);
+        return projectHooksPath is not null &&
+            await ManagedHooksWriter.IsArmedAsync(projectHooksPath, block, cancellationToken)
+            ? HooksBlock.ProjectArmedState
+            : HooksBlock.NotArmedState;
     }
 
     private static ToolErrorPayload? WorkspaceState(string workspaceRoot, string sessionDirectory)
