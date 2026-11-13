@@ -291,13 +291,18 @@ public sealed class HookPostEditCommandTests : IAsyncLifetime
         var (home, root, repo) = await NewWorkspaceWithRepoAsync();
         var secret = Write(repo, ".env", "API_KEY=PostEditEnvCanary42\n");
         var normal = Write(repo, "Normal.cs", "class Normal { int NormalToken = 0; }\n");
+        // announced together, in one door call: the batch has to show it indexed the path it may read and
+        // refused the one it may not. Before the scoped route this case relied on the walk sweeping the
+        // neighbour; the door no longer walks, so the neighbour is announced too and the refusal still holds
+        var payload = "{\"tool_name\":\"MultiEdit\",\"tool_input\":{\"edits\":[" +
+                      $"{{\"file_path\":\"{secret}\"}},{{\"file_path\":\"{normal}\"}}]}}}}";
 
-        var hook = await CliTestProcess.RunPipedAsync(home, EditPayload("edit", secret), root, "hook", "post-edit");
+        var hook = await CliTestProcess.RunPipedAsync(home, payload, root, "hook", "post-edit");
 
         hook.ExitCode.ShouldBe(0);
         hook.StdOut.ShouldBeEmpty();
-        // the pass itself ran — the ordinary walk picks up the drift — while the guarded path stayed out
-        (await SearchFindsAsync(home, root, "NormalToken")).ShouldBeTrue();
+        (await SearchFindsAsync(home, root, "NormalToken")).ShouldBeTrue(
+            "the pass itself ran through the ordinary ingestion ruleset");
         (await SearchFindsAsync(home, root, "PostEditEnvCanary42")).ShouldBeFalse();
         (await SearchFindsAsync(home, root, "API_KEY")).ShouldBeFalse();
 
