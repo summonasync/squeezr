@@ -14,7 +14,7 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class SearchCommand : Command<SearchCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : WorkspaceTargetSettings
     {
         [CommandArgument(0, "<query>")]
         public string Query { get; set; } = string.Empty;
@@ -65,7 +65,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     settings.Json);
             }
 
-            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var workspaceRoot = settings.RequireWorkspaceRoot();
             var sw = Stopwatch.StartNew();
 
             var warnings = EmbeddingRuntimeFactory.TryCreate(

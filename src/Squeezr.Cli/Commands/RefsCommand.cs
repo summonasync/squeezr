@@ -11,7 +11,7 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class RefsCommand : Command<RefsCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : WorkspaceTargetSettings
     {
         [CommandArgument(0, "<symbol>")]
         public string Symbol { get; set; } = string.Empty;
@@ -27,7 +27,7 @@ public sealed class RefsCommand : Command<RefsCommand.Settings>
     {
         try
         {
-            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var workspaceRoot = settings.RequireWorkspaceRoot();
             var sw = Stopwatch.StartNew();
             var result = new RefLookup(workspaceRoot).Find(settings.Symbol, settings.Repo);
             // repo belongs in the key: two repos over the same relative layout (a checkout plus its

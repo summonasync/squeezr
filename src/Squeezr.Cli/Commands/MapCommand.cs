@@ -10,7 +10,7 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class MapCommand : Command<MapCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : WorkspaceTargetSettings
     {
         [CommandOption("--repo")]
         public string? Repo { get; set; }
@@ -32,7 +32,7 @@ public sealed class MapCommand : Command<MapCommand.Settings>
     {
         try
         {
-            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var workspaceRoot = settings.RequireWorkspaceRoot();
             var sw = Stopwatch.StartNew();
             var result = new RepoMapper(workspaceRoot).Build(
                 settings.Repo,

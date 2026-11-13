@@ -20,7 +20,9 @@ public sealed record ToolEnvelope(
     [property: JsonPropertyName("fileFreshness"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<FileFreshness>? FileFreshness = null,
     [property: JsonPropertyName("freshness"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    AnswerFreshness? Freshness = null)
+    AnswerFreshness? Freshness = null,
+    [property: JsonPropertyName("subject"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    AnswerSubjectBody? Subject = null)
 {
     public static ToolEnvelope Wrap(
         object? data,
@@ -75,6 +77,21 @@ public sealed record ToolEnvelope(
 
     public ToolEnvelope WithWarning(string? warning) =>
         warning is null ? this : this with { Warnings = [.. Warnings, warning] };
+
+    // The subject rides the session, not the answer: one serve process describes one store, so the facts are
+    // read once and stamped on every envelope that leaves the gate. An answer that already named its subject
+    // keeps its own — the stamp is a fallback, never a overwrite.
+    public ToolEnvelope WithSubject(AnswerSubjectBody? subject, string? crossTreeWarning) =>
+        subject is null
+            ? this
+            : this with
+            {
+                Subject = Subject ?? subject,
+                Warnings = crossTreeWarning is null ||
+                           Warnings.Contains(crossTreeWarning, StringComparer.Ordinal)
+                    ? Warnings
+                    : [.. Warnings, crossTreeWarning],
+            };
 
     // what the caller actually pays for this answer: the budgeted content plus the freshness story the
     // envelope ships beside it. telemetry reads the answer through this number, so stats cannot come out

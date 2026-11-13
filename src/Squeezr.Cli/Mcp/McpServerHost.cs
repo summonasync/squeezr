@@ -105,7 +105,7 @@ public static class McpServerHost
                 $"warning: '{workspace.Root}' is not an initialized workspace; tool calls will return an error");
         }
 
-        var gate = new McpToolGate(workspace.TakeWatchNotice);
+        var gate = new McpToolGate(workspace.TakeWatchNotice, workspace.Subject);
         var cache = new ToolResponseCache(workspaceRoot);
         var identity = new ClientIdentity();
         var services = new ServiceCollection();

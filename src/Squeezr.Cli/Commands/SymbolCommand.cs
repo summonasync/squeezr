@@ -10,7 +10,7 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class SymbolCommand : Command<SymbolCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : WorkspaceTargetSettings
     {
         [CommandArgument(0, "<name>")]
         public string Name { get; set; } = string.Empty;
@@ -35,7 +35,7 @@ public sealed class SymbolCommand : Command<SymbolCommand.Settings>
     {
         try
         {
-            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var workspaceRoot = settings.RequireWorkspaceRoot();
             var sw = Stopwatch.StartNew();
             var result = new SymbolLookup(workspaceRoot).Find(
                 settings.Name,

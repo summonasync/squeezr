@@ -9,7 +9,7 @@ namespace Squeezr.Cli.Commands;
 
 public sealed class ExpandCommand : Command<ExpandCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : WorkspaceTargetSettings
     {
         [CommandArgument(0, "<file>")]
         public string File { get; set; } = string.Empty;
@@ -37,7 +37,7 @@ public sealed class ExpandCommand : Command<ExpandCommand.Settings>
     {
         try
         {
-            var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
+            var workspaceRoot = settings.RequireWorkspaceRoot();
             var sw = Stopwatch.StartNew();
             var result = new SpanExpander(workspaceRoot).Expand(
                 settings.File,

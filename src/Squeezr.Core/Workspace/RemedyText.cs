@@ -12,6 +12,7 @@ public static class RemedyText
     public const string WorktreeDropCommand = "squeezr worktree drop";
     public const string WorktreeInitCommand = "squeezr worktree init";
     public const string WorkspaceRepairCommand = "squeezr workspace repair";
+    public const string WorkspaceListCommand = "squeezr workspace list";
     public const string ServicesUp = "squeezr services up";
     public const string VectorsReconcileApply = "squeezr vectors reconcile --apply";
     public const int ScopeHintSiblingLimit = 3;
