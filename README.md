@@ -898,11 +898,16 @@ Codex — AGENTS.md, Qwen — QWEN.md); `mcp remove` takes it back out.
 
 `squeezr mcp doctor` — the attach checkup: client found, entry present
 (user/project), binary on PATH, workspace indexed, headless status through the
-client's CLI. It also reads the managed hook block that `mcp install` arms in
-the same pass and `mcp remove` strips: one `hook pre-read: <state>` line per
-client (`armed`, `armed (project scope)`, `not armed`, or the reason the layout
-cannot be armed at all — hook layout unverified), plus an additive `hookStatus`
-per entry in `--json`; the arming rules are under **Advisory hook**. Plus
+client's CLI. It also reads the managed hook blocks that `mcp install` arms in
+the same pass and `mcp remove` strips, one line PER ARM — `hook pre-read:
+<state>` and `hook post-edit: <state>` — each with its own state (`armed`,
+`armed (project scope)`, `not armed`, or the reason the layout cannot be armed
+at all — hook layout unverified). Per-arm is the point: a store armed by an
+install that predates the write-side hook reports `hook pre-read: armed` beside
+`hook post-edit: not armed`, and the two stay distinguishable until the block is
+re-installed. In `--json` the same split rides as the additive `hookStatus` and
+`postEditHookStatus` keys; the arming rules are under **Advisory hook** and
+**Write-side hook**. Plus
 detection of **stale registrations**: if a client config
 names a path other than the stable one, doctor shows `stale` with the pair
 "registered → expected" and a ready repair command (`squeezr mcp install
@@ -1047,14 +1052,31 @@ stat of the file, so it is cheap to run on every read.
 
 **Arming is `squeezr mcp install`'s job now.** `<removed 2026-11-11 — 114/T3>`
 ~~The snippet is applied by hand (crew policy: agents are forbidden from
-writing hook configs).~~</removed> One command writes the managed block,
-`mcp doctor` reports the state it measured, `mcp remove` takes it back out:
+writing hook configs).~~</removed> One command writes both managed hook blocks —
+the advisory read arm (`PreToolUse`) documented above and the write-side arm
+(`PostToolUse`) documented under **Write-side hook** — `mcp doctor` reports the
+state it measured per arm, `mcp remove` takes both back out. The matcher over
+each runtime's tool ids is quoted from the shipped command (the `hooks` object
+lands as an additive sibling of `mcpServers`; Claude's hook file
+`~/.claude/settings.json` is a different file from the `~/.claude.json` server
+entry):
 
-| Client | armed matcher | hooks file (user scope) | doctor state |
-|---|---|---|---|
-| Claude Code | `Read` | `~/.claude/settings.json` — a different file from the `~/.claude.json` server entry | `armed` |
-| Qwen Code | `^read_file$` (anchored: Qwen evaluates matchers as regex) | `~/.qwen/settings.json` — `hooks` lands as an additive sibling of `mcpServers` | `armed` |
-| Kimi Code, Codex CLI | — | not armed (hook layout unverified) | `not armed (hook layout unverified)` |
+- **Claude Code** — read `Read`, write `Edit|Write|MultiEdit|NotebookEdit`;
+  both arms report `armed`.
+- **Qwen Code** — read `^read_file$`, write
+  `^(edit|write_file|notebook_edit)$`; both arms report `armed`. Qwen
+  evaluates matchers as regex, so every Qwen matcher is anchored; Claude
+  matches the exact tool name and takes the bare id or its alternation as
+  written.
+- **Kimi Code, Codex CLI** — neither arm arms; `mcp doctor` answers
+  `not armed (hook layout unverified)` and invents no path for a layout nobody
+  checked.
+
+A store armed before the write arm existed carries the read block alone, so the
+two `doctor` lines come apart: `hook pre-read: armed` beside `hook post-edit:
+not armed`. Re-running `mcp install` on such a config inserts the `PostToolUse`
+block and leaves the read block content-identical — the upgrade is an addition,
+not a rewrite.
 
 The written entry takes this shape — the command is the canonical absolute path
 of the binary, quoted when it contains a space:
@@ -1072,6 +1094,17 @@ of the binary, quoted when it contains a space:
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(edit|write_file|notebook_edit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/you/.local/bin/squeezr hook post-edit"
+          }
+        ]
+      }
     ]
   }
 }
@@ -1083,11 +1116,19 @@ of the binary, quoted when it contains a space:
 skips the arm: it rides with the client registration. There is no
 hook-specific opt-out.
 
-What counts as managed is defined strictly: the command equals the one install
-computes, or it is `<exe> hook pre-read` with the executable named `squeezr`.
-So a snippet applied by hand before this feature is managed too — install
-normalizes it into the canonical form, remove strips it. Merge-safety, stated
-at the altitude it was proven: foreign entries under `PreToolUse` are preserved
+What counts as managed is defined strictly and identically per arm: the command
+equals the one install computes, or it ends with ` hook pre-read` (read arm) or
+` hook post-edit` (write arm) with the executable named `squeezr` or
+`squeezr.exe`. So a snippet applied by hand before either arm existed is managed
+too — install normalizes it into the canonical form, remove strips it. As
+measured on hand-built configs, this rule cuts one specific way: a plain edit of
+the command's **path** inside a managed block keeps the arm owned (the
+executable token is still `squeezr`), so a re-install stale-repairs it to the
+current path and does not duplicate it; only an edit that breaks the command
+**token or the executable name** (`squeezr2 hook pre-read`, say) turns the entry
+foreign, and a foreign entry is preserved byte-for-byte — install adds its own
+alongside, remove touches only its own. Merge-safety, stated at the altitude it
+was proven: foreign entries under `PreToolUse` and `PostToolUse` are preserved
 by canonical serialization, and whole-file byte-identity is proven against the
 canonical pre-image — the JSON round-trip reformats the file (the same posture
 as the direct config writer), a foreign shape the merge cannot resolve refuses
@@ -1096,10 +1137,13 @@ a `.bak`. The `.bak` a re-install does leave behind comes from the
 server-entry write; the hook upsert stays silent because the block is already
 canonical.
 
-The `hook pre-read armed` line and the additive `hooksArmed` key claim a state,
-not a write: they are true for any client whose hook layout resolves, so an
-idempotent re-run still says armed having moved no byte. `mcp doctor` is the
-place that answers what is actually on disk.
+The `hook pre-read armed` / `hook post-edit armed` lines and the additive
+`hooksArmed` / `postEditHooksArmed` keys claim a state, not a write: each is
+true for its arm whenever that client's hook layout resolves, so an idempotent
+re-run still says both armed having moved no byte — and the two arms are
+reported apart, so a config that carries only the read block answers
+`hook post-edit: not armed` while the read line says `armed`. `mcp doctor` is
+the place that answers what is actually on disk.
 
 **Why the hook exists, in the numbers.** Every matching call into a registered
 workspace appends a telemetry row (`client: "hook"`), and `squeezr usage --json`
@@ -1113,6 +1157,88 @@ through two tools is counted in both, so buckets overlap and are not exhaustive
 outside the per-tool list. The runtime name beside a tool is a reading rule,
 not a matcher: a `Read` row is called Claude Code because that is what the row
 says, not because some other host was ruled out.
+
+### Write-side hook: `squeezr hook post-edit`
+
+The second managed arm — a PostToolUse hook on the edit-family tools, for the
+same two runtimes whose hook layout the read arm verifies, armed by the same
+`squeezr mcp install` pass. Where the read arm is *advisory* (it never touches
+the index), this one *acts*: after the agent edits, writes or notebooks a file
+inside a registered workspace, the command runs one path-scoped incremental
+index pass over exactly the paths the payload announced, so the very next query
+reads the file it just changed instead of a stale snapshot. It is deterministic
+invalidation that runs **alongside** the watch engine, never in place of it:
+`watch`, `serve --watch` and `watchd` keep doing the event-driven job for every
+change the harness did not announce. A human who types `squeezr hook post-edit`
+by hand sees only silence — the command reads its payload on stdin, gets
+nothing, and exits 0; the verb is a harness door, not a user-facing command, so
+to index from a terminal use `squeezr index`.
+
+**When it steps aside.** Before doing any work it reads the store's heartbeat
+files (`watch.heartbeat`, `serve-watch.heartbeat`). A fresh beat from a live
+watcher means the event path already owns this store's freshness, so the door
+no-ops and lets the watcher carry the change — two writers would only race. No
+live watcher means the door does the pass itself. Whatever the harness did not
+announce (a file edited outside the workspace, a change no tool reported) is
+left to the event path or a `squeezr index` walk; the door never reaches past
+the announced paths, and that is deliberate — sweeping the whole repo is the
+walk's job, not a hook that has to answer between two tool calls.
+
+**What it answers, and what it costs.** The door's cost is proportional to the
+files it was handed, not to the repository: the scoped route reads the announced
+paths and skips the repo walk, so its wall clock stays near the one unavoidable
+floor — CLI startup plus a single solution-open, a few **seconds** on a
+project-bearing repo — while a full index on the same store grows with size
+(measured at three sizes: door-vs-full-index ratio 0.42 at 300 files, 0.14 at
+1500, 0.07 at 3000, the door's own seconds barely moving as the repo grows
+tenfold). Nothing here is instant: there is no sub-second claim, and the floor
+is dominated by opening the solution once per invocation. Embeddings are not
+computed inline either — the vector work is deferred to a watcher, `serve` or
+`index` pass exactly as the watch route defers it, so a hook never waits on
+provider health.
+
+**Fail-open, by construction.** The exit code is always 0 and stdout stays
+empty. A payload that will not parse, names a tool outside the edit family,
+carries no path, points outside every workspace repo, hits a locked store past a
+short bounded wait, or trips any internal error — all of them exit 0 having done
+nothing. A hook that could block or throw would block the pipeline it watches,
+so the command is written so that the only observable failure mode is silence.
+The pass itself runs through the ordinary ingestion ruleset: ignore cascade and
+secret-guard denial included, so an edit to a guarded path lands in the index
+through the door no more than it would through `squeezr index`.
+
+**Tool ids, said honestly.** The armed matchers are the runtimes' own
+edit-tool names, compared Ordinal-exact and never normalized: Qwen
+`^(edit|write_file|notebook_edit)$`, Claude
+`Edit|Write|MultiEdit|NotebookEdit`. Two of these ids are armed on evidence
+weaker than the rest and are named as such rather than glossed: Claude's
+`MultiEdit` and Qwen's `notebook_edit` are *not observed in the local
+transcript corpus* — zero occurrences — but they are handled ids: the door
+parses the `edits[]` and `notebook_path` payload shapes those tools send, and
+the matcher arms them so an older or alternate runtime that does emit them is
+not silently left unindexed. No frequency claim is made for either; the other
+ids are corpus-evidenced. `.ipynb` through `notebook_edit` is ingested as plain
+text (raw JSON, unknown language — there is no cell parser in the indexer), so
+the notebook becomes searchable and reference-able as a document, *not*
+decomposed into cells.
+
+**Renews the row it was handed, nothing more.** A delete or rename reaches the
+door as a path that no longer exists, and the scoped route handles it as a
+removal for that path. The boundary is that the door acts only on announced
+paths: a rename announced as the **new** path alone updates the new row and
+leaves the old one until a walk reaps it. Answers stay correct anyway — search
+suppresses the dead token and `squeezr status` names the leftover row as drift
+— so a stale index here never returns a wrong hit; the sweeping itself is the
+walk's job. For the same reason the `status` guard counters (`withheld`)
+accumulate across successive scoped passes rather than describing one call in
+absolute terms; the next full index re-normalizes them.
+
+**Upgrade path.** A client config armed before this feature carries only the
+read block; `mcp doctor` shows it as `hook pre-read: armed` beside `hook
+post-edit: not armed`. Re-run `squeezr mcp install` to gain the second block —
+the install writes `PostToolUse` additively and leaves the existing
+`PreToolUse` block content-identical — and `mcp doctor` reports each arm's
+state separately, `mcp remove` strips both.
 
 ### Tools
 
