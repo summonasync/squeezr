@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-command installer for machines without a Squeezr checkout:
 #   curl -fsSL <raw-url>/scripts/install-release.sh | bash
-# Resolves the latest published Gitea release (or the tag given via
+# Resolves the latest published release (or the tag given via
 # --version), downloads the linux-x64 tar.gz, unpacks it into
 # ~/apps/squeezr/<tag> and repoints the squeezr symlink in ~/.local/bin.
 # When the account has watchd autostart installed, the freshly unpacked build
@@ -11,20 +11,35 @@
 # a source checkout instead, use scripts/install.sh.
 #
 # Usage: install-release.sh [--version <tag>] [--force]
-# Env:   SQUEEZR_GITEA       - Gitea base URL (default: http://REDACTED-LAN-HOST:3000)
-#        SQUEEZR_INSTALL_DIR - versioned install store (default: ~/apps/squeezr)
-#        SQUEEZR_BIN_DIR     - symlink directory (default: ~/.local/bin)
+# Env:   SQUEEZR_RELEASES_BASE - release API repo base (default https://api.github.com/repos/summonasync/squeezr)
+#        SQUEEZR_GITEA         - retired release host, kept only as a fallback when
+#                                SQUEEZR_RELEASES_BASE is unset; then the old API
+#                                layout is derived from it and a warning is printed
+#        SQUEEZR_INSTALL_DIR   - versioned install store (default: ~/apps/squeezr)
+#        SQUEEZR_BIN_DIR       - symlink directory (default: ~/.local/bin)
 set -euo pipefail
 
-gitea="${SQUEEZR_GITEA:-http://REDACTED-LAN-HOST:3000}"
-repo_api="$gitea/api/v1/repos/REDACTED-FORGE-NS/Squeezr"
-releases_page="$gitea/REDACTED-FORGE-NS/Squeezr/releases"
+repo_api="${SQUEEZR_RELEASES_BASE:-}"
+releases_page='https://github.com/summonasync/squeezr/releases'
+if [[ -n "$repo_api" ]]; then
+  repo_api="${repo_api%/}"
+elif [[ -n "${SQUEEZR_GITEA:-}" ]]; then
+  # The retired host still lives in stale configs. Deriving its old API layout keeps
+  # such a config resolving against a real endpoint instead of failing silently, but
+  # it must be said out loud once: the replacement variable is named in the warning.
+  host="${SQUEEZR_GITEA%/}"
+  repo_api="$host/api/v1/repos/REDACTED-FORGE-NS/Squeezr"
+  releases_page="$host/REDACTED-FORGE-NS/Squeezr/releases"
+  echo "install-release: warning: SQUEEZR_GITEA is deprecated and names a retired host - set SQUEEZR_RELEASES_BASE instead (deriving $repo_api)" >&2
+else
+  repo_api='https://api.github.com/repos/summonasync/squeezr'
+fi
 
 usage() {
   cat <<'USAGE'
 Usage: install-release.sh [--version <tag>] [--force]
 
-Installs the Squeezr CLI from a published Gitea release into
+Installs the Squeezr CLI from a published release into
 $SQUEEZR_INSTALL_DIR/<tag> (default ~/apps/squeezr) and repoints the
 squeezr symlink in $SQUEEZR_BIN_DIR (default ~/.local/bin).
 
@@ -38,7 +53,8 @@ Options:
   -h, --help       show this help
 
 Environment:
-  SQUEEZR_GITEA        Gitea base URL (default http://REDACTED-LAN-HOST:3000)
+  SQUEEZR_RELEASES_BASE release API repo base (default https://api.github.com/repos/summonasync/squeezr)
+  SQUEEZR_GITEA        deprecated fallback, used only when SQUEEZR_RELEASES_BASE is unset
   SQUEEZR_INSTALL_DIR  versioned install store (default ~/apps/squeezr)
   SQUEEZR_BIN_DIR      symlink location (default ~/.local/bin)
 USAGE
@@ -101,7 +117,7 @@ fetch_json() {
   case "$code" in
     200) ;;
     404) die "release not found at $url - published releases are listed on $releases_page" ;;
-    *) die "Gitea API returned HTTP $code for $url" ;;
+    *) die "release API returned HTTP $code for $url" ;;
   esac
 }
 
