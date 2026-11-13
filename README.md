@@ -180,18 +180,29 @@ troubleshooting lives in [`skills/squeezr/SKILL.md`](skills/squeezr/SKILL.md);
 short version:
 
 ```bash
-curl -fsSL http://REDACTED-LAN-HOST:3000/REDACTED-FORGE-NS/Squeezr/raw/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/summonasync/squeezr/main/scripts/install-release.sh | bash
 squeezr services up
 squeezr init && squeezr add . && squeezr index --events
 squeezr mcp install --all --scope user --yes
 ```
 
-1. The installer resolves the latest published Gitea release, unpacks it into
-   `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if
-   that dir is not on PATH, the script says so — fix the shell profile and open
-   a new terminal). Pin or roll back with `--version <tag>`. **Linux only** —
-   releases are published for `linux-x64` alone. On Windows, build the setup
-   executable locally (`powershell -File scripts\build-installer.ps1`) or
+1. The installer resolves the latest published release through the GitHub Releases
+   API (`https://api.github.com/repos/summonasync/squeezr`, or the tag given via
+   `--version <tag>` to pin or roll back), unpacks it into `~/apps/squeezr/<tag>/`
+   and repoints the `~/.local/bin/squeezr` symlink (if that dir is not on PATH, the
+   script says so — fix the shell profile and open a new terminal). `SQUEEZR_RELEASES_BASE`
+   retargets the resolution at another repo's release API base; it covers the API
+   base only, so the releases page the script prints on a miss stays the GitHub page.
+   `SQUEEZR_GITEA` is a deprecated fallback, consulted only when
+   `SQUEEZR_RELEASES_BASE` is unset: the script derives the old API layout from it,
+   warns on stderr and names the replacement variable.
+   **This line does not work anonymously yet:** the repository is currently private,
+   so an unauthenticated curl of it answers `404` (measured, not assumed), and the
+   script sends no credentials of its own. The distribution plumbing ships here;
+   the public store arrives when the owner flips the repository's visibility. Until
+   then install from a checkout with `scripts/install.sh`.
+   **Linux only** — releases are published for `linux-x64` alone. On Windows, build
+   the setup executable locally (`powershell -File scripts\build-installer.ps1`) or
    install from source with `powershell -File scripts\install.ps1`.
 2. Starts the managed Qdrant + Ollama stack; the first run pulls ~3.6 GB of
    images. If docker is missing, stop and ask the human — do not improvise.
@@ -693,9 +704,9 @@ registers in "Apps & features" — uninstall goes from there, not from hunting
 a script in a forgotten checkout. Run with elevation, it offers a
 per-machine install into `%ProgramFiles%\Squeezr`.
 
-No ready Windows builds exist anywhere and none will: Gitea releases are built
-for `linux-x64` only, there is no Windows runner. The package is built
-locally, on any Windows machine:
+No ready Windows builds exist anywhere and none will: published releases carry
+`linux-x64` only — the release workflow has no Windows job — so the package is
+built locally, on any Windows machine:
 
 ```powershell
 # prerequisite: Inno Setup 6 (plus the .NET 10 SDK)

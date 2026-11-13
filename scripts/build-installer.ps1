@@ -5,8 +5,8 @@
 .DESCRIPTION
   Publishes a self-contained single-file build and packages it with Inno Setup 6
   into artifacts\installer\SqueezrSetup-<version>-<rid>.exe. Runs on any Windows
-  machine with the .NET 10 SDK and Inno Setup 6 - no CI runner and no Gitea
-  release are involved; Windows packaging is deliberately local-only.
+  machine with the .NET 10 SDK and Inno Setup 6 - the release workflow has no
+  Windows job, so Windows packaging is deliberately local-only.
 
   Inno Setup 6 is a build prerequisite. It is looked up on PATH, in the HKCU and
   HKLM uninstall keys and in the default install directories, so a per-user
