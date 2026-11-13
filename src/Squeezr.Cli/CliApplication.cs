@@ -129,6 +129,8 @@ public static class CliApplication
                 hook.SetDescription("Produce payloads for AI client hooks (advisory, never blocks a tool call)");
                 hook.AddCommand<HookPreReadCommand>("pre-read")
                     .WithDescription("PreToolUse nudge on read-tool calls: point large reads at the indexed navigation tools");
+                hook.AddCommand<HookPostEditCommand>("post-edit")
+                    .WithDescription("PostToolUse path-scoped reindex after edit-tool calls: silent when a live watcher owns the store");
             });
             McpCommandRegistration.AddMcpBranch(config);
         });
