@@ -175,6 +175,32 @@ startup_timeout_sec = 30
         root.TryGetProperty("projectScopeEntry", out _).ShouldBeTrue();
         root.TryGetProperty("hookStatus", out var hookStatusProp).ShouldBeTrue();
         hookStatusProp.GetString().ShouldBe(HooksBlock.LayoutUnverifiedReason);
+        root.TryGetProperty("postEditHookStatus", out var postEditProp).ShouldBeTrue();
+        postEditProp.GetString().ShouldBe(HooksBlock.LayoutUnverifiedReason);
+    }
+
+    [Fact]
+    public async Task Doctor_JsonOutput_Transitional114Config_NamesPerArmStatesAdditively()
+    {
+        var home = TestDirs.NewTempDir();
+        var workspace = TestDirs.NewTempDir();
+        var environment = new McpOnboardingEnvironment(home, workspace, Path.Combine(home, "bin", "squeezr"), null);
+        var service = new McpOnboardingService(new ClientCliLocator(string.Empty));
+        var client = McpClientRegistry.Get(McpClientId.Qwen);
+        var settingsPath = Path.Combine(home, ".qwen", "settings.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+        var legacy = HooksBlock.ForClient(client, environment.CommandPath)!;
+        File.WriteAllText(settingsPath, new JsonObject
+        {
+            ["hooks"] = new JsonObject { ["PreToolUse"] = new JsonArray(legacy.ToJson()) },
+        }.ToJsonString());
+
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+        var serialized = JsonSerializer.Serialize(diagnostics, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        using var document = JsonDocument.Parse(serialized);
+
+        document.RootElement.GetProperty("hookStatus").GetString().ShouldBe(HooksBlock.ArmedState);
+        document.RootElement.GetProperty("postEditHookStatus").GetString().ShouldBe(HooksBlock.NotArmedState);
     }
 
     [Fact]
