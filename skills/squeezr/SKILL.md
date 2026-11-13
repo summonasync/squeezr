@@ -212,7 +212,8 @@ carries the change), and it never blocks or errors your pipeline: any payload
 it cannot use, a locked store past a short wait, a path outside the workspace —
 all exit silently with code 0. That silence is the design, not a stall: the
 door answers for the announced files only, in a few seconds dominated by
-opening the solution once (not sub-second, and it does not grow with repo
+opening the solution once per repository in the batch (not sub-second, and it
+does not grow with repo
 size); unannounced drift is the watcher's or `squeezr index`'s job. If you run
 `squeezr hook post-edit` yourself in a terminal, you get nothing back — it
 reads its payload on stdin, so there is no result to show; to index by hand

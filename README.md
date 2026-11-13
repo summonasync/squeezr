@@ -1187,12 +1187,13 @@ walk's job, not a hook that has to answer between two tool calls.
 **What it answers, and what it costs.** The door's cost is proportional to the
 files it was handed, not to the repository: the scoped route reads the announced
 paths and skips the repo walk, so its wall clock stays near the one unavoidable
-floor — CLI startup plus a single solution-open, a few **seconds** on a
+floor — CLI startup plus one solution-open per repository the batch touched,
+a few **seconds** on a
 project-bearing repo — while a full index on the same store grows with size
 (measured at three sizes: door-vs-full-index ratio 0.42 at 300 files, 0.14 at
 1500, 0.07 at 3000, the door's own seconds barely moving as the repo grows
 tenfold). Nothing here is instant: there is no sub-second claim, and the floor
-is dominated by opening the solution once per invocation. Embeddings are not
+is dominated by opening the solution once per repository the batch touched. Embeddings are not
 computed inline either — the vector work is deferred to a watcher, `serve` or
 `index` pass exactly as the watch route defers it, so a hook never waits on
 provider health.
