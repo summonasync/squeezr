@@ -36,6 +36,18 @@ internal static class ReconcilePendingNotice
                 + $"holds no copied rows. Re-run '{RemedyText.WorktreeInitCommand}' here to fill it, or "
                 + $"'{RemedyText.IndexCommand}' to index this tree into it.");
         }
+        else if (record.Code == ReconcileMarker.BaselineWidenedCode)
+        {
+            // A baseline row is the one event that reopens a closed record without a pass, and it owes its own
+            // words: nothing here was copied and left unproven — the store proved one tree and was then handed a
+            // second. 'the rows were copied' would describe a different gap and pitch a remedy that reads the
+            // wrong field.
+            lines.Add(
+                $"reconcile pending: repo '{WorktreeBaseline.RepoName}' joined this store after its last pass "
+                + "proved the rows the manifest owned then, so the second tree's coordinates are unmeasured here. "
+                + $"Re-run '{RemedyText.WorktreeInitCommand}' to pass over both trees, or "
+                + $"'{RemedyText.IndexCommand}' to index them into the store.");
+        }
         else if (!record.PassCompleted)
         {
             lines.Add(

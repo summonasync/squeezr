@@ -61,6 +61,23 @@ public sealed record ReconcileMarker(
             WrittenAt = DateTimeOffset.UtcNow,
         };
 
+    // A second tree joining the manifest invalidates the proof the record carries: the pass that closed it
+    // measured the repos the manifest owned then, and a repo it never saw cannot be covered by a claim about
+    // coordinates it never read. This is the only transition that reopens a closed record without a pass, and it
+    // exists because `--baseline` registers a tree rather than copying one — leaving the record closed would let
+    // the store keep answering 'reconciled' over an index that has never looked at half its own manifest.
+    public ReconcileMarker WidenedToBaseline() =>
+        this with
+        {
+            PassCompleted = false,
+            SemanticArmLanded = null,
+            CoveredChunks = null,
+            Code = BaselineWidenedCode,
+            WrittenAt = DateTimeOffset.UtcNow,
+        };
+
+    public const string BaselineWidenedCode = "worktree_baseline_widened";
+
     // The predicate every surface reads: a store that was filled owes its reader the pending word until a
     // pass over this root has completed AND the vectors its rows claim are accounted for. A store that
     // claims no vector is accounted for by having nothing to account for.

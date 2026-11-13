@@ -108,6 +108,14 @@ public static class CliApplication
                     .WithDescription(
                         "Remove the store of this worktree: registry rows of every spelling of one root, their " +
                         "store dirs and their Qdrant collections");
+                worktree.AddCommand<WorktreeResolveCommand>("resolve")
+                    .WithDescription(
+                        "Answer what store a path maps to and what that store says about itself — reads git's " +
+                        "files, the registry and the store manifests, and writes nothing");
+                worktree.AddCommand<WorktreeListCommand>("list")
+                    .WithDescription(
+                        "Show one family: the parent checkout's row and the worktree rows that name it, with the " +
+                        "branch and kind the registry recorded");
             });
             config.AddBranch("services", services =>
             {

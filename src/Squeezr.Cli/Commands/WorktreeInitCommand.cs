@@ -33,6 +33,12 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
         [CommandOption("--no-semantic")]
         public bool NoSemantic { get; set; }
 
+        [Description("Also register another checkout — the main worktree's root or its workspace name — in this " +
+            "lane's store as repo 'main', reachable with '--repo main'. The reconcile pass then indexes BOTH " +
+            "trees, so the lane's index roughly doubles; the price is printed before it is paid")]
+        [CommandOption("--baseline <NAME|PATH>")]
+        public string? Baseline { get; set; }
+
         [CommandOption("--json")]
         public bool Json { get; set; }
     }
@@ -83,6 +89,45 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
                     settings.Json);
             }
 
+            // The baseline row goes in BEFORE the reconcile pass, and that ordering is the whole design: the pass
+            // targets whatever the store's manifest owns, so registering the second tree here is what makes the
+            // one standard pass cover it. Adding it afterwards would need a second indexing door this verb does
+            // not have. A pass that minted no store has no manifest to add a repo to, and that is said as a state
+            // on the report rather than as silence — a flag half-applied and unmentioned is how options lie.
+            var baseline = settings.Baseline is null
+                ? null
+                : outcome.StoreKey is null
+                    ? WorktreeBaselineOutcome.Skipped(
+                        outcome.RootPath,
+                        $"this pass created no store at '{outcome.RootPath}', so repo '{WorktreeBaseline.RepoName}' " +
+                        $"had nowhere to be registered. Give the main worktree a store with " +
+                        $"{RemedyText.InitCommand} there, then re-run this verb with --baseline.")
+                    : WorkspaceRootResolver.GuardRegistryIo(() => WorktreeBaseline.Register(
+                        outcome.RootPath,
+                        settings.Baseline,
+                        WorktreeFacts.Resolve(outcome.RootPath),
+                        StaleLockWarningSink.ToStderr));
+
+            if (baseline?.PaysCost == true)
+            {
+                // The price is named before the pass pays it. --json keeps stdout one document and sends the
+                // notice on the channel this verb's other costs already travel on; human mode prints it to stdout,
+                // ahead of the reconcile line that describes the same pass, so the ordering a reader depends on is
+                // one stream a test can measure instead of a promise in prose.
+                if (settings.Json)
+                {
+                    Console.Error.WriteLine($"warning: {baseline.CostNotice}");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"  baseline: {baseline.CostNotice!.EscapeMarkup()}");
+                }
+            }
+            else if (baseline?.State == WorktreeBaselineState.Skipped)
+            {
+                Console.Error.WriteLine($"warning: {baseline.Reason}");
+            }
+
             // The copy planted the main worktree's coordinates; this is the one standard incremental pass over
             // this worktree's own root that puts them back on this branch. Registry reads inside it are guarded
             // the way the fill's are: a registry that goes busy is contention, not a broken lane. The runtime
@@ -97,7 +142,7 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
                 StaleLockWarningSink.ToStderr,
                 cancellationToken));
 
-            var report = WorktreeInitReport.From(outcome, fill, reconcile);
+            var report = WorktreeInitReport.From(outcome, fill, reconcile, baseline);
             if (report.RepairHint is not null)
             {
                 Console.Error.WriteLine($"warning: {report.RepairHint}");
@@ -177,8 +222,31 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
             AnsiConsole.MarkupLine(WorktreeReconcileLine.Build(reconcile));
         }
 
+        if (report.Baseline is { } baseline)
+        {
+            AnsiConsole.MarkupLine(BaselineLine(baseline));
+        }
+
         AnsiConsole.MarkupLine(IndexLine(report));
     }
+
+    // The after-the-fact half of the baseline: the cost line went out before the pass, this one says what the
+    // store ends up owning. 'Already there' is spelled out rather than folded into 'registered', because a second
+    // run of this verb on the same lane is the ordinary case and the reader has to be able to tell the pass that
+    // wrote a row from the one that only found it.
+    private static string BaselineLine(WorktreeBaselineReport baseline) =>
+        baseline.State switch
+        {
+            nameof(WorktreeBaselineState.Skipped) =>
+                $"  baseline: [yellow]skipped[/] — {baseline.Reason!.EscapeMarkup()}",
+            nameof(WorktreeBaselineState.AlreadyRegistered) =>
+                $"  baseline: repo [bold]{baseline.RepoName.EscapeMarkup()}[/] was already in this store — " +
+                $"{baseline.BaselineRootPath!.EscapeMarkup()}",
+            _ =>
+                $"  baseline: repo [bold]{baseline.RepoName.EscapeMarkup()}[/] now names " +
+                $"{baseline.BaselineRootPath!.EscapeMarkup()} — [bold]squeezr search --repo " +
+                $"{baseline.RepoName.EscapeMarkup()}[/] answers from that tree",
+        };
 
     // The reconcile runtime, built once per pass that has something to measure: the same handle counts the
     // collection and writes through it, and the provider comes along only when the workspace asked for

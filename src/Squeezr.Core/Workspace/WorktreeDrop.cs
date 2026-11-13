@@ -29,7 +29,7 @@ public static class WorktreeDrop
 
         if (!Directory.Exists(physical))
         {
-            throw new WorkspaceException(GoneTreeText(path, physical), WorkspaceException.WorktreeNotRegisteredCode);
+            throw WorktreeGoneException.ForDrop(WorktreeGoneTree.Measure(path, physical));
         }
 
         var facts = WorktreeFacts.Resolve(path);
@@ -105,22 +105,4 @@ public static class WorktreeDrop
         string root) =>
         [.. rows.Where(row => row.ParentRootPath is { } parent
             && WorkspaceCanonicalPath.SamePhysicalPath(parent, root))];
-
-    private static string GoneTreeText(string path, string physical)
-    {
-        var rows = WorkspaceRegistry.Load()
-            .Where(row => WorkspaceCanonicalPath.SamePhysicalPath(row.RootPath, physical))
-            .ToList();
-        if (rows.Count == 0)
-        {
-            return $"'{path}' does not exist and no registry row names it — nothing to drop. If a workspace store " +
-                   $"outlived this directory, reap it with {RemedyText.WorkspaceRepairCommand}.";
-        }
-
-        var named = string.Join(", ", rows.Select(row => $"'{row.StoreKey}'"));
-        return $"'{path}' does not exist, so no git facts can be read from it, while {rows.Count} registry row(s) " +
-               $"still name it ({named}). This verb drops a live tree; reap the row and its store with " +
-               $"{RemedyText.WorkspaceRepairCommand}, or clear one row directly with " +
-               $"{RemedyText.DropStore(rows[0].StoreKey)}.";
-    }
 }

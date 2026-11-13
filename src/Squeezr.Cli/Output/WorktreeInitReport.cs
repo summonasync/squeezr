@@ -5,8 +5,13 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Cli.Output;
 
-// The store the verb just produced or found, with everything an agent needs to keep working there:
-// the key, the collection vectors will live in, and the serve line that binds this store.
+// The store the verb just produced or found, with everything an agent needs to keep working there: the key, the
+// collection vectors will live in, and the serve line that binds this store.
+//
+// The baseline block is absent unless --baseline was asked (035: an absent key is not a false claim). When it is
+// present it carries the cost sentence this verb prints BEFORE the pass that pays it, so the payload is the
+// evidence that the price was named first — a report saying only 'baseline: registered' would let the ordering
+// this flag ships under go unmeasured.
 public sealed record WorktreeInitReport(
     string State,
     string RootPath,
@@ -26,12 +31,15 @@ public sealed record WorktreeInitReport(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     WorktreeFillReport? Fill,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    WorktreeReconcileReport? Reconcile)
+    WorktreeReconcileReport? Reconcile,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    WorktreeBaselineReport? Baseline)
 {
     public static WorktreeInitReport From(
         WorktreeRegistrationOutcome outcome,
         WorktreeFillOutcome fill,
-        WorktreeReconcileOutcome? reconcile = null) =>
+        WorktreeReconcileOutcome? reconcile = null,
+        WorktreeBaselineOutcome? baseline = null) =>
         new(
             State: outcome.State.ToString(),
             RootPath: outcome.RootPath,
@@ -58,5 +66,6 @@ public sealed record WorktreeInitReport(
             Reason: outcome.Reason,
             RepairHint: outcome.RepairHint,
             Fill: WorktreeFillReport.From(fill),
-            Reconcile: reconcile is null ? null : WorktreeReconcileReport.From(reconcile));
+            Reconcile: reconcile is null ? null : WorktreeReconcileReport.From(reconcile),
+            Baseline: baseline is null ? null : WorktreeBaselineReport.From(baseline));
 }
