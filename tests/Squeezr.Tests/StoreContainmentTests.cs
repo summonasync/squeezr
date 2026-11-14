@@ -91,8 +91,8 @@ public sealed class StoreContainmentTests
     public void RunHomeGuard_FallbackCapturedStore_IsRefusedEvenWhileHomePointsAtTheSandbox()
     {
         var fallback = SqueezrHome.DefaultHome();
-        fallback.ShouldNotBeEmpty("no profile home resolves on this machine, so this arm would assert that " +
-                                  "an empty string is contained — a green that measured nothing");
+        (fallback.Length > 0).ShouldBeTrue(customMessage: "no profile home resolves on this machine, so " +
+            "this arm would assert that an empty string is contained — a green that measured nothing");
 
         // The state the real suite reaches: a neighbour has restored HOME by the time a child spawns, so
         // the ambient environment looks healthy and only the provenance of the frozen value is wrong.
