@@ -61,6 +61,8 @@ public sealed class SessionStartHookInstallTests
         var root = JsonNode.Parse(File.ReadAllText(Path.Combine(home, ".qwen", "settings.json")))!.AsObject();
         root["hooks"]!.AsObject().ContainsKey("SessionStart").ShouldBeFalse();
         root["hooks"]!.AsObject()["PreToolUse"]!.AsArray().Count.ShouldBe(1);
+        root["hooks"]!.AsObject()["PreToolUse"]!.AsArray()[0]!["hooks"]!.AsArray()[0]!.AsObject()
+            .ContainsKey("timeout").ShouldBeFalse("no timeout key rides onto the pre-read hook object — its bytes are the shipped contract");
         JsonDocument.Parse(output.Trim()).RootElement.EnumerateArray()
             .Any(row => row.TryGetProperty("sessionStart", out _)).ShouldBeFalse(
                 "an unarmed opt-in is an absent key, not a claim of false");

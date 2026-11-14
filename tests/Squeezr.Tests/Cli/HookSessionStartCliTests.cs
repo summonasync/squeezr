@@ -69,11 +69,15 @@ public sealed class HookSessionStartCliTests
     public async Task SessionStart_InTheMainWorktree_AnswersWithSilence()
     {
         var main = await IndexedMainAsync("hook-main-silence");
+        var registryBefore = File.ReadAllText(WorkspaceRegistry.FilePath);
 
         var run = await HookAsync(main);
 
         run.ExitCode.ShouldBe(0);
         run.StdOut.ShouldBeEmpty("a main checkout keeps the store it has; the hook has nothing to tell");
+        run.StdErr.ShouldBeEmpty("silence must be the IsLinked gate's doing — a verb pass that ran and failed is equally silent on stdout");
+        File.ReadAllText(WorkspaceRegistry.FilePath).ShouldBe(registryBefore,
+            "the main checkout pays no registry write for a session start");
     }
 
     [Fact]
@@ -116,6 +120,19 @@ public sealed class HookSessionStartCliTests
         run.ExitCode.ShouldBe(0);
         run.StdOut.ShouldBeEmpty();
         RowsNaming(lane).ShouldBeEmpty("a payload this hook was not given is not a session to act on");
+    }
+
+    [Fact]
+    public async Task SessionStart_JsonNullPayload_AnswersWithSilence()
+    {
+        var main = await IndexedMainAsync("hook-null-main");
+        var lane = Lane(main, "feat/116-null");
+
+        var run = await CliTestProcess.RunPipedInSharedHomeAsync("null", lane, "hook", "session-start");
+
+        run.ExitCode.ShouldBe(0);
+        run.StdOut.ShouldBeEmpty("a payload that deserializes to nothing is still a payload this hook was not given");
+        RowsNaming(lane).ShouldBeEmpty();
     }
 
     [Fact]
