@@ -200,6 +200,31 @@ same pattern when their hook surface allows.~~</removed> Wiring is the
 command's job now; still never hand-edit a hook config from an agent session —
 run `mcp install` and read the verdict from `mcp doctor`.
 
+The same install pass arms a **second, write-side hook** — a `PostToolUse`
+block on the edit-family tools — for the same two verified runtimes. Where
+pre-read is advisory, this arm acts: after the agent edits a file in a
+registered workspace it runs one path-scoped incremental index pass over the
+paths the payload announced, so your next `code_search` / `symbol_lookup`
+sees the file you just changed instead of a stale snapshot — you do not pay a
+full `squeezr index` to get freshness back. It no-ops where a watcher already
+owns the store (a fresh `watch`/`serve-watch` heartbeat means the event engine
+carries the change), and it never blocks or errors your pipeline: any payload
+it cannot use, a locked store past a short wait, a path outside the workspace —
+all exit silently with code 0. That silence is the design, not a stall: the
+door answers for the announced files only, in a few seconds dominated by
+opening the solution once per repository in the batch (not sub-second, and it
+does not grow with repo
+size); unannounced drift is the watcher's or `squeezr index`'s job. If you run
+`squeezr hook post-edit` yourself in a terminal, you get nothing back — it
+reads its payload on stdin, so there is no result to show; to index by hand
+use `squeezr index`. Arm the write block by re-running `mcp install` after an
+upgrade, and check it with `mcp doctor`: it now prints one line per arm, so
+`hook pre-read: armed` beside `hook post-edit: not armed` is the pre-upgrade
+state telling you to re-install. `MultiEdit` (claude) and `notebook_edit`
+(qwen) are armed because the door handles their payload shapes, even though
+neither id appears in the local transcript corpus; a notebook is indexed as
+plain text, not parsed into cells.
+
 ## 5. Tool cheat-sheet (MCP)
 
 Navigation flow: `repo_map` first for orientation → `code_search` /

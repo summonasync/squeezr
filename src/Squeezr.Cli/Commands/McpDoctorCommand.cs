@@ -192,6 +192,10 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         {
             AnsiConsole.MarkupLine($"  hook pre-read: {Markup.Escape(status)}");
         }
+        if (entry.PostEditHookStatus is { } postEditStatus)
+        {
+            AnsiConsole.MarkupLine($"  hook post-edit: {Markup.Escape(postEditStatus)}");
+        }
     }
 
     private static string Flag(bool value) => value ? "[green]yes[/]" : "[red]no[/]";

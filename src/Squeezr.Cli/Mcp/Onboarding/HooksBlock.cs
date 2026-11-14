@@ -4,8 +4,8 @@ using Squeezr.Cli.Commands;
 namespace Squeezr.Cli.Mcp.Onboarding;
 
 // The managed hooks block install arms, doctor reports and remove strips. One value per hook event so a
-// later SessionStart or post-edit hook adds its own block here without touching the merge rules of
-// ManagedHooksWriter; identity of a managed hook object is the command token, never a marker key.
+// later SessionStart hook adds its own block here without touching the merge rules of ManagedHooksWriter;
+// identity of a managed hook object is the command token, never a marker key.
 public sealed record HooksBlock(string Event, string Matcher, string CommandName, string Command)
 {
     public const string LayoutUnverifiedReason = "not armed (hook layout unverified)";
@@ -13,7 +13,8 @@ public sealed record HooksBlock(string Event, string Matcher, string CommandName
     public const string ProjectArmedState = "armed (project scope)";
     public const string NotArmedState = "not armed";
 
-    private const string PreReadCommandName = "pre-read";
+    public const string PreReadCommandName = "pre-read";
+    public const string PostEditCommandName = "post-edit";
 
     public string CommandToken => "hook " + CommandName;
 
@@ -24,10 +25,53 @@ public sealed record HooksBlock(string Event, string Matcher, string CommandName
         {
             return null;
         }
-        // Qwen evaluates matchers as regex unless anchored; Claude matches the exact tool name.
-        var matcher = client.Id == McpClientId.Qwen ? $"^{payloadId}$" : payloadId;
-        var commandToken = "hook " + PreReadCommandName;
-        return new HooksBlock("PreToolUse", matcher, PreReadCommandName, $"{Invoke(commandPath)} {commandToken}");
+        return new HooksBlock(
+            "PreToolUse",
+            BuildMatcher(client.Id, [payloadId]),
+            PreReadCommandName,
+            $"{Invoke(commandPath)} hook {PreReadCommandName}");
+    }
+
+    public static HooksBlock? PostEditForClient(McpClientDescriptor client, string commandPath)
+    {
+        var payloadIds = HookPostEditToolNames.PayloadIdsFor(client.Id.ToString().ToLowerInvariant());
+        if (payloadIds.Count == 0 || client.HooksPathResolver is null)
+        {
+            return null;
+        }
+        return new HooksBlock(
+            "PostToolUse",
+            BuildMatcher(client.Id, payloadIds),
+            PostEditCommandName,
+            $"{Invoke(commandPath)} hook {PostEditCommandName}");
+    }
+
+    public static IReadOnlyList<HooksBlock> ArmsFor(McpClientDescriptor client, string commandPath)
+    {
+        var arms = new List<HooksBlock>(2);
+        if (ForClient(client, commandPath) is { } preRead)
+        {
+            arms.Add(preRead);
+        }
+        if (PostEditForClient(client, commandPath) is { } postEdit)
+        {
+            arms.Add(postEdit);
+        }
+        return arms;
+    }
+
+    // Qwen evaluates matchers as regex unless anchored, so every qwen matcher is one anchored expression
+    // over the measured payload ids; Claude matches the exact tool name and takes the bare id (or its
+    // alternation) as written.
+    private static string BuildMatcher(McpClientId id, IReadOnlyList<string> payloadIds)
+    {
+        if (id != McpClientId.Qwen)
+        {
+            return string.Join('|', payloadIds);
+        }
+        return payloadIds.Count == 1
+            ? $"^{payloadIds[0]}$"
+            : $"^({string.Join('|', payloadIds)})$";
     }
 
     public bool Owns(string candidateCommand) =>

@@ -22,4 +22,7 @@ public sealed record McpClientDiagnostics(
     StoreWatchDiagnostics? Watch = null,
     // Additive per 114/T3: the managed hook state this doctor run measured — "armed", "not armed", or the
     // explicit reason a client is un-armed (hook layout unverified). Null only for hand-built diagnostics.
-    string? HookStatus = null);
+    string? HookStatus = null,
+    // Additive per 025/R5: the PostToolUse arm's state, reported apart so the upgrade-era transitional
+    // config (pre-read armed from 114, post-edit missing) names itself. Null only for hand-built diagnostics.
+    string? PostEditHookStatus = null);
