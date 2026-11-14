@@ -119,26 +119,21 @@ public sealed class StoreContainmentTests
         (profileHome.Length > 0).ShouldBeTrue(customMessage: "no profile home resolves here, so this arm " +
             "would assert that an empty pin is refused for the wrong reason");
 
-        var previousEnv = Environment.GetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable);
-        try
-        {
-            // The branch AC3 names first: a pin that exists, is honoured, and happens to name the developer's
-            // profile store - the CI/debug shape REQ-1 calls a hard error. It must be refused at module load,
-            // not discovered as leaked rows three classes later.
-            Environment.SetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable, profileHome);
-            SqueezrHome.Reset();
+        // The branch AC3 names first: a pin that exists, is honoured, and happens to name the developer's
+        // profile store - the CI/debug shape REQ-1 calls a hard error.
+        //
+        // Deliberately no Environment.SetEnvironmentVariable and no Reset here, even though that is how the
+        // shape actually arises. Setting the ambient pin to the profile home and clearing the cache would
+        // hand every other collection running in parallel (ProcessGlobals serializes classes against each
+        // other, not against them) a window in which the first CliTestProcess.RunStore of the run freezes
+        // the developer's store with FromPin=true - the test would manufacture the leak it guards, and
+        // would be safest when the leak has already been prevented. The predicate is what AC3 asks about,
+        // so the predicate is what this asserts, with the value passed in rather than planted in the host.
+        var error = Should.Throw<InvalidOperationException>(
+            () => TestRunHomeGuard.RequireContainedAtLoad(profileHome));
 
-            var error = Should.Throw<InvalidOperationException>(
-                () => TestRunHomeGuard.RequireContainedAtLoad(SqueezrHome.Resolve()));
-
-            error.Message.ShouldContain(profileHome);
-            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable, previousEnv);
-            SqueezrHome.Reset();
-        }
+        error.Message.ShouldContain(profileHome);
+        error.Message.ShouldContain(TestRunHomeGuard.Remedy);
     }
 
     [LinuxFact]
