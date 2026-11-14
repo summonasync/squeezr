@@ -112,6 +112,35 @@ public sealed class StoreContainmentTests
         error.Message.ShouldContain(TestRunHomeGuard.Remedy);
     }
 
+    [Fact]
+    public void RunHomeGuard_ExternalPinPointingAtTheProfileHome_IsRefused()
+    {
+        var profileHome = SqueezrHome.DefaultHome();
+        (profileHome.Length > 0).ShouldBeTrue(customMessage: "no profile home resolves here, so this arm " +
+            "would assert that an empty pin is refused for the wrong reason");
+
+        var previousEnv = Environment.GetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable);
+        try
+        {
+            // The branch AC3 names first: a pin that exists, is honoured, and happens to name the developer's
+            // profile store - the CI/debug shape REQ-1 calls a hard error. It must be refused at module load,
+            // not discovered as leaked rows three classes later.
+            Environment.SetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable, profileHome);
+            SqueezrHome.Reset();
+
+            var error = Should.Throw<InvalidOperationException>(
+                () => TestRunHomeGuard.RequireContainedAtLoad(SqueezrHome.Resolve()));
+
+            error.Message.ShouldContain(profileHome);
+            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable, previousEnv);
+            SqueezrHome.Reset();
+        }
+    }
+
     [LinuxFact]
     [SupportedOSPlatform("linux")]
     public void RunHomeGuard_ProfileHomeResolution_IsRefusedAndNamesThePath()
