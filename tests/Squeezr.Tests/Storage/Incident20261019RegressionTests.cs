@@ -16,8 +16,13 @@ public sealed class Incident20261019RegressionTests : IDisposable
 {
     private const string HomeEnvironmentVariable = "SQUEEZR_HOME";
     private const string ProfileEnvironmentVariable = "HOME";
-    private readonly string? _previousEnv;
-    private readonly string? _previousHome;
+    // Read at construction, not left to the compiler's default: Dispose restores both variables from
+    // these fields, and SetEnvironmentVariable(name, null) REMOVES the variable, so an unassigned field
+    // strips the run's own HOME and SQUEEZR_HOME from the host process. Every later SqueezrHome.Resolve()
+    // in the same process then falls back to the developer's profile home - the 118 leak, measured as 17
+    // fixture registrations landing in ~/.squeezr after this class finished.
+    private readonly string? _previousEnv = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
+    private readonly string? _previousHome = Environment.GetEnvironmentVariable(ProfileEnvironmentVariable);
     private readonly List<string> _createdDirs = [];
 
     [LinuxFact]

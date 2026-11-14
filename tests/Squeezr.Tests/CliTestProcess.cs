@@ -15,7 +15,11 @@ internal static partial class CliTestProcess
     // temp dir and SqueezrHome.Reset() cleared the cache. Without this snapshot,
     // SqueezrHome.Resolve() at Process.Start time could re-read a stale env var
     // and send the child to a registry where the workspace is unknown.
+    // The snapshot is the one value a broken neighbour can poison for the whole run, so it is checked on
+    // every use instead of trusted for the rest of the process: see RunHome and feature 118 REQ-1.
     private static readonly string TestRunHome = SqueezrHome.Resolve();
+
+    private static string RunHome() => TestRunHomeGuard.RequireContained(TestRunHome, requireAmbientPin: false);
 
     public static async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(
         string workingDir, params string[] args)
@@ -90,7 +94,7 @@ internal static partial class CliTestProcess
             UseShellExecute = false
         };
         startInfo.Environment["NO_COLOR"] = "1";
-        startInfo.Environment["SQUEEZR_HOME"] = squeezrHome ?? TestRunHome;
+        startInfo.Environment["SQUEEZR_HOME"] = squeezrHome ?? RunHome();
         // ProcessStartInfo.Environment starts as a copy of ours, so an unset variable
         // here means the child inherits the developer's real store and profile. No test
         // has a reason to touch either, so isolation is the default rather than a request.

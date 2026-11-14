@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -72,5 +73,54 @@ public sealed class StoreContainmentTests
                 a whitespace SQUEEZR_HOME resolved to {whitespace};
                 DefaultHome() = {SqueezrHome.DefaultHome()}, process HOME = {Environment.GetEnvironmentVariable("HOME")}
                 """);
+    }
+
+    // The 118/T3 runtime half: the guard is shown refusing the state it exists for, with the path it
+    // refused in its message, and accepting the state a real run has. Both halves are asserted because a
+    // guard that only ever throws is as useless as one that never does.
+    [Fact]
+    public void RunHomeGuard_ScratchStore_IsAcceptedUnchanged()
+    {
+        var scratch = TestDirs.NewTempDir();
+
+        TestRunHomeGuard.RequireContained(scratch, requireAmbientPin: false).ShouldBe(scratch);
+    }
+
+    [Fact]
+    public void RunHomeGuard_StoreThatResolvedToNothing_IsRefusedWithTheRemedy()
+    {
+        var error = Should.Throw<InvalidOperationException>(
+            () => TestRunHomeGuard.RequireContained(string.Empty, requireAmbientPin: false));
+
+        error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void RunHomeGuard_ProfileHomeResolution_IsRefusedAndNamesThePath()
+    {
+        var previousEnv = Environment.GetEnvironmentVariable("SQUEEZR_HOME");
+        var previousHome = Environment.GetEnvironmentVariable("HOME");
+        var sentinelProfile = TestDirs.NewTempDir();
+        try
+        {
+            Environment.SetEnvironmentVariable("SQUEEZR_HOME", null);
+            Environment.SetEnvironmentVariable("HOME", sentinelProfile);
+            SqueezrHome.Reset();
+            var profileHome = SqueezrHome.Resolve();
+
+            profileHome.ShouldStartWith(sentinelProfile);
+            var error = Should.Throw<InvalidOperationException>(
+                () => TestRunHomeGuard.RequireContained(profileHome, requireAmbientPin: true));
+
+            error.Message.ShouldContain(profileHome);
+            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("HOME", previousHome);
+            Environment.SetEnvironmentVariable("SQUEEZR_HOME", previousEnv);
+            SqueezrHome.Reset();
+        }
     }
 }

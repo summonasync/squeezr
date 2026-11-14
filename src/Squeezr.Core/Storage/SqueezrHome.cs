@@ -7,18 +7,29 @@ public static class SqueezrHome
     public const string HomeEnvironmentVariable = "SQUEEZR_HOME";
     private static readonly object Sync = new();
     private static string? _resolved;
+    private static bool _resolvedFromDefault;
 
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+    // The cache remembers which of the two sources produced the value, because they are not equally
+    // durable. A value read from an explicit pin stays frozen for the process: that is what a long-lived
+    // host relies on when it sets the variable once at startup and something later clears it around a
+    // child spawn. A value computed from the profile fallback carries no such intent — it is only what the
+    // answer was while the environment said nothing — so an explicit pin that appears later wins over it.
+    // Without the distinction, a process that blanks the variable and re-pins it keeps writing into
+    // whichever home the blank window happened to name; 118 measured that as 17 registrations landing in
+    // a developer's real store from code that never asked for it.
     public static string Resolve()
     {
         lock (Sync)
         {
-            if (_resolved is null)
+            var env = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
+            var pinned = !string.IsNullOrWhiteSpace(env);
+            if (_resolved is null || (_resolvedFromDefault && pinned))
             {
-                var env = Environment.GetEnvironmentVariable(HomeEnvironmentVariable);
-                _resolved = !string.IsNullOrWhiteSpace(env) ? env : DefaultHome();
+                _resolvedFromDefault = !pinned;
+                _resolved = pinned ? env! : DefaultHome();
             }
 
             return _resolved;
@@ -83,6 +94,7 @@ public static class SqueezrHome
         lock (Sync)
         {
             _resolved = null;
+            _resolvedFromDefault = false;
         }
     }
 }

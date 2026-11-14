@@ -1,10 +1,15 @@
 using System.Text.RegularExpressions;
 using Shouldly;
+using Xunit.Abstractions;
 
 namespace Squeezr.Tests;
 
 public class EnvMutationSweepTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public EnvMutationSweepTests(ITestOutputHelper output) => _output = output;
+
     private static readonly Regex SerializedDefinition =
         new(@"\[CollectionDefinition\(""(?<name>[^""]+)""(?<body>.*?)\)\]", RegexOptions.Compiled | RegexOptions.Singleline);
 
@@ -12,10 +17,101 @@ public class EnvMutationSweepTests
     public void TestTree_ClassesTouchingProcessEnvOrProcesses_AllSitInSerializedCollections()
     {
         var testsRoot = TestsRoot();
-        var offenders = EnvMutationSweep.Scan(testsRoot, SerializedCollections(testsRoot));
+        var offenders = EnvMutationSweep.Scan(testsRoot, SerializedCollections(testsRoot), out var scannedClasses);
+
+        // The denominator is part of the assertion: an empty offender list over nothing scanned would be
+        // the green that proves nothing.
+        _output.WriteLine($"env sweep: {scannedClasses} classes scanned, {offenders.Count} offenders");
+        scannedClasses.ShouldBeGreaterThan(0, "the sweep found no class to judge — the root or the filter is broken");
 
         offenders.ShouldBeEmpty(
-            $"env/process-touching test classes must sit in a DisableParallelization collection: {Describe(offenders)}");
+            $"env/process/registry-touching test classes must sit in a DisableParallelization collection, " +
+            $"and env restores must name a field the file assigns: {Describe(offenders)}");
+    }
+
+    [Fact]
+    public void Scan_StaticRegistryWriterOutsideSerializedCollection_IsReported()
+    {
+        using var scratch = new ScratchDir();
+        scratch.Write("RowWriterTests.cs",
+            """
+            public class RowWriterTests
+            {
+                [Fact]
+                public void Do_Thing() => WorkspaceRegistry.Add(new WorkspaceEntry("x", "/tmp/x"));
+            }
+            """);
+
+        var offender = offenders(scratch).Single(o => o.ClassName == "RowWriterTests");
+        offender.Evidence.ShouldContain("WorkspaceRegistry.Add(");
+    }
+
+    [Fact]
+    public void Scan_EnvRestoredFromNeverAssignedField_IsReportedEvenUnderASerializedCollection()
+    {
+        using var scratch = new ScratchDir();
+        scratch.Write("ClobberTests.cs",
+            """
+            [Collection("ProcessGlobals")]
+            public class ClobberTests : IDisposable
+            {
+                private readonly string? _previousEnv;
+
+                [Fact]
+                public void Do_Thing() => Environment.SetEnvironmentVariable("SQUEEZR_HOME", "/tmp/scratch");
+
+                public void Dispose() =>
+                    Environment.SetEnvironmentVariable("SQUEEZR_HOME", _previousEnv);
+            }
+            """);
+
+        var offender = offenders(scratch).Single(o => o.ClassName == "ClobberTests");
+        offender.Evidence.ShouldContain(e => e.Contains("_previousEnv"));
+    }
+
+    [Fact]
+    public void Scan_EnvRestoredFromAssignedField_IsClean()
+    {
+        using var scratch = new ScratchDir();
+        scratch.Write("HonestTests.cs",
+            """
+            [Collection("ProcessGlobals")]
+            public class HonestTests : IDisposable
+            {
+                private readonly string? _previousEnv = Environment.GetEnvironmentVariable("SQUEEZR_HOME");
+
+                [Fact]
+                public void Do_Thing() => Environment.SetEnvironmentVariable("SQUEEZR_HOME", "/tmp/scratch");
+
+                public void Dispose() =>
+                    Environment.SetEnvironmentVariable("SQUEEZR_HOME", _previousEnv);
+            }
+            """);
+
+        offenders(scratch).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Scan_EnvRestoredFromFieldAssignedOnTheNextLine_IsClean()
+    {
+        using var scratch = new ScratchDir();
+        scratch.Write("WrappedTests.cs",
+            """
+            [Collection("ProcessGlobals")]
+            public class WrappedTests : IDisposable
+            {
+                private readonly string? _previousEnv =
+                    Environment.GetEnvironmentVariable("SQUEEZR_HOME");
+
+                [Fact]
+                public void Do_Thing() => Environment.SetEnvironmentVariable("SQUEEZR_HOME", "/tmp/scratch");
+
+                public void Dispose() =>
+                    Environment.SetEnvironmentVariable("SQUEEZR_HOME", _previousEnv);
+            }
+            """);
+
+        offenders(scratch).ShouldBeEmpty();
     }
 
     [Fact]

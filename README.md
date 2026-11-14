@@ -346,6 +346,32 @@ Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI
   `GetFolderPath(UserProfile)` goes through the shell API for known folders and
   ignores `USERPROFILE`, so otherwise the profile cannot be redirected.
   Unset — behavior is exactly as before.
+- **Home resolution remembers where its answer came from.** `SQUEEZR_HOME` is
+  read once per process and cached, but the cache is not equally authoritative
+  for its two sources: a value that came from the variable itself stays frozen
+  for the process (a long-lived host sets it once at startup and a later blank
+  window must not move it), while a value computed from the profile fallback is
+  only what the answer was while the environment said nothing — so an explicit
+  `SQUEEZR_HOME` that appears later wins over a frozen fallback instead of
+  being ignored for the rest of the process. This is the shape that let one
+  test run register 17 fixture workspaces into a developer's real store (118),
+  the pin cleared in-process, the fallback cached, every later write inheriting
+  it.
+- **The registry rebuilds itself, and that is why rows come back.** A missing
+  or unreadable `workspaces.json` is restored from `workspaces.json.bak`, and
+  with no usable backup it is rebuilt from the store directories under
+  `workspaces/` (each `workspace.json` names its `rootPath`). The rebuild is a
+  write, so a pure read — `squeezr workspace list` — can recreate rows,
+  including rows whose root is gone; they come back marked `stale`
+  (`rootPath` not on disk) and are removed by `drop --store-key` or by the
+  repair prune sweep. A pruned row does **not** come back: the prune takes the
+  store directory together with the row, so there is no manifest left to
+  rebuild from. Measured on a seeded scratch store (118/T4,
+  `audits/118-reap-2026-11-14.md`): 3 rows → `--yes` prunes 2 stale rows and
+  2 store dirs in 0.17 s, the next dry run reports nothing, and deleting the
+  registry plus its backup rebuilds only the one row whose store survived.
+  A rebuild writes without taking `workspaces.lock`, so it is not visible in
+  the lock's pid the way an ordinary registration is.
 - **Legacy migration is automatic:** projects on the old layout (`.squeezr/` +
   `squeezr.workspace.json` in the root) move to the store on first touch — the
   contents of `.squeezr/` and the manifest are carried over, the

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Squeezr.Core.Storage;
 
 namespace Squeezr.Tests;
 
@@ -29,5 +30,11 @@ public static class SqueezrTestEnvironment
         Environment.SetEnvironmentVariable("SQUEEZR_CLIENT_HOME", TestDirs.SharedClientHomeDir);
         Environment.SetEnvironmentVariable("HOME", TestDirs.SharedClientHomeDir);
         Environment.SetEnvironmentVariable("CLAUDE_PROJECT_DIR", null);
+
+        // Both branches above land here, and HOME is now the run's own, so this is the one moment where
+        // the ambient pin describes the run instead of whichever test last held the serialized collection.
+        // REQ-1 (118): an inherited pin that points at a profile home is refused at module load, not
+        // discovered later as leaked rows in the developer's registry.
+        TestRunHomeGuard.RequireContained(SqueezrHome.Resolve(), requireAmbientPin: true);
     }
 }
