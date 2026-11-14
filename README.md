@@ -270,6 +270,7 @@ the central store:
 ```
 ~/.squeezr/                          # the store (override: env SQUEEZR_HOME)
 ├── workspaces.json               # registry: name/rootPath/storeKey/createdAt/lastUsedAt
+│                                #   (+ additive kind/parentRootPath/branch on worktree rows)
 ├── workspaces.lock                  # registry lock — one writer to workspaces.json at a time
 ├── workspaces/<storeKey>/          # one workspace's index store
 │   ├── workspace.json               # manifest (repositories)
@@ -325,10 +326,13 @@ the central store:
   confirms; without a terminal and without `--yes` repair refuses (a missing
   prompt is not consent). Deletion goes through the same single path as `drop`
   (row + store dir); adoptable orphans and live entries are not deleted; a
-  dated copy of `workspaces.json` is written before any real cleanup. Fallback
-  path: `squeezr init` in the project root — on top of an existing store dir it
-  works as lossless adoption: a live `config.json`, the manifest (repo list)
-  and the index (`meta.db`) survive; no reset to defaults.
+  dated copy of `workspaces.json` is written before any real cleanup. The same
+  command carries the collection arm for lanes — `--apply` and nothing else
+  opens it, and `rc 0` there reports a run, not an answered endpoint; see [Git
+  worktrees: one store per checkout](#git-worktrees-one-store-per-checkout).
+  Fallback path: `squeezr init` in the project root — on top of an existing
+  store dir it works as lossless adoption: a live `config.json`, the manifest
+  (repo list) and the index (`meta.db`) survive; no reset to defaults.
 
 ```
 $ squeezr workspace list
@@ -353,6 +357,241 @@ Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI
   Details: [docs/migration-central-store.md](docs/migration-central-store.md).
   Qdrant collections (named after the workspace path, not the store) survive
   the migration, no vectors are lost.
+
+## Git worktrees: one store per checkout
+
+A linked `git worktree` is a second checkout of one repository, and until 116
+squeezr served it the parent's index: `status` named the main root, a symbol
+that lives only on the branch answered `matches: []`, and `expand` handed back
+line numbers from the *other* tree while calling the file `fresh`. Measured
+against a real lane on 2026-11-10 (2291 parent files counted, zero files of the
+checkout being asked about), that is the bug this contour closes.
+
+What a lane agent runs to get an index of its own branch:
+
+```bash
+cd /path/to/repo/.lanes/my-feature
+squeezr worktree init          # registers this checkout, fills it from the main worktree, reconciles it
+```
+
+`squeezr hook session-start` runs exactly this command for you when a runtime
+starts a session inside the lane (see the SessionStart hook section); nothing
+about the verb is hook-only, and the hook is opt-in.
+
+The family is path-first — the identity comes from git's own facts about the
+directory, never from a name two agents might spell differently:
+
+| verb | what it answers |
+|---|---|
+| `worktree init [PATH] [--name] [--copy \| --reindex] [--no-semantic] [--baseline <NAME\|PATH>] [--json]` | registers the checkout as its own store, fills it, runs one reconcile pass; idempotent by path |
+| `worktree resolve [PATH] [--json]` | what store this path maps to, and what that store says about itself |
+| `worktree list [PATH] [--json]` | one family: the parent row plus the worktree rows that name it |
+| `worktree drop [PATH] [--json]` | ends the store: rows, store dirs, collections |
+
+Identity is the existing root-keyed scheme, so a lane is one more workspace and
+not a new model: `storeKey` = `{name slug}-{first 8 hex of SHA1 over the
+canonical root}`, collection = `squeezr-{first 12 hex}`. Registry rows gained
+additive `kind` / `parentRootPath` / `branch` (a row written before this build
+loads unchanged, the three fields simply null), and resolution is
+**deepest-root-wins**: a registered nested root beats its ancestor, which is
+what makes `serve`, `hook pre-read` and every cwd-resolved query answer for the
+branch it is standing on.
+
+### What `init` costs, and why
+
+`init` copies the parent's index rather than rebuilding it, because rebuilding
+a 2291-file repository at every lane birth is the thing agents were already
+paying `grep` to avoid. The price is real bytes:
+
+- `meta.db` — checkpoint-then-copy **under the source's index lock** (a torn
+  copy off a live `serve --watch` is the normal case, not an edge), then the
+  copy is verified to open.
+- `trigram.idx` — a real byte copy. This machine's filesystem is ext4, so
+  `cp --reflink=auto` has nothing cheap to do.
+- vectors — scroll-and-put into the lane's own collection: exact point ids and
+  payloads, no re-embedding, Ollama untouched. Refused **before the first
+  point** when the source chunks' `ModelKey` does not match this lane's
+  resolved embedding model — the remedy names `--reindex`, because vectors
+  across models are not comparable.
+
+**~661 MB per lane** on this product's own store (208 MB `meta.db` + 453 MB
+`trigram.idx`) — that is the live-store figure this feature's carriers
+measured, and it is a scale reference, not a constant: the same door on a
+scratch clone of this repo at head 072e4ea moved 54,173,696 B of `meta.db` plus
+51,746,558 B of `trigram.idx` for a 3 165-file parent store
+(`audits/work-116-36-e2e/`, capture `P4b-init.193505.log`). The honest reading
+is that the copy costs what the parent's index costs, and the `--json` `fill`
+block of every run names its own three numbers — source → staged → installed —
+so nobody has to trust a doc figure. `--baseline <NAME|PATH>` registers
+the parent checkout as a second repo (`main`, reachable with `--repo main`)
+inside the lane's store, and its price is printed before the pass pays it —
+measured on that same scratch clone: the lane counted 3 165 files / 12 993
+symbols / 24 617 chunks on its own and 6 330 / 25 986 / 49 234 after the
+baseline pass, i.e. the doubling is two trees in one store, not a guess
+(capture `EB1-baseline-price.200801.log`). The notice reads differently on the
+next call, because by then nothing is about to be paid: the standing form says
+the store already answers for two trees. Each of the three copies reports
+source → staged → installed counts and a mismatch fails the command — a fill
+that cannot say its numbers is not a green.
+
+`--reindex` is the other half of that choice, and it is not a small flag: the
+copy is skipped outright (`fill.skip: "ReindexRequested"`), the reconcile pass
+does not run (`reconcile.state: "Deferred"`), and the lane's coordinates are
+then owed by `squeezr index` — measured in capture `EB2-reindex-no-parent-bytes`.
+`--no-semantic` is the middle setting: the copy runs, one pass runs without the
+semantic arm, so this branch's coordinates land now and its embeddings wait for
+a later `squeezr index`.
+
+Two things the first pass of a lane does that a caller should know before it
+automates the door:
+
+- **The lane's config is minted, not inherited.** `worktree init` creates the
+  child store through the same path `squeezr init` uses, so the new store starts
+  on the built-in defaults — `qdrant.endpoint http://localhost:6334`,
+  `embeddings.provider auto` — and NOT on the parent's pinned endpoint or model.
+  A parent indexed against a dedicated instance therefore gets a lane whose first
+  pass asks the default one, and the model-mismatch guard above is the thing that
+  refuses rather than lets that through. Point the lane's `config.json` at the
+  same endpoint before the first semantic pass if the parent does not live on the
+  default; `squeezr worktree init --no-semantic` is the way to register a lane
+  while you still decide that.
+- **The SessionStart hook does not skip the semantic arm.** `hook session-start`
+  calls `squeezr worktree init <path> --json` with no mode flag, because the hook
+  has no axis to pass one on; a lane born inside a session therefore pays the copy
+  AND the embedding pass inline, on the lane's just-minted default config. On a
+  two-chunk fixture that is the ~2 s the hook section quotes. On a full clone of
+  this product's tree (3 165 files, 24 617 chunks) the birth pass is minutes, not
+  seconds — the hook-armed leg in this feature's e2e run ran ~3 min of wall clock
+  and ended reconcile-pending with the pending notice on stderr, and that same leg
+  is also the proof of the bullet above, because it reached the machine's shared
+  Qdrant instead of a pinned one (`audits/work-116-36-e2e/e2e_20261114T193439Z/H1-session-start-fresh.193534.log`,
+  and the dead-endpoint redo `audits/work-116-36-e2e/hf_20261114T194829Z/HF1-hook-fresh-lane-dead-first.194830.log`).
+  The repeat pass on a settled lane is the sub-second case the hook is designed
+  around. If a lane must be born cheap, run `squeezr worktree init --no-semantic`
+  yourself first and let the hook find the store already registered.
+
+The copy plants the parent's coordinates, so `init` runs one standard
+incremental pass over the lane root to put them back on this branch. A git-diff
+filter was rejected as the oracle for that pass: it misses ignore-layer
+divergences and uncommitted edits, and the cost is bounded by chunk-hash
+identity anyway. Until that pass closes, the store's own answers say so —
+`status`, `index_status` and the per-file verdicts report the reconcile state
+as pending, and MCP `fileFreshness` answers `unknown` instead of `fresh` for
+rows whose size and stamp came off a checkout this store never indexed. That
+marker lives in the lane's `workspace.json`, so a settled lane does not re-pay
+a measurement every session start.
+
+### Reading a lane store without touching it
+
+`squeezr worktree resolve` and `squeezr worktree list` answer from git facts,
+the registry and the store manifests. Their promise, stated as measured: on a
+healthy registry they write nothing — the same bytes and the same mtime — while
+a registry that is missing or unparseable is rebuilt from the store manifests
+first, so the one write that can still land behind a read is the registry's own
+recovery. The SessionStart hook and every `serve` startup walk the same read,
+so that recovery is a property of reading the registry, not of
+these two verbs. The lane carriers for the healthy-versus-recovered difference
+are `audits/t11-load-2026-11-14/` and `audits/work-116-27-t11-agent-binding.md`
+— quoted there with the registry regime they were taken in, because the
+regime matters for anything duration-shaped. The T13 audit repeats it on a
+scratch registry of two rows (`audits/work-116-36-e2e/`, captures
+`Z1-healthy-zero-writes`, `Z2-corrupt-registry-recovery`, `Z3-missing-registry-recovery`):
+healthy → `workspaces.json` unchanged to the sha256 and the mtime across a
+`resolve` and a `list`; corrupt or absent → the verb still answers, and the file
+comes back rewritten from the store dirs. One thing that rebuild does NOT
+preserve, measured: the store manifests carry no `kind`, `branch` or
+`parentRootPath`, so a rebuilt lane row reads as a plain workspace and
+`worktree list` no longer places it in its family (the row is there, the role is
+not) until `squeezr worktree init` runs again and re-records the git facts.
+Naming another tree with `--workspace`/`--at` survives the rebuild (it resolves
+by path); reading the family does not.
+
+Ignore semantics stay per-root, which is what makes a lane indexable at all: a
+decision is taken on the path relative to the repo being indexed, so the
+parent's `.lanes/` line and the built-in `**/.claude/worktrees/**` defaults
+have nothing to match inside the child — while the same defaults keep the
+parent from indexing a full copy of itself (`BuiltInIgnoreDefaultsTests`:
+`AgentWorktreeCopies_AreExcludedByDefaults` for the parent side,
+`AgentWorktreeDefaults_DoNotMatchTrackedSources` for the ADR-002 line the
+defaults must never cross). What the lane e2e measures is the child answering
+from its own tree after a fill and a reconcile
+(`WorktreeInitCopyCliTests.WorktreeInit_FilledLaneAnswersQueriesRightAfterTheVerb`,
+`…CopyThenReconcile_LaneAnswersWithItsOwnBranchContentAndLineNumbers`); a test
+that writes the parent's `.lanes/` line and then asserts the child still
+indexes its sources is NOT among the carriers, so that half of the rule is a
+mechanism reading, not a measurement — recorded as a gap, not smoothed over.
+
+To point one query at another tree deliberately, use the store axis: `search`,
+`symbol`, `refs`, `expand` and `map` take `--workspace <storeKey|path>` with
+the sugar `--at parent` / `--at <registered-root>`. The two handles are a store
+key or a directory — a workspace NAME is neither, and naming one is a refusal
+(`worktree_not_registered`), not a fuzzy lookup: `squeezr workspace list` prints
+the keys. Note the asymmetry with `--baseline <NAME|PATH>`, which does take a
+registered name, because there the name selects a checkout to register rather
+than a store to read. Nearest-by-default is the rule; the flag chooses, it never
+silences what was chosen — an answer that is not the cwd store names its subject
+(`root`, `branch`, `storeKey`) and says out loud that its coordinates come from a
+different tree.
+
+### When a lane dies
+
+The store must die in the same release that births it, or every lane adds a
+corpse to the machine. Three doors, one mechanism:
+
+- `squeezr worktree drop [PATH]` — folds every registry row naming one root
+  (a path spelling is not a second workspace) and clears each one's row, store
+  dir and collection. Rows before collections, always: a live row protects its
+  collection, and the flipped order would maim a working store.
+- `squeezr workspace repair` — the row half reaps worktree rows whose
+  `rootPath` is gone from disk, through the same dead-`rootPath` prune class
+  that already ships for plain stale rows (dry-run first, `--yes` or a TTY
+  answer to confirm). No second reaper was invented for lanes.
+- `squeezr workspace repair --apply` — the collection half: after the row
+  sweep it enumerates the `squeezr-<12 hex>` collections on each endpoint this
+  profile's configs name and reports the ones no surviving row claims.
+
+Two things the wire says that a human skimming the exit code will miss, both
+worth naming before someone ships a script on the wrong assumption:
+
+1. **`rc 0` does not mean the endpoints answered.** A sweep that reached no
+   Qdrant and deleted nothing still exits 0 — measured in this feature's e2e run,
+   where a dead endpoint produced exit 0 with `endpointFaults` naming the
+   `HttpRequestException` it actually caught. Gate on
+   `collections.endpointFaults` (the measured error per endpoint that never
+   replied), `collections.unreachableEndpoints` and
+   `collections.notOwnedEndpoints`; `seenMinted` is the denominator of the
+   "nothing unreferenced" claim, so a zero there is a scope, not a clean bill.
+   `collections.ran` is a coverage claim, not a success one: it is `false` when
+   every named endpoint failed to answer (and the whole arm is skipped with a
+   `skipReason` when no workspace config names an endpoint at all). `entries` is
+   the ledger of what the survey actually saw, and an endpoint that never
+   replied contributes nothing to it — which is exactly why
+   `endpointFaults` and `unreachableEndpoints` exist beside it rather than a
+   longer `entries` list.
+2. **`Owned` is consent, not safety.** A delete is only ever built against an
+   endpoint some row declares as this profile's own (`qdrant.owned: true`) —
+   there is no `--apply` around that, and no consent prompt past it either.
+   Which cuts the other way too: on an endpoint you declared yours, an
+   unreferenced mint-shaped collection is reapable even if a different home
+   minted it. What a foreign product's collections (`overmind_entries`,
+   `overmind_routes`) are protected by is their name shape and your configs
+   not claiming those endpoints — nothing more, and the docs do not claim
+   more.
+
+The known 852 mint-shaped collections with no reconstructable provenance stay
+`BUGS/029`: the sweep is a gate on the litter this feature's verbs can produce,
+not a general cleaner, and a run of `repair --apply` does not promise the
+machine is tidy afterwards. Dropping one row of a tree that was registered
+under two spellings also leaves the sibling spelling's collection in place
+until the next `repair --apply` sweep whose claim set no longer names the gone
+row — two stages, by design, because the claim set is read after the row
+prune and that is what keeps a live store's vectors alive.
+
+A note on the marker file: a linked worktree's `.git` is a one-line file whose
+whole content is an absolute path into the main checkout's gitdir (a submodule
+`.git` is the same shape), and indexing it is how an answer ends up quoting
+another tree. It is not indexed, in any workspace, and a store that already
+held such a row loses it when that file is next read.
 
 ## Cross-repo workspaces
 
@@ -436,7 +675,11 @@ its own workspace — sibling repos join only when deliberately added with
 ## Indexing exclusions
 
 Squeezr does not index everything: built-in defaults cut `node_modules`, `bin`,
-`obj`, `dist`, `.next`, `.vs`, `coverage` and other noise. On top of the
+`obj`, `dist`, `.next`, `.vs`, `coverage` and other noise, and the `.git`
+entry never reaches the index as a file either — not the directory in a main
+checkout, not the one-line `gitdir:` pointer a linked worktree or a submodule
+keeps in its place (that line is an absolute path into somebody else's tree,
+which is the coordinate no answer should quote). On top of the
 defaults — three layers, each next one overrides the previous
 (last-match-wins):
 

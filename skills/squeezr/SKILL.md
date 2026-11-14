@@ -140,6 +140,70 @@ there `\` stays a directory separator rather than an escape, a class cannot
 contain `/`, and there is no residual-form skip: an unterminated `[` or a POSIX
 class is read literally instead of warned and dropped.
 
+### Git worktree lanes: an index of YOUR branch
+
+If the checkout you are working in is a linked `git worktree` (a lane under
+`.lanes/`, `.claude/worktrees/`, anywhere), do NOT run `squeezr init` here and
+do NOT settle for the parent's index — a lane session that reads the parent's
+store gets parent answers: branch-only symbols come back `matches: []` and
+`expand_span` quotes line numbers from the other tree. One command instead:
+
+```bash
+squeezr worktree init          # in the lane root; registers, fills, reconciles — idempotent, exit 0
+```
+
+It takes the identity from git's own facts about the directory (path-first, so
+two spellings of one tree still get one store), copies the main worktree's
+index in, and runs one incremental pass over THIS tree so the coordinates end
+up being the branch's. `squeezr hook session-start` (opt-in, see §4) runs the
+same verb at session start, which is the ergonomic door; the verb itself is
+always available and needs no hook.
+
+Cost, stated before you pay it: ~661 MB per lane on ext4 (`meta.db` +
+`trigram.idx`, a real byte copy — no cheap clone here), plus one reconcile
+pass. That is the live-store figure and a scale reference, not a constant: the
+same door on a scratch clone of this repo at head 072e4ea moved 54 MB + 52 MB
+for a 3 165-file parent store. `worktree init --json` prints its own source →
+staged → installed numbers per file, so read the numbers off the run.
+`--baseline <name|path>` also registers the parent checkout as a second repo
+(`main`, reached with `--repo main`), and the doubling is the arithmetic of two
+trees in one store — measured: the same lane went from 3 165 files / 24 617
+chunks to 6 330 / 49 234. `--reindex` skips the copy outright
+(`fill.skip: "ReindexRequested"`) and runs no pass (`reconcile.state:
+"Deferred"`), so the coordinates are then owed by `squeezr index`;
+`--no-semantic` copies and passes, leaving only the embeddings. Until the reconcile pass closes,
+`status` / `index_status` report the store as reconcile-pending and MCP
+`fileFreshness` answers `unknown` rather than `fresh` — that is the honest
+state of a freshly copied lane, not a defect to route around.
+
+The rest of the family: `squeezr worktree resolve [PATH]` (what store this path
+maps to and what it says about itself), `squeezr worktree list [PATH]` (one
+family: parent row plus the worktree rows naming it), `squeezr worktree drop
+[PATH]` (ends the store — rows of every spelling, store dirs, collections).
+`resolve` and `list` write nothing on a healthy registry; a missing or
+unparseable `workspaces.json` is rebuilt from the store manifests before they
+answer, so "zero writes" is a statement about the healthy path. To read the
+other tree deliberately, use `--workspace <storeKey|path>` or `--at parent` on
+`search`/`symbol`/`refs`/`expand`/`map` — such an answer names its subject
+(`root`/`branch`/`storeKey`) and warns that its coordinates come from a
+different checkout.
+
+Death path: `worktree drop` when the lane is still on disk; when a worktree
+directory is simply gone, `squeezr workspace repair` reaps the row and the
+store through the existing dead-`rootPath` prune (dry-run first), and
+`squeezr workspace repair --apply` also reaps mint-shaped collections
+(`squeezr-<12 hex>`) no surviving row names — but ONLY on endpoints this
+profile's config declares `qdrant.owned: true`, and never on someone else's
+Qdrant. Two traps for scripts: `rc 0` does not mean the endpoints answered
+(gate on `collections.endpointFaults` / `unreachableEndpoints` /
+`notOwnedEndpoints`, and read `seenMinted` as the denominator), and `Owned` is
+consent, not safety — an endpoint you call yours gets swept even if another
+home minted the collections on it. The sweep is a gate on lane litter, not a
+general cleaner: the ~852 unattributable collections already on this machine
+are `BUGS/029` and stay there. A sibling spelling of a dropped row keeps its
+collection until the next `repair --apply`, which is the second half of the
+same two-stage design, not a leak.
+
 ## 4. MCP registration
 
 ```bash
@@ -238,7 +302,18 @@ init` / `squeezr index` own it), a repository nobody indexed (the verb reports
 `ParentNotIndexed` and creates nothing), a plain directory, a stdin that does not
 parse, a payload naming another event, or a failed verb pass — so the arm cannot
 break a session start. On a settled lane the repeat pass measured ~0.6 s (the
-first pass ~2 s on a two-chunk repo, most of it the copy).
+first pass ~2 s on a two-chunk repo, most of it the copy). Scale that honestly:
+the hook calls the verb with no mode flag, so a first birth pays the embedding
+pass too — on a full clone of this product's tree (3 165 files, 24 617 chunks) one
+first hook-armed birth on a full clone of this repo ran ~3 min and exited 0
+reconcile-pending — and that leg is also the one that reached the machine's shared
+Qdrant, because of the default-config bullet below. If the lane must appear cheap,
+run `squeezr worktree init --no-semantic` yourself before the session starts; the
+hook then reads `already registered`. Also know the lane's config is
+minted, not inherited: a fresh store starts on the built-in defaults
+(`qdrant.endpoint http://localhost:6334`, `provider auto`) whatever the parent was
+indexed against, so a pinned or dedicated vector setup has to be written into the
+lane's own `config.json` before its first semantic pass.
 
 Adoption is a flag, never a default and never a prompt — this is the one hook that
 runs a command at every session start:
