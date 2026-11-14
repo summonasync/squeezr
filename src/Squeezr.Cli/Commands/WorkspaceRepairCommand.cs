@@ -214,20 +214,35 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
     {
         var rows = WorkspaceRootResolver.GuardRegistryIo(WorkspaceRegistry.Load);
         return await WorkspaceCollectionSweep.RunAsync(
-            WorkspaceCollectionSweep.EndpointsOf(rows),
+            WorkspaceCollectionSweep.SweepTargetsOf(rows),
             WorkspaceCollectionSweep.CollectionApplyGate(settings.Apply, prune.Mode),
             cancellationToken);
     }
 
     // An endpoint that never answered is a hole in the ledger, and a --json reader has to see it on the
     // channel warnings travel on: silence here would read as "the sweep looked everywhere and found nothing".
+    // The measured error rides with the name so a reader can tell a dead port from an empty one, and a run
+    // that had --apply in hand but deleted nothing on an endpoint it does not own says so instead of leaving
+    // the silence to be read as success — there is no consent path past that gate, so it is a refusal, not a
+    // result.
     private static void WriteCollectionHints(WorkspaceRepairCollectionsReport collections)
     {
         foreach (var endpoint in collections.UnreachableEndpoints)
         {
+            var fault = collections.EndpointFaults?.FirstOrDefault(
+                row => string.Equals(row.Endpoint, endpoint, StringComparison.Ordinal));
             Console.Error.WriteLine(
-                $"warning: the collection sweep could not reach '{endpoint}'; collections living there are not in " +
+                $"warning: the collection sweep could not reach '{endpoint}'" +
+                $"{(fault is null ? ";" : $" — {fault.Error};")} collections living there are not in " +
                 "this ledger, and nothing on it was deleted.");
+        }
+
+        if (collections.Apply && collections.NotOwnedEndpoints is { Count: > 0 } skipped)
+        {
+            Console.Error.WriteLine(
+                $"warning: the collection sweep deleted nothing on {skipped.Count} non-owned endpoint(s) " +
+                $"({string.Join(", ", skipped)}): this profile's configs do not declare them its own, and " +
+                "--apply is not consent to delete on another home's Qdrant.");
         }
     }
 
@@ -248,11 +263,16 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 WorkspaceCollectionSweep.ActionReapFailed =>
                     $"  [red]x[/] collection {named} — not reaped: " +
                     $"{(entry.Failure ?? "no reason given").EscapeMarkup()}",
+                WorkspaceCollectionSweep.ActionSkippedNotOwned =>
+                    $"  [yellow]![/] collection {named} — left alone: this profile does not own that endpoint " +
+                    "([grey]endpoint-not-owned[/])",
                 _ => $"  [yellow]-[/] collection {named} — would be reaped (pass --apply)",
             });
         }
 
         var reaped = collections.Entries.Count(entry => entry.Action == WorkspaceCollectionSweep.ActionReaped);
+        var held = collections.Entries.Count(
+            entry => entry.Action == WorkspaceCollectionSweep.ActionSkippedNotOwned);
         AnsiConsole.MarkupLine(
             $"[grey]Collections: {collections.Entries.Count} unreferenced of {collections.SeenMinted} " +
             $"collection(s) this product minted on {collections.Endpoints.Count} endpoint(s) — " +
@@ -261,6 +281,9 @@ public sealed class WorkspaceRepairCommand : AsyncCommand<WorkspaceRepairCommand
                 : "reported only, nothing deleted (pass --apply)")}[/]" +
             (collections.UnreachableEndpoints.Count > 0
                 ? $"[grey], {collections.UnreachableEndpoints.Count} endpoint(s) unreachable[/]"
+                : string.Empty) +
+            (held > 0
+                ? $"[grey], {held} left alone on non-owned endpoint(s)[/]"
                 : string.Empty) + "[grey].[/]");
     }
 

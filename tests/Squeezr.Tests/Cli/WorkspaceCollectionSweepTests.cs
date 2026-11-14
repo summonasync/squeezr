@@ -53,7 +53,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
         var server = FakeQdrant.With(Collection(goneRoot));
 
         var report = await WorkspaceCollectionSweep.RunAsync(
-            [Endpoint], apply: false, CancellationToken.None, server);
+            [Owned(Endpoint)], apply: false, CancellationToken.None, server);
 
         report.Ran.ShouldBeTrue();
         report.Apply.ShouldBeFalse();
@@ -72,7 +72,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
             Collection(claimedRoot), Collection(goneRoot), "squeezr-d23ab1c2", "grimoire-ae74daf9", "system");
 
         var report = await WorkspaceCollectionSweep.RunAsync(
-            [Endpoint], apply: true, CancellationToken.None, server);
+            [Owned(Endpoint)], apply: true, CancellationToken.None, server);
 
         report.Entries.ShouldHaveSingleItem().Collection.ShouldBe(Collection(goneRoot));
         server.Deleted.ShouldBe([Collection(goneRoot)],
@@ -92,7 +92,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
         await WorkspaceStoreDropper.DropAsync(deadKey, deadChildRoot, null, CancellationToken.None);
 
         var report = await WorkspaceCollectionSweep.RunAsync(
-            [Endpoint], apply: true, CancellationToken.None, server);
+            [Owned(Endpoint)], apply: true, CancellationToken.None, server);
 
         var aliveAtListTime = server.KeysAtListTime.ShouldHaveSingleItem();
         aliveAtListTime.ShouldNotContain(deadKey,
@@ -113,7 +113,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
             .RefusingDeletesWith(HttpStatusCode.Conflict, "collection is aliased");
 
         var report = await WorkspaceCollectionSweep.RunAsync(
-            [Endpoint], apply: true, CancellationToken.None, server);
+            [Owned(Endpoint)], apply: true, CancellationToken.None, server);
 
         var entry = report.Entries.ShouldHaveSingleItem();
         entry.Action.ShouldBe(WorkspaceCollectionSweep.ActionReapFailed);
@@ -130,7 +130,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
         var server = FakeQdrant.With(Collection(goneRoot)).Unreachable();
 
         var report = await WorkspaceCollectionSweep.RunAsync(
-            [Endpoint], apply: true, CancellationToken.None, server);
+            [Owned(Endpoint)], apply: true, CancellationToken.None, server);
 
         report.Ran.ShouldBeFalse();
         report.Entries.ShouldBeEmpty();
@@ -146,6 +146,196 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
 
         report.Ran.ShouldBeFalse();
         report.SkipReason.ShouldNotBeNull().ShouldContain("no workspace config named a Qdrant endpoint");
+    }
+
+    // The F4 shape: a pinned scratch home whose rows carry the default config names the shared standard port,
+    // and the collections living there were minted by a registry this run never read. Walking that endpoint is
+    // what lets the ledger say what it saw; deleting on it is what the Owned flag refuses, and the refusal has
+    // to be a counted line with a machine-readable reason — a would-reap row here would promise a delete that
+    // no flag can ever authorize.
+    [Fact]
+    public async Task RunAsync_EndpointThisProfileDoesNotOwn_CountsTheSkipAndBuildsNoDeleteRequest()
+    {
+        var (goneRoot, _, _) = WriteRow("gone-lane");
+        RemoveRow("gone-lane");
+        var preview = FakeQdrant.With(Collection(goneRoot), "overmind_entries", "grimoire-ae74daf9");
+
+        var reported = await WorkspaceCollectionSweep.RunAsync(
+            [Foreign(Endpoint)], apply: false, CancellationToken.None, preview);
+
+        reported.Ran.ShouldBeTrue("the survey walked it, so the run is not a skip of the whole arm");
+        reported.SeenMinted.ShouldBe(1, "the foreign pair is not this product's name, so it is not a candidate");
+        var listed = reported.Entries.ShouldHaveSingleItem();
+        listed.Action.ShouldBe(WorkspaceCollectionSweep.ActionSkippedNotOwned);
+        listed.Reason.ShouldBe(WorkspaceCollectionSweep.ReasonNotOwned);
+        reported.NotOwnedEndpoints.ShouldBe([Endpoint]);
+        preview.Requests.ShouldBe(["GET /collections"], "a refusal reads the ledger, it does not write it");
+
+        var applied = FakeQdrant.With(Collection(goneRoot), "overmind_entries", "grimoire-ae74daf9");
+        var appliedReport = await WorkspaceCollectionSweep.RunAsync(
+            [Foreign(Endpoint)], apply: true, CancellationToken.None, applied);
+
+        appliedReport.Apply.ShouldBeTrue("--apply is in hand, and it is still not consent on another home's port");
+        appliedReport.Entries.ShouldHaveSingleItem().Action.ShouldBe(
+            WorkspaceCollectionSweep.ActionSkippedNotOwned);
+        applied.Deleted.ShouldBeEmpty();
+        applied.Requests.ShouldBe(["GET /collections"],
+            "no DELETE request is ever built for a non-owned endpoint, not even one that would be refused");
+    }
+
+    [Fact]
+    public async Task RunAsync_OwnedAndForeignEndpointsNamingTheSameCollection_ReapHereAndHoldThere()
+    {
+        const string foreignEndpoint = "http://foreign.test:6333";
+        var (goneRoot, _, _) = WriteRow("gone-lane");
+        RemoveRow("gone-lane");
+        var server = FakeQdrant.With(Collection(goneRoot));
+
+        var report = await WorkspaceCollectionSweep.RunAsync(
+            [Owned(Endpoint), Foreign(foreignEndpoint)], apply: true, CancellationToken.None, server);
+
+        report.Endpoints.ShouldBe([Endpoint, foreignEndpoint]);
+        report.SeenMinted.ShouldBe(2, "one name seen on each of the two endpoints that hold it");
+        report.Entries.Select(entry => entry.Action).ShouldBe(
+            [WorkspaceCollectionSweep.ActionReaped, WorkspaceCollectionSweep.ActionSkippedNotOwned]);
+        report.Entries.Select(entry => entry.Endpoint).ShouldBe([Endpoint, foreignEndpoint]);
+        report.NotOwnedEndpoints.ShouldBe([foreignEndpoint],
+            "the owned half did not lend its flag to the sibling and the foreign half did not strip it");
+        server.Deleted.ShouldBe([Collection(goneRoot)],
+            "one collection seen twice is deleted once, on the endpoint that declared itself mine");
+    }
+
+    // The dead-port class the marshal measured: two live profiles name a port nothing listens on. The sweep
+    // may not read that as an empty collection set, may not send the survey to a default port instead, and has
+    // to report the error its own request caught so a reader can tell the two apart.
+    [Fact]
+    public async Task RunAsync_OwnedEndpointWithNoListener_ReportsItsMeasuredFault_NotAQuietZero()
+    {
+        var (goneRoot, _, _) = WriteRow("gone-lane");
+        RemoveRow("gone-lane");
+        var server = FakeQdrant.With(Collection(goneRoot)).Unreachable();
+
+        var report = await WorkspaceCollectionSweep.RunAsync(
+            [Owned(Endpoint)], apply: true, CancellationToken.None, server);
+
+        report.Ran.ShouldBeFalse();
+        report.SeenMinted.ShouldBe(0);
+        report.UnreachableEndpoints.ShouldBe([Endpoint]);
+        var fault = report.EndpointFaults.ShouldNotBeNull().ShouldHaveSingleItem();
+        fault.Endpoint.ShouldBe(Endpoint);
+        fault.Error.ShouldBe("HttpRequestException: connection refused",
+            "the fault line is the exception this run actually caught, typed and passed through");
+        report.NotOwnedEndpoints.ShouldBeEmpty();
+        server.Deleted.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void SweepTargetsOf_TwoConfigs_TwoEndpoints_ClassifiesEachFromItsOwnFile()
+    {
+        var ownedHome = Tracked(TestDirs.NewTempDir());
+        var foreignHome = Tracked(TestDirs.NewTempDir());
+        var sharedHome = Tracked(TestDirs.NewTempDir());
+        var bare = Tracked(TestDirs.NewTempDir());
+        WriteConfig(ownedHome, "http://one.test:6334", owned: true);
+        WriteConfig(foreignHome, "http://one.test:6334");
+        WriteConfig(sharedHome, "http://two.test:6333");
+        var rows = new[]
+        {
+            RowOf("foreign-first", foreignHome),
+            RowOf("mine", ownedHome),
+            RowOf("also-mine", sharedHome),
+            RowOf("bare", bare),
+        };
+
+        var targets = WorkspaceCollectionSweep.SweepTargetsOf(rows);
+
+        targets.ShouldBe(
+            [
+                new QdrantSweepTarget("http://one.test:6334", true),
+                new QdrantSweepTarget("http://two.test:6333", true),
+            ],
+            "one endpoint, one target: the row that declared it its own wins the flag for the shared spelling, " +
+            "and an owned config naming an explicit endpoint resolves there instead of deriving a port");
+        WorkspaceCollectionSweep.EndpointsOf(rows).ShouldBe(["http://one.test:6334", "http://two.test:6333"],
+            "the unowned projection the ledger reports is unchanged by the gate — every named endpoint is " +
+            "still surveyed, ownership only decides what may be deleted on it");
+    }
+
+    // Forward-only, exactly as the claim set is built: a name derived from a surviving row is claimed and a
+    // name that merely looks like one is not. Backward reconstruction from the endpoint's inventory is dead —
+    // the measured inventory holds hundreds of names no registry anywhere answers for — so nothing in this
+    // predicate may claim to know where a name came from.
+    [Fact]
+    public void ClaimedNames_SurvivingRows_AnswerForwardForTheirOwnNamesOnly()
+    {
+        var (liveRoot, _, _) = WriteRow("live-lane");
+        var goneRoot = Tracked(TestDirs.NewTempDir());
+        var rows = WorkspaceRegistry.Load();
+
+        var claimed = WorkspaceCollectionSweep.ClaimedNames(rows);
+
+        claimed.ShouldContain(Collection(liveRoot),
+            "a live row names its own collection, in each spelling its serve path can open");
+        claimed.ShouldNotContain(Collection(goneRoot),
+            "no row of this registry derives that name, so it is unclaimed — which is the whole of what this " +
+            "sweep is allowed to say about where it came from");
+        claimed.ShouldNotContain("overmind_entries");
+        claimed.ShouldNotContain("grimoire-ae74daf9");
+        claimed.Count.ShouldBe(claimed.Distinct().Count(), "the claim set is a set");
+    }
+
+    // Dry-run output is the only legal source of a deletion set: the same candidate list, read from the same
+    // registry at the same point in the run, decides both what is listed and what is deleted. Measured
+    // behaviorally — two scripted endpoints seeded alike, preview first, apply second.
+    [Fact]
+    public async Task RunAsync_ApplyPathDeletesExactlyWhatTheDryRunListed()
+    {
+        var (firstRoot, _, _) = WriteRow("gone-one");
+        var (secondRoot, _, _) = WriteRow("gone-two");
+        RemoveRow("gone-one");
+        RemoveRow("gone-two");
+        var seeded = new[]
+        {
+            Collection(firstRoot), Collection(secondRoot), "squeezr-0a1b2c3d4e5f", "overmind_entries",
+        };
+
+        var previewed = await WorkspaceCollectionSweep.RunAsync(
+            [Owned(Endpoint)], apply: false, CancellationToken.None, FakeQdrant.With(seeded));
+        var server = FakeQdrant.With(seeded);
+        var applied = await WorkspaceCollectionSweep.RunAsync(
+            [Owned(Endpoint)], apply: true, CancellationToken.None, server);
+
+        previewed.Entries.ShouldAllBe(entry => entry.Action == WorkspaceCollectionSweep.ActionWouldReap);
+        var listed = previewed.Entries.Select(entry => entry.Collection).ToList();
+        listed.ShouldNotContain(name => name == "overmind_entries",
+            "a name this product never minted is not on the list the apply path may work, in either mode");
+        listed.ShouldBe(
+            new[] { Collection(firstRoot), Collection(secondRoot), "squeezr-0a1b2c3d4e5f" }
+                .OrderBy(name => name, StringComparer.Ordinal).ToList(),
+            "every unclaimed mint-shaped name is a candidate — the scratch-shaped half is stopped by the " +
+            "ownership gate, never by the claim set pretending to know its provenance");
+
+        applied.Entries.Select(entry => entry.Collection).ToList().ShouldBe(listed,
+            "the apply path works the preview's own list: same names, same endpoint, same order");
+        applied.Entries.Select(entry => (entry.Endpoint, entry.Collection)).ToList()
+            .ShouldBe(previewed.Entries.Select(entry => (entry.Endpoint, entry.Collection)).ToList());
+        server.Deleted.ShouldBe(listed, "the deletion set is structurally the dry-run output, nothing more");
+        applied.Entries.ShouldAllBe(entry => entry.Action == WorkspaceCollectionSweep.ActionReaped);
+    }
+
+    [Fact]
+    public void SweepGate_TheDeleteRequestSitsBehindTheOwnedFlag()
+    {
+        var source = File.ReadAllText(RepoFile("src/Squeezr.Cli/Commands/WorkspaceCollectionSweep.cs"));
+
+        var gateAt = source.IndexOf("if (!target.Owned)", StringComparison.Ordinal);
+        var deleteAt = source.IndexOf("TryDeleteCollectionAsync(http, target.Endpoint", StringComparison.Ordinal);
+
+        gateAt.ShouldBeGreaterThan(0,
+            "the sweep consults the ownership the declaring config carried, not a conjunction restated " +
+            "somewhere a refactor can drop it silently");
+        deleteAt.ShouldBeGreaterThan(gateAt,
+            "the delete request is downstream of the gate, and a non-owned candidate leaves the loop before it");
     }
 
     [LinuxFact]
@@ -179,6 +369,9 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
     [InlineData("squeezr-0a1b2c3d4e5ff", false)]
     [InlineData("squeezr-demo", false)]
     [InlineData("grimoire-0a1b2c3d4e5f", false)]
+    [InlineData("overmind_entries", false)]
+    [InlineData("overmind_routes", false)]
+    [InlineData("squeezr-0A1B2C3D4E5F", false)]
     public void IsMintedName_AcceptsOnlyWhatThisProductWrites(string collection, bool expected) =>
         WorkspaceCollectionSweep.IsMintedName(collection).ShouldBe(expected);
 
@@ -279,10 +472,14 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
     private static WorkspaceRegistryEntry RowOf(string name, string root) =>
         new(name, root, WorkspaceStoreKeys.Create(name, root), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
-    private static void WriteConfig(string root, string endpoint) =>
+    private static QdrantSweepTarget Owned(string endpoint) => new(endpoint, true);
+
+    private static QdrantSweepTarget Foreign(string endpoint) => new(endpoint, false);
+
+    private static void WriteConfig(string root, string endpoint, bool owned = false) =>
         ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
         {
-            Qdrant = new QdrantConfig { Endpoint = endpoint }
+            Qdrant = new QdrantConfig { Endpoint = endpoint, Owned = owned }
         });
 
     private string Tracked(string path)
@@ -297,6 +494,8 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
         IReadOnlyList<string> seeded) : HttpMessageHandler
     {
         public List<string> Deleted { get; } = [];
+
+        public List<string> Requests { get; } = [];
 
         public List<IReadOnlyList<string>> KeysAtListTime { get; } = [];
 
@@ -319,6 +518,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
 
         private HttpResponseMessage Send(HttpRequestMessage request)
         {
+            Requests.Add($"{request.Method} {request.RequestUri!.AbsolutePath}");
             if (unreachable)
             {
                 throw new HttpRequestException("connection refused");

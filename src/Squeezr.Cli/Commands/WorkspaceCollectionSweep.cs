@@ -13,6 +13,8 @@ internal static partial class WorkspaceCollectionSweep
     public const string ActionWouldReap = "would-reap";
     public const string ActionReaped = "reaped";
     public const string ActionReapFailed = "reap-failed";
+    public const string ActionSkippedNotOwned = "skipped-not-owned";
+    public const string ReasonNotOwned = "endpoint-not-owned";
 
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
 
@@ -28,37 +30,48 @@ internal static partial class WorkspaceCollectionSweep
     // candidate only when no surviving row names it, which is the direction that cannot take a live store's
     // vectors — the flipped order would delete a collection whose row had already gone but whose tree is
     // still indexed under another spelling.
+    // Deleting on an endpoint this profile does not call its own is not a repair, it is a raid on another
+    // home's vectors: the shared standard port holds collections named by registries this run never read, and
+    // a claim set built from live rows here cannot tell those from leaks. So the survey still walks a
+    // non-owned endpoint — the ledger has to say what it saw — but every candidate on it lands as a counted
+    // skip with a machine-readable reason, and the delete request is never even built. There is no consent
+    // path around this gate: --apply on a non-owned endpoint means "delete on the endpoints I own", per the
+    // owner ruling that closed F4.
     public static async Task<WorkspaceRepairCollectionsReport> RunAsync(
-        IReadOnlyList<string> endpoints,
+        IReadOnlyList<QdrantSweepTarget> targets,
         bool apply,
         CancellationToken cancellationToken,
         HttpMessageHandler? handler = null)
     {
-        if (endpoints.Count == 0)
+        if (targets.Count == 0)
         {
             return new WorkspaceRepairCollectionsReport(false, apply, [], 0, [], [],
                 "no workspace config named a Qdrant endpoint, so there was nothing to survey");
         }
 
+        var endpoints = targets.Select(target => target.Endpoint).ToList();
+        var notOwned = targets.Where(target => !target.Owned).Select(target => target.Endpoint).ToList();
         var claimed = ClaimedNames(WorkspaceRootResolver.GuardRegistryIo(WorkspaceRegistry.Load));
         var entries = new List<WorkspaceRepairCollectionEntry>();
         var unreachable = new List<string>();
+        var faults = new List<WorkspaceRepairEndpointFault>();
         var seen = 0;
 
         using var http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
         http.Timeout = ProbeTimeout;
 
-        foreach (var endpoint in endpoints)
+        foreach (var target in targets)
         {
             List<string> observed;
             try
             {
-                observed = await QdrantCollectionListing.NamesAsync(http, BaseUri(endpoint), cancellationToken);
+                observed = await QdrantCollectionListing.NamesAsync(http, BaseUri(target.Endpoint), cancellationToken);
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
                                         or IOException or UriFormatException or JsonException)
             {
-                unreachable.Add(endpoint);
+                unreachable.Add(target.Endpoint);
+                faults.Add(new WorkspaceRepairEndpointFault(target.Endpoint, DescribeFault(ex)));
                 continue;
             }
 
@@ -71,20 +84,28 @@ internal static partial class WorkspaceCollectionSweep
 
             foreach (var name in minted)
             {
-                if (!apply)
+                if (!target.Owned)
                 {
-                    entries.Add(new WorkspaceRepairCollectionEntry(endpoint, name, ActionWouldReap));
+                    entries.Add(new WorkspaceRepairCollectionEntry(
+                        target.Endpoint, name, ActionSkippedNotOwned, null, ReasonNotOwned));
                     continue;
                 }
 
-                var failure = await TryDeleteCollectionAsync(http, endpoint, name, cancellationToken);
+                if (!apply)
+                {
+                    entries.Add(new WorkspaceRepairCollectionEntry(target.Endpoint, name, ActionWouldReap));
+                    continue;
+                }
+
+                var failure = await TryDeleteCollectionAsync(http, target.Endpoint, name, cancellationToken);
                 entries.Add(new WorkspaceRepairCollectionEntry(
-                    endpoint, name, failure is null ? ActionReaped : ActionReapFailed, failure));
+                    target.Endpoint, name, failure is null ? ActionReaped : ActionReapFailed, failure));
             }
         }
 
         return new WorkspaceRepairCollectionsReport(
-            unreachable.Count < endpoints.Count, apply, endpoints, seen, entries, unreachable);
+            unreachable.Count < targets.Count, apply, endpoints, seen, entries, unreachable,
+            null, notOwned, faults);
     }
 
     // A store's collection is named by the spelling of its root, and one tree can survive as several
@@ -104,33 +125,51 @@ internal static partial class WorkspaceCollectionSweep
         return [.. names];
     }
 
-    // Every endpoint this profile's live configs point at: a dead row's config is gone with its tree, so the
-    // living rows are the only record of where this product's collections can be. A registry whose rows carry
-    // no readable config names no endpoint, and the survey refuses instead of guessing one — a guessed shared
-    // port would send a repair run to a Qdrant no row of this profile ever wrote to.
-    public static IReadOnlyList<string> EndpointsOf(IReadOnlyList<WorkspaceRegistryEntry> rows)
+    // Every endpoint this profile's live configs point at, each once, with the ownership flag read from the
+    // config that named it: a dead row's config is gone with its tree, so the living rows are the only record
+    // of where this product's collections can be, and which of them this run may delete on. A registry whose
+    // rows carry no readable config names no endpoint, and the survey refuses instead of guessing one — a
+    // guessed shared port would send a repair run to a Qdrant no row of this profile ever wrote to.
+    public static IReadOnlyList<QdrantSweepTarget> SweepTargetsOf(IReadOnlyList<WorkspaceRegistryEntry> rows)
     {
-        var endpoints = new List<string>();
+        var targets = new List<QdrantSweepTarget>();
         foreach (var row in rows)
         {
-            string endpoint;
+            QdrantConfig qdrant;
             try
             {
-                endpoint = ConfigFile.Load(row.RootPath).Qdrant.ResolvedEndpoint;
+                qdrant = ConfigFile.Load(row.RootPath).Qdrant;
             }
             catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
             {
                 continue;
             }
 
-            if (endpoint.Length > 0 && !endpoints.Contains(endpoint, StringComparer.Ordinal))
+            var endpoint = qdrant.ResolvedEndpoint;
+            if (endpoint.Length == 0)
             {
-                endpoints.Add(endpoint);
+                continue;
+            }
+
+            var at = targets.FindIndex(target =>
+                string.Equals(target.Endpoint, endpoint, StringComparison.Ordinal));
+            if (at < 0)
+            {
+                targets.Add(new QdrantSweepTarget(endpoint, qdrant.Owned));
+            }
+            else if (qdrant.Owned)
+            {
+                targets[at] = targets[at] with { Owned = true };
             }
         }
 
-        return endpoints;
+        return targets;
     }
+
+    // What the ledger covers, ownership aside: the survey walks all of it and refuses to delete on the part
+    // this profile does not own, so a skipped endpoint still shows up as a surveyed one.
+    public static IReadOnlyList<string> EndpointsOf(IReadOnlyList<WorkspaceRegistryEntry> rows) =>
+        [.. SweepTargetsOf(rows).Select(target => target.Endpoint)];
 
     public static bool IsMintedName(string collection) => MintedName().IsMatch(collection);
 
@@ -163,6 +202,12 @@ internal static partial class WorkspaceCollectionSweep
 
     private static string BaseUri(string endpoint) =>
         new Uri(endpoint).GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/";
+
+    // The error the sweep's own request caught, typed and verbatim: "no listener on this port" and "the
+    // collection set here is empty" must never collapse into the same zero, and a rerouted guess about a
+    // dead endpoint is worse than the failure it hides.
+    private static string DescribeFault(Exception ex) =>
+        ex.Message.Length > 0 ? $"{ex.GetType().Name}: {ex.Message}" : ex.GetType().Name;
 
     // The 078 naming is the only name this product writes; anything else on the endpoint belongs to
     // something that is not squeezr and is never a delete candidate, however stale it looks.
