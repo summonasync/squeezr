@@ -220,6 +220,8 @@ public class SemanticHitsResolverScopeTests
     {
         public int Dimensions => 4;
 
+        public string ModelKey => TestEmbeddingKeys.Calibrated;
+
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(_ => new float[] { 0.1f, 0.2f, 0.3f, 0.4f }).ToArray());
     }

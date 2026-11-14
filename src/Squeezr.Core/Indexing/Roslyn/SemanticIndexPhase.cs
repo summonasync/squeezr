@@ -8,7 +8,11 @@ public sealed record SemanticPhaseResult(
     int Chunks,
     int Skipped,
     IReadOnlyList<string>? Deferred = null,
-    int Throttled = 0);
+    int Throttled = 0,
+    // the declaring files this pass booked but did not parse: Deferred already carries them for the pooled
+    // route, which has a next pass to hand them to, and a caller that can fold them into the same batch
+    // (IndexScoped) needs them named apart from the files the parse refused
+    IReadOnlyList<string>? Booked = null);
 
 public static class SemanticIndexPhase
 {
@@ -290,7 +294,9 @@ public static class SemanticIndexPhase
             }
         }
 
-        return new SemanticPhaseResult(store.CountSymbols(repoDoc.Id), store.CountChunks(repoDoc.Id), skipped, deferred);
+        return new SemanticPhaseResult(
+            store.CountSymbols(repoDoc.Id), store.CountChunks(repoDoc.Id), skipped, deferred,
+            Booked: booked.Count > 0 ? booked.ToList() : null);
     }
 
     // a restamped caller leaves the rows it hosts exactly where they were: they name callsites inside

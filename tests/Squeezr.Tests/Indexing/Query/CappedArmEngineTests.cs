@@ -35,7 +35,12 @@ public class CappedArmEngineTests
         var alpha = fixture.Chunks["src/Core/Alpha.cs"];
         var store = new FakeVectorStore
         {
-            Hits = SaturatedScopePool(fixture.RepoId, [alpha], scopedScore: 0.9)
+            Hits =
+            [
+                Hit(1, alpha, fixture.RepoId, 0.9),
+                new VectorHit(2, "h", alpha.FileId, fixture.RepoId, 999, 1000, 0.85),
+                .. Enumerable.Range(0, 48).Select(i => OutOfScopeHit((ulong)(i + 100), fixture.RepoId, 0.4))
+            ]
         };
 
         var response = Search(fixture.Root, "zznotaword", store, prefix: "src/");
@@ -44,7 +49,45 @@ public class CappedArmEngineTests
         store.LastTopK.ShouldBe(50);
         response.Matches.ShouldContain(m => m.Path == "src/Core/Alpha.cs");
         response.Warnings.ShouldHaveSingleItem().ShouldBe(
-            "semantic arm capped at 50 examined candidates; 1 in scope, 1 delivered — narrow with --path-glob, kind=code, narrower prefix or repo scope");
+            "semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered — narrow with --path-glob, kind=code, narrower prefix or repo scope");
+    }
+
+    [Fact]
+    public void Hybrid_FullyServedNarrowScope_SilencesCappedWarning()
+    {
+        var fixture = NewIndexedWorkspace();
+        var alpha = fixture.Chunks["src/Core/Alpha.cs"];
+        var store = new FakeVectorStore
+        {
+            Hits = SaturatedScopePool(fixture.RepoId, [alpha], scopedScore: 0.9)
+        };
+
+        var response = Search(fixture.Root, "zznotaword", store, prefix: "src/");
+
+        store.LastTopK.ShouldBe(50);
+        response.Matches.ShouldContain(m => m.Path == "src/Core/Alpha.cs");
+        response.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Hybrid_ExactArmAnswered_EmptySemanticDelivery_SilencesCappedWarning()
+    {
+        var fixture = NewIndexedWorkspace();
+        var alpha = fixture.Chunks["src/Core/Alpha.cs"];
+        var store = new FakeVectorStore
+        {
+            Hits =
+            [
+                new VectorHit(1, "h", alpha.FileId, fixture.RepoId, 999, 1000, 0.9),
+                .. Enumerable.Range(0, 49).Select(i => OutOfScopeHit((ulong)(i + 100), fixture.RepoId, 0.4))
+            ]
+        };
+
+        var response = Search(fixture.Root, "Probe", store, prefix: "src/");
+
+        store.LastTopK.ShouldBe(50);
+        response.Matches.ShouldContain(m => m.Path == "src/Core/Alpha.cs");
+        response.Warnings.ShouldBeEmpty();
     }
 
     [Fact]
@@ -94,7 +137,12 @@ public class CappedArmEngineTests
         var alpha = fixture.Chunks["src/Core/Alpha.cs"];
         var store = new FakeVectorStore
         {
-            Hits = SaturatedScopePool(fixture.RepoId, [alpha], scopedScore: 0.60)
+            Hits =
+            [
+                Hit(1, alpha, fixture.RepoId, 0.60),
+                new VectorHit(2, "h", alpha.FileId, fixture.RepoId, 999, 1000, 0.55),
+                .. Enumerable.Range(0, 48).Select(i => OutOfScopeHit((ulong)(i + 100), fixture.RepoId, 0.4))
+            ]
         };
 
         var response = Search(fixture.Root, "zznotaword", store, prefix: "src/");
@@ -102,7 +150,7 @@ public class CappedArmEngineTests
         response.Matches.ShouldNotBeEmpty();
         response.Warnings.Count.ShouldBe(2);
         response.Warnings.ShouldContain(w =>
-            w.StartsWith("semantic arm capped at 50 examined candidates; 1 in scope, 1 delivered"));
+            w.StartsWith("semantic arm capped at 50 examined candidates; 2 in scope, 1 delivered"));
         response.Warnings.ShouldContain(
             "no exact-arm match; 1 semantic hit at low confidence — narrow with kind=code or prefix");
     }
@@ -196,6 +244,8 @@ public class CappedArmEngineTests
     private sealed class FakeEmbeddingProvider : IEmbeddingProvider
     {
         public int Dimensions => 4;
+
+        public string ModelKey => TestEmbeddingKeys.Calibrated;
 
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(_ => new float[] { 0.1f, 0.2f, 0.3f, 0.4f }).ToArray());

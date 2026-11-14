@@ -3,7 +3,9 @@ namespace Squeezr.Core.Health;
 public sealed record EmbeddingsHealth(
     string? Provider,
     string? ModelProblem,
-    string? CpuOnly)
+    string? CpuOnly,
+    string? ModelKey = null,
+    int? OtherModelChunks = null)
 {
     public static readonly EmbeddingsHealth Silent = new(null, null, null);
 }

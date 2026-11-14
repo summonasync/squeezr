@@ -126,6 +126,12 @@ public static class DoctorRunner
             yield break;
         }
 
+        if (facts.Health.ModelKey is { } modelKey)
+        {
+            yield return new DoctorFinding(
+                "embedding model", StateInfo, ModelVintageDetail(modelKey, facts.Health.OtherModelChunks), null);
+        }
+
         if (facts.UnavailableReason is { } unavailable)
         {
             yield return new DoctorFinding("semantic search", StateInfo, $"facts unavailable: {unavailable}", null);
@@ -171,6 +177,11 @@ public static class DoctorRunner
                 DoctorRemedies.Index);
         }
     }
+
+    private static string ModelVintageDetail(string modelKey, int? otherModelChunks) =>
+        otherModelChunks is null
+            ? $"{modelKey} (vintage count unavailable)"
+            : $"{modelKey} — {otherModelChunks} chunk(s) carry vectors from another embedding model";
 
     private static string ThresholdOrigin(int pendingThreshold)
         => pendingThreshold == WatchConfig.DefaultEmbedBudgetPerPass ? string.Empty : ", watch.embedBudgetPerPass";

@@ -310,7 +310,7 @@ public sealed class WorkspaceIndexer
                 if (existing is not null)
                 {
                     DropFile(existing, store, vectorStore, warnings, guard);
-                    SaveWithheldState(store, repo.Name, repoDoc, now, guard, rowDropped: true);
+                    SaveWithheldState(store, repo.Name, repoDoc, now, guard, droppedProtected: 1);
                 }
 
                 return null;
@@ -487,22 +487,412 @@ public sealed class WorkspaceIndexer
         }
     }
 
+    public sealed record ScopedIndexResult(int Indexed, int Removed, IReadOnlyList<string> Warnings);
+
+    // The batch sibling of IndexFile: one lock, one store, one Roslyn session per repo, one trigram append, and
+    // no walk at all — that is the whole point. Its cost is the announced paths plus the price of opening the
+    // workspace once, which on a project-bearing repo is seconds and does not grow with the number of files
+    // nobody touched. Reconciliation is limited to the announced paths too: a row nobody announced keeps its
+    // data, so this route cannot see a deletion nobody reported. The walk is what closes the rest, and a live
+    // watcher (or 'squeezr index') stays the answer for that.
+    public ScopedIndexResult IndexScoped(string workspaceRoot, IReadOnlyList<string> absolutePaths)
+    {
+        if (!WorkspaceManifestFile.Exists(workspaceRoot))
+        {
+            throw new WorkspaceException(
+                RemedyText.WorkspaceNotInitialized,
+                WorkspaceException.NotInitializedCode);
+        }
+
+        var manifest = WorkspaceManifestFile.Load(workspaceRoot);
+        var config = ConfigFile.Load(workspaceRoot);
+        var warnings = new List<string>();
+        var targets = ResolveScopedTargets(manifest, workspaceRoot, absolutePaths);
+        if (targets.Count == 0)
+        {
+            return new ScopedIndexResult(0, 0, warnings);
+        }
+
+        using (IndexLock.Acquire(SqueezrPaths.StoreDir(workspaceRoot)))
+        using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspaceRoot)))
+        {
+            var textCache = new Dictionary<uint, string>();
+            var changed = new List<FileDocument>();
+            var tombstones = new List<(uint RepoId, uint Id)>();
+            var indexed = 0;
+            var removed = 0;
+
+            foreach (var group in targets.GroupBy(t => t.RepoIndex).OrderBy(g => g.Key))
+            {
+                var repo = manifest.Repos[group.Key];
+                var repoRoot = ResolveRepoRoot(workspaceRoot, repo);
+                var repoDoc = store.FindRepo(repo.Name);
+                if (repoDoc is null)
+                {
+                    // the walk route throws on this shape, and a batch that resolved paths for other repos has
+                    // no business losing them because one repo row is missing
+                    warnings.Add(
+                        $"scoped pass skipped {group.Count()} path(s) of '{repo.Name}': the repository is missing " +
+                        "from the index store — run 'squeezr index'");
+                    continue;
+                }
+
+                // loaded per repo so the withheld counters the state write below adds up describe exactly the
+                // paths this group decided, not the running total of every group before it
+                var guard = SecretGuardIngestion.Load(workspaceRoot);
+                var batch = new ScopedBatch();
+                var rowsByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+                foreach (var target in group)
+                {
+                    IngestScopedPath(
+                        batch, store, repoDoc, repoRoot, target.RelativePath, rowsByPath, config, guard,
+                        textCache, warnings);
+                }
+
+                if (batch.CsharpFiles.Count > 0)
+                {
+                    RunScopedSemantic(store, repoRoot, repoDoc, repo.Name, config, guard, batch, warnings);
+                }
+
+                var tsResult = TreeSitterIndexPhase.Run(
+                    repoRoot, repoDoc, store, batch.TreeSitterTargets, textCache, config.Chunking,
+                    config.Indexing.NoSemantic, new TreeSitterProvider(config), warnings.Add);
+                var providerPaths = batch.CsharpFiles.Select(f => f.RelativePath)
+                    .Concat(batch.TreeSitterTargets.Select(d => d.Path).Except(tsResult.FailedPaths))
+                    .ToHashSet(StringComparer.Ordinal);
+                IndexFallbackChunks(store, repoDoc, batch.ChangedByPath, providerPaths, config.Chunking, textCache);
+
+                SaveWithheldState(store, repo.Name, repoDoc, batch.Now, guard, batch.GuardDropped);
+                changed.AddRange(batch.Changed);
+                tombstones.AddRange(batch.Tombstones);
+                indexed += batch.Changed.Count;
+                removed += batch.Removed;
+            }
+
+            AppendScopedTrigramSegments(
+                warnings, textCache, SqueezrPaths.TrigramIndexPath(workspaceRoot), changed, tombstones);
+
+            return new ScopedIndexResult(indexed, removed, warnings);
+        }
+    }
+
+    private readonly record struct ScopedTarget(int RepoIndex, string RelativePath);
+
+    // Longest-root containment, the same shape TouchedPaths uses: a repo nested inside another owns the paths
+    // under its own root. A path that names no repository is silently left alone — a directory announced
+    // instead of a file included. No warning line for those: the name of the path is exactly what a secret the
+    // guard has not yet been asked about would leak.
+    private static List<ScopedTarget> ResolveScopedTargets(
+        WorkspaceManifest manifest, string workspaceRoot, IReadOnlyList<string> absolutePaths)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var roots = manifest.Repos
+            .Select((repo, index) => (Index: index, Prefix: ResolveRepoRoot(workspaceRoot, repo) + Path.DirectorySeparatorChar))
+            .ToList();
+        var targets = new List<ScopedTarget>();
+        var seen = new HashSet<(int, string)>();
+
+        foreach (var announced in absolutePaths)
+        {
+            if (!Path.IsPathRooted(announced))
+            {
+                continue;
+            }
+
+            var full = Path.GetFullPath(announced);
+            var best = -1;
+            var bestLength = -1;
+            foreach (var (index, prefix) in roots)
+            {
+                if (full.StartsWith(prefix, comparison) && prefix.Length > bestLength)
+                {
+                    best = index;
+                    bestLength = prefix.Length;
+                }
+            }
+
+            if (best < 0 || bestLength == full.Length)
+            {
+                continue;
+            }
+
+            var relative = full[bestLength..].Replace(Path.DirectorySeparatorChar, '/');
+            if (seen.Add((best, relative)))
+            {
+                targets.Add(new ScopedTarget(best, relative));
+            }
+        }
+
+        return targets;
+    }
+
+    // What one scoped batch collected: the rows it wrote, the rows it reaped, and the parse targets the
+    // phases need. Carried as one object because the per-path decision below fills all of it and a batch of
+    // out-parameters would say nothing about why they belong together.
+    private sealed class ScopedBatch
+    {
+        public DateTime Now { get; } = DateTime.UtcNow;
+
+        public List<FileDocument> Changed { get; } = [];
+
+        public Dictionary<string, FileDocument> ChangedByPath { get; } = new(StringComparer.Ordinal);
+
+        public List<(uint RepoId, uint Id)> Tombstones { get; } = [];
+
+        public List<SourceFile> CsharpFiles { get; } = [];
+
+        public List<FileDocument> TreeSitterTargets { get; } = [];
+
+        public int Removed { get; set; }
+
+        public int GuardDropped { get; set; }
+    }
+
+    // The per-path half of IndexFile, kept decision-for-decision: guard before the path becomes a file, then
+    // the ignore ruleset, then the stat-shape split that tells a denied parent from a deletion, then the read.
+    // Two deliberate differences: an unreadable path warns instead of throwing (one file nobody can read must
+    // not cost the rest of the announced batch its pass), and a guard refusal adds no tombstone — the same
+    // asymmetry the single-file route already has, where the postings of a refused name stay for the purge to
+    // retire rather than being named in a delete here.
+    private static void IngestScopedPath(
+        ScopedBatch batch,
+        MetaStore store,
+        RepoDocument repoDoc,
+        string repoRoot,
+        string relativePath,
+        Dictionary<string, FileDocument> rowsByPath,
+        SqueezrConfig config,
+        SecretGuardIngestion guard,
+        Dictionary<uint, string> textCache,
+        List<string> warnings)
+    {
+        rowsByPath.TryGetValue(relativePath, out var existing);
+
+        if (guard.Deny(relativePath))
+        {
+            if (existing is not null)
+            {
+                DropFile(existing, store, vectorStore: null, warnings, guard);
+                batch.Removed++;
+                batch.GuardDropped++;
+            }
+
+            return;
+        }
+
+        var fullPath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var rules = IgnoreRuleset.ForFile(repoRoot, config, relativePath, warnings.Add);
+
+        void DropExisting()
+        {
+            if (existing is null)
+            {
+                return;
+            }
+
+            DropFile(existing, store, vectorStore: null, warnings, guard);
+            batch.Tombstones.Add((existing.RepoId, existing.Id));
+            batch.Removed++;
+        }
+
+        if (File.Exists(fullPath) && rules.Decision(relativePath, isDirectory: false).Excluded)
+        {
+            DropExisting();
+            return;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            var denial = ProbeMissingStat(fullPath, out var present);
+            if (denial is not null)
+            {
+                warnings.Add($"keeping '{relativePath}' in the index store: unreadable ({denial.Message}); rows kept");
+                return;
+            }
+
+            if (!present || !UnixFileType.IsRegularFile(fullPath))
+            {
+                DropExisting();
+                return;
+            }
+        }
+        else if (!UnixFileType.IsRegularFile(fullPath))
+        {
+            DropExisting();
+            return;
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(fullPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add($"scoped pass skipped '{relativePath}': unreadable ({ex.Message})");
+            return;
+        }
+
+        var text = SecretSnippetRedactor.Redact(relativePath, DecodeUtf8(bytes));
+        var doc = existing ?? new FileDocument { Id = store.GetNextFileId(), RepoId = repoDoc.Id };
+        doc.Path = relativePath;
+        doc.Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+        doc.Language = LanguageDetector.Detect(fullPath);
+        doc.Kind = DocKindDetector.Detect(doc.Language);
+        doc.SizeBytes = bytes.Length;
+        doc.LineCount = text.Length == 0
+            ? 0
+            : text.Count(c => c == '\n') + (text.EndsWith('\n') ? 0 : 1);
+        doc.IndexedAt = batch.Now;
+        store.UpsertFile(doc);
+        textCache[doc.Id] = text;
+
+        batch.Changed.Add(doc);
+        batch.ChangedByPath[relativePath] = doc;
+        if (doc.Language == "csharp")
+        {
+            batch.CsharpFiles.Add(new SourceFile(relativePath, fullPath, doc.Language, doc.SizeBytes, doc.Sha256));
+        }
+
+        if (IsTreeSitterLanguage(doc.Language))
+        {
+            batch.TreeSitterTargets.Add(doc);
+        }
+    }
+
+    // One session for the whole batch — the single solution open is the floor this route pays and the only
+    // repo-size cost it accepts. The booked set comes back from the phase and is folded into the same session
+    // instead of waiting for a later pass: a declaration the edited caller stopped calling is exactly the row
+    // whose ref set is now wrong, and leaving it booked would keep a ghost answer in find_references.
+    private const int BookedFoldRounds = 4;
+
+    private static void RunScopedSemantic(
+        MetaStore store,
+        string repoRoot,
+        RepoDocument repoDoc,
+        string repoName,
+        SqueezrConfig config,
+        SecretGuardIngestion guard,
+        ScopedBatch batch,
+        List<string> warnings)
+    {
+        RoslynSession session;
+        try
+        {
+            session = RoslynSession.Create(repoRoot, semantic: !config.Indexing.NoSemantic);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
+        {
+            warnings.Add($"semantic index skipped for repo '{repoName}': {ex.Message}");
+            return;
+        }
+
+        using (session)
+        {
+            var noSemantic = config.Indexing.NoSemantic;
+            var dbFilesByPath = store.ListFiles(repoDoc.Id).ToDictionary(f => f.Path, StringComparer.Ordinal);
+            var pending = batch.CsharpFiles;
+            var attempted = new HashSet<string>(StringComparer.Ordinal);
+
+            for (var round = 0; round < BookedFoldRounds && pending.Count > 0; round++)
+            {
+                var result = SemanticIndexPhase.RunWithSession(
+                    session, repoRoot, repoDoc, store, pending, batch.ChangedByPath, dbFilesByPath, config,
+                    noSemantic, guard, warnings.Add);
+                foreach (var file in pending)
+                {
+                    attempted.Add(file.RelativePath);
+                }
+
+                // the budget the phase applies is per round, so a hub caller with more stale declarations than
+                // the budget holds drains over rounds; what is left after the last one stays booked and the
+                // next pass — or a walk — takes it from here
+                pending = (result.Booked ?? [])
+                    .Where(path => !attempted.Contains(path) && dbFilesByPath.TryGetValue(path, out var row) && row.Language == "csharp")
+                    .Select(path => ToSourceFile(repoRoot, dbFilesByPath[path]))
+                    .ToList();
+            }
+
+            if (pending.Count > 0)
+            {
+                warnings.Add(
+                    $"scoped pass left {pending.Count} booked declaration(s) for a later pass; run 'squeezr index' to drain them");
+            }
+        }
+    }
+
+    private static SourceFile ToSourceFile(string repoRoot, FileDocument row) =>
+        new(
+            row.Path,
+            Path.Combine(repoRoot, row.Path.Replace('/', Path.DirectorySeparatorChar)),
+            row.Language,
+            row.SizeBytes,
+            row.Sha256);
+
+    // The append branch of ApplyTrigramUpdates, and only that branch: a legacy or missing trigram index cannot
+    // be healed by a batch that knows a handful of paths. The repair for that shape is the repo-wide rebuild,
+    // and the cheaper alternative — creating a fresh segment set from just these documents — would be worse
+    // than nothing: search would start answering "no matches" for files that were never in the batch. So the
+    // bytes of trigram.idx either gain this batch's segments or do not move at all.
+    private static void AppendScopedTrigramSegments(
+        List<string> warnings,
+        Dictionary<uint, string> textCache,
+        string trigramPath,
+        List<FileDocument> changed,
+        List<(uint RepoId, uint Id)> tombstones)
+    {
+        if (changed.Count == 0 && tombstones.Count == 0)
+        {
+            return;
+        }
+
+        uint? version;
+        try
+        {
+            version = TrigramSegment.TryReadVersion(trigramPath);
+        }
+        catch (InvalidDataException)
+        {
+            version = null;
+        }
+
+        if (version != TrigramIndexFormat.CurrentVersion)
+        {
+            warnings.Add(
+                $"scoped pass left the trigram index untouched ({(version is null ? "missing or unreadable" : $"version {version}")}); " +
+                "run 'squeezr index' to rebuild it");
+            return;
+        }
+
+        TrigramIndexWriter.AppendBatch(
+            trigramPath,
+            [.. changed.Select(doc => new TrigramDocument(doc.RepoId, doc.Id, ToPostings(textCache[doc.Id])))],
+            tombstones);
+
+        var stats = TrigramSegment.Scan(trigramPath);
+        if (stats.TombstoneRatio > CompactHintThreshold)
+        {
+            warnings.Add(
+                $"trigram index is {stats.TombstoneRatio:P0} tombstones; run 'squeezr compact' to reclaim space");
+        }
+    }
+
     private sealed record RepoWork(
         RepoIndexResult Result,
         List<FileDocument> Changed,
         List<FileReap> Reaps,
         int DeferredReaps);
 
-    // The ledger's row counters are recomputed from the store, the guard counters are not: this route decides
-    // one path, so whatever earlier passes refused has to survive the write. Carrying the tally forward is what
-    // the last full pass left in place of IgnoredTotal, and a single-file refusal must not erase it.
+    // The ledger's row counters are recomputed from the store, the guard counters are not: these routes decide
+    // a handful of paths, so whatever earlier passes refused has to survive the write. Carrying the tally
+    // forward is what the last full pass left in place of IgnoredTotal, and a single refusal must not erase it.
     private static void SaveWithheldState(
         MetaStore store,
         string repoKey,
         RepoDocument repoDoc,
         DateTime now,
         SecretGuardIngestion guard,
-        bool rowDropped)
+        int droppedProtected)
     {
         var prior = store.GetIndexState(repoKey);
         store.SaveIndexState(new IndexStateDocument
@@ -518,7 +908,7 @@ public sealed class WorkspaceIndexer
                 IgnoredBySource = prior?.Stats.IgnoredBySource,
                 GuardWithheld = (prior?.Stats.GuardWithheld ?? 0) + guard.Withheld,
                 GuardWithheldBuiltIns = (prior?.Stats.GuardWithheldBuiltIns ?? 0) + guard.WithheldByBuiltIns,
-                GuardDropped = (prior?.Stats.GuardDropped ?? 0) + (rowDropped ? 1 : 0),
+                GuardDropped = (prior?.Stats.GuardDropped ?? 0) + droppedProtected,
                 TrackedButExcluded = prior?.Stats.TrackedButExcluded ?? 0
             }
         });

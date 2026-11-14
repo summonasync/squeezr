@@ -285,6 +285,8 @@ public class PendingQueueRefillTests
     {
         public int Dimensions { get; init; } = 4;
 
+        public string ModelKey => TestEmbeddingKeys.TestModel;
+
         public int EmbeddedTextCount { get; private set; }
 
         public void Reset() => EmbeddedTextCount = 0;

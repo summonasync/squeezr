@@ -180,18 +180,29 @@ troubleshooting lives in [`skills/squeezr/SKILL.md`](skills/squeezr/SKILL.md);
 short version:
 
 ```bash
-curl -fsSL http://REDACTED-LAN-HOST:3000/REDACTED-FORGE-NS/Squeezr/raw/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/summonasync/squeezr/main/scripts/install-release.sh | bash
 squeezr services up
 squeezr init && squeezr add . && squeezr index --events
 squeezr mcp install --all --scope user --yes
 ```
 
-1. The installer resolves the latest published Gitea release, unpacks it into
-   `~/apps/squeezr/<tag>/` and repoints the `~/.local/bin/squeezr` symlink (if
-   that dir is not on PATH, the script says so — fix the shell profile and open
-   a new terminal). Pin or roll back with `--version <tag>`. **Linux only** —
-   releases are published for `linux-x64` alone. On Windows, build the setup
-   executable locally (`powershell -File scripts\build-installer.ps1`) or
+1. The installer resolves the latest published release through the GitHub Releases
+   API (`https://api.github.com/repos/summonasync/squeezr`, or the tag given via
+   `--version <tag>` to pin or roll back), unpacks it into `~/apps/squeezr/<tag>/`
+   and repoints the `~/.local/bin/squeezr` symlink (if that dir is not on PATH, the
+   script says so — fix the shell profile and open a new terminal). `SQUEEZR_RELEASES_BASE`
+   retargets the resolution at another repo's release API base; it covers the API
+   base only, so the releases page the script prints on a miss stays the GitHub page.
+   `SQUEEZR_GITEA` is a deprecated fallback, consulted only when
+   `SQUEEZR_RELEASES_BASE` is unset: the script derives the old API layout from it,
+   warns on stderr and names the replacement variable.
+   **This line does not work anonymously yet:** the repository is currently private,
+   so an unauthenticated curl of it answers `404` (measured, not assumed), and the
+   script sends no credentials of its own. The distribution plumbing ships here;
+   the public store arrives when the owner flips the repository's visibility. Until
+   then install from a checkout with `scripts/install.sh`.
+   **Linux only** — releases are published for `linux-x64` alone. On Windows, build
+   the setup executable locally (`powershell -File scripts\build-installer.ps1`) or
    install from source with `powershell -File scripts\install.ps1`.
 2. Starts the managed Qdrant + Ollama stack; the first run pulls ~3.6 GB of
    images. If docker is missing, stop and ask the human — do not improvise.
@@ -373,9 +384,14 @@ name is taken.
 - Weak-match honesty: when a hybrid query gets no exact-arm support (neither
   the phrase arm nor the identifier leg) and the top semantic score sits below
   the embedding model's relevance band, `code_search` and `search` still return
-  the hits but the envelope carries a warning naming the narrowing moves —
-  `narrow with kind=code or prefix` — so low-confidence prose matches never
-  pose as a confident answer. Strong answers stay warning-free.
+  the hits but the envelope carries a warning naming the narrowing moves — a
+  kind move only when the query carries no kind filter, because telling a reader
+  who already set `kind=docs` to switch to `kind=code` is not a move they can
+  take. The band itself is a property of one model: the floor (`0.72`, measured
+  on `nomic-embed-text-v1.5`) is looked up by the store's embedding model key,
+  and under a key nobody measured the answer claims nothing at all — no
+  low-confidence verdict, one line naming the uncalibrated key instead. Strong
+  answers stay warning-free.
 - Subtree scoping: the `prefix` parameter of `repo_map` / `code_search` (CLI
   twins: `--prefix` on `map` and `search`) answers only inside a directory
   subtree, matched against stored relative paths. An empty subtree is an error
@@ -407,7 +423,11 @@ name is taken.
   as a one-character set over `v`/`1`.
 - Coverage is visible before you query: `index_status` and `squeezr status`
   show per-repo file/symbol/chunk counts; `embeddings.coverage` in
-  `index_status` adds the semantic share (embedded / total chunks).
+  `index_status` adds the semantic share (embedded / total chunks), and
+  `embeddings.modelKey` / `embeddings.otherModelChunks` name the embedding model
+  whose vectors are in this store and how many embedded chunks were produced by
+  a different one. Both keys are absent when the provider does not resolve — an
+  unanswered question is not an answer of zero.
 
 Discovery stays per-directory: a project resolved from inside its tree keeps
 its own workspace — sibling repos join only when deliberately added with
@@ -684,9 +704,10 @@ registers in "Apps & features" — uninstall goes from there, not from hunting
 a script in a forgotten checkout. Run with elevation, it offers a
 per-machine install into `%ProgramFiles%\Squeezr`.
 
-No ready Windows builds exist anywhere and none will: Gitea releases are built
-for `linux-x64` only, there is no Windows runner. The package is built
-locally, on any Windows machine:
+No ready Windows builds exist anywhere and none will: published releases carry
+`linux-x64` only — publishing is a local procedure that builds that one archive
+and nothing else (see [Publishing a release](#publishing-a-release) below) — so
+the package is built locally, on any Windows machine:
 
 ```powershell
 # prerequisite: Inno Setup 6 (plus the .NET 10 SDK)
@@ -725,6 +746,56 @@ Moved from an old Windows machine? The migration checklist —
 Project still on the old layout with `.squeezr/` in the root? Migration to the
 central store happens by itself —
 [docs/migration-central-store.md](docs/migration-central-store.md).
+
+## Publishing a release
+
+No CI publishes anything and nothing is planned to: releases are assembled
+locally by whoever is holding the tag. The whole procedure, on a Linux box with
+the .NET 10 SDK, from the repository root:
+
+```bash
+version=1.1.0                                  # the tag is v$version
+
+# Self-contained single-file publish. The archive carries the whole publish
+# output, not just the binary: MSBuildWorkspace ships out-of-proc BuildHost
+# folders next to the exe, required for semantic indexing, and a single-file
+# bundle does not embed them.
+dotnet publish src/Squeezr.Cli/Squeezr.Cli.csproj -c Release -r linux-x64 --self-contained true \
+  -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
+  -p:DebugType=none -p:DebugSymbols=false -o dist/squeezr-linux-x64
+
+tar -czf "squeezr-$version-linux-x64.tar.gz" -C dist squeezr-linux-x64
+
+git tag "v$version" && git push origin "v$version"
+gh release create "v$version" "squeezr-$version-linux-x64.tar.gz" \
+  --notes "See CHANGELOG.md in the repository."
+```
+
+Two shapes are a contract with `scripts/install-release.sh`, not taste:
+
+- **Asset name** must end in `-linux-x64.tar.gz` — the script matches the
+  advertised `browser_download_url` against `-linux-x64[.]tar[.]gz$`, and a
+  release without a matching asset dies with `release <tag> has no linux-x64
+  tar.gz asset - check <releases page>`.
+- **Archive layout** must be `squeezr-linux-x64/squeezr` — the directory the
+  publish `-o` flag creates, packed with `tar -C dist squeezr-linux-x64`. The
+  unpack step probes for that exact path and dies with `archive layout changed -
+  expected a squeezr-linux-x64/squeezr binary inside <asset>` on anything else.
+
+Both shapes are what the release-resolution harness installs through —
+`audits/120-t1-harness/harness.sh` arms 1-4 resolve an asset named exactly this
+way and unpack it from exactly this layout (arm 7 covers the integrity check on a
+truncated archive). The two refusals quoted above are what the script answers a
+release that deviates from them; they are not separately armed.
+
+Two gates stay with the owner, and this section is where they are named rather
+than discovered later: **the first real publication** has not happened — the
+GitHub releases of this repository (`v1.0.10`, `v1.0.11`, `v1.1.0`) carry zero
+assets as of this writing, so there is nothing for `install-release.sh` to
+resolve until someone runs the procedure above for real — and the
+**repository visibility** is still private, which is the same gate the install
+command in [For AI agents](#for-ai-agents) answers with a `404`: publishing an
+asset does not make the anonymous `curl -fsSL … | bash` work.
 
 ## TUI: the human interface
 
@@ -827,11 +898,16 @@ Codex — AGENTS.md, Qwen — QWEN.md); `mcp remove` takes it back out.
 
 `squeezr mcp doctor` — the attach checkup: client found, entry present
 (user/project), binary on PATH, workspace indexed, headless status through the
-client's CLI. It also reads the managed hook block that `mcp install` arms in
-the same pass and `mcp remove` strips: one `hook pre-read: <state>` line per
-client (`armed`, `armed (project scope)`, `not armed`, or the reason the layout
-cannot be armed at all — hook layout unverified), plus an additive `hookStatus`
-per entry in `--json`; the arming rules are under **Advisory hook**. Plus
+client's CLI. It also reads the managed hook blocks that `mcp install` arms in
+the same pass and `mcp remove` strips, one line PER ARM — `hook pre-read:
+<state>` and `hook post-edit: <state>` — each with its own state (`armed`,
+`armed (project scope)`, `not armed`, or the reason the layout cannot be armed
+at all — hook layout unverified). Per-arm is the point: a store armed by an
+install that predates the write-side hook reports `hook pre-read: armed` beside
+`hook post-edit: not armed`, and the two stay distinguishable until the block is
+re-installed. In `--json` the same split rides as the additive `hookStatus` and
+`postEditHookStatus` keys; the arming rules are under **Advisory hook** and
+**Write-side hook**. Plus
 detection of **stale registrations**: if a client config
 names a path other than the stable one, doctor shows `stale` with the pair
 "registered → expected" and a ready repair command (`squeezr mcp install
@@ -976,14 +1052,31 @@ stat of the file, so it is cheap to run on every read.
 
 **Arming is `squeezr mcp install`'s job now.** `<removed 2026-11-11 — 114/T3>`
 ~~The snippet is applied by hand (crew policy: agents are forbidden from
-writing hook configs).~~</removed> One command writes the managed block,
-`mcp doctor` reports the state it measured, `mcp remove` takes it back out:
+writing hook configs).~~</removed> One command writes both managed hook blocks —
+the advisory read arm (`PreToolUse`) documented above and the write-side arm
+(`PostToolUse`) documented under **Write-side hook** — `mcp doctor` reports the
+state it measured per arm, `mcp remove` takes both back out. The matcher over
+each runtime's tool ids is quoted from the shipped command (the `hooks` object
+lands as an additive sibling of `mcpServers`; Claude's hook file
+`~/.claude/settings.json` is a different file from the `~/.claude.json` server
+entry):
 
-| Client | armed matcher | hooks file (user scope) | doctor state |
-|---|---|---|---|
-| Claude Code | `Read` | `~/.claude/settings.json` — a different file from the `~/.claude.json` server entry | `armed` |
-| Qwen Code | `^read_file$` (anchored: Qwen evaluates matchers as regex) | `~/.qwen/settings.json` — `hooks` lands as an additive sibling of `mcpServers` | `armed` |
-| Kimi Code, Codex CLI | — | not armed (hook layout unverified) | `not armed (hook layout unverified)` |
+- **Claude Code** — read `Read`, write `Edit|Write|MultiEdit|NotebookEdit`;
+  both arms report `armed`.
+- **Qwen Code** — read `^read_file$`, write
+  `^(edit|write_file|notebook_edit)$`; both arms report `armed`. Qwen
+  evaluates matchers as regex, so every Qwen matcher is anchored; Claude
+  matches the exact tool name and takes the bare id or its alternation as
+  written.
+- **Kimi Code, Codex CLI** — neither arm arms; `mcp doctor` answers
+  `not armed (hook layout unverified)` and invents no path for a layout nobody
+  checked.
+
+A store armed before the write arm existed carries the read block alone, so the
+two `doctor` lines come apart: `hook pre-read: armed` beside `hook post-edit:
+not armed`. Re-running `mcp install` on such a config inserts the `PostToolUse`
+block and leaves the read block content-identical — the upgrade is an addition,
+not a rewrite.
 
 The written entry takes this shape — the command is the canonical absolute path
 of the binary, quoted when it contains a space:
@@ -1001,6 +1094,17 @@ of the binary, quoted when it contains a space:
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(edit|write_file|notebook_edit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/you/.local/bin/squeezr hook post-edit"
+          }
+        ]
+      }
     ]
   }
 }
@@ -1012,11 +1116,19 @@ of the binary, quoted when it contains a space:
 skips the arm: it rides with the client registration. There is no
 hook-specific opt-out.
 
-What counts as managed is defined strictly: the command equals the one install
-computes, or it is `<exe> hook pre-read` with the executable named `squeezr`.
-So a snippet applied by hand before this feature is managed too — install
-normalizes it into the canonical form, remove strips it. Merge-safety, stated
-at the altitude it was proven: foreign entries under `PreToolUse` are preserved
+What counts as managed is defined strictly and identically per arm: the command
+equals the one install computes, or it ends with ` hook pre-read` (read arm) or
+` hook post-edit` (write arm) with the executable named `squeezr` or
+`squeezr.exe`. So a snippet applied by hand before either arm existed is managed
+too — install normalizes it into the canonical form, remove strips it. As
+measured on hand-built configs, this rule cuts one specific way: a plain edit of
+the command's **path** inside a managed block keeps the arm owned (the
+executable token is still `squeezr`), so a re-install stale-repairs it to the
+current path and does not duplicate it; only an edit that breaks the command
+**token or the executable name** (`squeezr2 hook pre-read`, say) turns the entry
+foreign, and a foreign entry is preserved byte-for-byte — install adds its own
+alongside, remove touches only its own. Merge-safety, stated at the altitude it
+was proven: foreign entries under `PreToolUse` and `PostToolUse` are preserved
 by canonical serialization, and whole-file byte-identity is proven against the
 canonical pre-image — the JSON round-trip reformats the file (the same posture
 as the direct config writer), a foreign shape the merge cannot resolve refuses
@@ -1025,10 +1137,13 @@ a `.bak`. The `.bak` a re-install does leave behind comes from the
 server-entry write; the hook upsert stays silent because the block is already
 canonical.
 
-The `hook pre-read armed` line and the additive `hooksArmed` key claim a state,
-not a write: they are true for any client whose hook layout resolves, so an
-idempotent re-run still says armed having moved no byte. `mcp doctor` is the
-place that answers what is actually on disk.
+The `hook pre-read armed` / `hook post-edit armed` lines and the additive
+`hooksArmed` / `postEditHooksArmed` keys claim a state, not a write: each is
+true for its arm whenever that client's hook layout resolves, so an idempotent
+re-run still says both armed having moved no byte — and the two arms are
+reported apart, so a config that carries only the read block answers
+`hook post-edit: not armed` while the read line says `armed`. `mcp doctor` is
+the place that answers what is actually on disk.
 
 **Why the hook exists, in the numbers.** Every matching call into a registered
 workspace appends a telemetry row (`client: "hook"`), and `squeezr usage --json`
@@ -1043,9 +1158,92 @@ outside the per-tool list. The runtime name beside a tool is a reading rule,
 not a matcher: a `Read` row is called Claude Code because that is what the row
 says, not because some other host was ruled out.
 
+### Write-side hook: `squeezr hook post-edit`
+
+The second managed arm — a PostToolUse hook on the edit-family tools, for the
+same two runtimes whose hook layout the read arm verifies, armed by the same
+`squeezr mcp install` pass. Where the read arm is *advisory* (it never touches
+the index), this one *acts*: after the agent edits, writes or notebooks a file
+inside a registered workspace, the command runs one path-scoped incremental
+index pass over exactly the paths the payload announced, so the very next query
+reads the file it just changed instead of a stale snapshot. It is deterministic
+invalidation that runs **alongside** the watch engine, never in place of it:
+`watch`, `serve --watch` and `watchd` keep doing the event-driven job for every
+change the harness did not announce. A human who types `squeezr hook post-edit`
+by hand sees only silence — the command reads its payload on stdin, gets
+nothing, and exits 0; the verb is a harness door, not a user-facing command, so
+to index from a terminal use `squeezr index`.
+
+**When it steps aside.** Before doing any work it reads the store's heartbeat
+files (`watch.heartbeat`, `serve-watch.heartbeat`). A fresh beat from a live
+watcher means the event path already owns this store's freshness, so the door
+no-ops and lets the watcher carry the change — two writers would only race. No
+live watcher means the door does the pass itself. Whatever the harness did not
+announce (a file edited outside the workspace, a change no tool reported) is
+left to the event path or a `squeezr index` walk; the door never reaches past
+the announced paths, and that is deliberate — sweeping the whole repo is the
+walk's job, not a hook that has to answer between two tool calls.
+
+**What it answers, and what it costs.** The door's cost is proportional to the
+files it was handed, not to the repository: the scoped route reads the announced
+paths and skips the repo walk, so its wall clock stays near the one unavoidable
+floor — CLI startup plus one solution-open per repository the batch touched,
+a few **seconds** on a
+project-bearing repo — while a full index on the same store grows with size
+(measured at three sizes: door-vs-full-index ratio 0.42 at 300 files, 0.14 at
+1500, 0.07 at 3000, the door's own seconds barely moving as the repo grows
+tenfold). Nothing here is instant: there is no sub-second claim, and the floor
+is dominated by opening the solution once per repository the batch touched. Embeddings are not
+computed inline either — the vector work is deferred to a watcher, `serve` or
+`index` pass exactly as the watch route defers it, so a hook never waits on
+provider health.
+
+**Fail-open, by construction.** The exit code is always 0 and stdout stays
+empty. A payload that will not parse, names a tool outside the edit family,
+carries no path, points outside every workspace repo, hits a locked store past a
+short bounded wait, or trips any internal error — all of them exit 0 having done
+nothing. A hook that could block or throw would block the pipeline it watches,
+so the command is written so that the only observable failure mode is silence.
+The pass itself runs through the ordinary ingestion ruleset: ignore cascade and
+secret-guard denial included, so an edit to a guarded path lands in the index
+through the door no more than it would through `squeezr index`.
+
+**Tool ids, said honestly.** The armed matchers are the runtimes' own
+edit-tool names, compared Ordinal-exact and never normalized: Qwen
+`^(edit|write_file|notebook_edit)$`, Claude
+`Edit|Write|MultiEdit|NotebookEdit`. Two of these ids are armed on evidence
+weaker than the rest and are named as such rather than glossed: Claude's
+`MultiEdit` and Qwen's `notebook_edit` are *not observed in the local
+transcript corpus* — zero occurrences — but they are handled ids: the door
+parses the `edits[]` and `notebook_path` payload shapes those tools send, and
+the matcher arms them so an older or alternate runtime that does emit them is
+not silently left unindexed. No frequency claim is made for either; the other
+ids are corpus-evidenced. `.ipynb` through `notebook_edit` is ingested as plain
+text (raw JSON, unknown language — there is no cell parser in the indexer), so
+the notebook becomes searchable and reference-able as a document, *not*
+decomposed into cells.
+
+**Renews the row it was handed, nothing more.** A delete or rename reaches the
+door as a path that no longer exists, and the scoped route handles it as a
+removal for that path. The boundary is that the door acts only on announced
+paths: a rename announced as the **new** path alone updates the new row and
+leaves the old one until a walk reaps it. Answers stay correct anyway — search
+suppresses the dead token and `squeezr status` names the leftover row as drift
+— so a stale index here never returns a wrong hit; the sweeping itself is the
+walk's job. For the same reason the `status` guard counters (`withheld`)
+accumulate across successive scoped passes rather than describing one call in
+absolute terms; the next full index re-normalizes them.
+
+**Upgrade path.** A client config armed before this feature carries only the
+read block; `mcp doctor` shows it as `hook pre-read: armed` beside `hook
+post-edit: not armed`. Re-run `squeezr mcp install` to gain the second block —
+the install writes `PostToolUse` additively and leaves the existing
+`PreToolUse` block content-identical — and `mcp doctor` reports each arm's
+state separately, `mcp remove` strips both.
+
 ### SessionStart hook: `squeezr hook session-start`
 
-The second hook event squeezr answers, and the one that changes what a worktree
+The third hook event squeezr answers, and the one that changes what a worktree
 session knows before it reads a file. `squeezr worktree init` gives a linked
 checkout its own store; this command is the door that runs it so nobody has to
 remember it. The hook reads the payload from stdin, takes `cwd` (the launch
@@ -1210,7 +1408,7 @@ measurements.
 | `find_references` | `symbol` (required), `repo?` | every call site `{repo, file, line, kind, enclosingSymbol}` — `repo` on each row distinguishes byte-identical paths from different repositories (a checkout plus its worktree). Same-name definitions sharing one call list yield one row set, and the envelope carries additive `definitions` — `{repo, kind, file, startLine, endLine}` per declaration behind the collapsed rows (the same fields as `refs --json`). The field appears in exactly two cases: two or more same-name declarations share one call list, or the symbol has no calls at all (otherwise an empty `data` would say nothing about declarations); in other answers the field is absent and the envelope stays six-keyed. `definitions` is metadata of the collapsed rows: it does not count into `tokensUsed`, same as the CLI. enclosingSymbol is captured by Roslyn at index time (exact, partial classes included); for indexes built before capture the value is inferred from symbol spans (a fallback inference). Symbol not found → tool error (like `squeezr refs`, exit 1) |
 | `expand_span` | `file`, `startLine` (required), `endLine?`, `contextLines?` (3), `maxTokens?` (1500) | the span's lines + context from the live file on disk (sees edits made after indexing). The only tool that returns source lines |
 | `code_pack` | `name` (required), `repo?`, `kind?`, `maxTokens?` (2000) | the task-shaped front door: one call answers "what is this symbol and who touches it" — definition (signature, doc comment, `span`), the defining member's body (`bodyLines`, or the `members` mode for oversized types), every caller as `{repo, file, line, kind, enclosingSymbol}`, trust signals (`guardWarnings`, `laggingDeclarations`, `additionalMatches`), and the per-file `cost` block. Budget order: definition and body spend first, callers truncate — `withheldCallers` counts what did not fit, `complete:false` names it. `complete` follows the answer state, not the budget's mood: `complete = withheldCallers == 0 && the lookup was not clipped`, so a pack whose oversized type body was replaced by the full member map answers `complete: true` with `lookupTruncated: false` and `bodyOmitted: true` (the pack's own flag, read from the one hit it rendered — with several matches it describes the rendered pack, not every candidate), while `withheldCallers > 0` still answers `complete: false` with its own warning line. Measured live on a 2.6k-file store: ~2.3× faster than the equivalent `symbol_lookup` → `expand_span` → `find_references` chain (one store session instead of three; the ratio narrows on bigger stores — the saved overhead is constant). Prefer the per-tool calls when you need only one of the three answers — the pack buys breadth, not depth |
-| `index_status` | — | freshness: index age, per-repo file/symbol/chunk counters, the `kindChunks` block (chunk counts per kind: `code`/`docs`; the values sum to the per-repo chunks counts), the `ignored: { files, bySource }` block per repo (excluded files broken down by source: defaults/config/squeezrignore/gitignore; zero-count sources absent), pending embeddings and `embeddings.coverage` (the embedded share of chunks, 0..1; `null` when there is nothing to embed), Qdrant availability, the workspace `rootPath` (if it is not your project's root, this session is looking into a foreign workspace). When exclusions exist, `warnings` name the dominant source and how to turn it off. When ranking is curated, `warnings` list the active `indexing.rankExclude` patterns. **Additive (035 contract):** if the registry holds two or more workspaces, `data` carries `workspaces` — an array of `{ name, rootPath, storeKey, current, stale }` (at most 12 rows, the current session's row first; the rest counted in `workspacesOmitted`). With one workspace neither key exists, and the `data` output matches the old one byte for byte — existing fields are neither renamed nor removed |
+| `index_status` | — | freshness: index age, per-repo file/symbol/chunk counters, the `kindChunks` block (chunk counts per kind: `code`/`docs`; the values sum to the per-repo chunks counts), the `ignored: { files, bySource }` block per repo (excluded files broken down by source: defaults/config/squeezrignore/gitignore; zero-count sources absent), pending embeddings and `embeddings.coverage` (the embedded share of chunks, 0..1; `null` when there is nothing to embed), `embeddings.modelKey` + `embeddings.otherModelChunks` (the active embedding model key, and how many embedded chunks carry a different one — **additive (035)**: both keys are absent when the provider does not resolve, so the silent shape stays byte-for-byte what it was. Reading them costs this tool one bounded provider probe per call, which it did not make before: worst case ~5 s under `auto` (3 s tags budget + 2 s executor probe), ~2 s with an explicit ollama, 0 s on an OpenAI-compatible endpoint; an unreachable provider yields the silent shape, never an error), Qdrant availability, the workspace `rootPath` (if it is not your project's root, this session is looking into a foreign workspace). When exclusions exist, `warnings` name the dominant source and how to turn it off. When ranking is curated, `warnings` list the active `indexing.rankExclude` patterns. **Additive (035 contract):** if the registry holds two or more workspaces, `data` carries `workspaces` — an array of `{ name, rootPath, storeKey, current, stale }` (at most 12 rows, the current session's row first; the rest counted in `workspacesOmitted`). With one workspace neither key exists, and the `data` output matches the old one byte for byte — existing fields are neither renamed nor removed |
 
 All tools have a default token budget (see the table). `truncated: true` means
 the answer lost something it was asked for, and the warning then names the loss

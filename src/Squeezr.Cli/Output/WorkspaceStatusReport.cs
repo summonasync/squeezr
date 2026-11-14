@@ -27,7 +27,11 @@ public sealed record WorkspaceStatusReport(
     // numbers below describe this checkout gets the answer without parsing the warning line. Absent is the
     // state a workspace nobody filled from a main worktree carries, not a pending one.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    WorktreeRecord? Reconcile = null)
+    WorktreeRecord? Reconcile = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? EmbeddingModelKey = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? OtherModelChunks = null)
 {
     public static WorkspaceStatusReport Create(
         WorkspaceStatus status,
@@ -35,7 +39,9 @@ public sealed record WorkspaceStatusReport(
         string? embeddingsProvider = null,
         WorkspaceSiblingSnapshot? siblings = null,
         FleetWatchAdoption? watchAdoption = null,
-        WorktreeRecord? reconcile = null)
+        WorktreeRecord? reconcile = null,
+        string? embeddingModelKey = null,
+        int? otherModelChunks = null)
     {
         var warnings = new List<string>();
         warnings.AddRange(ReconcilePendingNotice.Lines(reconcile));
@@ -78,7 +84,9 @@ public sealed record WorkspaceStatusReport(
             ListedWorkspaces(siblings),
             siblings?.Omitted ?? 0,
             WatchAdoption: watchAdoption,
-            Reconcile: reconcile);
+            Reconcile: reconcile,
+            EmbeddingModelKey: embeddingModelKey,
+            OtherModelChunks: otherModelChunks);
     }
 
     private static IReadOnlyList<WorkspaceSiblingEntry>? ListedWorkspaces(WorkspaceSiblingSnapshot? siblings) =>

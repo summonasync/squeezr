@@ -568,6 +568,42 @@ public sealed class McpCommandsTests
     }
 
     [Fact]
+    public async Task Install_QwenUserJson_AlsoArmsPostEditUnderItsMeasuredMatcher()
+    {
+        var workspace = TestDirs.NewTempDir();
+        string? homeDir = null;
+
+        var (exitCode, _, output, _) = await RunAsync(
+            workspace, ["mcp", "install", "--client", "qwen", "--yes", "--json"],
+            configureHome: home => homeDir = home);
+
+        exitCode.ShouldBe(0);
+        using var document = JsonDocument.Parse(output);
+        var qwen = document.RootElement.EnumerateArray()
+            .Single(element => element.GetProperty("client").GetString() == "qwen");
+        qwen.GetProperty("postEditHooksArmed").GetBoolean().ShouldBeTrue();
+        var postToolUse = JsonNode.Parse(File.ReadAllText(Path.Combine(homeDir!, ".qwen", "settings.json")))!
+            ["hooks"]!.AsObject()["PostToolUse"]!.AsArray();
+        var entry = postToolUse.Single()!;
+        // ids measured from live payloads — see the citation block in ManagedHooksWriterTests
+        entry["matcher"]!.GetValue<string>().ShouldBe("^(edit|write_file|notebook_edit)$");
+        entry["hooks"]!.AsArray()[0]!["command"]!.GetValue<string>().ShouldEndWith(" hook post-edit");
+    }
+
+    [Fact]
+    public async Task Remove_QwenProjectAfterInstall_ReportsBothArmsRemoved()
+    {
+        var workspace = TestDirs.NewTempDir();
+
+        await RunAsync(workspace, ["mcp", "install", "--client", "qwen", "--scope", "project", "--yes"]);
+        var (exitCode, console, _, _) = await RunAsync(workspace, ["mcp", "remove", "--client", "qwen", "--scope", "project"]);
+
+        exitCode.ShouldBe(0);
+        console.Output.ShouldContain("hook pre-read removed");
+        console.Output.ShouldContain("hook post-edit removed");
+    }
+
+    [Fact]
     public async Task Install_ClaudeUser_WritesHooksToSettingsFileNotTheServerConfigFile()
     {
         var workspace = TestDirs.NewTempDir();
@@ -610,6 +646,7 @@ public sealed class McpCommandsTests
 
         exitCode.ShouldBe(0);
         console.Output.ShouldContain("hook pre-read: armed (project scope)");
+        console.Output.ShouldContain("hook post-edit: armed (project scope)");
     }
 
     [Fact]

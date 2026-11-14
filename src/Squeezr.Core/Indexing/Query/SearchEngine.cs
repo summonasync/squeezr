@@ -31,7 +31,7 @@ public sealed class SearchEngine
         var matches = ExactSearchPlan.Execute(_workspaceRoot, query, trackChunkKeys: false, fileScope, guard)
             .Select(hit => hit.Match)
             .ToList();
-        return Finalize(matches, query, AppendWithheld([], guard), matches.Count, []);
+        return Finalize(matches, query, AppendWithheld([], guard), matches.Count, [], null);
     }
 
     public async Task<SearchResponse> SearchHybridAsync(
@@ -95,15 +95,6 @@ public sealed class SearchEngine
             }
         }
 
-        if (fileScope is not { Count: 0 })
-        {
-            var capped = CappedArmPolicy.Warning(semantic, query.Repo, query.Prefix, query.Kind, query.PathGlob);
-            if (capped is not null)
-            {
-                warnings.Add(capped);
-            }
-        }
-
         var phraseLocations = new HashSet<(string Path, int Line)>(
             exact.Select(hit => (hit.Match.Path, hit.Match.Line)));
         var dedupedIdentifier = identifierHits
@@ -114,9 +105,22 @@ public sealed class SearchEngine
             .Concat(dedupedIdentifier)
             .Select(hit => (hit.Key!, hit.Match))
             .ToList();
+
+        // sits after the exact ranking settles: exactRanked.Count is the same number Finalize
+        // hands to WeakMatchPolicy, and both policies must answer for one exact arm
+        if (fileScope is not { Count: 0 })
+        {
+            var capped = CappedArmPolicy.Warning(
+                semantic, exactRanked.Count, query.Repo, query.Prefix, query.Kind, query.PathGlob);
+            if (capped is not null)
+            {
+                warnings.Add(capped);
+            }
+        }
+
         var merged = RrfMerger.Merge(exactRanked, semantic.Hits, tuning);
         var semanticScores = semantic.Hits.Select(hit => hit.Match.Score).ToList();
-        return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores);
+        return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores, embeddings?.ModelKey);
     }
 
     private static List<string> AppendWithheld(List<string> warnings, SecretGuardReader guard)
@@ -214,7 +218,8 @@ public sealed class SearchEngine
         SearchQuery query,
         IReadOnlyList<string> warnings,
         int exactArmHits,
-        IReadOnlyList<double> semanticScores)
+        IReadOnlyList<double> semanticScores,
+        string? modelKey)
     {
         // collapse before the cap so topK counts files, not spans of one file
         var files = FileHitCollapser.Collapse(ranked);
@@ -258,14 +263,21 @@ public sealed class SearchEngine
             taken.Add(clipped ? match with { Snippet = snippet } : match);
         }
 
-        var weakWarning = WeakMatchPolicy.IsWeak(exactArmHits, semanticScores)
+        var weakNotice = WeakMatchPolicy.IsWeak(exactArmHits, semanticScores, modelKey)
             ? WeakMatchPolicy.Warning(taken.Count(match => match.Source == "semantic"), query.Kind)
-            : null;
+            : UncalibratedFloorNotice(semanticScores, modelKey);
 
         return new SearchResponse(taken, tokensUsed, truncated, truncated ? Truncation : null)
         {
-            Warnings = weakWarning is null ? warnings : [.. warnings, weakWarning],
+            Warnings = weakNotice is null ? warnings : [.. warnings, weakNotice],
             LegUsage = taken.Count == 0 ? null : new SearchLegUsage(exactTokens, semanticTokens)
         };
     }
+
+    // the uncalibrated twin of the low-confidence sentence: the scores are there but no measured floor
+    // speaks for the model that produced them, so the answer claims nothing and says which key is bare
+    private static string? UncalibratedFloorNotice(IReadOnlyList<double> semanticScores, string? modelKey) =>
+        semanticScores.Count > 0 && modelKey is not null && !WeakMatchPolicy.HasCalibratedFloor(modelKey)
+            ? WeakMatchPolicy.CalibrationHint(modelKey)
+            : null;
 }

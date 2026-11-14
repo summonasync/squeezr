@@ -23,15 +23,27 @@ squeezr --version
 If missing, install the latest published release (no sudo, user dirs only):
 
 ```bash
-curl -fsSL http://REDACTED-LAN-HOST:3000/REDACTED-FORGE-NS/Squeezr/raw/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/summonasync/squeezr/main/scripts/install-release.sh | bash
 ```
 
-The script resolves the latest Gitea release, unpacks into `~/apps/squeezr/<tag>/`
+The script resolves the latest published release through the GitHub Releases API
+(`https://api.github.com/repos/summonasync/squeezr`), unpacks into `~/apps/squeezr/<tag>/`
 and repoints the `~/.local/bin/squeezr` symlink, then prints the installed version.
 If `~/.local/bin` is not on PATH, add it to the shell profile and open a new terminal
 before re-checking. Pin or roll back with `--version <tag>` (e.g. `v1.0.0`); force a
-re-download of an installed tag with `--force`. The script is the single source of
-install truth — install evolution changes the script, never this skill.
+re-download of an installed tag with `--force`. `SQUEEZR_RELEASES_BASE` retargets the
+release API base and nothing else — the releases page the script names on a miss stays
+the GitHub page; `SQUEEZR_GITEA` is a deprecated fallback, consulted only when
+`SQUEEZR_RELEASES_BASE` is unset, and says so in a stderr warning. The script is the
+single source of install truth — install evolution changes the script, never this skill.
+
+**A `404` on that curl is the visibility gate, not a wrong URL.** The repository is
+private as of this writing, so an anonymous request has nothing to serve; the script
+carries no credentials of its own. Report the gate to the human and stop there: do not
+improvise tokens or auth headers, do not retry the fetch through a proxy or a mirror,
+do not substitute another install source. If the human wants the machine running today,
+they decide between a checkout install (`scripts/install.sh`) and flipping the
+repository's visibility.
 
 ## 2. Services (Qdrant + Ollama)
 
@@ -188,7 +200,32 @@ same pattern when their hook surface allows.~~</removed> Wiring is the
 command's job now; still never hand-edit a hook config from an agent session —
 run `mcp install` and read the verdict from `mcp doctor`.
 
-The second event is `squeezr hook session-start`, the one a worktree lane needs.
+The same install pass arms a **second, write-side hook** — a `PostToolUse`
+block on the edit-family tools — for the same two verified runtimes. Where
+pre-read is advisory, this arm acts: after the agent edits a file in a
+registered workspace it runs one path-scoped incremental index pass over the
+paths the payload announced, so your next `code_search` / `symbol_lookup`
+sees the file you just changed instead of a stale snapshot — you do not pay a
+full `squeezr index` to get freshness back. It no-ops where a watcher already
+owns the store (a fresh `watch`/`serve-watch` heartbeat means the event engine
+carries the change), and it never blocks or errors your pipeline: any payload
+it cannot use, a locked store past a short wait, a path outside the workspace —
+all exit silently with code 0. That silence is the design, not a stall: the
+door answers for the announced files only, in a few seconds dominated by
+opening the solution once per repository in the batch (not sub-second, and it
+does not grow with repo
+size); unannounced drift is the watcher's or `squeezr index`'s job. If you run
+`squeezr hook post-edit` yourself in a terminal, you get nothing back — it
+reads its payload on stdin, so there is no result to show; to index by hand
+use `squeezr index`. Arm the write block by re-running `mcp install` after an
+upgrade, and check it with `mcp doctor`: it now prints one line per arm, so
+`hook pre-read: armed` beside `hook post-edit: not armed` is the pre-upgrade
+state telling you to re-install. `MultiEdit` (claude) and `notebook_edit`
+(qwen) are armed because the door handles their payload shapes, even though
+neither id appears in the local transcript corpus; a notebook is indexed as
+plain text, not parsed into cells.
+
+The third event is `squeezr hook session-start`, the one a worktree lane needs.
 `squeezr worktree init` gives a linked checkout its own store; this command is the
 door that runs it so a session started inside a lane never has to learn the
 command. It reads the payload from stdin, takes `cwd` (the launch directory when a
@@ -312,7 +349,12 @@ plain grep/read is correct, not a violation.
   tool that returns raw source lines; reads the live file on disk, so it reflects
   edits newer than the index. Call it on coordinates from other tools.
 - `index_status()` — workspace freshness: per-repo counts, pending embeddings,
-  semantic coverage (`embeddings.coverage`, embedded share of chunks 0..1),
+  semantic coverage (`embeddings.coverage`, embedded share of chunks 0..1), the
+  embedding identity (`embeddings.modelKey` — the model whose vectors are in this
+  store — with `embeddings.otherModelChunks`, how many embedded chunks carry a
+  different one; both absent when the provider does not resolve, and reading them
+  costs one bounded provider probe per call: ~5 s worst case under `auto`, ~2 s
+  explicit ollama, 0 s OpenAI-compatible),
   per-kind chunk counts (`kindChunks`: `code`/`docs`, values sum to the per-repo
   chunks counts), Qdrant availability, and the resolved workspace `rootPath` (if it is not your
   project's root, the session serves a different workspace). Call before heavy

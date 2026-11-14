@@ -416,6 +416,236 @@ public sealed class ManagedHooksWriterTests
         (await ManagedHooksWriter.IsArmedAsync(path, preRead, CancellationToken.None)).ShouldBeTrue();
     }
 
+    [Fact]
+    public void ArmsFor_ArmableRuntimes_ReturnPreReadThenPostEdit()
+    {
+        foreach (var id in new[] { McpClientId.Qwen, McpClientId.Claude })
+        {
+            var arms = HooksBlock.ArmsFor(McpClientRegistry.Get(id), "/opt/squeezr/bin/squeezr");
+            arms.Count.ShouldBe(2);
+            arms[0].Event.ShouldBe("PreToolUse");
+            arms[0].CommandToken.ShouldBe("hook pre-read");
+            arms[1].Event.ShouldBe("PostToolUse");
+            arms[1].CommandToken.ShouldBe("hook post-edit");
+            arms[1].Command.ShouldBe("/opt/squeezr/bin/squeezr hook post-edit");
+        }
+        HooksBlock.ArmsFor(McpClientRegistry.Get(McpClientId.Kimi), "/opt/squeezr/bin/squeezr").ShouldBeEmpty();
+        HooksBlock.ArmsFor(McpClientRegistry.Get(McpClientId.Codex), "/opt/squeezr/bin/squeezr").ShouldBeEmpty();
+    }
+
+    // Every id below is quoted with where it was measured, per the feature ruling that matcher ids come
+    // from payloads and never from the spec table:
+    // - qwen "write_file": audits/hook-live-2026-11-11/session-run2.jsonl, two qwen-code.tool_call
+    //   telemetry rows with "function_name":"write_file" (2026-11-11, real armed-block session).
+    // - qwen "edit": live Qwen Code session transcripts on this box (~/.qwen/projects/*, counted
+    //   2026-11-13: 5860 "function_name":"edit" telemetry rows in the Squeezr project corpus alone).
+    // - qwen "notebook_edit": the live Qwen Code runtime's own tool schema (session 2026-11-13 declares
+    //   notebook_edit); zero transcript occurrences because no notebook was ever edited — declared in
+    //   task obstacles, armed anyway because the shipped T1 door accepts the id.
+    // - claude "Edit"/"Write"/"NotebookEdit": live Claude Code transcripts on this box
+    //   (~/.claude/projects/*/*.jsonl tool_use names, counted 2026-11-13: 200/65/34 rows).
+    // - claude "MultiEdit": zero occurrences in the 1333-file local transcript corpus; the id rides the
+    //   T1-shipped HookPostEditToolNames table (reviewed carrier) — declared in task obstacles.
+    // - qwen pre-read "^read_file$": audits/hook-live-2026-11-11/armed-block-as-installed.json, the
+    //   block 114 actually wrote — pinned verbatim below as the upgrade compatibility shape.
+    [Fact]
+    public void PostEditArmMatchers_OverMeasuredPayloadIds_PerRuntimeShape()
+    {
+        HooksBlock.PostEditForClient(McpClientRegistry.Get(McpClientId.Qwen), "/opt/squeezr/bin/squeezr")!
+            .Matcher.ShouldBe("^(edit|write_file|notebook_edit)$");
+        HooksBlock.PostEditForClient(McpClientRegistry.Get(McpClientId.Claude), "/opt/squeezr/bin/squeezr")!
+            .Matcher.ShouldBe("Edit|Write|MultiEdit|NotebookEdit");
+    }
+
+    [Fact]
+    public void PreReadMatcher_KeepsTheExact114ArmedShape_ForByteStableUpgrade()
+    {
+        // The 114 block shipped on this box (armed-block-as-installed.json) carries "^read_file$";
+        // an unparenthesized single id keeps a re-install over that config a byte-for-byte no-op.
+        HooksBlock.ForClient(McpClientRegistry.Get(McpClientId.Qwen), "/opt/squeezr/bin/squeezr")!
+            .Matcher.ShouldBe("^read_file$");
+    }
+
+    [Fact]
+    public void PostEditIdentities_StayPartitionedPerRuntime_AndSurviveTheirMatcher()
+    {
+        foreach (var identity in HookPostEditToolNames.Identities)
+        {
+            McpClientRegistry.TryGet(identity.Runtime, out var owner)
+                .ShouldBeTrue($"'{identity.ToolId}' names unknown runtime '{identity.Runtime}'");
+            var arm = HooksBlock.PostEditForClient(owner, "/opt/squeezr/bin/squeezr");
+            arm.ShouldNotBeNull(
+                $"'{identity.ToolId}' is accepted for {identity.Runtime} but that runtime is never armed");
+            var alternatives = identity.Runtime == "qwen"
+                ? arm!.Matcher.TrimStart('^').Trim('$').Trim('(').Trim(')').Split('|')
+                : arm!.Matcher.Split('|');
+            alternatives.ShouldContain(identity.ToolId,
+                $"'{identity.ToolId}' must fire its own hook — unanchored or missing matchers over-match or under-match");
+            arm.CommandToken.ShouldBe("hook post-edit");
+        }
+    }
+
+    [Fact]
+    public async Task Upsert_BothArms_LiveUnderTheirEventKeys_AndSecondRunIsByteNoOp()
+    {
+        var path = ScratchPath();
+        var arms = HooksBlock.ArmsFor(McpClientRegistry.Get(McpClientId.Qwen), "/opt/squeezr/bin/squeezr");
+
+        (await UpsertAsync(path, arms[0])).ShouldBeTrue();
+        (await UpsertAsync(path, arms[1])).ShouldBeTrue();
+        var armed = File.ReadAllText(path);
+        (await UpsertAsync(path, arms[0])).ShouldBeFalse();
+        (await UpsertAsync(path, arms[1])).ShouldBeFalse();
+
+        File.ReadAllText(path).ShouldBe(armed);
+        var hooks = JsonNode.Parse(armed)!["hooks"]!.AsObject();
+        ManagedEntryCount(path, arms[0]).ShouldBe(1);
+        hooks["PostToolUse"]!.AsArray().Count(entry => EntryCarriesManaged(entry, arms[1])).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Upgrade_Legacy114OnlyConfig_GainsPostEdit_WithForeignAndPreReadBytesUntouched()
+    {
+        var path = ScratchPath();
+        var legacy = new HooksBlock("PreToolUse", "^read_file$", "pre-read", "/opt/squeezr/bin/squeezr hook pre-read");
+        var foreign = ForeignEntry("Bash", "echo keep-me");
+        WriteCanonical(path, new JsonObject
+        {
+            ["mcpServers"] = new JsonObject { ["other"] = new JsonObject { ["command"] = "other-cmd" } },
+            ["hooks"] = new JsonObject { ["PreToolUse"] = new JsonArray(foreign.DeepClone(), legacy.ToJson()) },
+            ["theme"] = "dark",
+        });
+        var preReadArrayBefore = JsonNode.Parse(File.ReadAllText(path))!["hooks"]!["PreToolUse"]!
+            .ToJsonString(CanonicalOptions);
+
+        var current = HooksBlock.ForClient(McpClientRegistry.Get(McpClientId.Qwen), "/opt/squeezr/bin/squeezr")!;
+        (await UpsertAsync(path, current)).ShouldBeFalse();
+        var postEdit = HooksBlock.PostEditForClient(McpClientRegistry.Get(McpClientId.Qwen), "/opt/squeezr/bin/squeezr")!;
+        (await UpsertAsync(path, postEdit)).ShouldBeTrue();
+
+        var after = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        after["hooks"]!["PreToolUse"]!.ToJsonString(CanonicalOptions).ShouldBe(preReadArrayBefore);
+        after["theme"]!.GetValue<string>().ShouldBe("dark");
+        after["mcpServers"]!.AsObject().ContainsKey("other").ShouldBeTrue();
+        after["hooks"]!.AsObject().ContainsKey("PostToolUse").ShouldBeTrue();
+        (await ManagedHooksWriter.IsArmedAsync(path, postEdit, CancellationToken.None)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Remove_BothArms_StripsEverything_LeavesForeignEntryBytesOnly()
+    {
+        var path = ScratchPath();
+        var arms = HooksBlock.ArmsFor(McpClientRegistry.Get(McpClientId.Claude), "/opt/squeezr/bin/squeezr");
+        var foreign = ForeignEntry("Edit", "echo foreign");
+        WriteCanonical(path, new JsonObject
+        {
+            ["theme"] = "dark",
+            ["hooks"] = new JsonObject { ["PreToolUse"] = new JsonArray(foreign.DeepClone()) },
+        });
+
+        await UpsertAsync(path, arms[0]);
+        await UpsertAsync(path, arms[1]);
+        (await ManagedHooksWriter.RemoveAsync(path, arms[1], CancellationToken.None)).ShouldBeTrue();
+        (await ManagedHooksWriter.RemoveAsync(path, arms[0], CancellationToken.None)).ShouldBeTrue();
+
+        var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        root["hooks"]!.AsObject().ContainsKey("PostToolUse").ShouldBeFalse();
+        var entries = root["hooks"]!["PreToolUse"]!.AsArray();
+        entries.Count.ShouldBe(1);
+        entries[0]!.ToJsonString(CanonicalOptions).ShouldBe(foreign.ToJsonString(CanonicalOptions));
+        root["theme"]!.GetValue<string>().ShouldBe("dark");
+    }
+
+    [Fact]
+    public void PostEditBlock_OwnsItsTokenAndRejectsThePreReadToken()
+    {
+        var postEdit = HooksBlock.PostEditForClient(McpClientRegistry.Get(McpClientId.Qwen), "/opt/squeezr/bin/squeezr")!;
+        postEdit.Owns("squeezr hook post-edit").ShouldBeTrue();
+        postEdit.Owns("/x/y/squeezr.exe hook post-edit").ShouldBeTrue();
+        postEdit.Owns("squeezr hook pre-read").ShouldBeFalse();
+        postEdit.Owns("other-tool hook post-edit").ShouldBeFalse();
+        HooksBlock.ForClient(McpClientRegistry.Get(McpClientId.Qwen), "/opt/squeezr/bin/squeezr")!
+            .Owns("squeezr hook post-edit").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ServiceInstall_OverLegacy114UserConfig_ArmsBoth_KeepsForeign_ReinstallIsNoOp()
+    {
+        var (service, environment, home) = NewService();
+        var client = McpClientRegistry.Get(McpClientId.Qwen);
+        var settingsPath = Path.Combine(home, ".qwen", "settings.json");
+        var legacy = HooksBlock.ForClient(client, environment.CommandPath)!;
+        var foreign = ForeignEntry("Bash", "echo keep-me");
+        WriteCanonical(settingsPath, new JsonObject
+        {
+            ["mcpServers"] = new JsonObject { ["other"] = new JsonObject { ["command"] = "other-cmd" } },
+            ["hooks"] = new JsonObject { ["PreToolUse"] = new JsonArray(foreign.DeepClone(), legacy.ToJson()) },
+            ["theme"] = "dark",
+        });
+
+        var install = await service.InstallAsync(client, McpScope.User, watch: false, writeInstructions: false, environment, CancellationToken.None);
+        var upgraded = File.ReadAllText(settingsPath);
+        install.HooksArmed.ShouldBeTrue();
+        install.PostEditHooksArmed.ShouldBeTrue();
+        await service.InstallAsync(client, McpScope.User, watch: false, writeInstructions: false, environment, CancellationToken.None);
+
+        File.ReadAllText(settingsPath).ShouldBe(upgraded);
+        var root = JsonNode.Parse(upgraded)!.AsObject();
+        root["hooks"]!.AsObject()["PreToolUse"]!.AsArray()
+            .Count(entry => entry!.ToJsonString(CanonicalOptions) == foreign.ToJsonString(CanonicalOptions)).ShouldBe(1);
+        root["theme"]!.GetValue<string>().ShouldBe("dark");
+        var postEdit = HooksBlock.PostEditForClient(client, environment.CommandPath)!;
+        ManagedEntryCount(settingsPath, postEdit, "PostToolUse").ShouldBe(1);
+
+        var remove = await service.RemoveAsync(client, McpScope.User, environment, CancellationToken.None);
+        remove.HooksRemoved.ShouldBeTrue();
+        remove.PostEditHooksRemoved.ShouldBeTrue();
+        var cleaned = JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject();
+        File.ReadAllText(settingsPath).ShouldNotContain("hook post-edit");
+        File.ReadAllText(settingsPath).ShouldNotContain("hook pre-read");
+        cleaned["hooks"]!.AsObject()["PreToolUse"]!.AsArray()
+            .Count(entry => entry!.ToJsonString(CanonicalOptions) == foreign.ToJsonString(CanonicalOptions)).ShouldBe(1);
+        cleaned["theme"]!.GetValue<string>().ShouldBe("dark");
+    }
+
+    [Fact]
+    public async Task ServiceDoctor_Legacy114Config_ReportsPreReadArmedAndPostEditNotArmed()
+    {
+        var (service, environment, home) = NewService();
+        var client = McpClientRegistry.Get(McpClientId.Qwen);
+        var settingsPath = Path.Combine(home, ".qwen", "settings.json");
+        WriteCanonical(settingsPath, new JsonObject
+        {
+            ["hooks"] = new JsonObject
+            {
+                ["PreToolUse"] = new JsonArray(HooksBlock.ForClient(client, environment.CommandPath)!.ToJson()),
+            },
+        });
+
+        var transitional = await service.DoctorAsync(client, environment, CancellationToken.None);
+
+        transitional.HookStatus.ShouldBe(HooksBlock.ArmedState);
+        transitional.PostEditHookStatus.ShouldBe(HooksBlock.NotArmedState);
+    }
+
+    [Fact]
+    public async Task ServiceInstall_ProjectScope_ArmsBothEvents_InProjectSettingsFile()
+    {
+        var (service, environment, _) = NewService();
+        var client = McpClientRegistry.Get(McpClientId.Qwen);
+
+        var install = await service.InstallAsync(client, McpScope.Project, watch: false, writeInstructions: false, environment, CancellationToken.None);
+        var projectSettings = Path.Combine(environment.WorkspaceRoot, ".qwen", "settings.json");
+
+        install.HooksArmed.ShouldBeTrue();
+        install.PostEditHooksArmed.ShouldBeTrue();
+        var postEdit = HooksBlock.PostEditForClient(client, environment.CommandPath)!;
+        (await ManagedHooksWriter.IsArmedAsync(projectSettings, postEdit, CancellationToken.None)).ShouldBeTrue();
+        var diagnostics = await service.DoctorAsync(client, environment, CancellationToken.None);
+        diagnostics.HookStatus.ShouldBe(HooksBlock.ProjectArmedState);
+        diagnostics.PostEditHookStatus.ShouldBe(HooksBlock.ProjectArmedState);
+    }
+
     private static string ScratchPath() => Path.Combine(TestDirs.NewTempDir(), "settings.json");
 
     private static Task<bool> UpsertAsync(string path, HooksBlock block) =>
@@ -443,10 +673,12 @@ public sealed class ManagedHooksWriterTests
         node is JsonValue text && text.TryGetValue(out string? commandText) &&
         commandText is not null && block.Owns(commandText);
 
-    private static int ManagedEntryCount(string path, HooksBlock block)
+    private static int ManagedEntryCount(string path, HooksBlock block) => ManagedEntryCount(path, block, "PreToolUse");
+
+    private static int ManagedEntryCount(string path, HooksBlock block, string eventKey)
     {
         var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
-        if (root["hooks"] is not JsonObject hooks || hooks["PreToolUse"] is not JsonArray entries)
+        if (root["hooks"] is not JsonObject hooks || hooks[eventKey] is not JsonArray entries)
         {
             return 0;
         }

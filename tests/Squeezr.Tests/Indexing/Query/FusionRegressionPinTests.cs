@@ -145,6 +145,8 @@ public class FusionRegressionPinTests
     {
         public int Dimensions => 4;
 
+        public string ModelKey => TestEmbeddingKeys.Calibrated;
+
         public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingUsage usage, CancellationToken ct) =>
             Task.FromResult(texts.Select(text =>
             {

@@ -283,6 +283,12 @@ public sealed class IndexStatusWorkspacesTests : IDisposable
         var manager = new WorkspaceManager(workspace);
         manager.Init(WorkspaceName);
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
+
+        // 112/T4 put the active model key in this payload, so the byte pin below only means what it
+        // says while the key is deterministically unresolvable: an ambient ollama on the build box
+        // would make the tool name a model the pin has no way to predict. Silent here is the shape
+        // IndexStatusModelKeyTests pins as its own contract.
+        TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(workspace);
         manager.AddRepo("repo", RepoName);
         File.WriteAllText(Path.Combine(workspace, "repo", "Alpha.cs"), """
             namespace Demo;

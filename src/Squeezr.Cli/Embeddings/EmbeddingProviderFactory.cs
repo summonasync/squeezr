@@ -27,10 +27,10 @@ public static class EmbeddingProviderFactory
         switch (config.Provider.Trim().ToLowerInvariant())
         {
             case "openai":
-                return new OpenAiCompatibleEmbeddingProvider(config.OpenAiCompatible);
+                return new OpenAiCompatibleEmbeddingProvider(config.OpenAiCompatible, EmbeddingModelKey.From(config));
             case "ollama":
                 OllamaModelEnsurer.Ensure(config.Ollama, httpHandler);
-                return new OllamaEmbeddingProvider(config.Ollama, httpHandler);
+                return new OllamaEmbeddingProvider(config.Ollama, EmbeddingModelKey.From(config), httpHandler);
             default:
                 throw new WorkspaceException($"Unknown embeddings provider '{config.Provider}'. Supported providers: ollama, openai.");
         }

@@ -192,6 +192,11 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         {
             AnsiConsole.MarkupLine($"  hook pre-read: {Markup.Escape(status)}");
         }
+        if (entry.PostEditHookStatus is { } postEditStatus)
+        {
+            AnsiConsole.MarkupLine($"  hook post-edit: {Markup.Escape(postEditStatus)}");
+        }
+
         if (entry.SessionStartStatus is { } sessionStartStatus)
         {
             AnsiConsole.MarkupLine($"  hook session-start: {Markup.Escape(sessionStartStatus)}");

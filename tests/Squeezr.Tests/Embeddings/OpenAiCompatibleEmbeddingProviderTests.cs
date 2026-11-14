@@ -3,6 +3,7 @@ using Shouldly;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Embeddings;
+using Squeezr.Core.Indexing.Query;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -10,6 +11,13 @@ namespace Squeezr.Tests.Embeddings;
 public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
 {
     private const string ApiKeyEnv = "SQUEEZR_TESTS_EMBEDDINGS_KEY";
+
+    // what EmbeddingModelKey.From computes for Options(): no profile, so no profile suffix
+    private const string ModelKey = "openai/nomic-embed-text/768";
+
+    private const string NomicProfiledKey = "openai/nomic-embed-text/768/nomic-embed-text-v1.5";
+
+    private const string BgeProfiledKey = "openai/nomic-embed-text/768/bge-code-v1";
 
     public OpenAiCompatibleEmbeddingProviderTests()
         => Environment.SetEnvironmentVariable(ApiKeyEnv, "test-key");
@@ -31,7 +39,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK,
                 """{"data":[{"index":1,"embedding":[4.0,5.0,6.0]},{"index":0,"embedding":[1.0,2.0,3.0]}]}"""));
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, handler);
 
         var vectors = await provider.EmbedAsync(["first text", "second text"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -46,7 +54,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK,
                 """{"data":[{"index":0,"embedding":[1.0]}]}"""));
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -64,7 +72,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json((HttpStatusCode)429, """{"error":"rate limited"}"""),
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, handler);
 
         var vectors = await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -77,7 +85,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
     {
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.BadRequest, """{"error":"bad request"}"""));
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, handler);
 
         var error = await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None));
 
@@ -92,7 +100,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
             StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"),
             StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"),
             StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}"));
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, handler);
 
         await Should.ThrowAsync<HttpRequestException>(() => provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None));
 
@@ -105,7 +113,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
         var handler = new StubHttpMessageHandler(
             new HttpRequestException("connection refused"),
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[7.0]}]}"""));
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, handler);
 
         var vectors = await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -119,7 +127,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
         var options = Options() with { ModelProfile = "nomic-embed-text-v1.5" };
-        var provider = new OpenAiCompatibleEmbeddingProvider(options, handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(options, NomicProfiledKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Document, CancellationToken.None);
 
@@ -132,7 +140,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
         var options = Options() with { ModelProfile = "nomic-embed-text-v1.5" };
-        var provider = new OpenAiCompatibleEmbeddingProvider(options, handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(options, NomicProfiledKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
 
@@ -144,7 +152,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
     {
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
 
@@ -157,7 +165,7 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"data":[{"index":0,"embedding":[1.0]}]}"""));
         var options = Options() with { ModelProfile = "bge-code-v1" };
-        var provider = new OpenAiCompatibleEmbeddingProvider(options, handler);
+        var provider = new OpenAiCompatibleEmbeddingProvider(options, BgeProfiledKey, handler);
 
         await provider.EmbedAsync(["hello"], EmbeddingUsage.Query, CancellationToken.None);
 
@@ -169,7 +177,8 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
     {
         Environment.SetEnvironmentVariable(ApiKeyEnv, null);
 
-        var error = Should.Throw<InvalidOperationException>(() => new OpenAiCompatibleEmbeddingProvider(Options()));
+        var error = Should.Throw<InvalidOperationException>(
+            () => new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey));
 
         error.Message.ShouldContain(ApiKeyEnv);
     }
@@ -177,7 +186,24 @@ public class OpenAiCompatibleEmbeddingProviderTests : IDisposable
     [Fact]
     public void Dimensions_ComesFromConfig()
     {
-        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), new StubHttpMessageHandler());
+        var provider = new OpenAiCompatibleEmbeddingProvider(Options(), ModelKey, new StubHttpMessageHandler());
         provider.Dimensions.ShouldBe(768);
+        provider.ModelKey.ShouldBe(ModelKey);
+    }
+
+    [Fact]
+    public void Factory_OpenAiProvider_CarriesTheKeyFromComputesForThatConfig()
+    {
+        var config = new EmbeddingsConfig
+        {
+            Provider = "openai",
+            OpenAiCompatible = Options() with { Model = "squeezr-unknown-embed", Dimensions = 512 }
+        };
+
+        var provider = EmbeddingProviderFactory.Create(config, TestDirs.NewTempDir());
+
+        provider.ModelKey.ShouldBe(EmbeddingModelKey.From(config));
+        provider.ModelKey.ShouldBe("openai/squeezr-unknown-embed/512");
+        WeakMatchPolicy.HasCalibratedFloor(provider.ModelKey).ShouldBeFalse();
     }
 }
