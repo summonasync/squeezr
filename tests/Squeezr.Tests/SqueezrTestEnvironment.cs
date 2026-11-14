@@ -35,6 +35,6 @@ public static class SqueezrTestEnvironment
         // the ambient pin describes the run instead of whichever test last held the serialized collection.
         // REQ-1 (118): an inherited pin that points at a profile home is refused at module load, not
         // discovered later as leaked rows in the developer's registry.
-        TestRunHomeGuard.RequireContained(SqueezrHome.Resolve(), requireAmbientPin: true);
+        TestRunHomeGuard.RequireContainedAtLoad(SqueezrHome.Resolve());
     }
 }

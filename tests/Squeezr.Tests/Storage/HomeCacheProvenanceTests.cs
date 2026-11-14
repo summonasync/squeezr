@@ -7,7 +7,7 @@ namespace Squeezr.Tests.Storage;
 // what that costs when the once happened to fall in a window where the pin was gone: every later write in
 // the process lands in whichever home the blank window named. Two branches, deliberately side by side -
 // a fallback fill that a later pin must displace, and a pin fill that stays frozen when the variable is
-// cleared afterwards. The second is what CliTestProcess.TestRunHome depends on and what REQ-5 forbids
+// cleared afterwards. The second is what CliTestProcess.RunStore depends on and what REQ-5 forbids
 // changing, so it is pinned here rather than left to the reader's trust.
 [Collection("ProcessGlobals")]
 public sealed class HomeCacheProvenanceTests : IDisposable

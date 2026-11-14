@@ -15,11 +15,23 @@ internal static partial class CliTestProcess
     // temp dir and SqueezrHome.Reset() cleared the cache. Without this snapshot,
     // SqueezrHome.Resolve() at Process.Start time could re-read a stale env var
     // and send the child to a registry where the workspace is unknown.
-    // The snapshot is the one value a broken neighbour can poison for the whole run, so it is checked on
-    // every use instead of trusted for the rest of the process: see RunHome and feature 118 REQ-1.
-    private static readonly string TestRunHome = SqueezrHome.Resolve();
+    // The snapshot is the one value a broken neighbour can poison for the whole run, so it carries its own
+    // provenance and is checked on every use instead of trusted for the rest of the process: a store the
+    // run froze out of the profile fallback is refused before the first child spawns (feature 118 REQ-1).
+    private static readonly (string Home, bool FromPin) RunStore = CaptureRunStore();
 
-    private static string RunHome() => TestRunHomeGuard.RequireContained(TestRunHome, requireAmbientPin: false);
+    private static (string Home, bool FromPin) CaptureRunStore()
+    {
+        // One breath for both readings: whether the pin was present IS what the cache is about to record,
+        // so the spawn-time check never has to ask the environment again — and cannot be moved by a
+        // neighbour that blanked or restored it in between.
+        var fromPin = !string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable));
+        return (SqueezrHome.Resolve(), fromPin);
+    }
+
+    private static string RunHome() =>
+        TestRunHomeGuard.RequirePinnedSnapshot(RunStore.Home, RunStore.FromPin);
 
     public static async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(
         string workingDir, params string[] args)

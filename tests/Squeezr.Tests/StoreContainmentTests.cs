@@ -75,22 +75,39 @@ public sealed class StoreContainmentTests
                 """);
     }
 
-    // The 118/T3 runtime half: the guard is shown refusing the state it exists for, with the path it
-    // refused in its message, and accepting the state a real run has. Both halves are asserted because a
+    // The 118/T3 runtime half, split the way the guard is split: a store captured from an explicit pin is
+    // accepted, a store captured from the fallback is refused on sight, and at module load a value that IS
+    // a profile home is refused with the path named. Every arm is asserted in both directions because a
     // guard that only ever throws is as useless as one that never does.
     [Fact]
-    public void RunHomeGuard_ScratchStore_IsAcceptedUnchanged()
+    public void RunHomeGuard_PinCapturedStore_IsAcceptedUnchanged()
     {
         var scratch = TestDirs.NewTempDir();
 
-        TestRunHomeGuard.RequireContained(scratch, requireAmbientPin: false).ShouldBe(scratch);
+        TestRunHomeGuard.RequirePinnedSnapshot(scratch, capturedFromPin: true).ShouldBe(scratch);
+    }
+
+    [Fact]
+    public void RunHomeGuard_FallbackCapturedStore_IsRefusedEvenWhileHomePointsAtTheSandbox()
+    {
+        var fallback = SqueezrHome.DefaultHome();
+        fallback.ShouldNotBeEmpty("no profile home resolves on this machine, so this arm would assert that " +
+                                  "an empty string is contained — a green that measured nothing");
+
+        // The state the real suite reaches: a neighbour has restored HOME by the time a child spawns, so
+        // the ambient environment looks healthy and only the provenance of the frozen value is wrong.
+        var error = Should.Throw<InvalidOperationException>(
+            () => TestRunHomeGuard.RequirePinnedSnapshot(fallback, capturedFromPin: false));
+
+        error.Message.ShouldContain(fallback);
+        error.Message.ShouldContain(TestRunHomeGuard.Remedy);
     }
 
     [Fact]
     public void RunHomeGuard_StoreThatResolvedToNothing_IsRefusedWithTheRemedy()
     {
         var error = Should.Throw<InvalidOperationException>(
-            () => TestRunHomeGuard.RequireContained(string.Empty, requireAmbientPin: false));
+            () => TestRunHomeGuard.RequireContainedAtLoad(string.Empty));
 
         error.Message.ShouldContain(TestRunHomeGuard.Remedy);
     }
@@ -111,7 +128,7 @@ public sealed class StoreContainmentTests
 
             profileHome.ShouldStartWith(sentinelProfile);
             var error = Should.Throw<InvalidOperationException>(
-                () => TestRunHomeGuard.RequireContained(profileHome, requireAmbientPin: true));
+                () => TestRunHomeGuard.RequireContainedAtLoad(profileHome));
 
             error.Message.ShouldContain(profileHome);
             error.Message.ShouldContain(TestRunHomeGuard.Remedy);
