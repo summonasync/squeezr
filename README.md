@@ -1614,14 +1614,16 @@ verb rather than to the host's default 60 seconds, which would kill the pass
 mid-copy and leave the next session to repeat it.
 
 **Where the project-scope registration lands, and why this hook does not depend
-on it.** The `--scope project` arm writes the client registration into the
+on it.** The `--scope project` arm writes the **hook arm** of the client
+registration into the
 **resolved workspace root** — the store that answers there — not into whatever
 directory the operator happens to stand in. Measured in a nested lane
 (`audits/t12-project-scope-probe.sh`, run B; raw log
 `audits/work-116-29-probe/project-scope-probe-run.log`, sha256 `827e1bf0…`):
 while the lane owns no store, a
 project-scope install run from inside it lands in the **parent's**
-`.qwen/settings.json` — the hook blocks (three since 025), because `serve`
+`.qwen/settings.json` — the hook blocks (two at that measurement, three on head:
+PreToolUse, PostToolUse, SessionStart), because `serve`
 started in that lane also binds the parent and says so:
 
 ```
@@ -1636,7 +1638,7 @@ workspace root)`, and the same project-scope install now writes the **lane's**
 025 merge the `mcpServers` arm rides the client CLI's own cwd resolution, so
 one call from an unregistered lane can split the registration across two files
 (measured: `audits/work-116-36-e2e/hx_20261114T195033Z/`, finding F-4 of
-`audits/work-116-36-t13-docs-e2e.md` — owed its own card). Once the lane owns
+`audits/work-116-36-t13-docs-e2e.md` — carded as `BUGS/033`). Once the lane owns
 a store, both halves land in the lane's file. And the SessionStart hook is what
 makes the lane an answerer
 in the first place; the ordering is the fact worth knowing, not a bug to work
