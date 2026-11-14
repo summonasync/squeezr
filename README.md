@@ -364,12 +364,18 @@ Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI
   write, so a pure read — `squeezr workspace list` — can recreate rows,
   including rows whose root is gone; they come back marked `stale`
   (`rootPath` not on disk) and are removed by `drop --store-key` or by the
-  repair prune sweep. A pruned row does **not** come back: the prune takes the
-  store directory together with the row, so there is no manifest left to
-  rebuild from. Measured on a seeded scratch store (118/T4,
+  repair prune sweep. Through this branch a pruned row really is gone for
+  good: the prune takes the store directory together with the row, so there
+  is no manifest left to rebuild from. The **backup** branch is not so
+  forgiving — measured on a seeded scratch store (118/T4,
   `audits/118-reap-2026-11-14.md`): 3 rows → `--yes` prunes 2 stale rows and
-  2 store dirs in 0.17 s, the next dry run reports nothing, and deleting the
-  registry plus its backup rebuilds only the one row whose store survived.
+  2 store dirs in 0.17 s and the next dry run reports nothing; deleting the
+  registry *and* its backup rebuilds only the one row whose store survived;
+  but deleting **only** `workspaces.json` and leaving `workspaces.json.bak`
+  hands back the last pruned row — 12 rows pruned, one resurrected, already
+  stale, and it happens again after every such cycle (`BUGS/032`). So a
+  confirmed prune is durable against a rebuild from store manifests, and not
+  against a registry wipe that leaves the backup behind.
   A rebuild writes without taking `workspaces.lock`, so it is not visible in
   the lock's pid the way an ordinary registration is.
 - **Legacy migration is automatic:** projects on the old layout (`.squeezr/` +
