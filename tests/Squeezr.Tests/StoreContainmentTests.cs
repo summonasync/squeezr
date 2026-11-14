@@ -83,8 +83,20 @@ public sealed class StoreContainmentTests
     public void RunHomeGuard_PinCapturedStore_IsAcceptedUnchanged()
     {
         var scratch = TestDirs.NewTempDir();
+        var previous = TestRunHomeGuard.RunStoreAtModuleLoad;
+        try
+        {
+            // The control arm: a store that came from an explicit pin and IS the store this run claimed at
+            // module load must pass untouched. The claim is set to the same value on purpose - accepting a
+            // pin-captured store that is not this run's is the failure the identity arm exists for.
+            TestRunHomeGuard.RunStoreAtModuleLoad = scratch;
 
-        TestRunHomeGuard.RequirePinnedSnapshot(scratch, capturedFromPin: true).ShouldBe(scratch);
+            TestRunHomeGuard.RequirePinnedSnapshot(scratch, capturedFromPin: true).ShouldBe(scratch);
+        }
+        finally
+        {
+            TestRunHomeGuard.RunStoreAtModuleLoad = previous;
+        }
     }
 
     [Fact]
@@ -134,6 +146,33 @@ public sealed class StoreContainmentTests
         finally
         {
             TestRunHomeGuard.ProfileStoreAtStartup = previousStartup;
+        }
+    }
+
+    [Fact]
+    public void RunHomeGuard_ForeignPinCapturedAsRunStore_IsRefusedByIdentity()
+    {
+        var claimed = TestDirs.SharedStoreDir;
+        var foreign = TestDirs.NewTempDir();
+        var previous = TestRunHomeGuard.RunStoreAtModuleLoad;
+        try
+        {
+            // The case provenance cannot see: a ProcessGlobals fact has SQUEEZR_HOME pointed at its own
+            // scratch dir, and the run's first CliTestProcess touch lands inside that window. The value is
+            // explicit, non-profile and present, so every provenance and shape arm passes - and the whole
+            // run would then spawn children against a directory that test deletes in its Dispose.
+            TestRunHomeGuard.RunStoreAtModuleLoad = claimed;
+
+            var error = Should.Throw<InvalidOperationException>(
+                () => TestRunHomeGuard.RequirePinnedSnapshot(foreign, capturedFromPin: true));
+
+            error.Message.ShouldContain(foreign);
+            error.Message.ShouldContain(claimed);
+            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+        }
+        finally
+        {
+            TestRunHomeGuard.RunStoreAtModuleLoad = previous;
         }
     }
 

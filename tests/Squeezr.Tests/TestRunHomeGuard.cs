@@ -48,15 +48,17 @@ internal static class TestRunHomeGuard
                 $"the test run store is the profile default home '{home}'. {Remedy}");
         }
 
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable)))
-        {
-            throw new InvalidOperationException(
-                $"the test run has no {SqueezrHome.HomeEnvironmentVariable} pin while its store answers " +
-                $"'{home}'. {Remedy}");
-        }
-
         return home;
     }
+
+    // The store this run claimed at module load, recorded by SqueezrTestEnvironment where the environment
+    // still describes the run and nothing else has pinned anything yet. Provenance and shape cannot answer
+    // the question that remains: a ProcessGlobals fact pins SQUEEZR_HOME to its own scratch dir for the
+    // width of its own test, and if the run's first CliTestProcess touch lands in that window, the captured
+    // pair is (somebody else's dir, FromPin=true) - explicit, non-profile, present. Every arm passes and the
+    // whole run then spawns children against a directory its owner deletes in Dispose. Only a value taken
+    // before any test could interfere can say whether a store is THIS run's.
+    public static string? RunStoreAtModuleLoad { get; set; }
 
     private static bool SamePath(string left, string right) =>
         string.Equals(
@@ -66,10 +68,23 @@ internal static class TestRunHomeGuard
 
     // Provenance comes from the product's own cache (SqueezrHome.ResolveWithProvenance), so this check never
     // consults the environment again and cannot be moved by a neighbour between two reads.
-    public static string RequirePinnedSnapshot(string home, bool capturedFromPin) =>
-        capturedFromPin
-            ? home
-            : throw new InvalidOperationException(
+    public static string RequirePinnedSnapshot(string home, bool capturedFromPin)
+    {
+        if (!capturedFromPin)
+        {
+            throw new InvalidOperationException(
                 $"the test run store '{home}' was frozen from the profile fallback, not from an explicit " +
                 $"{SqueezrHome.HomeEnvironmentVariable}. {Remedy}");
+        }
+
+        if (RunStoreAtModuleLoad is { Length: > 0 } claimed && !SamePath(home, claimed))
+        {
+            throw new InvalidOperationException(
+                $"the test run store '{home}' is not the store this run claimed at module load ('{claimed}') " +
+                $"— a neighbouring test's {SqueezrHome.HomeEnvironmentVariable} was live when the snapshot " +
+                $"was taken. {Remedy}");
+        }
+
+        return home;
+    }
 }

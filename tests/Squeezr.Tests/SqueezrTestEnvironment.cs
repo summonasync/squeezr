@@ -40,7 +40,12 @@ public static class SqueezrTestEnvironment
         // Both branches above land here, and HOME is now the run's own, so this is the one moment where
         // the ambient pin describes the run instead of whichever test last held the serialized collection.
         // REQ-1 (118): an inherited pin that points at a profile home is refused at module load, not
-        // discovered later as leaked rows in the developer's registry.
-        TestRunHomeGuard.RequireContainedAtLoad(SqueezrHome.Resolve());
+        // discovered later as leaked rows in the developer's registry. What survives the check is recorded
+        // as this run's identity: the only value no test can have influenced yet.
+        TestRunHomeGuard.RunStoreAtModuleLoad = TestRunHomeGuard.RequireContainedAtLoad(SqueezrHome.Resolve());
+
+        // The child-store snapshot is taken here, in the same instant, so no test can be the first to
+        // decide it; see CliTestProcess.PrimeRunStore.
+        CliTestProcess.PrimeRunStore();
     }
 }

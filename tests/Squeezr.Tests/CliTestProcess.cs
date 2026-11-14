@@ -33,6 +33,12 @@ internal static partial class CliTestProcess
     private static string RunHome() =>
         TestRunHomeGuard.RequirePinnedSnapshot(RunStore.Home, RunStore.FromPin);
 
+    // Taken by the module initializer, before any test can hold the pin: touching RunStore here is what
+    // makes the snapshot deterministic. Without it the static initializes at whichever test reaches a CLI
+    // child first, which may be mid-window while a ProcessGlobals fact owns SQUEEZR_HOME for its own
+    // scratch dir - and the alternative, catching that after the fact, fails every later spawn in the run.
+    internal static void PrimeRunStore() => _ = RunStore;
+
     public static async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(
         string workingDir, params string[] args)
     {
