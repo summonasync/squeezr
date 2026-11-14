@@ -136,7 +136,7 @@ internal static class EnvMutationSweep
                     region.HasTests && region.Evidence.Count > 0 && !region.EffectivelySerialized;
                 if (outsideSerialized || region.Restores.Count > 0)
                 {
-                    var evidence = outsideSerialized ? new List<string>(region.Evidence) : [];
+                    var evidence = outsideSerialized ? new List<string>(region.Evidence) : new List<string>();
                     evidence.AddRange(region.Restores);
                     offenders.Add(new Offender(region.Name, relativePath, [.. evidence.Distinct()]));
                 }
