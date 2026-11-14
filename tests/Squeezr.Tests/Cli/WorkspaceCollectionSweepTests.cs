@@ -238,7 +238,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
         var bare = Tracked(TestDirs.NewTempDir());
         WriteConfig(ownedHome, "http://one.test:6334", owned: true);
         WriteConfig(foreignHome, "http://one.test:6334");
-        WriteConfig(sharedHome, "http://two.test:6333");
+        WriteConfig(sharedHome, "http://two.test:6333", owned: true);
         var rows = new[]
         {
             RowOf("foreign-first", foreignHome),
