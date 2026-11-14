@@ -18,6 +18,12 @@ public static class SqueezrTestEnvironment
     [ModuleInitializer]
     public static void RedirectSqueezrHome()
     {
+        // Before anything touches the environment: the profile store this process actually started with.
+        // The guard needs it because after HOME is redirected below, "is this a profile home" can only be
+        // answered against the sandbox, and a run that inherited SQUEEZR_HOME=/home/<dev>/.squeezr would
+        // pass every arm while writing fixture rows into that store (review-118-05-t2, REQ-1).
+        TestRunHomeGuard.ProfileStoreAtStartup = SqueezrHome.DefaultHome();
+
         var staleCutoff = TimeSpan.FromHours(6);
         FixtureSweep.SweepStaleRoots(TestDirs.FixtureBaseRoot(), staleCutoff, DateTime.UtcNow);
         FixtureSweep.SweepStaleRoots(TestDirs.LegacyPruneBaseRoot(), staleCutoff, DateTime.UtcNow);

@@ -113,22 +113,40 @@ public sealed class StoreContainmentTests
     }
 
     [Fact]
-    public void RunHomeGuard_ExternalPinPointingAtTheProfileHome_IsRefused()
+    public void RunHomeGuard_RunStoreEqualToTheStartupProfile_IsRefused()
+    {
+        var startupProfile = Path.Combine(TestDirs.NewTempDir(), ".squeezr");
+        var previousStartup = TestRunHomeGuard.ProfileStoreAtStartup;
+        try
+        {
+            // REQ-1's first branch, the one review-118-05-t2 proved was uncovered: a run that INHERITED a
+            // pin pointing at the developer's profile store. After the initializer redirects HOME there is
+            // no way to tell that shape from a healthy sandbox comparison, so the guard carries the startup
+            // profile it captured before any mutation - and this is what that arm answers to.
+            TestRunHomeGuard.ProfileStoreAtStartup = startupProfile;
+
+            var error = Should.Throw<InvalidOperationException>(
+                () => TestRunHomeGuard.RequireContainedAtLoad(startupProfile));
+
+            error.Message.ShouldContain(startupProfile);
+            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+        }
+        finally
+        {
+            TestRunHomeGuard.ProfileStoreAtStartup = previousStartup;
+        }
+    }
+
+    [Fact]
+    public void RunHomeGuard_StoreEqualToTheLiveDefaultHome_IsRefused()
     {
         var profileHome = SqueezrHome.DefaultHome();
         (profileHome.Length > 0).ShouldBeTrue(customMessage: "no profile home resolves here, so this arm " +
             "would assert that an empty pin is refused for the wrong reason");
 
-        // The branch AC3 names first: a pin that exists, is honoured, and happens to name the developer's
-        // profile store - the CI/debug shape REQ-1 calls a hard error.
-        //
-        // Deliberately no Environment.SetEnvironmentVariable and no Reset here, even though that is how the
-        // shape actually arises. Setting the ambient pin to the profile home and clearing the cache would
-        // hand every other collection running in parallel (ProcessGlobals serializes classes against each
-        // other, not against them) a window in which the first CliTestProcess.RunStore of the run freezes
-        // the developer's store with FromPin=true - the test would manufacture the leak it guards, and
-        // would be safest when the leak has already been prevented. The predicate is what AC3 asks about,
-        // so the predicate is what this asserts, with the value passed in rather than planted in the host.
+        // The live DefaultHome arm - the sandbox profile the initializer created. Named for what it
+        // actually covers: an earlier version of this fact claimed the inherited-pin branch and proved
+        // nothing of the kind, because it sampled DefaultHome() after the redirect (review-118-05-t2).
         var error = Should.Throw<InvalidOperationException>(
             () => TestRunHomeGuard.RequireContainedAtLoad(profileHome));
 

@@ -20,12 +20,26 @@ internal static class TestRunHomeGuard
         "pin SQUEEZR_HOME to a scratch store (SqueezrTestEnvironment does it at module load) or run the " +
         "suite from a root outside $HOME; a pin that is missing here was cleared in-process by a test";
 
+    // The developer's profile store as the process found it, captured before the harness redirects HOME.
+    // Without it the only "is this a profile home" comparison the guard can make is against the SANDBOX
+    // profile, which the initializer created on purpose - so a run that inherited
+    // SQUEEZR_HOME=/home/<dev>/.squeezr answered every arm and went ahead writing fixture rows into the
+    // real registry, which is REQ-1's hard-error case (found by review-118-05-t2).
+    public static string? ProfileStoreAtStartup { get; set; }
+
     public static string RequireContainedAtLoad(string home)
     {
         if (home.Length == 0)
         {
             throw new InvalidOperationException(
                 $"the test run store resolved to nothing. {Remedy}");
+        }
+
+        if (ProfileStoreAtStartup is { Length: > 0 } startup &&
+            SamePath(home, startup))
+        {
+            throw new InvalidOperationException(
+                $"the test run store is the profile home the process started with ('{home}'). {Remedy}");
         }
 
         if (SqueezrHome.IsDefaultHome(home))
@@ -44,8 +58,14 @@ internal static class TestRunHomeGuard
         return home;
     }
 
-    // capturedFromPin is read in the same breath as the value itself — see CliTestProcess.RunStore — so
-    // this check never consults the environment again and cannot be moved by a neighbour.
+    private static bool SamePath(string left, string right) =>
+        string.Equals(
+            WorkspaceCanonicalPath.ResolveThroughLinks(left),
+            WorkspaceCanonicalPath.ResolveThroughLinks(right),
+            StringComparison.Ordinal);
+
+    // Provenance comes from the product's own cache (SqueezrHome.ResolveWithProvenance), so this check never
+    // consults the environment again and cannot be moved by a neighbour between two reads.
     public static string RequirePinnedSnapshot(string home, bool capturedFromPin) =>
         capturedFromPin
             ? home

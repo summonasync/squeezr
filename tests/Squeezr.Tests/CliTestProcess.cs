@@ -22,12 +22,12 @@ internal static partial class CliTestProcess
 
     private static (string Home, bool FromPin) CaptureRunStore()
     {
-        // One breath for both readings: whether the pin was present IS what the cache is about to record,
-        // so the spawn-time check never has to ask the environment again — and cannot be moved by a
-        // neighbour that blanked or restored it in between.
-        var fromPin = !string.IsNullOrWhiteSpace(
-            Environment.GetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable));
-        return (SqueezrHome.Resolve(), fromPin);
+        // The product answers with the pair, under its own lock. Reading the environment here and the cache
+        // there was the earlier shape, and it could return a combination that never existed: a neighbour's
+        // pin with this run's fallback value, or a healthy pinned value reported as a fallback and refused
+        // for the rest of the run.
+        var (home, fromDefault) = SqueezrHome.ResolveWithProvenance();
+        return (home, !fromDefault);
     }
 
     private static string RunHome() =>
