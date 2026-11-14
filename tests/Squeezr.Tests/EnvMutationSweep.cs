@@ -111,7 +111,7 @@ internal static class EnvMutationSweep
                 foreach (var region in stack)
                     region.Evidence.Add(marker);
 
-            foreach (var restore in EnvRestoreFromField.Matches(line))
+            foreach (Match restore in EnvRestoreFromField.Matches(line))
             {
                 var field = restore.Groups["field"].Value;
                 if (!assigned.Contains(field))

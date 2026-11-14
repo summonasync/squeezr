@@ -23,17 +23,23 @@ internal static class TestRunHomeGuard
     public static string RequireContainedAtLoad(string home)
     {
         if (home.Length == 0)
-            return throw new InvalidOperationException(
+        {
+            throw new InvalidOperationException(
                 $"the test run store resolved to nothing. {Remedy}");
+        }
 
         if (SqueezrHome.IsDefaultHome(home))
-            return throw new InvalidOperationException(
+        {
+            throw new InvalidOperationException(
                 $"the test run store is the profile default home '{home}'. {Remedy}");
+        }
 
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(SqueezrHome.HomeEnvironmentVariable)))
-            return throw new InvalidOperationException(
+        {
+            throw new InvalidOperationException(
                 $"the test run has no {SqueezrHome.HomeEnvironmentVariable} pin while its store answers " +
                 $"'{home}'. {Remedy}");
+        }
 
         return home;
     }
