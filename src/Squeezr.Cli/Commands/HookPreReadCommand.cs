@@ -28,7 +28,7 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
-        var payload = ReadStdin();
+        var payload = HookStdin.Read(MaxStdinChars);
 
         HookPreReadAdvice? advice = null;
         try
@@ -89,33 +89,6 @@ public sealed class HookPreReadCommand : Command<HookPreReadCommand.Settings>
         {
             // fail-open: the adoption signal is worth a line, never a broken hook
         }
-    }
-
-    private static string ReadStdin()
-    {
-        var buffer = new char[MaxStdinChars + 1];
-        var read = 0;
-        int chunk;
-        while (read < buffer.Length && (chunk = Console.In.ReadBlock(buffer, read, buffer.Length - read)) > 0)
-        {
-            read += chunk;
-        }
-
-        // Oversized input is treated as unreadable rather than truncated: the hook
-        // stays advisory and oversized payloads degrade to the fail-open empty path.
-        if (read <= MaxStdinChars)
-        {
-            return new string(buffer, 0, read);
-        }
-
-        // Drain the rest into a fixed sink so a large writer never blocks on a full
-        // pipe; allocation stays bounded by the buffers above.
-        var sink = new char[4096];
-        while (Console.In.ReadBlock(sink, 0, sink.Length) > 0)
-        {
-        }
-
-        return string.Empty;
     }
 
     internal static HookPreReadAdvice? Evaluate(string payload)

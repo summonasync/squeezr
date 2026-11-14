@@ -73,6 +73,13 @@ internal static partial class CliTestProcess
         string squeezrHome, string stdin, string workingDir, params string[] args) =>
         StartAsync(workingDir, args, squeezrHome, stdin);
 
+    // The same piped call against the home every other child in this run already shares — for fixtures that
+    // registered their workspaces through RunAsync rather than into a scratch home of their own. A distinct
+    // name, because (stdin, workingDir, args) and (home, stdin, workingDir, args) would bind alike.
+    public static Task<(int ExitCode, string StdOut, string StdErr)> RunPipedInSharedHomeAsync(
+        string stdin, string workingDir, params string[] args) =>
+        StartAsync(workingDir, args, null, stdin);
+
     // The BUGS/010 pin harness: the child sees a raw dangling or unset HOME. squeezrHome "" means
     // SQUEEZR_HOME is present but empty, which the product reads as unset; childHome null leaves
     // HOME unset entirely, a path passes it through raw. DOTNET_CLI_HOME keeps the dotnet host

@@ -8,4 +8,7 @@ public sealed record McpInstallResult(
     bool InstructionsWritten,
     string? Warning,
     string? Error,
-    bool HooksArmed = false);
+    bool HooksArmed = false,
+    // Additive per 035: the SessionStart block this pass wrote — path plus the exact bytes — present only when
+    // --session-start was asked and a verified layout took it. Its absence is the claim that nothing was armed.
+    SessionStartHookWrite? SessionStart = null);

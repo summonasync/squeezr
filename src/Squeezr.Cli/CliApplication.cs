@@ -151,6 +151,12 @@ public static class CliApplication
                 hook.SetDescription("Produce payloads for AI client hooks (advisory, never blocks a tool call)");
                 hook.AddCommand<HookPreReadCommand>("pre-read")
                     .WithDescription("PreToolUse nudge on read-tool calls: point large reads at the indexed navigation tools");
+                hook.AddCommand<HookSessionStartCommand>("session-start")
+                    .WithDescription(
+                        "SessionStart hook body: in a linked git worktree, call 'worktree init' and tell the session " +
+                        "which store answers for this branch. Creates nothing outside a linked checkout; never blocks a session");
+                hook.AddCommand<HookSnippetCommand>("snippet")
+                    .WithDescription("Print the paste-ready managed hook blocks for each client — writes nothing; 'mcp install --session-start' is the opt-in writer");
             });
             McpCommandRegistration.AddMcpBranch(config);
         });

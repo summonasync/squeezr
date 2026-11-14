@@ -48,6 +48,11 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
         [CommandOption("--project")]
         public bool Project { get; set; }
 
+        // The only hook arm here that is not automatic: it puts a command into the user's client settings that
+        // runs at every session start, so --yes does NOT imply it and a terminal answers the prompt with 'no'.
+        [CommandOption("--session-start")]
+        public bool SessionStart { get; set; }
+
         [CommandOption("--yes")]
         public bool Yes { get; set; }
 
@@ -85,6 +90,14 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
 
         if (clientValues is not { Length: > 0 } && settings.Project)
         {
+            if (settings.SessionStart)
+            {
+                Console.Error.WriteLine(
+                    "error: --session-start arms a client hook and this path arms none — pass --client (<csv>|all) " +
+                    "with --session-start, or drop --session-start to write only the project block.");
+                return 1;
+            }
+
             return WriteProjectBlockOnly(
                 ProjectCheckout.From(WorkspaceRootResolver.LaunchDirectory(), resolution), settings.Json);
         }
@@ -131,6 +144,16 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
 
         var writeProjectBlock = await McpCommandSupport.ResolveProjectBlockAsync(
             settings.Project, settings.Yes, interactive, cancellationToken);
+        // No prompt here, deliberately: the interactive install flow is a shipped contract of its own (three
+        // prompts, pinned byte-for-byte), and an arm into the user's client settings is the one act that should
+        // not be reachable by whatever the terminal's next Enter happens to select. The flag is the consent.
+        var sessionStart = settings.SessionStart;
+        if (!sessionStart && clients.Any(client => HooksBlock.ForSessionStart(client, environment.CommandPath) is not null))
+        {
+            Console.Error.WriteLine(
+                "note: session-start hook not armed (opt-in) — 'squeezr hook snippet --session-start' prints the " +
+                "block, 'squeezr mcp install --session-start' writes it.");
+        }
 
         var service = new McpOnboardingService(_locator);
         var results = new List<McpInstallResult>();
@@ -139,7 +162,7 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             try
             {
                 results.Add(await service.InstallAsync(
-                    client, scope, settings.Watch, writeInstructions, environment, cancellationToken));
+                    client, scope, settings.Watch, writeInstructions, sessionStart, environment, cancellationToken));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or
                                         ClientCliException or TimeoutException or InvalidOperationException or NotSupportedException)
@@ -241,6 +264,17 @@ public sealed class McpInstallCommand : AsyncCommand<McpInstallCommand.Settings>
             if (result.HooksArmed)
             {
                 AnsiConsole.MarkupLine("  [green]+[/] hook pre-read armed");
+            }
+            if (result.SessionStart is { } sessionStart)
+            {
+                AnsiConsole.MarkupLine($"  [green]+[/] session-start hook armed — {Markup.Escape(sessionStart.Path)}");
+                foreach (var line in sessionStart.Block.Split('\n', StringSplitOptions.TrimEntries))
+                {
+                    if (line.Length > 0)
+                    {
+                        AnsiConsole.MarkupLine($"    [grey]{Markup.Escape(line)}[/]");
+                    }
+                }
             }
         }
         if (projectChange is not null)

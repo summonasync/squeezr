@@ -1043,6 +1043,163 @@ outside the per-tool list. The runtime name beside a tool is a reading rule,
 not a matcher: a `Read` row is called Claude Code because that is what the row
 says, not because some other host was ruled out.
 
+### SessionStart hook: `squeezr hook session-start`
+
+The second hook event squeezr answers, and the one that changes what a worktree
+session knows before it reads a file. `squeezr worktree init` gives a linked
+checkout its own store; this command is the door that runs it so nobody has to
+remember it. The hook reads the payload from stdin, takes `cwd` (the launch
+directory when a host sends none), and calls the verb — then tells the session
+which store answers for the branch it is standing on.
+
+The body holds no indexing logic of its own: it invokes `squeezr worktree init
+<path> --json` in a child of the same build and renders what that report says.
+Registration, the store copy, the reconcile pass and its pending state are the
+verb's contract, pinned by the tasks that shipped it; the warnings the verb puts
+on stderr ride into the context instead of being re-derived here.
+
+What it does, by the state of the checkout:
+
+| where the session stands | what the hook answers | exit |
+|---|---|---|
+| linked worktree with no store yet | the verb mints, fills and reconciles the store; the session is told the branch, the store key and the collection | `0` |
+| linked worktree that already has one | the verb reports `already registered`; the session is told nothing was created this session | `0` |
+| main worktree | silence — `squeezr init` and `squeezr index` own the primary checkout | `0` |
+| worktree of a repository nobody indexed | silence — the verb reports `ParentNotIndexed` and creates nothing, so an unrelated repo stays quiet | `0` |
+| plain directory, no git marker | silence | `0` |
+| stdin that does not parse, or a payload naming another event | silence (fail-open, the same rule `hook pre-read` lives under) | `0` |
+| the verb exits non-zero | nothing for the model; the reason goes to stderr, where a human reading the transcript finds it | `0` |
+
+The answer is one line of JSON, and the shape is load-bearing the same way the
+pre-read advice's is:
+
+```json
+{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"squeezr: this checkout is git worktree 'feat/x' and got its own index just now (store 'lane-x-8f63', collection 'squeezr-8f63…'). code_search, symbol_lookup, find_references, repo_map and expand_span answer for this branch; a plain full-file read is the slow path here."}}
+```
+
+**The text carries no angle brackets, on purpose.** Qwen Code writes
+SessionStart context into the system instruction after replacing `<` and `>`
+with `&lt;` and `&gt;` (measured live on 0.27.1 against a local mock endpoint:
+the captured request body is the model's own prompt, and the hook text arrived
+inside a hidden session-start block with its brackets escaped). Claude Code
+wraps the same field in a system reminder. A remedy spelled
+`cd <path> && squeezr serve` would therefore arrive as `&lt;path&gt;`, so every
+field the hook interpolates is bracket-replaced before it is emitted, and a pin
+redden if a bracket ever reaches the wire. The block is bounded (≤1200
+characters, at most three warning lines) because this text is paid for by every
+session in the tree.
+
+**Adopting it is a human act, not a silent one.** `mcp install` arms the
+`PreToolUse` hook by default because that hook only ever advises; a SessionStart
+hook runs a command at every session start, so it is opt-in:
+
+```
+squeezr mcp install --client qwen --session-start
+```
+
+The flag prints the exact block it wrote and where. Without it the command
+writes nothing new and says so on stderr. `squeezr hook snippet --session-start`
+prints the same blocks for pasting by hand and writes nothing at all — the
+pinned test is that the printed block and the written block are byte-identical,
+so the paste-ready text in this file cannot drift from what install emits.
+`squeezr mcp remove` takes the block back out whether or not the flag was ever
+used on that machine (a hook that outlives the registration that armed it is
+litter with a command in it), and `squeezr mcp doctor` reports the two states
+separately: `hook pre-read: armed` and `hook session-start: armed | not armed`,
+plus `sessionStartStatus` in `--json`. `--yes` never implies the arm, and **no
+prompt offers it either** — unlike the instructions block and the project block,
+this arm is reachable only through the flag. That is deliberate: the interactive
+install flow is a contract its own pins answer by pushed keystrokes, so adding a
+prompt here would consume a keystroke belonging to another question, and a
+default-`no` Enter is weaker consent than a flag whose job is to print the block
+before it lands.
+
+Paste-ready blocks (user scope, which is where these load unconditionally —
+project-scope hooks in a `.qwen/settings.json` are trust-gated and silently do
+not load in an untrusted folder):
+
+Qwen Code — `~/.qwen/settings.json`, `hooks` lands as an additive sibling of
+`mcpServers`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/you/.local/bin/squeezr hook session-start",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Claude Code — `~/.claude/settings.json` (a different file from the
+`~/.claude.json` that carries the server entry):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/you/.local/bin/squeezr hook session-start",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Two details in those blocks are measured, not guessed. The matcher is compared
+against **how the session began** (`startup`, `resume`, `clear`, `compact`), not
+against a tool name; `startup` is what both runtimes send for a new session, and
+narrowing to it is deliberate — a matcher nobody checked is a hook that never
+fires. `timeout` is read as **seconds** by both hosts (Qwen treats values at or
+above 1000 as legacy milliseconds, so 600 stays unambiguous), and the first
+session in a lane has a store to copy and reconcile: the budget belongs to the
+verb rather than to the host's default 60 seconds, which would kill the pass
+mid-copy and leave the next session to repeat it.
+
+**Where the project-scope registration lands, and why this hook does not depend
+on it.** The `--scope project` arm writes the client registration into the
+**resolved workspace root** — the store that answers there — not into whatever
+directory the operator happens to stand in. Measured in a nested lane
+(`audits/t12-project-scope-probe.sh`, run C): while the lane owns no store, a
+project-scope install run from inside it lands in the **parent's**
+`.qwen/settings.json` (`mcpServers` plus both hook blocks), because `serve`
+started in that lane also binds the parent and says so:
+
+```
+squeezr serve: workspace '<main>' store 'proj-main-ec8399ac' (nearest registered workspace above '<main>/.lanes/probe')
+warning: this checkout '<main>/.lanes/probe' (branch feat/x) has no store of its own — … run squeezr worktree init in this directory for an index of this branch
+```
+
+After one session start in that lane — the hook's own act — both halves move:
+`serve` binds `store 't12-proj-3507b847' (this directory is a registered
+workspace root)`, and the same project-scope install now writes the **lane's**
+`.qwen/settings.json`. So the door is consistent (the registration follows the
+store that answers) and the SessionStart hook is what makes the lane an answerer
+in the first place; the ordering is the fact worth knowing, not a bug to work
+around. This is also why the snippet above is documented at **user scope**: one
+registration there covers every checkout, the hook takes the tree to register
+from its payload rather than from where the client config lives, and a
+project-scope hook file is trust-gated on Qwen anyway. The residual — an operator
+who arms project scope in a lane that has not started a session yet gets a
+parent-root registration — is carried into the feature's docs card with these
+measurements.
+
 ### Tools
 
 | Tool | Parameters (defaults) | Returns |

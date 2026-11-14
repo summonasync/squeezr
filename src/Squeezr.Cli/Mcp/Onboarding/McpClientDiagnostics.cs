@@ -22,4 +22,7 @@ public sealed record McpClientDiagnostics(
     StoreWatchDiagnostics? Watch = null,
     // Additive per 114/T3: the managed hook state this doctor run measured — "armed", "not armed", or the
     // explicit reason a client is un-armed (hook layout unverified). Null only for hand-built diagnostics.
-    string? HookStatus = null);
+    string? HookStatus = null,
+    // Additive per 035: the SessionStart block's state, measured the same way. It is reported separately because
+    // it is armed separately — --session-start is opt-in, so 'armed' here can never be assumed from HookStatus.
+    string? SessionStartStatus = null);

@@ -188,6 +188,92 @@ same pattern when their hook surface allows.~~</removed> Wiring is the
 command's job now; still never hand-edit a hook config from an agent session —
 run `mcp install` and read the verdict from `mcp doctor`.
 
+The second event is `squeezr hook session-start`, the one a worktree lane needs.
+`squeezr worktree init` gives a linked checkout its own store; this command is the
+door that runs it so a session started inside a lane never has to learn the
+command. It reads the payload from stdin, takes `cwd` (the launch directory when a
+host sends none), calls the verb, and tells the session which store answers for
+the branch — the body holds no indexing logic of its own, and the report the verb
+prints is what gets rendered.
+
+Silence is the answer everywhere else, always at exit 0: a main worktree (`squeezr
+init` / `squeezr index` own it), a repository nobody indexed (the verb reports
+`ParentNotIndexed` and creates nothing), a plain directory, a stdin that does not
+parse, a payload naming another event, or a failed verb pass — so the arm cannot
+break a session start. On a settled lane the repeat pass measured ~0.6 s (the
+first pass ~2 s on a two-chunk repo, most of it the copy).
+
+Adoption is a flag, never a default and never a prompt — this is the one hook that
+runs a command at every session start:
+
+```
+squeezr mcp install --client qwen --session-start    # writes it, prints the exact block
+squeezr hook snippet --session-start                 # prints the same block, writes nothing
+```
+
+The block itself — one file per runtime, same shape, `<exe>` the absolute path of
+the squeezr binary:
+
+Qwen Code, `~/.qwen/settings.json` (an additive sibling of `mcpServers`):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/you/.local/bin/squeezr hook session-start",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Claude Code, `~/.claude/settings.json` (not the `~/.claude.json` that holds the
+server entry) — identical block:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/you/.local/bin/squeezr hook session-start",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`squeezr hook snippet --session-start` prints exactly these with the real command
+path filled in, per client, and a pin asserts the printed block is byte-for-byte
+what `mcp install --session-start` writes — the paste path and the flag cannot drift.
+
+`mcp doctor` reports the two arms apart (`hook pre-read: armed`,
+`hook session-start: armed | not armed`, additive `sessionStartStatus` in
+`--json`); `mcp remove` takes both back. Arm it at **user scope**: a project-scope
+`hooks` block is trust-gated on Qwen and silently does not load in an untrusted
+folder, and one user-level registration covers every checkout because the hook
+takes the tree to register from its payload rather than from where the client
+config lives. The answer arrives in the system prompt with angle brackets escaped
+(measured on Qwen Code 0.27.1), so it is bracket-free by construction — a remedy
+spelled `cd <path> && …` would otherwise reach the model as `&lt;path&gt;`. Keep
+`"timeout": 600` in the snippet: both hosts read it as seconds, and the first
+session in a fresh lane has a store to copy and reconcile, which the 60 s default
+would kill mid-pass.
+
 ## 5. Tool cheat-sheet (MCP)
 
 Navigation flow: `repo_map` first for orientation → `code_search` /

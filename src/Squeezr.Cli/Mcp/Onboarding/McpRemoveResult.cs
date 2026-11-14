@@ -8,4 +8,7 @@ public sealed record McpRemoveResult(
     bool InstructionsRemoved,
     string? Warning,
     string? Error,
-    bool HooksRemoved = false);
+    bool HooksRemoved = false,
+    // Additive per 035: a block install can arm is one remove has to take back, or the hook outlives the
+    // registration that armed it. True only when a managed SessionStart block was really found and stripped.
+    bool SessionStartRemoved = false);

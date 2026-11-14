@@ -17,7 +17,7 @@ public sealed class TestEnvironmentScope : IDisposable
 
     private readonly (string Name, string? Value)[] _previous;
 
-    public TestEnvironmentScope()
+    public TestEnvironmentScope(string? homeDir = null)
     {
         _previous =
         [
@@ -25,7 +25,9 @@ public sealed class TestEnvironmentScope : IDisposable
             (ClientHomeVariable, Environment.GetEnvironmentVariable(ClientHomeVariable)),
         ];
 
-        HomeDir = TestDirs.NewTempDir();
+        // A pinned home is for the doors that are supposed to remember what they wrote: install, then remove,
+        // then doctor only say something about each other if all three see the same profile directory.
+        HomeDir = homeDir ?? TestDirs.NewTempDir();
 
         Environment.SetEnvironmentVariable(HomeVariable, HomeDir);
         Environment.SetEnvironmentVariable(ClientHomeVariable, HomeDir);

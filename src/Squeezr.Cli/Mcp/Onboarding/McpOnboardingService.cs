@@ -13,8 +13,14 @@ public sealed class McpOnboardingService
 
     private const int HeadlessMessageCap = 200;
 
+    // Asked-for-but-unarmable is said, not swallowed: a flag that quietly did nothing is how an adopted hook
+    // becomes a rumor.
+    private const string SessionStartUnsupportedWarning =
+        "session-start hook not armed — no verified hook layout for this client";
+
     private readonly ClientCliLocator _locator;
     private readonly ClientCliBridge _bridge;
+    private readonly SessionStartHooks _sessionStartHooks = new();
 
     public McpOnboardingService(ClientCliLocator locator)
     {
@@ -23,11 +29,21 @@ public sealed class McpOnboardingService
         _bridge = new ClientCliBridge(locator);
     }
 
+    public Task<McpInstallResult> InstallAsync(
+        McpClientDescriptor client,
+        McpScope scope,
+        bool watch,
+        bool writeInstructions,
+        McpOnboardingEnvironment environment,
+        CancellationToken cancellationToken) =>
+        InstallAsync(client, scope, watch, writeInstructions, sessionStart: false, environment, cancellationToken);
+
     public async Task<McpInstallResult> InstallAsync(
         McpClientDescriptor client,
         McpScope scope,
         bool watch,
         bool writeInstructions,
+        bool sessionStart,
         McpOnboardingEnvironment environment,
         CancellationToken cancellationToken)
     {
@@ -58,15 +74,22 @@ public sealed class McpOnboardingService
             await ManagedHooksWriter.UpsertAsync(hooksPath, block, cancellationToken);
             hooksArmed = true;
         }
+        var sessionStartWrite = sessionStart
+            ? await _sessionStartHooks.ArmAsync(client, scope, environment, cancellationToken)
+            : null;
+        var warning = sessionStart && sessionStartWrite is null
+            ? CombineWarnings(decision.Warning, SessionStartUnsupportedWarning)
+            : decision.Warning;
         return new McpInstallResult(
             ClientName(client),
             ScopeName(scope),
             MethodName(decision.Method),
             configPath,
             instructionsWritten,
-            decision.Warning,
+            warning,
             null,
-            hooksArmed);
+            hooksArmed,
+            sessionStartWrite);
     }
 
     public async Task<McpRemoveResult> RemoveAsync(
@@ -96,6 +119,7 @@ public sealed class McpOnboardingService
         {
             hooksRemoved = await ManagedHooksWriter.RemoveAsync(hooksPath, block, cancellationToken);
         }
+        var sessionStartRemoved = await _sessionStartHooks.StripAsync(client, scope, environment, cancellationToken);
         return new McpRemoveResult(
             ClientName(client),
             ScopeName(scope),
@@ -104,7 +128,8 @@ public sealed class McpOnboardingService
             instructionsRemoved,
             decision.Warning,
             null,
-            hooksRemoved);
+            hooksRemoved,
+            sessionStartRemoved);
     }
 
     public async Task<McpClientDiagnostics> DoctorAsync(
@@ -149,6 +174,7 @@ public sealed class McpOnboardingService
             warnings.AddRange(TrustedProjectWarning);
         }
         var hookStatus = await ResolveHookStatusAsync(client, environment, cancellationToken);
+        var sessionStartStatus = await _sessionStartHooks.StatusAsync(client, environment, cancellationToken);
         return new McpClientDiagnostics(
             ClientName(client),
             ClientDetector.IsInstalled(client, environment, _locator),
@@ -167,7 +193,8 @@ public sealed class McpOnboardingService
             expectedPath,
             indexState,
             watch,
-            hookStatus);
+            hookStatus,
+            sessionStartStatus);
     }
 
     private static async Task<string> ResolveHookStatusAsync(
@@ -284,6 +311,9 @@ public sealed class McpOnboardingService
             await TomlMcpConfigWriter.RemoveAsync(configPath, ClientCliBridge.ServerName, cancellationToken);
         }
     }
+
+    private static string? CombineWarnings(string? first, string second) =>
+        first is null ? second : $"{first}; {second}";
 
     private static bool InstructionBlockExists(string instructionPath) =>
         File.Exists(instructionPath) &&

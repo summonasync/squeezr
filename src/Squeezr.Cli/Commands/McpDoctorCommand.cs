@@ -192,6 +192,10 @@ public sealed class McpDoctorCommand : AsyncCommand<McpDoctorCommand.Settings>
         {
             AnsiConsole.MarkupLine($"  hook pre-read: {Markup.Escape(status)}");
         }
+        if (entry.SessionStartStatus is { } sessionStartStatus)
+        {
+            AnsiConsole.MarkupLine($"  hook session-start: {Markup.Escape(sessionStartStatus)}");
+        }
     }
 
     private static string Flag(bool value) => value ? "[green]yes[/]" : "[red]no[/]";
