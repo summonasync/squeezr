@@ -63,7 +63,7 @@ public sealed class WorkspaceRepairCollectionsCliTests : IDisposable
         var fault = collections.GetProperty("endpointFaults").EnumerateArray().Single();
         fault.GetProperty("endpoint").GetString().ShouldBe(OwnedDeadEndpoint);
         var error = fault.GetProperty("error").GetString()!;
-        error.ShouldStartWith("HttpRequestException",
+        error.StartsWith("HttpRequestException", StringComparison.Ordinal).ShouldBeTrue(
             "the report carries the error this run's own request caught, never a rerouted default");
         error.Length.ShouldBeGreaterThan("HttpRequestException".Length,
             "a bare exception name with nothing measured behind it would read as a classification, not a fault");
