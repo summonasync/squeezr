@@ -259,6 +259,23 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
         WorkspaceCollectionSweep.EndpointsOf(rows).ShouldBe(["http://one.test:6334", "http://two.test:6333"],
             "the unowned projection the ledger reports is unchanged by the gate — every named endpoint is " +
             "still surveyed, ownership only decides what may be deleted on it");
+
+        // the strip direction of the same promise: an unowned sibling arriving AFTER the declaring row is
+        // not a veto over it either — ownership must survive being second in file order, not just first
+        var rowsReversed = new[]
+        {
+            RowOf("mine", ownedHome),
+            RowOf("foreign-first", foreignHome),
+            RowOf("also-mine", sharedHome),
+            RowOf("bare", bare),
+        };
+
+        WorkspaceCollectionSweep.SweepTargetsOf(rowsReversed).ShouldBe(
+            [
+                new QdrantSweepTarget("http://one.test:6334", true),
+                new QdrantSweepTarget("http://two.test:6333", true),
+            ],
+            "row order decides nothing: the declaring row wins the flag from ahead and from behind alike");
     }
 
     // Forward-only, exactly as the claim set is built: a name derived from a surviving row is claimed and a
