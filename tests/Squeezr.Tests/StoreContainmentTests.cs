@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -72,5 +73,152 @@ public sealed class StoreContainmentTests
                 a whitespace SQUEEZR_HOME resolved to {whitespace};
                 DefaultHome() = {SqueezrHome.DefaultHome()}, process HOME = {Environment.GetEnvironmentVariable("HOME")}
                 """);
+    }
+
+    // The 118/T3 runtime half, split the way the guard is split: a store captured from an explicit pin is
+    // accepted, a store captured from the fallback is refused on sight, and at module load a value that IS
+    // a profile home is refused with the path named. Every arm is asserted in both directions because a
+    // guard that only ever throws is as useless as one that never does.
+    [Fact]
+    public void RunHomeGuard_PinCapturedStore_IsAcceptedUnchanged()
+    {
+        var scratch = TestDirs.NewTempDir();
+        var previous = TestRunHomeGuard.RunStoreAtModuleLoad;
+        try
+        {
+            // The control arm: a store that came from an explicit pin and IS the store this run claimed at
+            // module load must pass untouched. The claim is set to the same value on purpose - accepting a
+            // pin-captured store that is not this run's is the failure the identity arm exists for.
+            TestRunHomeGuard.RunStoreAtModuleLoad = scratch;
+
+            TestRunHomeGuard.RequirePinnedSnapshot(scratch, capturedFromPin: true).ShouldBe(scratch);
+        }
+        finally
+        {
+            TestRunHomeGuard.RunStoreAtModuleLoad = previous;
+        }
+    }
+
+    [Fact]
+    public void RunHomeGuard_FallbackCapturedStore_IsRefusedEvenWhileHomePointsAtTheSandbox()
+    {
+        var fallback = SqueezrHome.DefaultHome();
+        (fallback.Length > 0).ShouldBeTrue(customMessage: "no profile home resolves on this machine, so " +
+            "this arm would assert that an empty string is contained — a green that measured nothing");
+
+        // The state the real suite reaches: a neighbour has restored HOME by the time a child spawns, so
+        // the ambient environment looks healthy and only the provenance of the frozen value is wrong.
+        var error = Should.Throw<InvalidOperationException>(
+            () => TestRunHomeGuard.RequirePinnedSnapshot(fallback, capturedFromPin: false));
+
+        error.Message.ShouldContain(fallback);
+        error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+    }
+
+    [Fact]
+    public void RunHomeGuard_StoreThatResolvedToNothing_IsRefusedWithTheRemedy()
+    {
+        var error = Should.Throw<InvalidOperationException>(
+            () => TestRunHomeGuard.RequireContainedAtLoad(string.Empty));
+
+        error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+    }
+
+    [Fact]
+    public void RunHomeGuard_RunStoreEqualToTheStartupProfile_IsRefused()
+    {
+        var startupProfile = Path.Combine(TestDirs.NewTempDir(), ".squeezr");
+        var previousStartup = TestRunHomeGuard.ProfileStoreAtStartup;
+        try
+        {
+            // REQ-1's first branch, the one review-118-05-t2 proved was uncovered: a run that INHERITED a
+            // pin pointing at the developer's profile store. After the initializer redirects HOME there is
+            // no way to tell that shape from a healthy sandbox comparison, so the guard carries the startup
+            // profile it captured before any mutation - and this is what that arm answers to.
+            TestRunHomeGuard.ProfileStoreAtStartup = startupProfile;
+
+            var error = Should.Throw<InvalidOperationException>(
+                () => TestRunHomeGuard.RequireContainedAtLoad(startupProfile));
+
+            error.Message.ShouldContain(startupProfile);
+            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+        }
+        finally
+        {
+            TestRunHomeGuard.ProfileStoreAtStartup = previousStartup;
+        }
+    }
+
+    [Fact]
+    public void RunHomeGuard_ForeignPinCapturedAsRunStore_IsRefusedByIdentity()
+    {
+        var claimed = TestDirs.SharedStoreDir;
+        var foreign = TestDirs.NewTempDir();
+        var previous = TestRunHomeGuard.RunStoreAtModuleLoad;
+        try
+        {
+            // The case provenance cannot see: a ProcessGlobals fact has SQUEEZR_HOME pointed at its own
+            // scratch dir, and the run's first CliTestProcess touch lands inside that window. The value is
+            // explicit, non-profile and present, so every provenance and shape arm passes - and the whole
+            // run would then spawn children against a directory that test deletes in its Dispose.
+            TestRunHomeGuard.RunStoreAtModuleLoad = claimed;
+
+            var error = Should.Throw<InvalidOperationException>(
+                () => TestRunHomeGuard.RequirePinnedSnapshot(foreign, capturedFromPin: true));
+
+            error.Message.ShouldContain(foreign);
+            error.Message.ShouldContain(claimed);
+            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+        }
+        finally
+        {
+            TestRunHomeGuard.RunStoreAtModuleLoad = previous;
+        }
+    }
+
+    [Fact]
+    public void RunHomeGuard_StoreEqualToTheLiveDefaultHome_IsRefused()
+    {
+        var profileHome = SqueezrHome.DefaultHome();
+        (profileHome.Length > 0).ShouldBeTrue(customMessage: "no profile home resolves here, so this arm " +
+            "would assert that an empty pin is refused for the wrong reason");
+
+        // The live DefaultHome arm - the sandbox profile the initializer created. Named for what it
+        // actually covers: an earlier version of this fact claimed the inherited-pin branch and proved
+        // nothing of the kind, because it sampled DefaultHome() after the redirect (review-118-05-t2).
+        var error = Should.Throw<InvalidOperationException>(
+            () => TestRunHomeGuard.RequireContainedAtLoad(profileHome));
+
+        error.Message.ShouldContain(profileHome);
+        error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public void RunHomeGuard_ProfileHomeResolution_IsRefusedAndNamesThePath()
+    {
+        var previousEnv = Environment.GetEnvironmentVariable("SQUEEZR_HOME");
+        var previousHome = Environment.GetEnvironmentVariable("HOME");
+        var sentinelProfile = TestDirs.NewTempDir();
+        try
+        {
+            Environment.SetEnvironmentVariable("SQUEEZR_HOME", null);
+            Environment.SetEnvironmentVariable("HOME", sentinelProfile);
+            SqueezrHome.Reset();
+            var profileHome = SqueezrHome.Resolve();
+
+            profileHome.ShouldStartWith(sentinelProfile);
+            var error = Should.Throw<InvalidOperationException>(
+                () => TestRunHomeGuard.RequireContainedAtLoad(profileHome));
+
+            error.Message.ShouldContain(profileHome);
+            error.Message.ShouldContain(TestRunHomeGuard.Remedy);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("HOME", previousHome);
+            Environment.SetEnvironmentVariable("SQUEEZR_HOME", previousEnv);
+            SqueezrHome.Reset();
+        }
     }
 }

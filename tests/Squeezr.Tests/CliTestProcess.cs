@@ -16,7 +16,29 @@ internal static partial class CliTestProcess
     // temp dir and SqueezrHome.Reset() cleared the cache. Without this snapshot,
     // SqueezrHome.Resolve() at Process.Start time could re-read a stale env var
     // and send the child to a registry where the workspace is unknown.
-    private static readonly string TestRunHome = SqueezrHome.Resolve();
+    // The snapshot is the one value a broken neighbour can poison for the whole run, so it carries its own
+    // provenance and is checked on every use instead of trusted for the rest of the process: a store the
+    // run froze out of the profile fallback is refused before the first child spawns (feature 118 REQ-1).
+    private static readonly (string Home, bool FromPin) RunStore = CaptureRunStore();
+
+    private static (string Home, bool FromPin) CaptureRunStore()
+    {
+        // The product answers with the pair, under its own lock. Reading the environment here and the cache
+        // there was the earlier shape, and it could return a combination that never existed: a neighbour's
+        // pin with this run's fallback value, or a healthy pinned value reported as a fallback and refused
+        // for the rest of the run.
+        var (home, fromDefault) = SqueezrHome.ResolveWithProvenance();
+        return (home, !fromDefault);
+    }
+
+    private static string RunHome() =>
+        TestRunHomeGuard.RequirePinnedSnapshot(RunStore.Home, RunStore.FromPin);
+
+    // Taken by the module initializer, before any test can hold the pin: touching RunStore here is what
+    // makes the snapshot deterministic. Without it the static initializes at whichever test reaches a CLI
+    // child first, which may be mid-window while a ProcessGlobals fact owns SQUEEZR_HOME for its own
+    // scratch dir - and the alternative, catching that after the fact, fails every later spawn in the run.
+    internal static void PrimeRunStore() => _ = RunStore;
 
     public static async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(
         string workingDir, params string[] args)
@@ -131,7 +153,7 @@ internal static partial class CliTestProcess
             UseShellExecute = false
         };
         startInfo.Environment["NO_COLOR"] = "1";
-        startInfo.Environment["SQUEEZR_HOME"] = squeezrHome ?? TestRunHome;
+        startInfo.Environment["SQUEEZR_HOME"] = squeezrHome ?? RunHome();
         // ProcessStartInfo.Environment starts as a copy of ours, so an unset variable
         // here means the child inherits the developer's real store and profile. No test
         // has a reason to touch either, so isolation is the default rather than a request.
