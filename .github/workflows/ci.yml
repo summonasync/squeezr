@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -12,11 +13,7 @@ concurrency:
 jobs:
   build-test:
     # windows-latest is parked until a windows runner exists
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -30,10 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - rid: linux-x64
-            os: ubuntu-latest
-    runs-on: ${{ matrix.os }}
+        rid: [linux-x64]
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
