@@ -200,7 +200,9 @@ squeezr mcp install --all --scope user --yes
    so an unauthenticated curl of it answers `404` (measured, not assumed), and the
    script sends no credentials of its own. The distribution plumbing ships here;
    the public store arrives when the owner flips the repository's visibility. Until
-   then install from a checkout with `scripts/install.sh`.
+   then install from a checkout with `scripts/install.sh`, or take the published
+   archive with `gh release download` — the recipe is in
+   [Publishing a release](#publishing-a-release).
    **Linux only** — releases are published for `linux-x64` alone. On Windows, build
    the setup executable locally (`powershell -File scripts\build-installer.ps1`) or
    install from source with `powershell -File scripts\install.ps1`.
@@ -1029,7 +1031,15 @@ locally by whoever is holding the tag. The whole procedure, on a Linux box with
 the .NET 10 SDK, from the repository root:
 
 ```bash
-version=1.1.0                                  # the tag is v$version
+version=1.4.0                                  # the tag is v$version
+
+# Two stamps have to agree before anything gets built: `<Version>` in
+# src/Squeezr.Cli/Squeezr.Cli.csproj must read $version, and CHANGELOG.md must have
+# its [Unreleased] folded into a `## [$version] — yyyy-mm-dd` heading. A tag cut
+# without the fold leaves the release notes describing a version nobody can read
+# about, and a csproj stamped ahead of its tag (`1.3.0` since `07ff3a0`, 2026-11-03,
+# while the newest tag on the server stayed `v1.1.0` for another two weeks) makes
+# `--version` and the tag list disagree about reality.
 
 # Self-contained single-file publish. The archive carries the whole publish
 # output, not just the binary: MSBuildWorkspace ships out-of-proc BuildHost
@@ -1045,6 +1055,10 @@ git tag "v$version" && git push origin "v$version"
 gh release create "v$version" "squeezr-$version-linux-x64.tar.gz" \
   --notes "See CHANGELOG.md in the repository."
 ```
+
+The release commit the tag names is the changelog fold, so push `main` alongside the
+tag — a tag whose commit never landed on the branch leaves `main` describing a
+release older than the newest one on the releases page.
 
 Two shapes are a contract with `scripts/install-release.sh`, not taste:
 
@@ -1064,13 +1078,28 @@ truncated archive). The two refusals quoted above are what the script answers a
 release that deviates from them; they are not separately armed.
 
 Two gates stay with the owner, and this section is where they are named rather
-than discovered later: **the first real publication** has not happened — the
-GitHub releases of this repository (`v1.0.10`, `v1.0.11`, `v1.1.0`) carry zero
-assets as of this writing, so there is nothing for `install-release.sh` to
-resolve until someone runs the procedure above for real — and the
-**repository visibility** is still private, which is the same gate the install
-command in [For AI agents](#for-ai-agents) answers with a `404`: publishing an
-asset does not make the anonymous `curl -fsSL … | bash` work.
+than discovered later. **The first real publication happened on 2026-11-16:** `v1.3.0`
+carries its `squeezr-1.3.0-linux-x64.tar.gz`, and it is the only release that does —
+`v1.0.10`, `v1.0.11` and `v1.1.0` stayed asset-less and nobody plans to backfill them,
+so `install-release.sh --version v1.1.0` answers `release v1.1.0 has no linux-x64
+tar.gz asset`; those tags are history, not install targets. **The repository
+visibility is still private**, which is the same gate the install command in
+[For AI agents](#for-ai-agents) answers with a `404` — publishing an asset does not
+make the anonymous `curl -fsSL … | bash` work, because the script sends no credentials
+of its own. Until the flip, an authenticated machine gets the identical bytes by hand:
+
+```bash
+gh release download v1.3.0 --pattern '*-linux-x64.tar.gz' -D /tmp
+mkdir -p ~/apps/squeezr/v1.3.0
+tar -xzf /tmp/squeezr-1.3.0-linux-x64.tar.gz -C ~/apps/squeezr/v1.3.0 --strip-components=1
+touch ~/apps/squeezr/v1.3.0/squeezr        # the tar carries archived mtimes; restamp for the drift detector
+ln -sfn ~/apps/squeezr/v1.3.0/squeezr ~/.local/bin/squeezr
+```
+
+Same tree the script would have built. Watch it if another session's `squeezr serve
+--watch` is executing the tag directory being replaced: the install deletes the target
+path, and the live process keeps running happily off a deleted inode until its session
+ends — check `readlink /proc/<pid>/exe` before overwriting a tag that is already there.
 
 ## TUI: the human interface
 
