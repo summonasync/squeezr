@@ -498,3 +498,10 @@ ENTRIES/
 # Lane workspaces (per-agent checkouts), live outside git
 .lanes/
 Squeezr.lanes/
+
+# Internal crew artifacts — live on disk for local work, never in the public tree
+/audits/
+/BUGS/
+/docs/
+/AGENTS.md
+/TECHNICAL-SOLUTIONS.md
