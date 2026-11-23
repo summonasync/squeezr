@@ -139,7 +139,7 @@ public sealed class RoslynSession : IDisposable
     {
         // DisposeAttempted means the session is buried, not that the release completed: the flag is
         // set before the workspace dispose so a throwing dispose cannot reopen the signal. A second
-        // MSBuildWorkspace.Dispose is tolerated today (probed, see audits/dotnet-coder-055-t2-r3),
+        // MSBuildWorkspace.Dispose is tolerated today (probed),
         // so this is one-shot liveness bookkeeping, not crash insurance.
         if (DisposeAttempted)
         {

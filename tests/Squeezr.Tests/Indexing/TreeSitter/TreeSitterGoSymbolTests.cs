@@ -223,7 +223,7 @@ public class TreeSitterGoSymbolTests
         // const_spec / var_spec nodes exactly like the package-level ones; only the ancestor chain says
         // which is which. Dropping them is go's own decision, NOT a rule inherited from rust — rust's
         // const_item and static_item do sit inside blocks and rust ships rows for them (MEASURED in
-        // review-023-05 and recorded in audits/review-023-05-mutation.txt: a 'const K' and a 'static S'
+        // review-023-05's mutation run: a 'const K' and a 'static S'
         // in an fn body arrive as Field rows with container 'main'. Not pinned here or in the rust tests:
         // no rust fixture has a block-level item yet, and adding one is a coverage task, not a comment
         // fix — the claim's home is the carrier until that row exists)
@@ -295,7 +295,7 @@ public class TreeSitterGoSymbolTests
     {
         // 'const A, B = 1, 2' is ONE const_spec whose name field holds 'A' and whose second identifier is
         // an unnamed sibling. Reading one row per name would give A and B the same span, which is the
-        // BUGS/022 duplicate-chunk shape that triage has not given a span model to — so the form is
+        // duplicate-chunk shape that triage has not given a span model to — so the form is
         // refused whole, exactly as python refuses a tuple target, and the single-name specs beside it
         // are untouched
         var rows = Parse("src/multi.go", """
@@ -470,7 +470,7 @@ public class TreeSitterGoSymbolTests
         // the denominator first: one row was extracted from a file whose doc line sits directly above it.
         // go is the closest grammar to working here — its comment node has the kind CollectComments
         // looks for (unlike python's docstring string node and rust's doc_comment), so the gap is the
-        // renderer's '/**'-only rule and nothing else. Owner: BUGS/021, third mechanism
+        // renderer's '/**'-only rule and nothing else — the third deferred capture mechanism
         symbols.Count.ShouldBe(1);
         Find(symbols, "Run", SymbolKind.Function).DocComment.ShouldBeNull();
     }
@@ -605,7 +605,7 @@ public class TreeSitterGoSymbolTests
         // '.mts' to the detector, to CanHandle and to LanguageName while forgetting GrammarName passed
         // every assertion above — the file would fall back to the javascript grammar while being labeled
         // typescript, which is exactly the mislabel the twin finding is about (measured by review-023-05
-        // as their mutant R8 and by mutant MC here as the same drift — see audits/review-023-05-mutation.txt)
+        // as their mutant R8 and by mutant MC here as the same drift)
         foreach (var path in candidates)
         {
             provider.CanHandle(path, null).ShouldBeFalse($"unexpected handler for {path}");

@@ -5,7 +5,7 @@
 #
 # Carriers (all from git, all built outside the repo tree):
 #   before     = COMMIT_BEFORE (08036ec — parent of the feature's first code commit 51794ec,
-#                merge-base with main, the state audits/baseline-017-2026-11-09.md was shot on)
+#                merge-base with main, the baseline state the 017 report was shot on)
 #   prebudget  = COMMIT_PREBUDGET (506510d — T1+T2+T3 closed, no refresh budget; the before column
 #                of the budget-wire comparison, because a budget-less guard on 08036ec would mix
 #                the check-path price and the budget price into one arm)

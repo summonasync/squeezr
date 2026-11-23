@@ -379,7 +379,7 @@ public class TreeSitterPythonSymbolTests
     {
         var result = Parse("src/config.py", SameSpanSource);
 
-        // measured shape, pinned as declared behavior (tracked in BUGS/022, not fixed here): a one-line
+        // measured shape, pinned as declared behavior (known defect, not fixed here): a one-line
         // class and the const inside it share a span because a span is the node's line range, so the
         // per-symbol chunker emits two byte-identical rows for one line. The style the rest of this file
         // uses — Chunks.Single(c => c.Span == symbol.Span) — cannot resolve a chunk here, which is why

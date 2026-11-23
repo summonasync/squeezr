@@ -440,7 +440,7 @@ public class TreeSitterRoutingTests
         var repoId = store.FindRepo("demo")!.Id;
         var file = store.ListFiles(repoId).Single(f => f.Path == "src/config.py");
 
-        // the store half of BUGS/022: four symbol rows on two lines, four chunk rows on the same two
+        // the store half of the duplicate-chunk shape: four symbol rows on two lines, four chunk rows on the same two
         // lines, and every chunk of a colliding pair attributed to the symbol that came first in source
         // order — SymbolPersistence.FindContainingSymbol orders candidates by span width and LINQ's
         // OrderBy is stable, so a class and the one-line const inside it (equal widths) never split the

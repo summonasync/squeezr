@@ -17,8 +17,8 @@ public sealed class HookPostEditCostTests(ITestOutputHelper output) : IAsyncLife
     private const int SmallRepoFiles = 300;
     private const int LargeRepoFiles = 1500;
 
-    // Headspace over the measured shape of this route (load 8-13 on 32 cores, full table in
-    // audits/025-t1-cost-2026-11-13/): scoped 3.3-4.2 s against a 9.7 s control at 300 files (ratio 0.33-0.43),
+    // Headspace over the measured shape of this route (load 8-13 on 32 cores): scoped 3.3-4.2 s against a
+    // 9.7 s control at 300 files (ratio 0.33-0.43),
     // 4.1-4.6 s against a 28.4 s control at 1500 (0.15-0.16), and 1.1-1.3x of wall for a 5x bigger repo. The
     // pre-fix door measured 0.85-1.11 / ~1.05 / 3.5-4.0x on the same fixtures, so every bound below is a claim
     // that failed loudly before the fix and not a formality now.

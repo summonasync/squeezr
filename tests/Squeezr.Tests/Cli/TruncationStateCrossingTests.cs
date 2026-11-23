@@ -31,7 +31,7 @@ public sealed class TruncationStateCrossingTests
     public async Task MappedThenClippedCeilingsOnOneConnection_EachAnswerCrossesOnItsOwnState()
     {
         // one workspace, one connection, both ceilings — the honest shape of this crossing. T5 had to split the
-        // two states into harnesses of their own because BUGS/024 kept the ceiling out of the symbol_lookup cache
+        // two states into harnesses of their own because the ceiling was left out of the symbol_lookup cache
         // key: the second call replayed the first envelope, so a shared connection measured a replay instead of
         // the state. With the budget in the key, the legs run side by side and each answers at its own ceiling.
         var workspace = NewFixtureWorkspace();

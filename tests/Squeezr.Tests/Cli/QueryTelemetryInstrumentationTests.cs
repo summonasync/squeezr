@@ -190,7 +190,7 @@ public sealed class QueryTelemetryInstrumentationTests
 
         // both calls carry one ceiling on purpose: what this pair pins is the fresh answer and the hit that
         // replays it, and a hit only exists under an identical key. The ceiling-varying legs — the ones that must
-        // NOT hit since 115/T7 put the budget into the symbol_lookup key (BUGS/024) — are SymbolLookupBudgetCacheKeyTests
+        // NOT hit since 115/T7 put the budget into the symbol_lookup key — are SymbolLookupBudgetCacheKeyTests
         return (fresh, QueryTelemetry.ReadAll(root).Where(row => row.Tool == "symbol_lookup").ToList());
     }
 

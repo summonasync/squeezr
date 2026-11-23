@@ -10,7 +10,7 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Mcp;
 
-// BUGS/024: symbol_lookup shaped its answer by maxTokens but keyed the cached envelope without the budget, so the
+// symbol_lookup shaped its answer by maxTokens but keyed the cached envelope without the budget, so the
 // remedy feature 115 exists to make honest — "raise maxTokens" — could not be followed inside the session that
 // heard it: the raised call replayed the small answer and read as proof that ceilings do nothing. These pins hold
 // the executable form of the remedy, and the price it must not cost: an identical ceiling still replays.

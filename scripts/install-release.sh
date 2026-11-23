@@ -12,9 +12,6 @@
 #
 # Usage: install-release.sh [--version <tag>] [--force]
 # Env:   SQUEEZR_RELEASES_BASE - release API repo base (default https://api.github.com/repos/summonasync/squeezr)
-#        SQUEEZR_GITEA         - retired release host, kept only as a fallback when
-#                                SQUEEZR_RELEASES_BASE is unset; then the old API
-#                                layout is derived from it and a warning is printed
 #        SQUEEZR_INSTALL_DIR   - versioned install store (default: ~/apps/squeezr)
 #        SQUEEZR_BIN_DIR       - symlink directory (default: ~/.local/bin)
 set -euo pipefail
@@ -23,14 +20,6 @@ repo_api="${SQUEEZR_RELEASES_BASE:-}"
 releases_page='https://github.com/summonasync/squeezr/releases'
 if [[ -n "$repo_api" ]]; then
   repo_api="${repo_api%/}"
-elif [[ -n "${SQUEEZR_GITEA:-}" ]]; then
-  # The retired host still lives in stale configs. Deriving its old API layout keeps
-  # such a config resolving against a real endpoint instead of failing silently, but
-  # it must be said out loud once: the replacement variable is named in the warning.
-  host="${SQUEEZR_GITEA%/}"
-  repo_api="$host/api/v1/repos/REDACTED-FORGE-NS/Squeezr"
-  releases_page="$host/REDACTED-FORGE-NS/Squeezr/releases"
-  echo "install-release: warning: SQUEEZR_GITEA is deprecated and names a retired host - set SQUEEZR_RELEASES_BASE instead (deriving $repo_api)" >&2
 else
   repo_api='https://api.github.com/repos/summonasync/squeezr'
 fi
@@ -54,7 +43,6 @@ Options:
 
 Environment:
   SQUEEZR_RELEASES_BASE release API repo base (default https://api.github.com/repos/summonasync/squeezr)
-  SQUEEZR_GITEA        deprecated fallback, used only when SQUEEZR_RELEASES_BASE is unset
   SQUEEZR_INSTALL_DIR  versioned install store (default ~/apps/squeezr)
   SQUEEZR_BIN_DIR      symlink location (default ~/.local/bin)
 USAGE

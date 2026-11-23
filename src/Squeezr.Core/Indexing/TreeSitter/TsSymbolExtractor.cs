@@ -89,7 +89,7 @@ internal static class TsSymbolExtractor
         // can declare SEVERAL names, and the same kinds appear inside a function body as at package
         // level. Multi-name specs are refused rather than read one row per name: the grammar's 'name'
         // field is only the first identifier ('const A, B = 1, 2' has A as the field and B as an unnamed
-        // sibling), so a per-name reading would hand both names the same span — the BUGS/022 collision
+        // sibling), so a per-name reading would hand both names the same span — a collision
         // shape that triage has not given a span model to yet. Same deliberate drop python makes for
         // tuple targets
         "const_spec" or "var_spec" => IsGoPackageLevelBinding(node),

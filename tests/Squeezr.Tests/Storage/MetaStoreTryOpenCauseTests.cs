@@ -59,7 +59,7 @@ public sealed class MetaStoreTryOpenCauseTests : IDisposable
         cause.ShouldBe(StoreOpenCause.Missing);
     }
 
-    // A header whose fields do not parse is the corruption BUGS/030 describes: LiteDB answers 103, and a
+    // A header whose fields do not parse is the corruption case where LiteDB answers 103, and a
     // fleet or stats blank that used to read as 'no store' now says the file is there and unreadable.
     [Fact]
     public void TryOpen_WithCause_NamesUnparseableForAHeaderThatDoesNotParse()

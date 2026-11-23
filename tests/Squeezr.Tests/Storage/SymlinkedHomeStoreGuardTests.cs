@@ -8,7 +8,7 @@ namespace Squeezr.Tests.Storage;
 // The 067/T9 fix round closed the untrusted-row route into the central store, but the guard compared two
 // spellings lexically: with SQUEEZR_HOME named through a linked ancestor (<d>/link/.squeezr naming
 // <d>/real/.squeezr) the compare missed and Directory.Delete took the whole home. Measured on three
-// binaries in audits/registry-store-parent-drop-guard-2026-10-06/residual-symlink-home.txt.
+// binaries.
 [Collection("ProcessGlobals")]
 public sealed class SymlinkedHomeStoreGuardTests : IDisposable
 {

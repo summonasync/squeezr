@@ -193,9 +193,6 @@ squeezr mcp install --all --scope user --yes
    script says so — fix the shell profile and open a new terminal). `SQUEEZR_RELEASES_BASE`
    retargets the resolution at another repo's release API base; it covers the API
    base only, so the releases page the script prints on a miss stays the GitHub page.
-   `SQUEEZR_GITEA` is a deprecated fallback, consulted only when
-   `SQUEEZR_RELEASES_BASE` is unset: the script derives the old API layout from it,
-   warns on stderr and names the replacement variable.
    **This line does not work anonymously yet:** the repository is currently private,
    so an unauthenticated curl of it answers `404` (measured, not assumed), and the
    script sends no credentials of its own. The distribution plumbing ships here;
@@ -341,8 +338,8 @@ $ squeezr workspace list
 Squeezr (orphan)   unknown — needs --root   squeezr-d23cb388   orphan — needs root
 warning: workspace store 'squeezr-d23cb388' has no recorded root path; run 'squeezr workspace repair --store-key squeezr-d23cb388 --root <path>'.
 
-$ squeezr workspace repair --store-key squeezr-d23cb388 --root REDACTED-PATH/Projects/AI-Tools/Squeezr
-Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI-Tools/Squeezr
+$ squeezr workspace repair --store-key squeezr-d23cb388 --root /home/you/Projects/my-repo
+Adopted workspace Squeezr (squeezr-d23cb388) with root /home/you/Projects/my-repo
 ```
 
 - **Environment variables:** `SQUEEZR_HOME` relocates the whole store,
@@ -373,13 +370,12 @@ Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI
   repair prune sweep. Through this branch a pruned row really is gone for
   good: the prune takes the store directory together with the row, so there
   is no manifest left to rebuild from. The **backup** branch is not so
-  forgiving — measured on a seeded scratch store (118/T4,
-  `audits/118-reap-2026-11-14.md`): 3 rows → `--yes` prunes 2 stale rows and
+  forgiving — measured on a seeded scratch store (118/T4): 3 rows → `--yes` prunes 2 stale rows and
   2 store dirs in 0.17 s and the next dry run reports nothing; deleting the
   registry *and* its backup rebuilds only the one row whose store survived;
   but deleting **only** `workspaces.json` and leaving `workspaces.json.bak`
   hands back the last pruned row — 12 rows pruned, one resurrected, already
-  stale, and it happens again after every such cycle (`BUGS/032`). So a
+  stale, and it happens again after every such cycle. So a
   confirmed prune is durable against a rebuild from store manifests, and not
   against a registry wipe that leaves the backup behind.
   A rebuild writes without taking `workspaces.lock`, so it is not visible in
@@ -388,7 +384,6 @@ Adopted workspace Squeezr (squeezr-d23cb388) with root REDACTED-PATH/Projects/AI
   `squeezr.workspace.json` in the root) move to the store on first touch — the
   contents of `.squeezr/` and the manifest are carried over, the
   squeezr-generated `docker-compose.yml` and the dead `state.json` are removed.
-  Details: [docs/migration-central-store.md](docs/migration-central-store.md).
   Qdrant collections (named after the workspace path, not the store) survive
   the migration, no vectors are lost.
 
@@ -452,8 +447,7 @@ paying `grep` to avoid. The price is real bytes:
 `trigram.idx`) — that is the live-store figure this feature's carriers
 measured, and it is a scale reference, not a constant: the same door on a
 scratch clone of this repo at head 072e4ea moved 54,173,696 B of `meta.db` plus
-51,746,558 B of `trigram.idx` for a 3 165-file parent store
-(`audits/work-116-36-e2e/`, capture `P4b-init.193505.log`). The honest reading
+51,746,558 B of `trigram.idx` for a 3 165-file parent store. The honest reading
 is that the copy costs what the parent's index costs, and the `--json` `fill`
 block of every run names its own three numbers — source → staged → installed —
 so nobody has to trust a doc figure. `--baseline <NAME|PATH>` registers
@@ -498,8 +492,7 @@ automates the door:
   seconds — the hook-armed leg in this feature's e2e run ran ~3 min of wall clock
   and ended reconcile-pending with the pending notice on stderr, and that same leg
   is also the proof of the bullet above, because it reached the machine's shared
-  Qdrant instead of a pinned one (`audits/work-116-36-e2e/e2e_20261114T193439Z/H1-session-start-fresh.193534.log`,
-  and the dead-endpoint redo `audits/work-116-36-e2e/hf_20261114T194829Z/HF1-hook-fresh-lane-dead-first.194830.log`).
+  Qdrant instead of a pinned one.
   The repeat pass on a settled lane is the sub-second case the hook is designed
   around. If a lane must be born cheap, run `squeezr worktree init --no-semantic`
   yourself first and let the hook find the store already registered.
@@ -525,11 +518,9 @@ first, so the one write that can still land behind a read is the registry's own
 recovery. The SessionStart hook and every `serve` startup walk the same read,
 so that recovery is a property of reading the registry, not of
 these two verbs. The lane carriers for the healthy-versus-recovered difference
-are `audits/t11-load-2026-11-14/` and `audits/work-116-27-t11-agent-binding.md`
-— quoted there with the registry regime they were taken in, because the
-regime matters for anything duration-shaped. The T13 audit repeats it on a
-scratch registry of two rows (`audits/work-116-36-e2e/`, captures
-`Z1-healthy-zero-writes`, `Z2-corrupt-registry-recovery`, `Z3-missing-registry-recovery`):
+were captured with the registry regime they were taken in — the regime matters
+for anything duration-shaped. The T13 audit repeats it on a scratch registry of
+two rows:
 healthy → `workspaces.json` unchanged to the sha256 and the mtime across a
 `resolve` and a `list`; corrupt or absent → the verb still answers, and the file
 comes back rewritten from the store dirs. One thing that rebuild does NOT
@@ -613,7 +604,7 @@ worth naming before someone ships a script on the wrong assumption:
    more.
 
 The known 852 mint-shaped collections with no reconstructable provenance stay
-`BUGS/029`: the sweep is a gate on the litter this feature's verbs can produce,
+unattributed: the sweep is a gate on the litter this feature's verbs can produce,
 not a general cleaner, and a run of `repair --apply` does not promise the
 machine is tidy afterwards. Dropping one row of a tree that was registered
 under two spellings also leaves the sibling spelling's collection in place
@@ -916,8 +907,7 @@ secret guard: 7 path(s) purged, 186 row(s) removed · 1 reap journal name(s) red
 
 Points a pass could not remove itself are finished by `squeezr vectors
 reconcile --apply`. The raw bytes of the cleaned store were verified with a
-sweep over `meta.db`/`trigram.idx`/telemetry — evidence in
-`audits/store-purge-2026-10-05.md`.
+sweep over `meta.db`/`trigram.idx`/telemetry.
 
 ## Managed services: `squeezr services`
 
@@ -1018,11 +1008,8 @@ Worth knowing:
 - **The embedding model is not in the package** (+131 MB for optional
   semantics) — fetched separately via `scripts\fetch-model.ps1`.
 
-Moved from an old Windows machine? The migration checklist —
-[docs/migration-windows-to-linux.md](docs/migration-windows-to-linux.md).
 Project still on the old layout with `.squeezr/` in the root? Migration to the
-central store happens by itself —
-[docs/migration-central-store.md](docs/migration-central-store.md).
+central store happens by itself.
 
 ## Publishing a release
 
@@ -1071,10 +1058,9 @@ Two shapes are a contract with `scripts/install-release.sh`, not taste:
   unpack step probes for that exact path and dies with `archive layout changed -
   expected a squeezr-linux-x64/squeezr binary inside <asset>` on anything else.
 
-Both shapes are what the release-resolution harness installs through —
-`audits/120-t1-harness/harness.sh` arms 1-4 resolve an asset named exactly this
-way and unpack it from exactly this layout (arm 7 covers the integrity check on a
-truncated archive). The two refusals quoted above are what the script answers a
+Both shapes are what the release-resolution harness installs through — its
+arms 1-4 resolve an asset named exactly this way and unpack it from exactly
+this layout (arm 7 covers the integrity check on a truncated archive). The two refusals quoted above are what the script answers a
 release that deviates from them; they are not separately armed.
 
 Two gates stay with the owner, and this section is where they are named rather
@@ -1318,10 +1304,8 @@ when the host forwards the model's raw arguments (`"offset":"437"`) — parses
 exactly like the numeric one: quoted decimal integers are read as numbers
 (leading zeros and a sign parse too), and a quoted non-digit fails the whole
 payload open — no advice and no telemetry row, on `offset` as well as `limit`.
-Measured delivery: the whole-file read in
-an armed live Qwen session (`audits/hook-live-2026-11-11/`); the quoted-number
-arms by in-process A/B replay against the armed command
-(`audits/t6-028-fix-2026-11-12/`).
+Measured delivery: the whole-file read in an armed live Qwen session; the
+quoted-number arms by in-process A/B replay against the armed command.
 
 **`tool_name` carries the runtime's own id.** Qwen sends `read_file`, Claude
 sends `Read`. Nothing is normalized: the command accepts a declared set —
@@ -1348,7 +1332,7 @@ context. Plain text on stdout at exit 0 would reach the human as a UI
 Everything else — silence: a non-workspace path, a small file, a missing or
 guarded file at a narrow or absent limit, malformed stdin → empty stdout,
 exit 0. (A wide requested limit of ≥ 400 lines answers before the guard and
-before the disk is consulted — that over-answer is the open defect BUGS/027,
+before the disk is consulted — that over-answer is an open defect,
 not documented behavior.) The hook is advisory-only — it
 sets no `permissionDecision` and never blocks a read; internal errors are
 fail-open (silent, code 0). No network — only the workspace registry and a
@@ -1678,9 +1662,8 @@ mid-copy and leave the next session to repeat it.
 on it.** The `--scope project` arm writes the **hook arm** of the client
 registration into the
 **resolved workspace root** — the store that answers there — not into whatever
-directory the operator happens to stand in. Measured in a nested lane
-(`audits/t12-project-scope-probe.sh`, run B; raw log
-`audits/work-116-29-probe/project-scope-probe-run.log`, sha256 `827e1bf0…`):
+directory the operator happens to stand in. Measured in a nested lane (run B
+of the project-scope probe):
 while the lane owns no store, a
 project-scope install run from inside it lands in the **parent's**
 `.qwen/settings.json` — the hook blocks (two at that measurement, three on head:
@@ -1698,8 +1681,7 @@ workspace root)`, and the same project-scope install now writes the **lane's**
 `.qwen/settings.json`. The hooks arm follows the store that answers; since the
 025 merge the `mcpServers` arm rides the client CLI's own cwd resolution, so
 one call from an unregistered lane can split the registration across two files
-(measured: `audits/work-116-36-e2e/hx_20261114T195033Z/`, finding F-4 of
-`audits/work-116-36-t13-docs-e2e.md` — carded as `BUGS/037`). Once the lane owns
+(measured — finding F-4 of the T13 docs e2e; carded as a defect). Once the lane owns
 a store, both halves land in the lane's file. And the SessionStart hook is what
 makes the lane an answerer
 in the first place; the ordering is the fact worth knowing, not a bug to work
@@ -1891,7 +1873,7 @@ than a warning line:
 Two more texts exist outside that family, and this list is the symbol family's,
 not the whole wire: `expand_span` carries its own legs clause,
 `truncated: 1494 of 1500 token ceiling — raise maxTokens, or narrow the span (startLine/endLine)`
-(live, `audits/truncation-state-2026-11-10/raw/remedy-catalog-round4.jsonl`), and a
+(live capture), and a
 zero-hit answer whose `did you mean` text itself did not fit has no hint to render,
 so both roads fall back to the bare `truncated: 0 of 1 token ceiling — raise maxTokens`
 (same carrier, calls #43/#44 — the suggestions are dropped and the answer is clipped).
@@ -1908,7 +1890,7 @@ predicate-shaped helper is the named follow-up.
 
 `raise maxTokens` re-runs inside the session you are in: the resolved ceiling is
 part of `symbol_lookup`'s response-cache key, so the same name at a bigger
-ceiling gets its own envelope instead of the stored one (`BUGS/024`, closed by
+ceiling gets its own envelope instead of the stored one (closed by
 115/T7 — its additive `params.maxTokens` row key is declared in the CHANGELOG).
 An identical ceiling still replays, which is the point of the cache; `code_pack`
 keyed its budget this way before `symbol_lookup` did.
@@ -2706,7 +2688,7 @@ Period: 2026-11-10 18:39 — 2026-11-10 18:49 (28 records)
   nothing, so one surface has two ledger readings; the guard records that
   choice, it does not fix it. One more denominator caveat, unrelated to the
   split but true of every number on this page: a call that ends in an error
-  writes no row at all (`BUGS/026`), so these rates describe answers that
+  writes no row at all, so these rates describe answers that
   worked, never the traffic an agent actually generated.
 - **Savings** — a counterfactual against the whole-file baseline. The formula
   (unchanged since specs 021/050):

@@ -2,7 +2,7 @@ namespace Squeezr.Core.Indexing;
 
 // The two caps one CheckAndRefresh call may spend re-reading files. Measured on a real stand (870 rows,
 // 4.7 symbols/file, this guard's own check path) and on the symbol-dense polygon, per file; each row is the
-// 2026-11-10 pass and the 2026-11-11 post-boot re-run of the same harness (audits/017-t4-2026-11-10/), and
+// 2026-11-10 pass and the 2026-11-11 post-boot re-run of the same harness, and
 // the ranges below are the union of the two, which is what a per-file price actually is on this box:
 //
 //   check, one candidate                    0.37-1.50 ms   (0.44 median per candidate on the re-run)

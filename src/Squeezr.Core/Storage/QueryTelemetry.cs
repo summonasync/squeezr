@@ -32,7 +32,7 @@ public static class QueryTelemetry
     // The append primitive has to survive two writers sharing the file. File.AppendAllText opens with
     // FileShare.Read, and that is not enough: append placement is settled when the file is opened, not when the
     // bytes are written, so two handles that open before the other's bytes land overwrite one another with no
-    // error anywhere (measured on Linux — audits/107-gate-2026-11-09/probe-append-primitive.log: eight writers
+    // error anywhere (measured on Linux — eight writers
     // released from a barrier go bad in all 200 trials, losing up to seven of eight rows, whichever share mask
     // is asked for). The writer lock is the only real exclusion; this gate is the same exclusion inside one
     // process, and FileShare.Delete is what lets a swap rename the log on Windows while a handle is still open.

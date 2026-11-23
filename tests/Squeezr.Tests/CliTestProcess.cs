@@ -102,7 +102,7 @@ internal static partial class CliTestProcess
         string stdin, string workingDir, params string[] args) =>
         StartAsync(workingDir, args, null, stdin);
 
-    // The BUGS/010 pin harness: the child sees a raw dangling or unset HOME. squeezrHome "" means
+    // The dangling-HOME pin harness: the child sees a raw dangling or unset HOME. squeezrHome "" means
     // SQUEEZR_HOME is present but empty, which the product reads as unset; childHome null leaves
     // HOME unset entirely, a path passes it through raw. DOTNET_CLI_HOME keeps the dotnet host
     // itself alive — it refuses to start with no home at all, and the product must see the damage.

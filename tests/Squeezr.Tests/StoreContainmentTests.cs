@@ -12,7 +12,7 @@ namespace Squeezr.Tests;
 // should already be confined, yet the rows landed in the real profile store. This class states the
 // invariant the harness must hold and, while it fails, prints the four values that settle the question.
 // The assertion is deliberately a containment predicate, not "home != DefaultHome()": a run pinned to
-// REDACTED-PATH/scratch/... (the documented convention) is legitimate and must not trip.
+// /srv/scratch/... (the documented convention) is legitimate and must not trip.
 [Collection("ProcessGlobals")]
 public sealed class StoreContainmentTests
 {

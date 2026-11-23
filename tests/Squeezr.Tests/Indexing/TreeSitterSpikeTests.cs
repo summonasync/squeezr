@@ -1011,7 +1011,7 @@ public class TreeSitterSpikeTests
 
         // one row per type, each with its own span: a grouped 'const ( A; B )' shows the same wrapper
         // shape, and a wrapper keyed as a row — or used as a span anchor the way python's decorator is —
-        // would hand every member of the group one identical span, the BUGS/022 duplicate-chunk shape
+        // would hand every member of the group one identical span — the duplicate-chunk shape
         wrappers.Count(w => w.GetChildForField("name") == null).ShouldBe(wrappers.Count);
 
         // three const_declarations here — 'const MaxSize', the 'const ( A; B )' group and the 'const

@@ -62,7 +62,7 @@ public static class SqueezrHome
     public static string WorkspacesDir => Path.Combine(Resolve(), SqueezrPaths.WorkspacesDirName);
 
     // A profile-anchored home whose profile directory is gone is the dangling-HOME environment
-    // error (BUGS/010): registry commands refuse with a remedy instead of answering an empty
+    // error: registry commands refuse with a remedy instead of answering an empty
     // world. SQUEEZR_HOME is the user's explicit choice and never trips this. No profile at all
     // (HOME unset and no passwd entry) refuses the same way — pre-fix that corner silently
     // anchored the central store to the process working directory.

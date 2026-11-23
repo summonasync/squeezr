@@ -435,8 +435,8 @@ public sealed class ManagedHooksWriterTests
 
     // Every id below is quoted with where it was measured, per the feature ruling that matcher ids come
     // from payloads and never from the spec table:
-    // - qwen "write_file": audits/hook-live-2026-11-11/session-run2.jsonl, two qwen-code.tool_call
-    //   telemetry rows with "function_name":"write_file" (2026-11-11, real armed-block session).
+    // - qwen "write_file": two qwen-code.tool_call telemetry rows with "function_name":"write_file"
+    //   (2026-11-11, real armed-block session).
     // - qwen "edit": live Qwen Code session transcripts on this box (~/.qwen/projects/*, counted
     //   2026-11-13: 5860 "function_name":"edit" telemetry rows in the Squeezr project corpus alone).
     // - qwen "notebook_edit": the live Qwen Code runtime's own tool schema (session 2026-11-13 declares
@@ -446,8 +446,8 @@ public sealed class ManagedHooksWriterTests
     //   (~/.claude/projects/*/*.jsonl tool_use names, counted 2026-11-13: 200/65/34 rows).
     // - claude "MultiEdit": zero occurrences in the 1333-file local transcript corpus; the id rides the
     //   T1-shipped HookPostEditToolNames table (reviewed carrier) — declared in task obstacles.
-    // - qwen pre-read "^read_file$": audits/hook-live-2026-11-11/armed-block-as-installed.json, the
-    //   block 114 actually wrote — pinned verbatim below as the upgrade compatibility shape.
+    // - qwen pre-read "^read_file$": the block 114 actually wrote, pinned verbatim below as the
+    //   upgrade compatibility shape.
     [Fact]
     public void PostEditArmMatchers_OverMeasuredPayloadIds_PerRuntimeShape()
     {

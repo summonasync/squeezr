@@ -12,8 +12,8 @@ namespace Squeezr.Tests.Indexing.TreeSitter;
 // from one store. Counts were produced by indexing the fixture (the dump sits next to the review
 // carrier), and the refusals below are the grammar's own, restated at product scale with real files.
 //
-// Doc comments are not claimed anywhere in this class: go's '//' shape is one of the three mechanisms
-// BUGS/021 carries, and a fixture row that looked like documentation coverage would say more than the
+// Doc comments are not claimed anywhere in this class: go's '//' shape is one of the three deferred
+// capture mechanisms, and a fixture row that looked like documentation coverage would say more than the
 // product ships.
 public class GoFixtureEndToEndTests
 {

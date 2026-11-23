@@ -33,8 +33,7 @@ If `~/.local/bin` is not on PATH, add it to the shell profile and open a new ter
 before re-checking. Pin or roll back with `--version <tag>` (e.g. `v1.0.0`); force a
 re-download of an installed tag with `--force`. `SQUEEZR_RELEASES_BASE` retargets the
 release API base and nothing else — the releases page the script names on a miss stays
-the GitHub page; `SQUEEZR_GITEA` is a deprecated fallback, consulted only when
-`SQUEEZR_RELEASES_BASE` is unset, and says so in a stderr warning. The script is the
+the GitHub page. The script is the
 single source of install truth — install evolution changes the script, never this skill.
 
 **A `404` on that curl is the visibility gate, not a wrong URL.** The repository is
@@ -200,7 +199,7 @@ Qdrant. Two traps for scripts: `rc 0` does not mean the endpoints answered
 consent, not safety — an endpoint you call yours gets swept even if another
 home minted the collections on it. The sweep is a gate on lane litter, not a
 general cleaner: the ~852 unattributable collections already on this machine
-are `BUGS/029` and stay there. A sibling spelling of a dropped row keeps its
+stay there. A sibling spelling of a dropped row keeps its
 collection until the next `repair --apply`, which is the second half of the
 same two-stage design, not a leak.
 
@@ -478,7 +477,7 @@ Read the state through `truncated` plus the hit's
 key (nulls are dropped on serialization, so a mapped hit has no `body` field at
 all). `raise maxTokens` in a remedy is a ceiling choice that re-runs in your
 next call on the same connection: the resolved ceiling is part of
-`symbol_lookup`'s response cache key (`BUGS/024`, closed by 115/T7), so a bigger
+`symbol_lookup`'s response cache key (closed by 115/T7), so a bigger
 ceiling answers with its own envelope; only an identical ceiling replays.
 `code_search` defaults to
 maxTokens 2000 and sets `truncated` when it overflows — narrow the query or

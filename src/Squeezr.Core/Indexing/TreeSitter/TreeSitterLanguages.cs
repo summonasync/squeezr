@@ -139,14 +139,14 @@ internal static class TreeSitterLanguages
     // read off tree-sitter-go itself (TreeSitterSpikeTests.Go_*), borrowing nothing: a type is named by
     // the 'type_spec' INSIDE the type_declaration wrapper — the wrapper has no name field, and for a
     // grouped 'type ( A int; B string )' it spans several types at once, so keying it as a row or as a
-    // span anchor would hand every member of the group the same span (the BUGS/022 duplicate-chunk
+    // span anchor would hand every member of the group the same span (the duplicate-chunk
     // shape). Unlike a python decorator, a go declaration group describes no single item, so it stays
     // out of the table entirely. The two named forms are separate node kinds and both are keyed:
     // 'type Alias = int' is a type_alias, NOT a type_spec (measured), so an earlier draft of this row
     // indexed no go alias at all while javascript and rust index theirs. 'const_spec'/'var_spec' name
     // SINGLE-identifier package-level bindings, and two refusals live with them: a multi-name spec
     // ('const A, B = 1, 2' — the grammar keeps only 'A' in the name field and B is an unnamed sibling,
-    // so one row per name would hand both the same span, the 022 shape again) and the blank identifier,
+    // so one row per name would hand both the same span, the duplicate-chunk shape again) and the blank identifier,
     // which is a throwaway and not a name. The scope test that drops 'const local = 1' inside a function
     // body is a divergence chosen for go, not a rule inherited from the others: rust's const_item and
     // static_item DO sit inside blocks and rust ships rows for them (measured — a 'const K' and a

@@ -13,7 +13,7 @@ namespace Squeezr.Tests.Indexing.TreeSitter;
 // review carrier) rather than computed by hand, because the store reads are the product's own output.
 //
 // Nothing here asserts doc-comment capture. The fixture writes a module and a class docstring on
-// purpose — that is what a python package looks like — and the deferral is BUGS/021, which carries three
+// purpose — that is what a python package looks like — and the deferral covers three
 // mechanisms (rust ///, python docstring, go // renderer-only) and stays open.
 public class PythonFixtureEndToEndTests
 {
