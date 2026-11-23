@@ -31,7 +31,7 @@
 *The eye that lets the horde find things without reading everything.*
 
 `await SummonAsync();` — part of the summoner's kit  
-overmind · grimoire · **▸ squeezr** · mindlash studio
+overmind · grimoire · **▸ squeezr** · summon async studio
 
 ---
 
@@ -2797,20 +2797,34 @@ Period: 2026-09-18 08:00 — 2026-09-25 11:31 (11 records)
 - [x] **M1** — CLI skeleton, LiteDB schemas, config, workspace
 - [x] **M2** — trigram index, exact `search`, incremental, `compact`
 - [x] **M3** — Roslyn: symbols, chunks, `symbol`, `map`, `expand`
-- [x] **M4** — Qdrant + ONNX embeddings: hybrid `search`, `refs`
+- [x] **M4** — Qdrant + embeddings (ollama or OpenAI-compatible): hybrid `search`, `refs`
 - [x] **M5** — MCP `serve` with all tools + agent-facing README
 - [x] **M6** — tree-sitter for JS/TS, the fallback chunker
 
+The milestones are the origin story; everything since 1.0.0 — the watch
+daemon and its supervisor, the fleet, hooks, one store per git worktree,
+symbol lanes for Rust, Python and Go, the MCP response cache, the secret
+redactor — lives in [CHANGELOG.md](CHANGELOG.md).
+
+Next:
+- doc comments as first-class symbols — Rust `///`, python docstrings and
+  go `//` are indexed as text only today
+- the pre-read hook still over-answers a wide requested limit before the
+  secret guard runs — an open defect
+- more language grammars as real demand shows up
+
 ## Stack
 
-.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · tree-sitter (JS/TS)
-· Qdrant · Ollama · xUnit + Shouldly
+.NET 10 / C# 14 · Spectre.Console.Cli · LiteDB · Roslyn · tree-sitter (JS/TS
+· Rust · Python · Go) · Qdrant · Ollama · xUnit + Shouldly
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) and [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-*summonasync — one dev, a swarm of agents, nothing leaves the machine.*  
-overmind · grimoire · squeezr · mindlash studio
-
+*summonasync — one dev, a swarm of agents, nothing leaves the machine.*
 Everything here runs on your machine: the index lives in `~/.squeezr`, the
 telemetry never leaves it, and it dies with the workspace. If it does not —
 that is a bug, file it.
