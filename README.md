@@ -31,7 +31,7 @@
 *The eye that lets the horde find things without reading everything.*
 
 `await SummonAsync();` — part of the summoner's kit  
-overmind · grimoire · **▸ squeezr** · summon async studio
+overmind · grimoire · **▸ squeezr** · synchro · syncrowatch · summonasync studio
 
 ---
 
@@ -2828,3 +2828,8 @@ Apache-2.0 — see [LICENSE](LICENSE) and [CHANGELOG.md](CHANGELOG.md).
 Everything here runs on your machine: the index lives in `~/.squeezr`, the
 telemetry never leaves it, and it dies with the workspace. If it does not —
 that is a bug, file it.
+
+---
+
+`await SummonAsync();` — part of the summoner's kit  
+overmind · grimoire · **▸ squeezr** · synchro · syncrowatch · summonasync studio
