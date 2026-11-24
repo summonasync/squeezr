@@ -1,0 +1,8 @@
+SUITE CARRIER START 2026-11-24T18:10:37Z head=1543886 home=/var/tmp/squeezr-home-032t6-QHZk7k load1=6.77 competing_dotnet=0
+0 cores=32
+Test run for /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/032-async-core-profile/tests/Squeezr.Tests/bin/Debug/net10.0/Squeezr.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:  4858, Skipped:     0, Total:  4858, Duration: 26 m 19 s - Squeezr.Tests.dll (net10.0)
+test rc=0
+SUITE CARRIER END 2026-11-24T18:36:58Z load1=7.70 competing_dotnet=1
