@@ -1,6 +1,8 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using Shouldly;
+using Squeezr.Cli.Mcp;
+using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
 
@@ -57,6 +59,59 @@ public class McpConcurrencyTests
             result.IsError.ShouldNotBe(true);
             ParseEnvelope(result).GetProperty("data").EnumerateArray().ShouldNotBeEmpty();
         }
+    }
+
+    [Fact]
+    public async Task QueuedSymbolLookup_CancelledWhileTheGateIsHeld_ThrowsInsteadOfEventuallyRunning()
+    {
+        var workspace = NewIndexedWorkspace();
+        var gate = new McpToolGate();
+        var tool = new SymbolLookupTool(new McpWorkspace(workspace, workspace, null), gate, null, new ClientIdentity());
+
+        var insideGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holder = gate.RunAsync(async _ =>
+        {
+            insideGate.SetResult();
+            await releaseGate.Task;
+            return ToolEnvelope.Wrap(new { hit = 0 }, 1, false);
+        }, CancellationToken.None);
+        await insideGate.Task;
+
+        using var cts = new CancellationTokenSource();
+        var queued = tool.FindAsync(name: "Alpha", cancellationToken: cts.Token);
+        cts.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => queued);
+
+        releaseGate.SetResult();
+        await holder;
+    }
+
+    [Fact]
+    public async Task QueuedGateCall_CancelledWhileWaiting_IsCancelledBeforeItsBodyRuns()
+    {
+        var gate = new McpToolGate();
+        var insideGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holder = gate.RunAsync(async _ =>
+        {
+            insideGate.SetResult();
+            await releaseGate.Task;
+            return ToolEnvelope.Wrap(new { hit = 0 }, 1, false);
+        }, CancellationToken.None);
+        await insideGate.Task;
+
+        using var cts = new CancellationTokenSource();
+        var queued = gate.RunAsync(
+            _ => Task.FromResult<object>(ToolEnvelope.Wrap(new { hit = 1 }, 1, false)),
+            cts.Token);
+        cts.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => queued);
+
+        releaseGate.SetResult();
+        await holder;
     }
 
     private static JsonElement ParseEnvelope(CallToolResult result)

@@ -16,19 +16,6 @@ public sealed class McpToolGate(
     private readonly AnswerSubjectBody? _subjectBody = AnswerSubjectNotice.BodyOf(subject);
     private readonly string? _crossTreeWarning = AnswerSubjectNotice.CrossTreeWarningOf(subject);
 
-    public T Run<T>(Func<T> call)
-    {
-        _semaphore.Wait();
-        try
-        {
-            return Attach(call());
-        }
-        finally
-        {
-            _semaphore.Release();
-        }
-    }
-
     public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);

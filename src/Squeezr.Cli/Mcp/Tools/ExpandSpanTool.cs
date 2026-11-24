@@ -26,13 +26,16 @@ public sealed class ExpandSpanTool
 
     [Description("Read the exact lines you need from the live file on disk: the span plus contextLines of surrounding context, around coordinates from code_search/symbol_lookup — reflects edits made after indexing, and is the only tool that returns raw source lines. When truncated is true, context (before/after) may be partially filled — the span itself has priority.")]
     [McpServerTool(Name = "expand_span", Title = "Expand span")]
-    public object Expand(
+    public Task<object> ExpandAsync(
         string file,
         int startLine,
         int? endLine = null,
         int? contextLines = null,
-        int? maxTokens = null) =>
-        _gate.Run(() => ExpandCore(file, startLine, endLine, contextLines, maxTokens));
+        int? maxTokens = null,
+        CancellationToken cancellationToken = default) =>
+        _gate.RunAsync(
+            ct => Task.FromResult(ExpandCore(file, startLine, endLine, contextLines, maxTokens)),
+            cancellationToken);
 
     private object ExpandCore(
         string file,

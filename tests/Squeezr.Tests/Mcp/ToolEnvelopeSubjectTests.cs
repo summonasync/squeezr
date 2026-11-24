@@ -101,13 +101,13 @@ public sealed class ToolEnvelopeSubjectTests
     // The gate is the seam the subject rides: it stamps every envelope the session answers with, so no tool has
     // to remember the naming and a forgotten one is structurally impossible.
     [Fact]
-    public void Gate_StampsEveryAnswerOfALaneSession_IncludingTheCachedReplay()
+    public async Task Gate_StampsEveryAnswerOfALaneSession_IncludingTheCachedReplay()
     {
         var subject = new AnswerSubject("/lane/root", LaneBranch, "lane-9c176b2e", "/lane/root", CrossTree: false);
         var gate = new McpToolGate(subject: subject);
 
-        var first = gate.Run(() => ToolEnvelope.Wrap(new { hit = 1 }, 3, false));
-        var second = gate.Run(() => ToolEnvelope.Wrap(new { hit = 2 }, 4, false));
+        var first = await gate.RunAsync(_ => Task.FromResult(ToolEnvelope.Wrap(new { hit = 1 }, 3, false)), CancellationToken.None);
+        var second = await gate.RunAsync(_ => Task.FromResult(ToolEnvelope.Wrap(new { hit = 2 }, 4, false)), CancellationToken.None);
 
         first.Subject.ShouldNotBeNull();
         second.Subject!.Branch.ShouldBe(LaneBranch);
@@ -115,11 +115,11 @@ public sealed class ToolEnvelopeSubjectTests
     }
 
     [Fact]
-    public void Gate_NoSubjectSession_AnswersExactlyAsItDidBeforeTheBlock()
+    public async Task Gate_NoSubjectSession_AnswersExactlyAsItDidBeforeTheBlock()
     {
         var gate = new McpToolGate();
 
-        var envelope = gate.Run(() => ToolEnvelope.Wrap(new { hit = 1 }, 3, false, ["w1"]));
+        var envelope = await gate.RunAsync(_ => Task.FromResult(ToolEnvelope.Wrap(new { hit = 1 }, 3, false, ["w1"])), CancellationToken.None);
 
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(envelope));
         document.RootElement.TryGetProperty("subject", out _).ShouldBeFalse();
@@ -162,7 +162,7 @@ public sealed class ToolEnvelopeSubjectTests
     }
 
     [Fact]
-    public void WithSubject_ReplayOfAStoredEnvelope_GetsItsSubjectFromTheSession_NotTheCache()
+    public async Task WithSubject_ReplayOfAStoredEnvelope_GetsItsSubjectFromTheSession_NotTheCache()
     {
         var subject = new AnswerSubject("/lane/root", LaneBranch, "lane-9c176b2e", null, CrossTree: false);
         var stored = ToolEnvelope.Wrap(new { hit = 1 }, 3, false, freshness: AnswerFreshness.ForContent(
@@ -170,7 +170,7 @@ public sealed class ToolEnvelopeSubjectTests
             stalePaths: [], payloadLines: [null]));
         var gate = new McpToolGate(subject: subject);
 
-        var replayed = gate.Run(() => stored.MarkReplayed());
+        var replayed = await gate.RunAsync(_ => Task.FromResult(stored.MarkReplayed()), CancellationToken.None);
 
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(replayed));
         document.RootElement.GetProperty("subject").GetProperty("branch").GetString().ShouldBe(LaneBranch);
