@@ -30,12 +30,13 @@ public sealed class CodePackTool
 
     [Description("Answer \"what is this symbol and who touches it\" in ONE call: definition (signature, doc comment, file:span), the defining member's body within the budget (maxTokens default 2000), every caller as file:line rows, and per-file cost — instead of chaining symbol_lookup → expand_span → find_references. Budget order: definition and body spend first, callers truncate (the withheld count is in the response). complete:false names the way out; expand_span reads the exact lines around any coordinate. Per-tool exactness stays available: symbol_lookup, find_references and expand_span keep their contracts.")]
     [McpServerTool(Name = "code_pack", Title = "Code pack")]
-    public object Pack(
+    public Task<object> PackAsync(
         string name,
         string? repo = null,
         string? kind = null,
-        int? maxTokens = null) =>
-        _gate.Run(() => PackCore(name, repo, kind, maxTokens));
+        int? maxTokens = null,
+        CancellationToken cancellationToken = default) =>
+        _gate.RunAsync(ct => Task.FromResult(PackCore(name, repo, kind, maxTokens)), cancellationToken);
 
     private object PackCore(string name, string? repo, string? kind, int? maxTokens)
     {

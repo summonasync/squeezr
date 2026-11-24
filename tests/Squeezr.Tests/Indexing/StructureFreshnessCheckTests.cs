@@ -194,7 +194,7 @@ public class StructureFreshnessCheckTests
     }
 
     [Fact]
-    public void MapRendersOnce_AndReportsTheDirtyRows_WithoutReindexingThem()
+    public async Task MapRendersOnce_AndReportsTheDirtyRows_WithoutReindexingThem()
     {
         var workspace = IndexedWorkspace(
             ("src/Alpha.cs", Namespace("Alpha", "Add")),
@@ -205,7 +205,7 @@ public class StructureFreshnessCheckTests
         File.Delete(IngestionWorkspaces.Full(workspace, "src/Beta.cs"));
 
         var renders = 0;
-        var envelope = MapTool(workspace, () => renders++).Build(depth: 3).ShouldBeOfType<ToolEnvelope>();
+        var envelope = (await MapTool(workspace, () => renders++).BuildAsync(depth: 3)).ShouldBeOfType<ToolEnvelope>();
 
         renders.ShouldBe(1,
             "one call, one render — the answer used to build the map a second time behind a refreshed file");
@@ -221,21 +221,21 @@ public class StructureFreshnessCheckTests
     }
 
     [Fact]
-    public void MapRendersOnce_OnACleanIndex_Too()
+    public async Task MapRendersOnce_OnACleanIndex_Too()
     {
         var workspace = IndexedWorkspace(
             ("src/Alpha.cs", Class("Alpha")),
             ("src/Beta.cs", Class("Beta")));
 
         var renders = 0;
-        var envelope = MapTool(workspace, () => renders++).Build().ShouldBeOfType<ToolEnvelope>();
+        var envelope = (await MapTool(workspace, () => renders++).BuildAsync()).ShouldBeOfType<ToolEnvelope>();
 
         renders.ShouldBe(1);
         envelope.StaleFiles.ShouldBeEmpty();
     }
 
     [Fact]
-    public void Map_RendersOnceEvenWhenEveryRowIsStale()
+    public async Task Map_RendersOnceEvenWhenEveryRowIsStale()
     {
         var files = Enumerable.Range(0, 12)
             .Select(i => ($"src/Unit{i:00}.cs", Class($"Unit{i:00}")))
@@ -247,7 +247,7 @@ public class StructureFreshnessCheckTests
         }
 
         var renders = 0;
-        var envelope = MapTool(workspace, () => renders++).Build().ShouldBeOfType<ToolEnvelope>();
+        var envelope = (await MapTool(workspace, () => renders++).BuildAsync()).ShouldBeOfType<ToolEnvelope>();
 
         renders.ShouldBe(1);
         envelope.StaleFiles.Count.ShouldBe(files.Length,
@@ -255,7 +255,7 @@ public class StructureFreshnessCheckTests
     }
 
     [Fact]
-    public void StaleRowsBeyondTheSampleBound_AreCarriedAsASample_AndSaidOutLoud()
+    public async Task StaleRowsBeyondTheSampleBound_AreCarriedAsASample_AndSaidOutLoud()
     {
         var vanished = Enumerable.Range(0, 40).Select(i => ($"src/Vanish{i:00}.cs", Class($"Vanish{i:00}"))).ToArray();
         var lagging = Enumerable.Range(0, 30).Select(i => ($"src/Lag{i:00}.cs", Class($"Lag{i:00}"))).ToArray();
@@ -277,7 +277,7 @@ public class StructureFreshnessCheckTests
         pass.Changed.Count.ShouldBe(lagging.Length,
             "the bound sits on what an answer carries, never on what this pass walked");
 
-        var envelope = MapTool(workspace).Build().ShouldBeOfType<ToolEnvelope>();
+        var envelope = (await MapTool(workspace).BuildAsync()).ShouldBeOfType<ToolEnvelope>();
 
         envelope.StaleFiles.Count.ShouldBe(StructureFreshnessCheck.StaleSampleLimit);
         envelope.StaleFiles.ShouldBe(pass.Missing.Take(25).Concat(pass.Changed.Take(25)),
@@ -290,7 +290,7 @@ public class StructureFreshnessCheckTests
     }
 
     [Fact]
-    public void StaleClassSmallerThanItsSeat_KeepsEveryRowInTheSample_WhileTheLargerTakesTheRest()
+    public async Task StaleClassSmallerThanItsSeat_KeepsEveryRowInTheSample_WhileTheLargerTakesTheRest()
     {
         var vanished = Enumerable.Range(0, 60).Select(i => ($"src/Vanish{i:00}.cs", Class($"Vanish{i:00}"))).ToArray();
         var lagging = Enumerable.Range(0, 2).Select(i => ($"src/Lag{i:00}.cs", Class($"Lag{i:00}"))).ToArray();
@@ -305,7 +305,7 @@ public class StructureFreshnessCheckTests
             File.AppendAllText(IngestionWorkspaces.Full(workspace, relative), "// past the stamp\n");
         }
 
-        var envelope = MapTool(workspace).Build().ShouldBeOfType<ToolEnvelope>();
+        var envelope = (await MapTool(workspace).BuildAsync()).ShouldBeOfType<ToolEnvelope>();
 
         envelope.StaleFiles.Count.ShouldBe(StructureFreshnessCheck.StaleSampleLimit);
         envelope.StaleFiles.Count(p => p.Contains("Lag", StringComparison.Ordinal)).ShouldBe(2,
@@ -317,7 +317,7 @@ public class StructureFreshnessCheckTests
     }
 
     [Fact]
-    public void StaleRowsWithinTheBound_AreCarriedInFull_AndNothingIsSaidAboutSampling()
+    public async Task StaleRowsWithinTheBound_AreCarriedInFull_AndNothingIsSaidAboutSampling()
     {
         var files = Enumerable.Range(0, 7).Select(i => ($"src/Unit{i}.cs", Class($"Unit{i}"))).ToArray();
         var workspace = IndexedWorkspace(files);
@@ -334,7 +334,7 @@ public class StructureFreshnessCheckTests
         var pass = StructureFreshnessCheck.Check(workspace, ["demo"]);
         pass.Stale.Count.ShouldBe(7);
 
-        var envelope = MapTool(workspace).Build().ShouldBeOfType<ToolEnvelope>();
+        var envelope = (await MapTool(workspace).BuildAsync()).ShouldBeOfType<ToolEnvelope>();
 
         envelope.StaleFiles.ShouldBe(pass.Stale,
             "a verdict list the answer can carry whole is carried whole");

@@ -1773,9 +1773,12 @@ Every tool answers in one envelope:
   the verdict of a structure pass (a row whose file is gone, or whose size or
   mtime moved — no content is read there and nothing is refreshed), on
   `code_search` / `symbol_lookup` / `find_references` it is the content guard
-  (modified files refresh inline on read, inside a per-call budget — a file
-  count and a wall bound, both named by the warning line that appears when a
-  re-read was refused; `RefreshBudget` is the one place they are declared).
+  (modified files refresh inline on read — since 032 the stale set is
+  re-indexed as one batch, one lock and one store open for up to four
+  candidates, never one full re-index cycle per file — inside a per-call
+  budget: a file count and a wall bound, both named by the warning line that
+  appears when a re-read was refused; `RefreshBudget` is the one place they
+  are declared).
   Whatever could not be refreshed — refused by that budget, or attempted and
   failed — lands honestly in `staleFiles`, and `unrefreshedFiles` says how
   many of them the budget refused. Either way the agent sees the data behind
@@ -1816,7 +1819,10 @@ Every tool answers in one envelope:
     `warnings` line that appears with it says both. Absent means the budget
     never bound: either nothing was stale, or the call never reached a
     candidate (a store it could not open collapses every candidate and
-    attributes no cause, and that shape is never charged to the budget). A
+    attributes no cause, and since 032 so does a token cancelled before the
+    first slot was accepted — both shapes are never charged to the budget; a
+    cancel after an acceptance refuses the remainder the way the budget
+    does). A
     refused row costs the answer nothing extra: it is still named in
     `staleFiles`, still counted in `staleTotal`, still `lagging` in
     `fileFreshness`. What the budget buys is the caller's wall time — a

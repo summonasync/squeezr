@@ -32,10 +32,14 @@ public sealed class FindReferencesTool
 
     [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set, captured at index time by Roslyn — exact, partial classes included; span-based inference is only a fallback for indexes built before enclosing capture. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. A row set belongs to the declaring file's last parse, so a caller indexed after it can leave a removed callsite listed here and hide one it added: the row-visible part of that lag is reported, not silently served (a brand-new callsite into a declaring the caller never had a row in leaves nothing to mark — only a full index catches it) — the declaring files appear in staleFiles with a warning naming them, a watch pass re-parses them under a per-pass budget, and 'squeezr index' reconciles every caller now. Returns a tool error if the symbol is not indexed. Pass the symbol as 'symbol' or its alias 'name' — both are accepted, a wrong-param error names both. Pair with symbol_lookup to jump from a match to its usages.")]
     [McpServerTool(Name = "find_references", Title = "Find references")]
-    public object Find(string? symbol = null, string? repo = null, string? name = null) =>
-        _gate.Run(() => FindCore(symbol, name, repo));
+    public Task<object> FindAsync(
+        string? symbol = null,
+        string? repo = null,
+        string? name = null,
+        CancellationToken cancellationToken = default) =>
+        _gate.RunAsync(ct => Task.FromResult(FindCore(symbol, name, repo, ct)), cancellationToken);
 
-    private object FindCore(string? symbol, string? name, string? repo)
+    private object FindCore(string? symbol, string? name, string? repo, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
@@ -61,7 +65,7 @@ public sealed class FindReferencesTool
 
             var namedUniverse = AnsweredFiles(result);
             IReadOnlyList<(string Repo, string File)> candidates = [.. namedUniverse.Take(FreshnessGuard.CandidateLimit)];
-            var freshness = Guard(root, candidates);
+            var freshness = Guard(root, candidates, cancellationToken);
             if (freshness.Refreshed.Count > 0)
             {
                 result = lookup.Find(symbolName, repo);
@@ -220,8 +224,11 @@ public sealed class FindReferencesTool
                 .Concat(g.Definitions.Select(d => (g.Repo, d.File))))
             .Distinct()];
 
-    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string File)> candidates) =>
-        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
+    private static FreshnessResult Guard(
+        string root,
+        IReadOnlyList<(string Repo, string File)> candidates,
+        CancellationToken cancellationToken) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr, cancellationToken);
 
     private static object Params(string symbol, string? repo, IReadOnlyList<string> secretGuardExtra) =>
         new { symbol, repo, secretGuardExtra };

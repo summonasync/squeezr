@@ -41,8 +41,13 @@ public sealed class RepoMapTool
 
     [Description("Structural map of the indexed repositories: nested directory/file tree rendered as indented lines with type/member signatures (depth 1 = dirs, 2 = files, 3 = members), never bodies. The cheapest first contact with an unfamiliar workspace — orient across repos, dirs and entry points before reading any file. Pass prefix (e.g. \"src/Squeezr.Cli/\") to render only that subtree with prefix-relative directory labels — depth keeps its structural meaning. Lines come from the index: one structural pass over the indexed rows reports files missing from disk or changed by size or mtime in staleFiles — a bounded sample of what it found, never the full verdict, with the covered row count and the sample size in freshness; the vanished rows come first in it, the first listedMissing of them, and the lagging rows after. Nothing is reindexed on this call; expand_span reads code on coordinates from other tools.")]
     [McpServerTool(Name = "repo_map", Title = "Repository map")]
-    public object Build(string? repo = null, string? prefix = null, int? depth = null, int? maxTokens = null) =>
-        _gate.Run(() => BuildCore(repo, prefix, depth, maxTokens));
+    public Task<object> BuildAsync(
+        string? repo = null,
+        string? prefix = null,
+        int? depth = null,
+        int? maxTokens = null,
+        CancellationToken cancellationToken = default) =>
+        _gate.RunAsync(ct => Task.FromResult(BuildCore(repo, prefix, depth, maxTokens)), cancellationToken);
 
     private object BuildCore(string? repo, string? prefix, int? depth, int? maxTokens)
     {

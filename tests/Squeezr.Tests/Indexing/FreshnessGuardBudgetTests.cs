@@ -6,8 +6,9 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Indexing;
 
-// The budget is pinned with a spy that counts re-reads and a clock only a re-read moves: the caps the guard
-// compares against are the shipped ones, the files it refuses are real, and no test waits out an index pass.
+// The budget is pinned with a spy that counts the one batch a call may start and records what the guard
+// announced into it: the caps the guard compares against are the shipped ones, the files it refuses are
+// real, and no test waits out an index pass.
 public class FreshnessGuardBudgetTests
 {
     [Fact]
@@ -15,38 +16,43 @@ public class FreshnessGuardBudgetTests
     {
         var total = RefreshBudget.MaxFilesReRead + 1;
         var workspace = StaleWorkspace(total);
-        var spy = new SpyReindex();
+        var spy = new SpyBatch();
 
         var result = CheckWithBudget(workspace, spy, Candidates(total));
 
-        spy.Starts.ShouldBe(RefreshBudget.MaxFilesReRead, "one call starts this many re-reads and no more");
+        spy.Batches.ShouldBe(1, "one call starts one batch and no more");
+        spy.Announced.ShouldBe(Candidates(RefreshBudget.MaxFilesReRead).Select(Key), customMessage:
+            "the batch carries this many candidates and no more — the cap is its capacity");
         result.Refreshed.ShouldBe(Candidates(total - 1).Select(Key));
         result.Unrefreshed.ShouldHaveSingleItem()
             .ShouldBe(Key(("demo", $"unit{RefreshBudget.MaxFilesReRead}.cs")), StringComparer.Ordinal);
         result.Stale.ShouldHaveSingleItem().ShouldBe(result.Unrefreshed[0], StringComparer.Ordinal,
-            "a re-read that succeeded leaves the stale list; the one the budget refused does not — the answer " +
+            "a candidate the batch healed leaves the stale list; the one the budget refused does not — the answer " +
             "loses no file either way");
         result.Stale.ShouldContain(result.Unrefreshed[0], StringComparer.Ordinal,
             "Unrefreshed is a named part of Stale, never a second list the caller has to subtract");
-        spy.ReRead.ShouldNotContain(result.Unrefreshed[0]);
+        spy.Announced.ShouldNotContain(result.Unrefreshed[0], StringComparer.Ordinal);
     }
 
     [Theory]
     [InlineData(6)]
     [InlineData(12)]
     [InlineData(24)]
-    public void CallWhoseTimeBudgetIsSpent_StopsStartingReReads_AndNamesHowManyItLeft(int total)
+    public void CallWhoseTimeBudgetIsSpent_StopsTakingSlots_AndNamesHowManyItLeft(int total)
     {
         var workspace = StaleWorkspace(total);
-        var costPerFile = RefreshBudget.MaxWallClockMillis / 2 + 1;
-        var spy = new SpyReindex(costMillisPerFile: costPerFile);
+        var costPerPoll = RefreshBudget.MaxWallClockMillis / 2 + 1;
+        var polls = 0;
+        var spy = new SpyBatch();
 
-        var result = CheckWithBudget(workspace, spy, Candidates(total));
+        var result = CheckWithBudget(workspace, spy, Candidates(total),
+            elapsed: () => TimeSpan.FromMilliseconds(costPerPoll * ++polls));
 
-        spy.Starts.ShouldBe(2,
-            $"two re-reads at {costPerFile} ms pass the {RefreshBudget.MaxWallClockMillis} ms bound between the " +
-            "second and the third candidate — the wall clock is what ended this call, not the file cap");
-        spy.Starts.ShouldBeLessThan(RefreshBudget.MaxFilesReRead,
+        spy.Announced.Count.ShouldBe(2,
+            $"two slots at {costPerPoll} ms a poll pass the {RefreshBudget.MaxWallClockMillis} ms bound " +
+            "between the second and the third candidate — the wall clock is what ended this call, not the batch cap");
+        spy.Batches.ShouldBe(1);
+        spy.Announced.Count.ShouldBeLessThan(RefreshBudget.MaxFilesReRead,
             "the time bound has to bite before the count bound for this to be the time bound's own test");
         result.Unrefreshed.Count.ShouldBe(total - 2,
             "and every candidate behind the bound is named as left, so the remainder is counted, not guessed");
@@ -55,19 +61,21 @@ public class FreshnessGuardBudgetTests
             "everything the clock refused is still named stale, and nothing else is");
     }
 
-    // the floor is what keeps a slow call honest: the bound is a rule about starting another re-read, not a
+    // the floor is what keeps a slow call honest: the bound is a rule about taking another slot, not a
     // way to hand back a call that healed nothing while naming every stale row as though it could not help
     [Fact]
-    public void WallBoundAlreadySpent_BeforeTheFirstCandidate_StillReReadsOneFile()
+    public void WallBoundAlreadySpent_BeforeTheFirstCandidate_StillAnnouncesOneCandidate()
     {
         var total = RefreshBudget.MaxFilesReRead + 2;
         var workspace = StaleWorkspace(total);
-        var spy = new SpyReindex(elapsedFromStart: TimeSpan.FromMilliseconds(RefreshBudget.MaxWallClockMillis * 40));
+        var spy = new SpyBatch();
 
-        var result = CheckWithBudget(workspace, spy, Candidates(total));
+        var result = CheckWithBudget(workspace, spy, Candidates(total),
+            elapsed: () => TimeSpan.FromMilliseconds(RefreshBudget.MaxWallClockMillis * 40));
 
-        spy.Starts.ShouldBe(1,
+        spy.Announced.Count.ShouldBe(1,
             "the first stale candidate is never refused for time, so a call that found a stale file heals one");
+        spy.Batches.ShouldBe(1);
         result.Refreshed.ShouldHaveSingleItem();
         result.Unrefreshed.Count.ShouldBe(total - 1);
         result.Stale.Count.ShouldBe(total - 1);
@@ -78,7 +86,7 @@ public class FreshnessGuardBudgetTests
     {
         var workspace = StaleWorkspace(RefreshBudget.MaxFilesReRead);
         File.WriteAllText(In(workspace, "src/extra.cs"), Class("Extra"));
-        var spy = new SpyReindex();
+        var spy = new SpyBatch();
 
         List<(string Repo, string Path)> ordered =
             [.. Candidates(RefreshBudget.MaxFilesReRead), ("demo", "keep.cs"), ("demo", "extra.cs")];
@@ -86,29 +94,34 @@ public class FreshnessGuardBudgetTests
 
         result.Refreshed.Count.ShouldBe(RefreshBudget.MaxFilesReRead);
         result.Stale.ShouldNotContain("demo/keep.cs", StringComparer.Ordinal,
-            "the budget refuses re-reads, not examination — a fresh file past the bound still reads fresh");
+            "the budget refuses slots, not examination — a fresh file past the bound still reads fresh");
         result.Unrefreshed.ShouldHaveSingleItem().ShouldBe("demo/extra.cs", StringComparer.Ordinal,
             "and the stale one behind it is refused as itself");
-        spy.Starts.ShouldBe(RefreshBudget.MaxFilesReRead);
+        spy.Announced.Count.ShouldBe(RefreshBudget.MaxFilesReRead);
+        spy.Batches.ShouldBe(1);
     }
 
+    // the batch is one route now: when it throws, no announced candidate can carry a healed verdict, and
+    // the tally has to say so without turning the throw into a budget refusal it did not earn
     [Fact]
-    public void ReReadThatFailed_IsNotCountedAsABudgetRefusal()
+    public void BatchThatThrew_IsNotCountedAsABudgetRefusal()
     {
         var total = RefreshBudget.MaxFilesReRead + 1;
         var workspace = StaleWorkspace(total);
-        var spy = new SpyReindex(failures: 1);
+        var spy = new SpyBatch(failures: 1);
 
         var result = CheckWithBudget(workspace, spy, Candidates(total));
 
-        result.Refreshed.Count.ShouldBe(RefreshBudget.MaxFilesReRead - 1,
-            "the first attempt threw, so one fewer row came back");
+        spy.Batches.ShouldBe(1);
+        result.Refreshed.ShouldBeEmpty(
+            "the batch answered nothing it can vouch for, so no announced candidate is refreshed");
+        result.Stale.Count.ShouldBe(total,
+            "every announced candidate keeps its stale verdict and the refused one keeps its own");
         result.Stale.ShouldContain("demo/unit0.cs", StringComparer.Ordinal,
-            "a failed re-read is stale because its row still describes other content");
+            "a thrown batch is stale because its rows still describe other content");
         result.Unrefreshed.ShouldHaveSingleItem().ShouldBe(
             $"demo/unit{RefreshBudget.MaxFilesReRead}.cs", StringComparer.Ordinal,
             "examined-and-refused and left-no-room are two statements and never share one tally");
-        result.Stale.Count.ShouldBe(2, "one thrown attempt and one refusal, and the two are told apart above");
     }
 
     [Theory]
@@ -127,14 +140,62 @@ public class FreshnessGuardBudgetTests
             File.Delete(SqueezrPaths.ManifestPath(workspace));
         }
 
-        var spy = new SpyReindex();
+        var spy = new SpyBatch();
         var result = CheckWithBudget(workspace, spy, Candidates(total));
 
-        spy.Starts.ShouldBe(0, "a call that cannot read the workspace re-reads nothing either");
+        spy.Batches.ShouldBe(0, "a call that cannot read the workspace starts no batch either");
         result.Stale.Count.ShouldBe(total, "the collapsed call still reaches every candidate as stale");
         result.Unrefreshed.ShouldBeEmpty(
             "a workspace this call could not open is not a budget, and attributing its whole list to one is " +
             "the reading this pin exists to make impossible");
+    }
+
+    // cancellation is observed at the one deterministic point the budget refuses at, so a call cancelled
+    // before its first acceptance tells the same story as a workspace it could not open: nothing spent,
+    // nothing refused, everything stale — the collapse shape, never a budget verdict it did not earn
+    [Fact]
+    public void CallCancelledBeforeItsFirstBatch_CollapsesToStale_AndLeavesNoBudgetTally()
+    {
+        var total = RefreshBudget.MaxFilesReRead + 3;
+        var workspace = StaleWorkspace(total);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var spy = new SpyBatch();
+
+        var result = CheckWithBudget(workspace, spy, Candidates(total), cts.Token);
+
+        spy.Batches.ShouldBe(0, "a call cancelled before its first acceptance never reaches the indexer");
+        result.Refreshed.ShouldBeEmpty();
+        result.Stale.Count.ShouldBe(total, "the call stopped before it could vouch for any candidate");
+        result.Unrefreshed.ShouldBeEmpty(
+            "nothing reached the budget to be refused by it: an empty Unrefreshed is what a call that healed " +
+            "nothing says, and cancellation before the first acceptance is that call");
+    }
+
+    // the batch under way when the token fires is not interrupted: it completes and every candidate it
+    // carried stays healed, and the tail the cap refused before the token fired stays refused —
+    // boundary-only cancellation across one boundary per call, with both shapes still readable in the answer
+    [Fact]
+    public void CallCancelledInsideItsBatch_KeepsTheBatchHealed_AndTheRefusedTailRefused()
+    {
+        var total = RefreshBudget.MaxFilesReRead + 2;
+        var workspace = StaleWorkspace(total);
+        using var cts = new CancellationTokenSource();
+        var spy = new SpyBatch(onStart: () => cts.Cancel());
+
+        var result = CheckWithBudget(workspace, spy, Candidates(total), cts.Token);
+
+        spy.Batches.ShouldBe(1, "cancellation is boundary-only: the batch it fired inside finishes");
+        result.Refreshed.ShouldBe(Candidates(RefreshBudget.MaxFilesReRead).Select(Key), customMessage:
+            "the batch answered every candidate it carried, and the post-batch tally still maps them all");
+        result.Unrefreshed.ShouldBe(
+            [
+                Key(("demo", $"unit{RefreshBudget.MaxFilesReRead}.cs")),
+                Key(("demo", $"unit{RefreshBudget.MaxFilesReRead + 1}.cs")),
+            ],
+            StringComparer.Ordinal);
+        result.Stale.ShouldBe(result.Unrefreshed, customMessage:
+            "the refused tail is stale; nothing else is — the healed batch and the refused tail stay two shapes");
     }
 
     [Fact]
@@ -152,29 +213,33 @@ public class FreshnessGuardBudgetTests
         loop.ShouldContain("RefreshBudget.MaxWallClockMillis");
         NumbersIn(loop).ShouldBe(["0"],
             "the candidate loop reads both caps by name and owns one digit only: the zero that asks whether a " +
-            "re-read has already started. A cap spelled as a literal in the loop is the magic number this task " +
+            "slot has been taken yet. A cap spelled as a literal in the loop is the magic number this task " +
             "promised not to leave in the code");
     }
 
-    // the wrapper is the only place where the budget meets a real stopwatch and the real index route, and the
-    // spy-driven tests above cannot see either: swap the clock for a constant or drop the takeover forwarding
-    // there and every other test in this class still passes. No test exercises onStaleTakeover through the
-    // public overload, which is why the route half is pinned here rather than behaviourally.
+    // the wrapper is the only place where the budget meets a real stopwatch and the real batch route, and
+    // the spy-driven tests above cannot see either: swap the clock for a constant or wire the wrapper to
+    // anything but IndexScoped and every other test in this class still passes. No test exercises
+    // onStaleTakeover through the public overload, which is why the route half is pinned here.
     [Fact]
-    public void PublicWrapper_WiresTheRealClock_AndForwardsTheReindexRoute()
+    public void PublicWrapper_WiresTheRealClock_AndForwardsTheBatchRoute()
     {
         var wrapper = PublicWrapperBody(Read("src/Squeezr.Core/Indexing/FreshnessGuard.cs"));
         wrapper.ShouldContain("Stopwatch.StartNew()");
         wrapper.ShouldContain("() => clock.Elapsed");
         wrapper.ShouldNotContain("TimeSpan.Zero");
-        wrapper.ShouldContain("IndexFile(root, repo, path, onStaleTakeover: takeover)");
+        wrapper.ShouldContain("IndexScoped(",
+            customMessage: "the wrapper must wire the real batch route — the seam is only as real as what production hands it");
     }
 
     private static FreshnessResult CheckWithBudget(
         string workspace,
-        SpyReindex spy,
-        IReadOnlyList<(string Repo, string Path)> candidates) =>
-        FreshnessGuard.CheckAndRefresh(workspace, candidates, null, spy.Run, () => spy.Elapsed);
+        SpyBatch spy,
+        IReadOnlyList<(string Repo, string Path)> candidates,
+        CancellationToken cancellationToken = default,
+        Func<TimeSpan>? elapsed = null) =>
+        FreshnessGuard.CheckAndRefresh(
+            workspace, candidates, null, spy.Run, elapsed ?? (() => TimeSpan.Zero), cancellationToken);
 
     private static List<(string Repo, string Path)> Candidates(int count) =>
         [.. Enumerable.Range(0, count).Select(i => ("demo", $"unit{i}.cs"))];
@@ -188,8 +253,8 @@ public class FreshnessGuardBudgetTests
         Path.Combine(workspace, relative.Replace('/', Path.DirectorySeparatorChar));
 
     // files whose rows are behind their content by a real edit: every candidate is one the guard wants to
-    // re-read, and the spy is the only thing deciding whether the call may start it. keep.cs joins the same
-    // index and is never touched, so it is the fresh position in the list.
+    // re-read, and the spy is the only thing deciding whether the call may announce it. keep.cs joins the
+    // same index and is never touched, so it is the fresh position in the list.
     private static string StaleWorkspace(int count)
     {
         var workspace = TestDirs.NewTempDir();
@@ -269,38 +334,37 @@ public class FreshnessGuardBudgetTests
         throw new InvalidOperationException("unbalanced braces in the candidate loop");
     }
 
-    private sealed class SpyReindex
+    private sealed class SpyBatch
     {
-        private readonly int _costMillisPerFile;
         private readonly int _failures;
-        private int _starts;
+        private readonly Action? _onStart;
+        private readonly List<string> _announced = [];
+        private int _batches;
 
-        public SpyReindex(
-            int costMillisPerFile = 0,
-            int failures = 0,
-            TimeSpan? elapsedFromStart = null)
+        public SpyBatch(int failures = 0, Action? onStart = null)
         {
-            _costMillisPerFile = costMillisPerFile;
             _failures = failures;
-            Elapsed = elapsedFromStart ?? TimeSpan.Zero;
+            _onStart = onStart;
         }
 
-        public int Starts => _starts;
+        public int Batches => _batches;
 
-        public TimeSpan Elapsed { get; private set; }
+        public IReadOnlyList<string> Announced => _announced;
 
-        public List<string> ReRead { get; } = [];
-
-        public void Run(string workspaceRoot, string repo, string path, Action<string>? onStaleTakeover)
+        public WorkspaceIndexer.ScopedIndexResult Run(
+            string workspaceRoot,
+            IReadOnlyList<(string Repo, string Path, string AbsolutePath)> batch,
+            Action<string>? onStaleTakeover)
         {
-            _starts++;
-            Elapsed += TimeSpan.FromMilliseconds(_costMillisPerFile);
-            if (_starts <= _failures)
+            _batches++;
+            _onStart?.Invoke();
+            _announced.AddRange(batch.Select(candidate => $"{candidate.Repo}/{candidate.Path}"));
+            if (_batches <= _failures)
             {
-                throw new IOException("spy re-read refused on purpose");
+                throw new IOException("spy batch refused on purpose");
             }
 
-            ReRead.Add($"{repo}/{path}");
+            return new WorkspaceIndexer.ScopedIndexResult(batch.Count, 0, []);
         }
     }
 }

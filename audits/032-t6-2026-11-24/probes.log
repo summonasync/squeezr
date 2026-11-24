@@ -1,0 +1,3 @@
+probe mid1 18:19:43Z load1=7.97 load5=6.71 competing_dotnet_foreign=1
+probe mid2 18:29:23Z load1=6.21 load5=6.93 competing_dotnet_foreign=1
+probe mid3 18:39:01Z load1=5.77 load5=6.60 competing_dotnet_foreign=0
