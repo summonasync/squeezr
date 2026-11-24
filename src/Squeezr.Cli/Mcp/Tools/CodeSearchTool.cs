@@ -98,7 +98,7 @@ public sealed class CodeSearchTool
             warnings.AddRange(response.Warnings);
 
             var candidates = GuardCandidates(response);
-            var freshness = Guard(root, candidates);
+            var freshness = Guard(root, candidates, cancellationToken);
             if (freshness.Refreshed.Count > 0)
             {
                 response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
@@ -196,8 +196,11 @@ public sealed class CodeSearchTool
             .Select(m => (m.Repo, m.Path))
             .Distinct()];
 
-    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string Path)> candidates) =>
-        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
+    private static FreshnessResult Guard(
+        string root,
+        IReadOnlyList<(string Repo, string Path)> candidates,
+        CancellationToken cancellationToken) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr, cancellationToken);
 
     private static object Params(
         string query,

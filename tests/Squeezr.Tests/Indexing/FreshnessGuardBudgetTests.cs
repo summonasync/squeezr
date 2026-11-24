@@ -137,6 +137,49 @@ public class FreshnessGuardBudgetTests
             "the reading this pin exists to make impossible");
     }
 
+    // cancellation is observed at the one deterministic point the budget refuses at, so a call cancelled
+    // before its first start tells the same story as a workspace it could not open: nothing spent, nothing
+    // refused, everything stale — the collapse shape, never a budget verdict it did not earn
+    [Fact]
+    public void CallCancelledBeforeItsFirstReRead_CollapsesToStale_AndLeavesNoBudgetTally()
+    {
+        var total = RefreshBudget.MaxFilesReRead + 3;
+        var workspace = StaleWorkspace(total);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var spy = new SpyReindex();
+
+        var result = CheckWithBudget(workspace, spy, Candidates(total), cts.Token);
+
+        spy.Starts.ShouldBe(0, "a call cancelled before its first start never reaches the indexer");
+        result.Refreshed.ShouldBeEmpty();
+        result.Stale.Count.ShouldBe(total, "the call stopped before it could vouch for any candidate");
+        result.Unrefreshed.ShouldBeEmpty(
+            "nothing reached the budget to be refused by it: an empty Unrefreshed is what a call that healed " +
+            "nothing says, and cancellation before the first start is that call");
+    }
+
+    // the re-read under way when the token fires is not interrupted: it completes and stays Refreshed, and
+    // everything behind it is refused at the same point the budget refuses at — the healed prefix and the
+    // refused tail stay two readable shapes in one answer
+    [Fact]
+    public void CallCancelledAfterAReReadStarted_KeepsTheHealedPrefix_AndRefusesTheRest()
+    {
+        var total = RefreshBudget.MaxFilesReRead + 2;
+        var workspace = StaleWorkspace(total);
+        using var cts = new CancellationTokenSource();
+        var spy = new SpyReindex(onStart: () => cts.Cancel());
+
+        var result = CheckWithBudget(workspace, spy, Candidates(total), cts.Token);
+
+        spy.Starts.ShouldBe(1, "cancellation is boundary-only: the re-read it fired inside finishes and heals");
+        result.Refreshed.ShouldBe(Candidates(1).Select(Key));
+        result.Stale.Count.ShouldBe(total - 1, "the tail stopped being vouched for the moment the token fired");
+        result.Unrefreshed.ShouldBe(result.Stale,
+            "the refused part is named as itself — a prefix in Refreshed beside a tail in Unrefreshed is the " +
+            "mid-loop shape, and it must not read as the collapse or as a budget verdict");
+    }
+
     [Fact]
     public void BothCapsAreDeclaredInOnePlace_AndTheGuardSpellsNoNumberForThem()
     {
@@ -173,8 +216,9 @@ public class FreshnessGuardBudgetTests
     private static FreshnessResult CheckWithBudget(
         string workspace,
         SpyReindex spy,
-        IReadOnlyList<(string Repo, string Path)> candidates) =>
-        FreshnessGuard.CheckAndRefresh(workspace, candidates, null, spy.Run, () => spy.Elapsed);
+        IReadOnlyList<(string Repo, string Path)> candidates,
+        CancellationToken cancellationToken = default) =>
+        FreshnessGuard.CheckAndRefresh(workspace, candidates, null, spy.Run, () => spy.Elapsed, cancellationToken);
 
     private static List<(string Repo, string Path)> Candidates(int count) =>
         [.. Enumerable.Range(0, count).Select(i => ("demo", $"unit{i}.cs"))];
@@ -273,15 +317,18 @@ public class FreshnessGuardBudgetTests
     {
         private readonly int _costMillisPerFile;
         private readonly int _failures;
+        private readonly Action? _onStart;
         private int _starts;
 
         public SpyReindex(
             int costMillisPerFile = 0,
             int failures = 0,
-            TimeSpan? elapsedFromStart = null)
+            TimeSpan? elapsedFromStart = null,
+            Action? onStart = null)
         {
             _costMillisPerFile = costMillisPerFile;
             _failures = failures;
+            _onStart = onStart;
             Elapsed = elapsedFromStart ?? TimeSpan.Zero;
         }
 
@@ -294,6 +341,7 @@ public class FreshnessGuardBudgetTests
         public void Run(string workspaceRoot, string repo, string path, Action<string>? onStaleTakeover)
         {
             _starts++;
+            _onStart?.Invoke();
             Elapsed += TimeSpan.FromMilliseconds(_costMillisPerFile);
             if (_starts <= _failures)
             {

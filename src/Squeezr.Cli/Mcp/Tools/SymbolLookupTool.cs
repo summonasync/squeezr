@@ -36,14 +36,15 @@ public sealed class SymbolLookupTool
         int? maxTokens = null,
         string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        _gate.RunAsync(ct => Task.FromResult(FindCore(name, symbol, kind, repo, maxTokens)), cancellationToken);
+        _gate.RunAsync(ct => Task.FromResult(FindCore(name, symbol, kind, repo, maxTokens, ct)), cancellationToken);
 
     private object FindCore(
         string? name,
         string? symbol,
         string? kind,
         string? repo,
-        int? maxTokens)
+        int? maxTokens,
+        CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
@@ -66,7 +67,7 @@ public sealed class SymbolLookupTool
             var result = lookup.Find(symbolName, repo, kind, budget, body: true);
 
             var candidates = GuardCandidates(result);
-            var freshness = Guard(root, candidates);
+            var freshness = Guard(root, candidates, cancellationToken);
             if (freshness.Refreshed.Count > 0)
             {
                 result = lookup.Find(symbolName, repo, kind, budget, body: true);
@@ -157,8 +158,11 @@ public sealed class SymbolLookupTool
             .Select(m => (m.Repo, m.File))
             .Distinct()];
 
-    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string File)> candidates) =>
-        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
+    private static FreshnessResult Guard(
+        string root,
+        IReadOnlyList<(string Repo, string File)> candidates,
+        CancellationToken cancellationToken) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr, cancellationToken);
 
     // both roads write through here, reading the state off the envelope the caller is about to receive: a fresh
     // call and the cache hit that replays it carry one answer, so one answer cannot be two rows in the ledger

@@ -6,9 +6,11 @@ using Squeezr.Core.Workspace;
 namespace Squeezr.Core.Indexing;
 
 // Unrefreshed is the budget's own tally: every key it holds is also in Stale, and it names the part of that
-// list this call refused to re-read because the budget was gone. The two early returns below hand back an
+// list this call refused to re-read because the budget was gone. The early returns below hand back an
 // empty Unrefreshed on purpose — a call that never reached the candidates left nothing behind at a budget,
 // it reached nothing, and the reason a caller reads must not be allowed to collapse into the budget shape.
+// A cancel before the first re-read starts joins them: it stopped the call before anything was spent, so
+// every candidate is Stale and none of it is a refusal.
 public sealed record FreshnessResult(
     IReadOnlyList<string> Refreshed,
     IReadOnlyList<string> Stale,
@@ -23,7 +25,8 @@ public static class FreshnessGuard
     public static FreshnessResult CheckAndRefresh(
         string workspaceRoot,
         IReadOnlyList<(string Repo, string Path)> candidates,
-        Action<string>? onStaleTakeover = null)
+        Action<string>? onStaleTakeover = null,
+        CancellationToken cancellationToken = default)
     {
         var clock = Stopwatch.StartNew();
         return CheckAndRefresh(
@@ -32,7 +35,8 @@ public static class FreshnessGuard
             onStaleTakeover,
             (root, repo, path, takeover) =>
                 new WorkspaceIndexer().IndexFile(root, repo, path, onStaleTakeover: takeover),
-            () => clock.Elapsed);
+            () => clock.Elapsed,
+            cancellationToken);
     }
 
     internal static FreshnessResult CheckAndRefresh(
@@ -40,7 +44,8 @@ public static class FreshnessGuard
         IReadOnlyList<(string Repo, string Path)> candidates,
         Action<string>? onStaleTakeover,
         ReindexFile reindex,
-        Func<TimeSpan> elapsed)
+        Func<TimeSpan> elapsed,
+        CancellationToken cancellationToken = default)
     {
         var refreshed = new List<string>();
         var stale = new List<string>();
@@ -90,10 +95,19 @@ public static class FreshnessGuard
                     // the deterministic point: a re-read that has not started yet is the only thing the budget
                     // can refuse, and it is refused as itself, never as a check that came back bad. The first
                     // one is never refused — a call that found a stale file heals at least one — so the wall
-                    // bound reads as "start another", and a slow store open cannot empty the call
+                    // bound reads as "start another", and a slow store open cannot empty the call. Cancellation
+                    // is read here and nowhere else, so a call stops between re-reads, never inside one: before
+                    // its first start it reached nothing and collapses like the workspace failures above,
+                    // after one it refuses the remainder the way the budget does
                     if (reReads >= RefreshBudget.MaxFilesReRead ||
-                        (reReads > 0 && elapsed().TotalMilliseconds >= RefreshBudget.MaxWallClockMillis))
+                        (reReads > 0 && elapsed().TotalMilliseconds >= RefreshBudget.MaxWallClockMillis) ||
+                        cancellationToken.IsCancellationRequested)
                     {
+                        if (cancellationToken.IsCancellationRequested && reReads == 0)
+                        {
+                            return new FreshnessResult([], candidates.Select(Key).ToList(), []);
+                        }
+
                         var refused = Key(candidate);
                         stale.Add(refused);
                         unrefreshed.Add(refused);

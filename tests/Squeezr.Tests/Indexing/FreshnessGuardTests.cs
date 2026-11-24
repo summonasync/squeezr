@@ -139,6 +139,25 @@ public class FreshnessGuardTests
         new SearchEngine(workspace).Search(Query("newneedle")).Matches.ShouldHaveSingleItem().Path.ShouldBe("new.cs");
     }
 
+    [Fact]
+    public void CancelledCall_BeforeAnyReRead_TurnsEveryCandidateStale_WithoutReIndexing()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"cancelneedle\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"qwzzvkjw\"; }");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var result = FreshnessGuard.CheckAndRefresh(workspace, [("demo", "a.cs")], cancellationToken: cts.Token);
+
+        result.Refreshed.ShouldBeEmpty();
+        result.Stale.ShouldBe(["demo/a.cs"]);
+        result.Unrefreshed.ShouldBeEmpty();
+        new SearchEngine(workspace).Search(Query("qwzzvkjw")).Matches.ShouldBeEmpty(
+            "the row a re-read would have written is not there — nothing was indexed behind the cancellation");
+    }
+
     [LinuxFact]
     [SupportedOSPlatform("linux")]
     public async Task IndexedEmptyFile_PathSubstitutedWithAWriterlessFifo_DoesNotBlockTheFreshnessProbe()
@@ -248,6 +267,32 @@ public class FreshnessGuardTests
             customMessage: "the manifest is read once for the call, not once per candidate");
         loop.ShouldNotContain("SecretGuardIngestion.Load(",
             customMessage: "the guard profile is read once for the call, not once per candidate");
+    }
+
+    // the token the guard reads at its budget point is only as real as the wire that feeds it: each tool's
+    // gate lambda hands ct into its Core method, the Core method passes it at the Guard call, and the Guard
+    // helper forwards it to CheckAndRefresh — a default at any of the three hops reads as no cancellation
+    [Fact]
+    public void InGateCallers_ThreadTheGateToken_IntoTheGuard()
+    {
+        var wired = new (string Tool, string GateCall)[]
+        {
+            ("CodeSearchTool.cs", "SearchCore(query, repo, prefix, maxTokens, topK, kind, ct)"),
+            ("SymbolLookupTool.cs", "FindCore(name, symbol, kind, repo, maxTokens, ct)"),
+            ("FindReferencesTool.cs", "FindCore(symbol, name, repo, ct)"),
+        };
+
+        foreach (var (tool, gateCall) in wired)
+        {
+            var source = File.ReadAllText(Path.Combine(SolutionRoot(), "src/Squeezr.Cli/Mcp/Tools", tool));
+            source.ShouldContain(gateCall,
+                customMessage: $"{tool} must hand the gate's ct into its Core method — the only road the guard's token has");
+            source.ShouldContain("Guard(root, candidates, cancellationToken)",
+                customMessage: $"{tool} must pass that token at the guard call, not default");
+            source.ShouldContain(
+                "FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr, cancellationToken)",
+                customMessage: $"{tool}'s Guard helper must forward the token to CheckAndRefresh");
+        }
     }
 
     [Fact]

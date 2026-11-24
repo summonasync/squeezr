@@ -37,9 +37,9 @@ public sealed class FindReferencesTool
         string? repo = null,
         string? name = null,
         CancellationToken cancellationToken = default) =>
-        _gate.RunAsync(ct => Task.FromResult(FindCore(symbol, name, repo)), cancellationToken);
+        _gate.RunAsync(ct => Task.FromResult(FindCore(symbol, name, repo, ct)), cancellationToken);
 
-    private object FindCore(string? symbol, string? name, string? repo)
+    private object FindCore(string? symbol, string? name, string? repo, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
@@ -65,7 +65,7 @@ public sealed class FindReferencesTool
 
             var namedUniverse = AnsweredFiles(result);
             IReadOnlyList<(string Repo, string File)> candidates = [.. namedUniverse.Take(FreshnessGuard.CandidateLimit)];
-            var freshness = Guard(root, candidates);
+            var freshness = Guard(root, candidates, cancellationToken);
             if (freshness.Refreshed.Count > 0)
             {
                 result = lookup.Find(symbolName, repo);
@@ -224,8 +224,11 @@ public sealed class FindReferencesTool
                 .Concat(g.Definitions.Select(d => (g.Repo, d.File))))
             .Distinct()];
 
-    private static FreshnessResult Guard(string root, IReadOnlyList<(string Repo, string File)> candidates) =>
-        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr);
+    private static FreshnessResult Guard(
+        string root,
+        IReadOnlyList<(string Repo, string File)> candidates,
+        CancellationToken cancellationToken) =>
+        FreshnessGuard.CheckAndRefresh(root, candidates, StaleLockWarningSink.ToStderr, cancellationToken);
 
     private static object Params(string symbol, string? repo, IReadOnlyList<string> secretGuardExtra) =>
         new { symbol, repo, secretGuardExtra };
