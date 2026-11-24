@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using LiteDB;
 using Shouldly;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
@@ -313,6 +314,118 @@ public class FreshnessGuardTests
         result.Stale.ShouldBe(["demo/src/App.cs"], StringComparer.Ordinal);
     }
 
+    [Fact]
+    public void CandidatesSpanningTwoRepos_RideOneBatchCall()
+    {
+        var workspace = TwoRepoWorkspace();
+        WriteFile(workspace, "a/First.cs", "public static class First { public static int One = 1; }\n");
+        WriteFile(workspace, "b/Second.cs", "public static class Second { public static int Two = 2; }\n");
+        new WorkspaceIndexer().Index(workspace);
+        WriteFile(workspace, "a/First.cs", "public static class First { public static int One = 11; }\n");
+        WriteFile(workspace, "b/Second.cs", "public static class Second { public static int Two = 22; }\n");
+        var stub = new CountingStub();
+
+        var result = FreshnessGuard.CheckAndRefresh(
+            workspace, [("alpha", "First.cs"), ("beta", "Second.cs")], null, stub.Run, () => TimeSpan.Zero);
+
+        stub.Batches.ShouldBe(1, "the batch is one call regardless of how many repos the candidates span");
+        stub.Announced.Count.ShouldBe(2);
+        result.Refreshed.ShouldBe(["alpha/First.cs", "beta/Second.cs"], StringComparer.Ordinal);
+        result.Stale.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void CandidatesOfARepoMissingItsStoreRow_LandStale_AndNeverReachTheBatch()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"rowneedle\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"rowchanged\"; }");
+        var repoId = StoredRepoId(workspace, "demo");
+
+        using (var db = new LiteDatabase(SqueezrPaths.MetaDbPath(workspace)))
+        {
+            db.GetCollection<RepoDocument>(MetaStore.ReposCollection).Delete((long)repoId);
+        }
+
+        var stub = new CountingStub();
+        var result = FreshnessGuard.CheckAndRefresh(workspace, [("demo", "a.cs")], null, stub.Run, () => TimeSpan.Zero);
+
+        stub.Batches.ShouldBe(0, "a candidate whose repo the store does not name cannot be announced anywhere");
+        result.Refreshed.ShouldBeEmpty();
+        result.Stale.ShouldBe(["demo/a.cs"], StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void CandidatesWhoseRepoTheManifestDoesNotName_StayStale_WithoutEnteringTheBatch()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"ghostneedle\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"ghostchanged\"; }");
+        var stub = new CountingStub();
+
+        var result = FreshnessGuard.CheckAndRefresh(
+            workspace, [("ghost", "x.cs"), ("demo", "a.cs")], null, stub.Run, () => TimeSpan.Zero);
+
+        result.Refreshed.ShouldBe(["demo/a.cs"], StringComparer.Ordinal);
+        result.Stale.ShouldBe(["ghost/x.cs"], StringComparer.Ordinal);
+        result.Unrefreshed.ShouldBeEmpty();
+        stub.Batches.ShouldBe(1);
+        stub.Announced.ShouldHaveSingleItem().ShouldBe(
+            Path.Combine(workspace, "repo", "a.cs"), "the unresolvable name announces nothing");
+    }
+
+    // a shortfall the totals cannot attribute may not be averaged away either: every announced candidate
+    // answers from the state the batch left behind, and a row that is still behind its file stays stale
+    [Fact]
+    public void ShortfallTotals_AttributeFromTheStateTheBatchLeftBehind()
+    {
+        var workspace = NewWorkspace();
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"shortfallone\"; }");
+        WriteFile(workspace, "repo/b.cs", "class Beta { string Term = \"shortfalltwo\"; }");
+        new WorkspaceIndexer().Index(workspace);
+        WriteFile(workspace, "repo/a.cs", "class Alpha { string Term = \"shortonechanged\"; }");
+        WriteFile(workspace, "repo/b.cs", "class Beta { string Term = \"shorttwochanged\"; }");
+        var stub = new CountingStub(undercountsBy: 1);
+
+        var result = FreshnessGuard.CheckAndRefresh(
+            workspace, [("demo", "a.cs"), ("demo", "b.cs")], null, stub.Run, () => TimeSpan.Zero);
+
+        stub.Batches.ShouldBe(1);
+        result.Refreshed.ShouldBeEmpty(
+            "the totals cannot name the skipped path, so none of them is healed on the counts' say-so — and a " +
+            "stub that wrote nothing leaves every row behind its file, which the state check names stale");
+        result.Stale.ShouldBe(["demo/a.cs", "demo/b.cs"], StringComparer.Ordinal);
+        result.Unrefreshed.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void AProtectedPath_NeverEntersTheAnnouncedList_OrTheAnswer()
+    {
+        var workspace = IngestionWorkspaces.NewWorkspaceWithSecrets();
+        new WorkspaceIndexer().Index(workspace);
+        File.AppendAllText(
+            IngestionWorkspaces.Full(workspace, IngestionWorkspaces.EnvPath), "SUF=ANNOUNCEDCANARYNEEDLE\n");
+        File.AppendAllText(
+            IngestionWorkspaces.Full(workspace, IngestionWorkspaces.AppPath), "// appchangedneedle\n");
+        var stub = new CountingStub();
+
+        var result = FreshnessGuard.CheckAndRefresh(
+            workspace,
+            [("demo", IngestionWorkspaces.EnvPath), ("demo", IngestionWorkspaces.AppPath)],
+            null, stub.Run, () => TimeSpan.Zero);
+
+        stub.Batches.ShouldBe(1);
+        stub.Announced.ShouldHaveSingleItem().ShouldBe(
+            IngestionWorkspaces.Full(workspace, IngestionWorkspaces.AppPath),
+            "the protected path is filtered before the absolute list is built — the batch saw nothing of it");
+        result.Refreshed.ShouldBe(["demo/src/App.cs"], StringComparer.Ordinal);
+        result.Stale.ShouldBeEmpty();
+        result.Unrefreshed.ShouldBeEmpty(
+            "and no tally names the protected path: a skip is not a refusal and not an answer line");
+    }
+
     [LinuxFact]
     [SupportedOSPlatform("linux")]
     public void RowThatDiffersFromTheCandidateOnlyInCase_IsNotAcceptedAsTheCandidatesRow()
@@ -346,6 +459,41 @@ public class FreshnessGuardTests
     {
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         return store.FindFile(store.ListRepos().First().Id, relativePath)!.Sha256;
+    }
+
+    private static uint StoredRepoId(string workspace, string repoName)
+    {
+        using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
+        return store.FindRepo(repoName)!.Id;
+    }
+
+    private static string TwoRepoWorkspace()
+    {
+        var workspace = TestDirs.NewTempDir();
+        Directory.CreateDirectory(Path.Combine(workspace, "a"));
+        Directory.CreateDirectory(Path.Combine(workspace, "b"));
+        var manager = new WorkspaceManager(workspace);
+        manager.Init(null);
+        manager.AddRepo("a", "alpha");
+        manager.AddRepo("b", "beta");
+        return workspace;
+    }
+
+    private sealed class CountingStub(int undercountsBy = 0)
+    {
+        public int Batches { get; private set; }
+
+        public List<string> Announced { get; } = [];
+
+        public WorkspaceIndexer.ScopedIndexResult Run(
+            string workspaceRoot,
+            IReadOnlyList<(string Repo, string Path, string AbsolutePath)> batch,
+            Action<string>? onStaleTakeover)
+        {
+            Batches++;
+            Announced.AddRange(batch.Select(candidate => candidate.AbsolutePath));
+            return new WorkspaceIndexer.ScopedIndexResult(batch.Count - undercountsBy, 0, []);
+        }
     }
 
     private static string SolutionRoot()
