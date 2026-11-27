@@ -1,7 +1,7 @@
 using Squeezr.Core.Infra;
 using Squeezr.Semantic.Infra;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public static class QdrantEndpointHint
 {

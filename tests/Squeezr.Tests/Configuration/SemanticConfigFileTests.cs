@@ -106,6 +106,23 @@ public class SemanticConfigFileTests
     }
 
     [Fact]
+    public void Load_TypeMismatchedSemanticSection_ThrowsNamedAfterTheConfigFile()
+    {
+        var root = NewWorkspaceWithConfig(
+            """
+            {
+              "embeddings": { "provider": 123 },
+              "chunking": { "maxTokensPerChunk": 512, "fallbackWindowLines": 60, "fallbackOverlapLines": 15 },
+              "indexing": { "ignore": [], "maxFileSizeKb": 512 }
+            }
+            """);
+
+        var error = Should.Throw<WorkspaceException>(() => SemanticConfigFile.Load(root));
+
+        error.Message.ShouldStartWith($"Config file at '{SqueezrPaths.ConfigPath(root)}':");
+    }
+
+    [Fact]
     public void Save_AfterAnEdit_RewritesTheSemanticSectionsIntoTheFile()
     {
         var root = NewWorkspaceWithConfig(

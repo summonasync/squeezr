@@ -8,7 +8,7 @@ using Squeezr.Core.Workspace;
 using Squeezr.Semantic.Configuration;
 using Squeezr.Core.Indexing;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public sealed class QdrantVectorStore : IVectorStore
 {

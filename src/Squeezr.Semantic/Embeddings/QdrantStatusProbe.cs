@@ -3,7 +3,7 @@ using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Semantic.Workspace;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public static class QdrantStatusProbe
 {

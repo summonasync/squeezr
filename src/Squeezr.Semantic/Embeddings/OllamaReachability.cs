@@ -1,6 +1,6 @@
 using Squeezr.Core.Workspace;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 internal static class OllamaReachability
 {

@@ -1,4 +1,4 @@
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Semantic.Indexing.Query;

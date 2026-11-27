@@ -5,7 +5,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Workspace;
 using Squeezr.Semantic.Configuration;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public static class OllamaModelEnsurer
 {

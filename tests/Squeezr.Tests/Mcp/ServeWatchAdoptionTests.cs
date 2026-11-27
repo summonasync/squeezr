@@ -1,8 +1,7 @@
 using System.Text.Json;
 using Shouldly;
-using Squeezr.Cli.Embeddings;
-using Squeezr.Core.Configuration;
 using Squeezr.Semantic.Embeddings;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Serialization;

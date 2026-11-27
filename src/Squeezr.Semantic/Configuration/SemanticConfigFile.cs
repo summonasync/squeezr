@@ -11,8 +11,17 @@ public static class SemanticConfigFile
     public static SemanticConfig Load(string root)
     {
         var core = ConfigFile.Load(root);
-        var config = SemanticConfig.Bind(core);
-        Validate(SqueezrPaths.ConfigPath(root), config.Embeddings);
+        var path = SqueezrPaths.ConfigPath(root);
+        SemanticConfig config;
+        try
+        {
+            config = SemanticConfig.Bind(core);
+        }
+        catch (JsonException ex)
+        {
+            throw new WorkspaceException($"Config file at '{path}': {ex.Message}");
+        }
+        Validate(path, config.Embeddings);
         return config;
     }
 

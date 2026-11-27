@@ -1,7 +1,6 @@
 using Spectre.Console;
-using Squeezr.Cli.Embeddings;
-using Squeezr.Cli.Output;
 using Squeezr.Semantic.Embeddings;
+using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
 using Squeezr.Semantic.Indexing.Query;

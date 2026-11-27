@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Shouldly;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Health;
 using Squeezr.Core.Storage;

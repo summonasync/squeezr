@@ -5,7 +5,7 @@ using Squeezr.Core.Workspace;
 using Squeezr.Semantic.Configuration;
 using Squeezr.Semantic.Health;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public static class EmbeddingsHealthProbe
 {

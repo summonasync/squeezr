@@ -1,6 +1,6 @@
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
-internal static class EmbeddingProviderServices
+public static class EmbeddingProviderServices
 {
     public static bool RequiresManagedService(string? provider) => provider?.Trim().ToLowerInvariant() switch
     {

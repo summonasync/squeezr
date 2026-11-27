@@ -1,11 +1,11 @@
 using System.Text.Json;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 // One parse of the Qdrant collection listing, shared by the 078 legacy reaper and the repair sweep: same
 // endpoint, same wire shape, so it is read the same way. Which failures count as unreachable stays the
 // caller's policy — this helper just does not answer twice.
-internal static class QdrantCollectionListing
+public static class QdrantCollectionListing
 {
     public static async Task<List<string>> NamesAsync(
         HttpClient http,

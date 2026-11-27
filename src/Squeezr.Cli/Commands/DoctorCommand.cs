@@ -1,9 +1,8 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Infra;
 using Squeezr.Cli.Output;
-using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Health;
 using Squeezr.Core.Infra;
 using Squeezr.Core.Storage;

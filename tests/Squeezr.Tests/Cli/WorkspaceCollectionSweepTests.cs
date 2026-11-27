@@ -3,7 +3,7 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Cli.Commands;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Semantic.Configuration;

@@ -1,4 +1,4 @@
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public static class OnnxStoreDiagnostic
 {

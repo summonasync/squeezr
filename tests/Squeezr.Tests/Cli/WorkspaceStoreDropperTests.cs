@@ -1,9 +1,8 @@
 using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Cli.Commands;
-using Squeezr.Cli.Embeddings;
-using Squeezr.Core.Configuration;
 using Squeezr.Semantic.Embeddings;
+using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Semantic.Configuration;

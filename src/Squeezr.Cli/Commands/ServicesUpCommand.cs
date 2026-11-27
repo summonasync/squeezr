@@ -3,7 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Infra;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;

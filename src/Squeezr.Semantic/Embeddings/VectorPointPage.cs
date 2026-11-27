@@ -1,6 +1,6 @@
 using Squeezr.Semantic.Embeddings;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 // One page of a vector scroll: the points it carried, the id to ask after next, and the points on that page
 // this product did not write. A copy walks pages instead of materialising a whole collection because a

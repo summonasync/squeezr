@@ -4,7 +4,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Semantic.Embeddings;
 using Squeezr.Semantic.Configuration;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public sealed class OllamaEmbeddingProvider : IEmbeddingProvider, IEmbeddingExecutorEvidence
 {

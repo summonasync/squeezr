@@ -1,6 +1,6 @@
 using System.Net.Http;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 public sealed record LegacyReapReport(
     bool Ran,

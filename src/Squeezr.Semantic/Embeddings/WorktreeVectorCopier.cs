@@ -6,7 +6,7 @@ using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
-namespace Squeezr.Cli.Embeddings;
+namespace Squeezr.Semantic.Embeddings;
 
 // The semantic arm of one worktree fill: every point of the main worktree's collection lands in this
 // worktree's collection, by scroll-and-put. Nothing here embeds — a point read off the source is written to
