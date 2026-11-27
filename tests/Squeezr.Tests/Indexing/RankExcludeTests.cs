@@ -6,13 +6,14 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Mcp;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -93,7 +94,7 @@ public class RankExcludeTests
         config["indexing"]!.AsObject().Remove("rankExclude");
         File.WriteAllText(SqueezrPaths.ConfigPath(workspace), config.ToJsonString());
 
-        ConfigFile.Load(workspace).Indexing.RankExclude.ShouldBeEmpty();
+        SemanticConfigFile.Load(workspace).Indexing.RankExclude.ShouldBeEmpty();
         RankExclusion.Load(workspace).ShouldBeSameAs(RankExclusion.None);
         Paths(new SearchEngine(workspace, RankExclusion.Load(workspace))).ShouldBe(BaselinePaths);
     }
@@ -206,7 +207,7 @@ public class RankExcludeTests
         TestWorkspaceConfig.SetRankExclude(workspace, "audits/**");
         var engine = new SearchEngine(workspace, RankExclusion.Load(workspace));
 
-        var curated = Hybrid(engine, store);
+        var curated = Hybrid(workspace, engine, store);
         store.LastTopK.ShouldBe(ScopedVectorBudget.For(3, 5));
         store.LastTopK.ShouldBe(34);
         curated.Matches.Select(m => m.Path).ShouldNotContain("audits/Note.md");
@@ -234,7 +235,7 @@ public class RankExcludeTests
         TestWorkspaceConfig.SetRankExclude(workspace);
         var engine = new SearchEngine(workspace, RankExclusion.Load(workspace));
 
-        var uncurated = Hybrid(engine, store);
+        var uncurated = Hybrid(workspace, engine, store);
         store.LastTopK.ShouldBe(20);
         uncurated.Matches.Select(m => m.Path).ShouldContain("audits/Note.md");
     }
@@ -289,12 +290,8 @@ public class RankExcludeTests
             .ShouldContain(l => l.Contains(Marker));
     }
 
-    private static SearchResponse Hybrid(SearchEngine engine, FakeVectorStore store) =>
-        engine.SearchHybridAsync(
-            new SearchQuery("whatever", false, null, null, null, null, null, 2000, null),
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None).GetAwaiter().GetResult();
+    private static SearchResponse Hybrid(string workspaceRoot, SearchEngine engine, FakeVectorStore store) =>
+        engine.SearchHybridAsync(new SearchQuery("whatever", false, null, null, null, null, null, 2000, null), TestVectorPhase.Arm(workspaceRoot, new FakeEmbeddingProvider(), store), CancellationToken.None).GetAwaiter().GetResult();
 
     private static List<string> Paths(SearchEngine engine, string? prefix = null) =>
         engine.Search(Query(prefix)).Matches.Select(m => m.Path).OrderBy(p => p, StringComparer.Ordinal).ToList();
@@ -368,8 +365,7 @@ public class RankExcludeTests
         {
             new WorkspaceIndexer().Index(
                 workspace,
-                embeddings: new FakeEmbeddingProvider(),
-                vectorStore: new FakeVectorStore());
+                vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         }
         else
         {

@@ -1,6 +1,6 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -30,7 +30,7 @@ public class SecretSnippetLeakTests
         var embeddings = new CapturingEmbeddings();
         var vectors = new CapturingVectorStore();
 
-        new WorkspaceIndexer().Index(workspace, embeddings: embeddings, vectorStore: vectors);
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(embeddings, vectors));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         var chunkTexts = ChunkTexts(store);

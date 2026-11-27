@@ -2,10 +2,12 @@ using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -37,11 +39,11 @@ public class EmbeddingIndexPhaseTests
         var provider = new FakeEmbeddingProvider();
         var vectorStore = new FakeVectorStore();
 
-        new WorkspaceIndexer().Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
 
         var chunks = ListChunks(workspace);
         chunks.Count.ShouldBeGreaterThanOrEqualTo(2);
-        chunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+        chunks.ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
 
         var distinctHashes = chunks.Select(c => c.ChunkHash).Distinct().ToList();
         vectorStore.UpsertedPointCount.ShouldBe(distinctHashes.Count);
@@ -59,10 +61,10 @@ public class EmbeddingIndexPhaseTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.ResetCounters();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.UpsertedPointCount.ShouldBe(0);
     }
@@ -74,10 +76,10 @@ public class EmbeddingIndexPhaseTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore { Available = false };
 
-        var result = new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var result = new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         result.Warnings.ShouldContain(w => w.Contains("embeddings skipped", StringComparison.OrdinalIgnoreCase));
-        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "pending");
+        ListChunks(workspace).ShouldAllBe(c => c.VectorStatus == "pending");
     }
 
     [Fact]
@@ -89,14 +91,14 @@ public class EmbeddingIndexPhaseTests
 
         var ex = Should.Throw<VectorDimensionMismatchException>(() =>
             new WorkspaceIndexer().Index(
-                workspace, embeddings: new FakeEmbeddingProvider { Dimensions = 768 }, vectorStore: vectorStore));
+                workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider { Dimensions = 768 }, vectorStore)));
 
         ex.CollectionSize.ShouldBe(1536UL);
         ex.ModelDimensions.ShouldBe(768);
         ex.Message.ShouldContain("1536");
         ex.Message.ShouldContain("768");
         ex.Message.ShouldContain("squeezr index --reembed");
-        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "pending");
+        ListChunks(workspace).ShouldAllBe(c => c.VectorStatus == "pending");
     }
 
     [Fact]
@@ -108,7 +110,7 @@ public class EmbeddingIndexPhaseTests
         var vectorStore = new FakeVectorStore { CollectionSize = 1536 };
 
         Should.Throw<VectorDimensionMismatchException>(() =>
-            new WorkspaceIndexer().Index(workspace, embeddings: provider, vectorStore: vectorStore));
+            new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore)));
 
         provider.EmbedCallCount.ShouldBe(0);
         using var store = OpenStore(workspace);
@@ -122,7 +124,7 @@ public class EmbeddingIndexPhaseTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore { Available = false };
 
-        var result = new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var result = new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         result.Warnings.ShouldNotContain(w => w.Contains("vector preflight", StringComparison.OrdinalIgnoreCase));
         result.Warnings.ShouldContain(w => w.Contains("embeddings skipped", StringComparison.OrdinalIgnoreCase));
@@ -136,18 +138,18 @@ public class EmbeddingIndexPhaseTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider { Dimensions = 768 }, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider { Dimensions = 768 }, vectorStore));
         vectorStore.CollectionSize.ShouldBe(768);
         var hashCount = ListChunks(workspace).Select(c => c.ChunkHash).Distinct().Count();
 
         vectorStore.ResetCounters();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider { Dimensions = 1536 }, vectorStore: vectorStore, reembed: true);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider { Dimensions = 1536 }, vectorStore), reembed: true);
 
         vectorStore.DeleteCollectionCallCount.ShouldBe(1);
         vectorStore.CollectionSize.ShouldBe(1536);
         vectorStore.DimensionsEnsured.ShouldBe(1536);
         vectorStore.UpsertedPointCount.ShouldBe(hashCount);
-        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace).ShouldAllBe(c => c.VectorStatus == "ok");
     }
 
     [Fact]
@@ -158,14 +160,14 @@ public class EmbeddingIndexPhaseTests
         var provider = new FakeEmbeddingProvider();
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
         var hashCount = ListChunks(workspace).Select(c => c.ChunkHash).Distinct().Count();
 
         vectorStore.ResetCounters();
-        indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore, reembed: true);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore), reembed: true);
 
         vectorStore.UpsertedPointCount.ShouldBe(hashCount);
-        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace).ShouldAllBe(c => c.VectorStatus == "ok");
     }
 
     [Fact]
@@ -173,20 +175,21 @@ public class EmbeddingIndexPhaseTests
     {
         var workspace = NewWorkspace();
         WriteFile(workspace, "repo/a.cs", Source);
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with { Provider = "auto" }
         });
 
         new WorkspaceIndexer().Index(
             workspace,
-            embeddings: new FakeEmbeddingProvider(),
-            vectorStore: new FakeVectorStore(),
-            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+            vectorPhase: TestVectorPhase.Runtime(
+                new FakeEmbeddingProvider(),
+                new FakeVectorStore(),
+                new EmbeddingProviderResolution("ollama", null)));
 
         ListChunks(workspace).ShouldAllBe(c =>
-            c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+            c.VectorStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -194,15 +197,15 @@ public class EmbeddingIndexPhaseTests
     {
         var workspace = NewWorkspace();
         WriteFile(workspace, "repo/a.cs", Source);
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with { Provider = "auto" }
         });
 
         var error = Should.Throw<WorkspaceException>(() =>
             new WorkspaceIndexer().Index(
-                workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore()));
+                workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore())));
 
         error.Message.ShouldContain("must be resolved");
     }
@@ -212,19 +215,21 @@ public class EmbeddingIndexPhaseTests
     {
         var workspace = NewWorkspace();
         WriteFile(workspace, "repo/a.cs", Source);
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with { Provider = "auto" }
         });
 
         new WorkspaceIndexer().IndexFile(
             workspace, "demo", "a.cs",
-            new FakeEmbeddingProvider(), new FakeVectorStore(),
-            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+            TestVectorPhase.Runtime(
+                new FakeEmbeddingProvider(),
+                new FakeVectorStore(),
+                new EmbeddingProviderResolution("ollama", null)));
 
         ListChunks(workspace).ShouldAllBe(c =>
-            c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+            c.VectorStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -232,15 +237,15 @@ public class EmbeddingIndexPhaseTests
     {
         var workspace = NewWorkspace();
         WriteFile(workspace, "repo/a.cs", Source);
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with { Provider = "auto" }
         });
 
         var error = Should.Throw<WorkspaceException>(() =>
             new WorkspaceIndexer().IndexFile(
-                workspace, "demo", "a.cs", new FakeEmbeddingProvider(), new FakeVectorStore()));
+                workspace, "demo", "a.cs", TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore())));
 
         error.Message.ShouldContain("must be resolved");
     }
@@ -253,7 +258,7 @@ public class EmbeddingIndexPhaseTests
         var provider = new FakeEmbeddingProvider();
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
 
         using (var store = OpenStore(workspace))
         {
@@ -263,7 +268,7 @@ public class EmbeddingIndexPhaseTests
         }
 
         vectorStore.ResetCounters();
-        indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore), reembed: true);
 
         vectorStore.UpsertedPointCount.ShouldBeGreaterThan(0);
         ListChunks(workspace).ShouldAllBe(c => c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
@@ -277,7 +282,7 @@ public class EmbeddingIndexPhaseTests
         WriteFile(workspace, "repo/b.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         uint fileId;
         using (var store = OpenStore(workspace))
@@ -287,7 +292,7 @@ public class EmbeddingIndexPhaseTests
         }
 
         File.Delete(Path.Combine(workspace, "repo", "b.cs"));
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.DeletedFileIds.ShouldBe([fileId]);
     }
@@ -300,11 +305,11 @@ public class EmbeddingIndexPhaseTests
         WriteFile(workspace, "repo/b.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         vectorStore.FailDelete = true;
 
         File.Delete(Path.Combine(workspace, "repo", "b.cs"));
-        var result = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var result = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         result.Warnings.ShouldContain(w => w.Contains("failed to remove vectors", StringComparison.OrdinalIgnoreCase));
     }
@@ -315,7 +320,7 @@ public class EmbeddingIndexPhaseTests
         var workspace = NewWorkspace();
         WriteFile(workspace, "repo/a.cs", Source);
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         File.Delete(Path.Combine(workspace, "repo", "a.cs"));
         var result = indexer.Index(workspace);
@@ -332,7 +337,7 @@ public class EmbeddingIndexPhaseTests
 
         new WorkspaceIndexer().Index(workspace, progress: progress);
 
-        progress.Events.ShouldNotContain(e => e.Contains(":Embeddings:", StringComparison.Ordinal));
+        progress.Events.ShouldNotContain(e => e.Contains(":Vectors:", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -343,10 +348,10 @@ public class EmbeddingIndexPhaseTests
         var progress = new RecordingProgress();
 
         new WorkspaceIndexer().Index(
-            workspace, progress: progress, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+            workspace, progress: progress, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         progress.Events.ShouldContain(e =>
-            e.StartsWith("phase:demo:Embeddings:", StringComparison.Ordinal) && !e.EndsWith(":0", StringComparison.Ordinal));
+            e.StartsWith("phase:demo:Vectors:", StringComparison.Ordinal) && !e.EndsWith(":0", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -462,7 +467,7 @@ public class EmbeddingIndexPhaseTests
         WriteFile(workspace, "repo/notes.md", "# notes");
         var vectorStore = new FakeVectorStore();
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         using var store = OpenStore(workspace);
         var repoId = store.FindRepo("demo")!.Id;
@@ -558,12 +563,12 @@ public class EmbeddingIndexPhaseTests
                 new ChunkDocument
                 {
                     Id = 1, FileId = 1, RepoId = repo.Id, StartLine = 1, EndLine = 5,
-                    Text = "class A { }", ChunkHash = "hash-a", EmbeddingStatus = "ok", ModelKey = TestModelKey
+                    Text = "class A { }", ChunkHash = "hash-a", VectorStatus = "ok", ModelKey = TestModelKey
                 },
                 new ChunkDocument
                 {
                     Id = 2, FileId = 2, RepoId = repo.Id, StartLine = 1, EndLine = 5,
-                    Text = "# notes", ChunkHash = "hash-b", EmbeddingStatus = "ok", ModelKey = TestModelKey
+                    Text = "# notes", ChunkHash = "hash-b", VectorStatus = "ok", ModelKey = TestModelKey
                 },
             ]);
             repoId = repo.Id;
@@ -788,7 +793,7 @@ public class EmbeddingIndexPhaseTests
 
         public void PhaseStarted(string repoName, IndexPhase phase, int totalItems)
         {
-            _inEmbeddings = phase == IndexPhase.Embeddings;
+            _inEmbeddings = phase == IndexPhase.Vectors;
             if (_inEmbeddings)
             {
                 EmbeddingsTotal = totalItems;

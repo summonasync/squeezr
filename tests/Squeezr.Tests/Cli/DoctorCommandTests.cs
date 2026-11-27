@@ -3,6 +3,7 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -106,8 +107,8 @@ public sealed class DoctorCommandTests
     private static void SaveEmbeddings(
         string root, string provider, string? model, int? dimensions, string? ollamaEndpoint = null)
     {
-        var config = ConfigFile.Load(root);
-        ConfigFile.Save(root, config with
+        var config = SemanticConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config with
         {
             Embeddings = config.Embeddings with
             {

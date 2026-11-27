@@ -2,13 +2,15 @@ using System.ComponentModel;
 using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Indexing.Query;
 
 namespace Squeezr.Cli.Commands;
 
@@ -88,6 +90,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 ReportWarning(warning);
             }
 
+            var arm = embeddings is not null && vectorStore is not null
+                ? new SemanticSearchArm(workspaceRoot, embeddings, vectorStore)
+                : null;
             var engine = new SearchEngine(workspaceRoot, rankExclusion);
             var response = engine.SearchHybridAsync(
                 new SearchQuery(
@@ -101,14 +106,13 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     settings.MaxTokens,
                     settings.Prefix,
                     kindFilter),
-                embeddings,
-                vectorStore,
+                arm,
                 cancellationToken).GetAwaiter().GetResult();
 
             var vectorStoreUnavailable = false;
             foreach (var warning in response.Warnings)
             {
-                if (warning == SearchEngine.VectorStoreUnavailableWarning)
+                if (warning == SemanticSearchArm.VectorStoreUnavailableWarning)
                 {
                     vectorStoreUnavailable = true;
                     if (jsonWarnings is not null)
@@ -173,8 +177,8 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
             if (vectorStoreUnavailable)
             {
-                AnsiConsole.MarkupLine($"[grey]{SearchEngine.VectorStoreUnavailableWarning}[/]");
-                var hint = QdrantEndpointHint.RestPortMisconfiguration(ConfigFile.Load(workspaceRoot).Qdrant.Endpoint);
+                AnsiConsole.MarkupLine($"[grey]{SemanticSearchArm.VectorStoreUnavailableWarning}[/]");
+                var hint = QdrantEndpointHint.RestPortMisconfiguration(SemanticConfigFile.Load(workspaceRoot).Qdrant.Endpoint);
                 if (hint is not null)
                 {
                     AnsiConsole.MarkupLine($"[grey]{hint.EscapeMarkup()}[/]");

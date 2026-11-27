@@ -1,5 +1,4 @@
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Indexing.Roslyn;
 using Squeezr.Core.Indexing.TreeSitter;
@@ -37,12 +36,10 @@ public sealed class WorkspaceIndexer
         bool full = false,
         bool noSemantic = false,
         IIndexProgress? progress = null,
-        IEmbeddingProvider? embeddings = null,
-        IVectorStore? vectorStore = null,
+        IIndexVectorPhase? vectorPhase = null,
         bool reembed = false,
         Action<string>? onStaleTakeover = null,
-        EmbeddingProviderResolution? embeddingProviderResolution = null,
-        string? embeddingsUnavailableReason = null,
+        string? semanticUnavailableReason = null,
         IReadOnlyList<string>? changedPaths = null,
         SemanticSessionPool? sessions = null,
         int? embedBudgetPerPass = null,
@@ -83,12 +80,12 @@ public sealed class WorkspaceIndexer
             var textCache = new Dictionary<uint, string>();
             var guard = SecretGuardIngestion.Load(workspaceRoot);
 
-            if (reembed && embeddings is not null && vectorStore is not null)
+            if (reembed && vectorPhase is not null)
             {
                 store.MarkAllChunksPending(null);
                 try
                 {
-                    vectorStore.DeleteCollectionAsync(CancellationToken.None).GetAwaiter().GetResult();
+                    vectorPhase.DropCollection(warnings);
                     store.ClearAllPendingReaps();
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
@@ -97,14 +94,10 @@ public sealed class WorkspaceIndexer
                 }
             }
 
-            var modelKey = embeddings is not null
-                ? EmbeddingModelKey.From(WithResolvedProvider(config.Embeddings, embeddingProviderResolution))
-                : null;
-
-            if (!reembed && embeddings is not null && vectorStore is not null)
+            if (!reembed && vectorPhase is not null)
             {
-                EnsureVectorCompatibility(embeddings, vectorStore, warnings);
-                ReplayPendingReaps(vectorStore, store, warnings);
+                vectorPhase.Preflight(warnings);
+                vectorPhase.ReplayJournal(store, warnings);
             }
 
             var works = new List<RepoWork>();
@@ -113,8 +106,8 @@ public sealed class WorkspaceIndexer
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var work = IndexRepo(workspaceRoot, store, repo, full, config, effectiveNoSemantic, warnings,
-                    textCache, progress, embeddings, vectorStore, modelKey, embedRemaining, Pacing(sessions, changedPaths),
-                    embeddingsUnavailableReason, cancellationToken);
+                    textCache, progress, vectorPhase, embedRemaining, Pacing(sessions, changedPaths),
+                    semanticUnavailableReason, cancellationToken);
                 if (embedRemaining is not null)
                 {
                     embedRemaining = Math.Max(0, embedRemaining.Value - work.Result.Embedded);
@@ -151,11 +144,11 @@ public sealed class WorkspaceIndexer
             }
 
             var deferredReaps = works.Sum(w => w.DeferredReaps) +
-                RemoveVectorsOfDeletedFiles(vectorStore, store, reaps, warnings, guard);
+                RemoveVectorsOfDeletedFiles(vectorPhase, store, reaps, warnings, guard);
 
             deferredReaps += ApplyTrigramUpdates(
                 workspaceRoot, store, manifest, warnings, textCache, SqueezrPaths.TrigramIndexPath(workspaceRoot),
-                changedDocs, tombstones, full, progress, vectorStore);
+                changedDocs, tombstones, full, progress, vectorPhase);
 
             if (progress is not null)
             {
@@ -165,7 +158,7 @@ public sealed class WorkspaceIndexer
                 }
             }
 
-            var embeddingsCompleted = works.All(w => w.Result.EmbeddingsCompleted);
+            var drainCompleted = works.All(w => w.Result.DrainCompleted);
             return new IndexResult(
                 works.Select(w => w.Result).ToList(), DateTime.UtcNow, warnings,
                 deferredReaps, store.CountPendingReaps(),
@@ -173,17 +166,14 @@ public sealed class WorkspaceIndexer
                 works.Sum(w => w.Result.GuardWithheldBuiltIns),
                 works.Sum(w => w.Result.GuardDropped),
                 works.Sum(w => w.Result.Embedded),
-                embeddingsCompleted,
+                drainCompleted,
                 works.Sum(w => w.Result.Throttled),
-                embeddingsCompleted ? null : embeddingsUnavailableReason);
+                drainCompleted ? null : semanticUnavailableReason);
         }
     }
 
     private static Dictionary<uint, int[]> ToPostings(string text) =>
         TrigramExtractor.ExtractPostings(text).ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
-
-    private static EmbeddingsConfig WithResolvedProvider(EmbeddingsConfig config, EmbeddingProviderResolution? resolution) =>
-        resolution is null ? config : config with { Provider = resolution.Provider };
 
     private static string DecodeUtf8(byte[] bytes) =>
         bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
@@ -201,7 +191,7 @@ public sealed class WorkspaceIndexer
         List<(uint RepoId, uint Id)> tombstones,
         bool full,
         IIndexProgress? progress,
-        IVectorStore? vectorStore)
+        IIndexVectorPhase? vectorPhase)
     {
         uint? version = null;
         if (!full)
@@ -264,17 +254,15 @@ public sealed class WorkspaceIndexer
         }
 
         return RebuildTrigramIndex(
-            workspaceRoot, store, manifest, warnings, textCache, trigramPath, progress, vectorStore);
+            workspaceRoot, store, manifest, warnings, textCache, trigramPath, progress, vectorPhase);
     }
 
     public FileDocument? IndexFile(
         string workspaceRoot,
         string repoName,
         string relativePath,
-        IEmbeddingProvider? embeddings = null,
-        IVectorStore? vectorStore = null,
-        Action<string>? onStaleTakeover = null,
-        EmbeddingProviderResolution? embeddingProviderResolution = null)
+        IIndexVectorPhase? vectorPhase = null,
+        Action<string>? onStaleTakeover = null)
     {
         if (!WorkspaceManifestFile.Exists(workspaceRoot))
         {
@@ -309,7 +297,7 @@ public sealed class WorkspaceIndexer
             {
                 if (existing is not null)
                 {
-                    DropFile(existing, store, vectorStore, warnings, guard);
+                    DropFile(existing, store, vectorPhase, warnings, guard);
                     SaveWithheldState(store, repo.Name, repoDoc, now, guard, droppedProtected: 1);
                 }
 
@@ -319,10 +307,7 @@ public sealed class WorkspaceIndexer
             var fullPath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
             var rules = IgnoreRuleset.ForFile(repoRoot, config, relativePath, warnings.Add);
 
-            if (embeddings is not null && vectorStore is not null)
-            {
-                ReplayPendingReaps(vectorStore, store, warnings);
-            }
+            vectorPhase?.ReplayJournal(store, warnings);
 
             List<FileDocument> changed = [];
             List<(uint RepoId, uint Id)> tombstones = [];
@@ -338,7 +323,7 @@ public sealed class WorkspaceIndexer
                     return null;
                 }
 
-                DropFile(existing, store, vectorStore, warnings, guard);
+                DropFile(existing, store, vectorPhase, warnings, guard);
                 changed = [];
                 tombstones = [(existing.RepoId, existing.Id)];
             }
@@ -370,7 +355,7 @@ public sealed class WorkspaceIndexer
                         return null;
                     }
 
-                    DropFile(existing, store, vectorStore, warnings, guard);
+                    DropFile(existing, store, vectorPhase, warnings, guard);
                     changed = [];
                     tombstones = [(existing.RepoId, existing.Id)];
                 }
@@ -386,7 +371,7 @@ public sealed class WorkspaceIndexer
                     return null;
                 }
 
-                DropFile(existing, store, vectorStore, warnings, guard);
+                DropFile(existing, store, vectorPhase, warnings, guard);
                 changed = [];
                 tombstones = [(existing.RepoId, existing.Id)];
             }
@@ -429,7 +414,7 @@ public sealed class WorkspaceIndexer
                     : [];
                 var tsTargets = IsTreeSitterLanguage(doc.Language) ? new List<FileDocument> { doc } : [];
                 Dictionary<uint, HashSet<string>> priorChunkHashes =
-                    embeddings is not null && vectorStore is not null && existing is not null
+                    vectorPhase is not null && existing is not null
                         ? SnapshotChunkHashes(store, [existing.Id])
                         : [];
 
@@ -445,13 +430,11 @@ public sealed class WorkspaceIndexer
                 IndexFallbackChunks(
                     store, repoDoc, changedByPath, providerPaths, config.Chunking, textCache);
 
-                if (embeddings is not null && vectorStore is not null)
+                if (vectorPhase is not null)
                 {
                     var reaped = RequeueReapedFiles(store, FilesWithStalePoints(store, priorChunkHashes));
-                    DeleteVectorsForFiles(vectorStore, store, reaped, warnings, guard);
-                    var modelKey = EmbeddingModelKey.From(
-                        WithResolvedProvider(config.Embeddings, embeddingProviderResolution));
-                    EmbeddingIndexPhase.Run(repoDoc, store, modelKey, embeddings, vectorStore, warnings.Add);
+                    vectorPhase.RetirePoints(store, reaped, warnings, guard);
+                    vectorPhase.DrainFile(repoDoc, store, config, warnings);
                 }
 
                 changed = [doc];
@@ -460,7 +443,7 @@ public sealed class WorkspaceIndexer
 
             ApplyTrigramUpdates(
                 workspaceRoot, store, manifest, warnings, textCache, SqueezrPaths.TrigramIndexPath(workspaceRoot),
-                changed, tombstones, full: false, progress: null, vectorStore);
+                changed, tombstones, full: false, progress: null, vectorPhase);
 
             var priorState = store.GetIndexState(repo.Name);
             store.SaveIndexState(new IndexStateDocument
@@ -672,7 +655,7 @@ public sealed class WorkspaceIndexer
         {
             if (existing is not null)
             {
-                DropFile(existing, store, vectorStore: null, warnings, guard);
+                DropFile(existing, store, vectorPhase: null, warnings, guard);
                 batch.Removed++;
                 batch.GuardDropped++;
             }
@@ -690,7 +673,7 @@ public sealed class WorkspaceIndexer
                 return;
             }
 
-            DropFile(existing, store, vectorStore: null, warnings, guard);
+            DropFile(existing, store, vectorPhase: null, warnings, guard);
             batch.Tombstones.Add((existing.RepoId, existing.Id));
             batch.Removed++;
         }
@@ -926,12 +909,10 @@ public sealed class WorkspaceIndexer
         List<string> warnings,
         Dictionary<uint, string> textCache,
         IIndexProgress? progress,
-        IEmbeddingProvider? embeddings,
-        IVectorStore? vectorStore,
-        string? modelKey,
+        IIndexVectorPhase? vectorPhase,
         int? embedBudget,
         PacedPass? pacing,
-        string? embeddingsUnavailableReason,
+        string? semanticUnavailableReason,
         CancellationToken cancellationToken)
     {
         var repoDoc = store.FindRepo(repo.Name)
@@ -974,7 +955,7 @@ public sealed class WorkspaceIndexer
         var changed = new List<FileDocument>();
         // a reap drops every point of a re-chunked file, so it is only safe in a pass that can embed the
         // replacement chunks right after — a --no-semantic pass leaves the vector store alone entirely
-        var vectorsEnabled = embeddings is not null && vectorStore is not null;
+        var vectorsEnabled = vectorPhase is not null;
         var reapCandidates = new List<uint>();
 
         foreach (var file in walk.Files)
@@ -1097,22 +1078,20 @@ public sealed class WorkspaceIndexer
 
         var deferredReaps = 0;
         var embedded = 0;
-        var embeddingsCompleted = true;
-        if (embeddings is not null && vectorStore is not null)
+        var drainCompleted = true;
+        if (vectorPhase is not null)
         {
             var reaped = RequeueReapedFiles(store, FilesWithStalePoints(store, priorChunkHashes));
-            deferredReaps = DeleteVectorsForFiles(vectorStore, store, reaped, warnings, guard);
+            deferredReaps = vectorPhase.RetirePoints(store, reaped, warnings, guard);
             if (embedBudget is null or > 0)
             {
-                var phase = EmbeddingIndexPhase.Run(
-                    repoDoc, store, modelKey!, embeddings, vectorStore, warnings.Add, progress, embedBudget);
-                embedded = phase.Embedded;
-                embeddingsCompleted = phase.Completed;
+                (embedded, drainCompleted) = vectorPhase.DrainRepo(
+                    repoDoc, store, config, warnings, progress, embedBudget);
             }
         }
-        else if (embeddingsUnavailableReason is not null && !noSemantic)
+        else if (semanticUnavailableReason is not null && !noSemantic)
         {
-            embeddingsCompleted = false;
+            drainCompleted = false;
         }
 
         var totalFiles = store.CountFiles(repoDoc.Id);
@@ -1143,32 +1122,11 @@ public sealed class WorkspaceIndexer
         return new RepoWork(
             new RepoIndexResult(
                 repo.Name, added, modified, reaps.Count, skipped, totalFiles, walk.Ignored, ignoredSnapshot,
-                guard.Withheld, guard.WithheldByBuiltIns, deletedProtected, embedded, embeddingsCompleted,
-                semantic.Throttled, embeddingsCompleted ? null : embeddingsUnavailableReason),
+                guard.Withheld, guard.WithheldByBuiltIns, deletedProtected, embedded, drainCompleted,
+                semantic.Throttled, drainCompleted ? null : semanticUnavailableReason),
             changed,
             reaps,
             deferredReaps);
-    }
-
-    private static void EnsureVectorCompatibility(IEmbeddingProvider embeddings, IVectorStore vectorStore, List<string> warnings)
-    {
-        try
-        {
-            if (!vectorStore.IsAvailableAsync(CancellationToken.None).GetAwaiter().GetResult())
-            {
-                return;
-            }
-
-            vectorStore.EnsureCollectionAsync(embeddings.Dimensions, CancellationToken.None).GetAwaiter().GetResult();
-        }
-        catch (VectorDimensionMismatchException)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
-        {
-            warnings.Add($"vector preflight skipped: {ex.Message}");
-        }
     }
 
     // Every row that hangs off a file row leaves with it, and the count comes back: a purge that says how many
@@ -1226,32 +1184,32 @@ public sealed class WorkspaceIndexer
     // cannot remove go to the reap journal for the next pass that can — and only for files that actually held
     // vectors: a never-embedded id has nothing to reap, and the walk hands freed ids out again.
     private static int RemoveVectorsOfDeletedFiles(
-        IVectorStore? vectorStore,
+        IIndexVectorPhase? vectorPhase,
         MetaStore store,
         IReadOnlyList<FileReap> deleted,
         List<string> warnings,
         SecretGuardIngestion guard)
     {
-        if (vectorStore is not null)
+        if (vectorPhase is not null)
         {
-            return DeleteVectorsForFiles(vectorStore, store, deleted.Select(r => r.Target).ToList(), warnings, guard);
+            return vectorPhase.RetirePoints(store, deleted.Select(r => r.Target).ToList(), warnings, guard);
         }
 
         var owed = deleted.Where(r => r.HadVectors).Select(r => r.Target).ToList();
         return owed.Count > 0
-            ? DeferReap(store, owed, warnings, "this pass carries no vector store", guard)
+            ? VectorReapJournal.Defer(store, owed, warnings, "this pass carries no vector store", guard)
             : 0;
     }
 
     private static DropOutcome DropFile(
-        FileDocument file, MetaStore store, IVectorStore? vectorStore, List<string> warnings, SecretGuardIngestion guard)
+        FileDocument file, MetaStore store, IIndexVectorPhase? vectorPhase, List<string> warnings, SecretGuardIngestion guard)
     {
         var reap = CaptureReap(store, file);
         var rowsRemoved = CascadeSemanticRecords(reap.Id, store);
         store.DeleteFile(reap.Id);
         return new DropOutcome(
             rowsRemoved + 1,
-            RemoveVectorsOfDeletedFiles(vectorStore, store, [reap], warnings, guard));
+            RemoveVectorsOfDeletedFiles(vectorPhase, store, [reap], warnings, guard));
     }
 
     // What one file's retirement took out of the store: its own row plus everything that hung off it, and how
@@ -1284,7 +1242,7 @@ public sealed class WorkspaceIndexer
 
         // one batched half for the whole purge: the journal takes every owed cleanup at once and the pass says
         // it once, instead of one identical warning per retired file
-        var reapsQueued = RemoveVectorsOfDeletedFiles(vectorStore: null, store, reaps, warnings, guard);
+        var reapsQueued = RemoveVectorsOfDeletedFiles(vectorPhase: null, store, reaps, warnings, guard);
 
         var namedEntries = store.ListPendingReaps()
             .Where(entry => entry.Path is not null && guard.IsProtected(entry.Path))
@@ -1405,59 +1363,6 @@ public sealed class WorkspaceIndexer
         return targets;
     }
 
-    private static int DeleteVectorsForFiles(
-        IVectorStore vectorStore,
-        MetaStore store,
-        IReadOnlyList<PendingReapTarget> files,
-        List<string> warnings,
-        SecretGuardIngestion guard)
-    {
-        if (files.Count == 0)
-        {
-            return 0;
-        }
-
-        var fileIds = files.Select(f => f.FileId).ToList();
-        try
-        {
-            if (!vectorStore.IsAvailableAsync(CancellationToken.None).GetAwaiter().GetResult())
-            {
-                return DeferReap(store, files, warnings, "vector store unavailable", guard);
-            }
-
-            vectorStore.DeleteByFileIdsAsync(fileIds, CancellationToken.None).GetAwaiter().GetResult();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
-        {
-            return DeferReap(
-                store, files, warnings, $"failed to remove vectors for {fileIds.Count} file(s): {ex.Message}", guard);
-        }
-
-        return 0;
-    }
-
-    private static int DeferReap(
-        MetaStore store,
-        IReadOnlyList<PendingReapTarget> files,
-        List<string> warnings,
-        string reason,
-        SecretGuardIngestion guard)
-    {
-        try
-        {
-            store.EnqueuePendingReaps(WithoutProtectedPaths(files, guard));
-            warnings.Add($"{reason}; point cleanup for {files.Count} file(s) deferred to a later pass");
-            return files.Count;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
-        {
-            warnings.Add(
-                $"{reason}; point cleanup for {files.Count} file(s) NOT deferred " +
-                $"(journal write failed: {ex.Message}) — those points stay orphaned");
-            return 0;
-        }
-    }
-
     // The journal is meta.db content like any other row, so a queued cleanup for a protected path would keep
     // that name in the store bytes after the file row itself is gone. The id is what replay deletes by; the
     // name only proves the id still belongs to the file it was queued for, and "no live row behind the id" is
@@ -1479,66 +1384,6 @@ public sealed class WorkspaceIndexer
     // written for a file that no longer exists: deleting by that id would destroy a stranger's vectors and
     // spend the entry on the impostor, leaving the real orphans unattributed forever. Such entries are
     // dropped and handed to the hash-level route ('squeezr vectors reconcile'), which never names a file.
-    private static void ReplayPendingReaps(IVectorStore vectorStore, MetaStore store, List<string> warnings)
-    {
-        var entries = store.ListPendingReaps();
-        if (entries.Count == 0)
-        {
-            return;
-        }
-
-        var owed = new List<uint>();
-        var recycled = new List<uint>();
-        foreach (var entry in entries)
-        {
-            var fileId = (uint)entry.FileId;
-            var live = store.FindFileById(fileId);
-            if (live is null
-                || (entry.Path is not null && live.RepoId == entry.RepoId &&
-                    string.Equals(live.Path, entry.Path, StringComparison.Ordinal)))
-            {
-                owed.Add(fileId);
-            }
-            else
-            {
-                recycled.Add(fileId);
-            }
-        }
-
-        if (recycled.Count > 0)
-        {
-            store.ClearPendingReaps(recycled);
-            warnings.Add(
-                $"{recycled.Count} deferred point cleanup(s) dropped: those file ids now name different files — " +
-                "run 'squeezr vectors reconcile --apply' to remove the points their deletions left behind");
-        }
-
-        if (owed.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (!vectorStore.IsAvailableAsync(CancellationToken.None).GetAwaiter().GetResult())
-            {
-                return;
-            }
-
-            vectorStore.DeleteByFileIdsAsync(owed, CancellationToken.None).GetAwaiter().GetResult();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not OperationCanceledException)
-        {
-            warnings.Add($"deferred point cleanup for {owed.Count} file(s) failed again: {ex.Message}");
-            return;
-        }
-
-        var requeued = owed.Sum(store.MarkFileChunksPending);
-        store.ClearPendingReaps(owed);
-        warnings.Add(
-            $"replayed deferred point cleanup for {owed.Count} file(s); {requeued} chunk(s) re-queued for embedding");
-    }
-
     internal static int RebuildTrigramIndex(
         string workspaceRoot,
         MetaStore store,
@@ -1547,7 +1392,7 @@ public sealed class WorkspaceIndexer
         Dictionary<uint, string> textCache,
         string targetPath,
         IIndexProgress? progress = null,
-        IVectorStore? vectorStore = null)
+        IIndexVectorPhase? vectorPhase = null)
     {
         var writer = new TrigramIndexWriter();
         var reposById = store.ListRepos().ToDictionary(r => r.Id);
@@ -1580,7 +1425,7 @@ public sealed class WorkspaceIndexer
             if (guard.IsProtected(row.Path))
             {
                 NoteStoreDrop(guard, protectedDrops, warnings, row.Path, StoreDrop.Unreadable, $" ({reason})");
-                deferredReaps += DropFile(row, store, vectorStore, warnings, guard).ReapsQueued;
+                deferredReaps += DropFile(row, store, vectorPhase, warnings, guard).ReapsQueued;
                 return;
             }
 
@@ -1605,7 +1450,7 @@ public sealed class WorkspaceIndexer
                 || !entriesByName.TryGetValue(repoDoc.Name, out var entry))
             {
                 NoteStoreDrop(guard, protectedDrops, warnings, file.Path, StoreDrop.RepositoryGone);
-                deferredReaps += DropFile(file, store, vectorStore, warnings, guard).ReapsQueued;
+                deferredReaps += DropFile(file, store, vectorPhase, warnings, guard).ReapsQueued;
                 continue;
             }
 
@@ -1634,7 +1479,7 @@ public sealed class WorkspaceIndexer
                         if (!present)
                         {
                             NoteStoreDrop(guard, protectedDrops, warnings, file.Path, StoreDrop.MissingOnDisk);
-                            deferredReaps += DropFile(file, store, vectorStore, warnings, guard).ReapsQueued;
+                            deferredReaps += DropFile(file, store, vectorPhase, warnings, guard).ReapsQueued;
                             continue;
                         }
                     }

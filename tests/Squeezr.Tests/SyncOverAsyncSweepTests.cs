@@ -1,5 +1,6 @@
 using Shouldly;
 using Xunit.Abstractions;
+using Squeezr.Semantic.Indexing;
 
 namespace Squeezr.Tests;
 
@@ -11,16 +12,19 @@ public class SyncOverAsyncSweepTests
 
     // Ratchet floor from feature 032 (spec 823f8925 item 4, task T1). Measured 2026-11-24 at main
     // ae4d016: 21 GetAwaiter().GetResult() sites in src/Squeezr.Core — WorktreeReconcile 3,
-    // WorkspaceIndexer 7, EmbeddingIndexPhase 6, RoslynSession 2, RoslynProvider 3. The floor is
-    // two-sided on purpose: growth fails, and so does a drop until the constant follows the code down.
-    private const int CoreBaseline = 21;
+    // WorkspaceIndexer 7, EmbeddingIndexPhase 6, RoslynSession 2, RoslynProvider 3. Lowered by
+    // feature 130 task T1 (2026-11-27): the whole vector drain moved behind the IIndexVectorPhase
+    // seam into Squeezr.Semantic, taking EmbeddingIndexPhase 6, WorkspaceIndexer 7 and the
+    // WorktreeReconcile 3 sampling sites with it. What remains in Core is the Roslyn pair. The floor
+    // is two-sided on purpose: growth fails, and so does a drop until the constant follows the code down.
+    private const int CoreBaseline = 5;
 
     // A broken glob finds almost nothing; real debt reduction shaves a site or two off the baseline.
     // The denominator floor sits far enough below the baseline to tell those apart, so the ratchet
     // message below stays the one an honest drop sees.
-    private const int CoreDenominatorFloor = 10;
+    private const int CoreDenominatorFloor = 3;
 
-    private const int CoreFileFloor = 4;
+    private const int CoreFileFloor = 2;
 
     [Fact]
     public void Core_SyncOverAsyncSites_SitAtTheRatchetedBaseline()

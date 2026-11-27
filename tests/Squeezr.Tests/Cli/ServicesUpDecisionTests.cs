@@ -1,6 +1,7 @@
 using Shouldly;
 using Squeezr.Cli.Commands;
 using Squeezr.Core.Infra;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Tests.Cli;
 

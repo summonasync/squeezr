@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Squeezr.Core.Indexing;
 
 // DeferredReaps/PendingReaps are the machine-readable half of "no silent orphaning" (059): the first says
@@ -16,6 +18,6 @@ public sealed record IndexResult(
     int GuardWithheldBuiltIns = 0,
     int GuardDropped = 0,
     int Embedded = 0,
-    bool EmbeddingsCompleted = true,
+    [property: JsonPropertyName("embeddingsCompleted")] bool DrainCompleted = true,
     int Throttled = 0,
-    string? EmbeddingsSkipped = null);
+    [property: JsonPropertyName("embeddingsSkipped")] string? DrainSkippedReason = null);

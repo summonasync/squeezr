@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Squeezr.Tests" />
+    <InternalsVisibleTo Include="Squeezr.Semantic" />
   </ItemGroup>
 
   <ItemGroup>

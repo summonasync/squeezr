@@ -3,6 +3,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -45,7 +46,7 @@ public class WorkspaceIndexerBoundedPassTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         manager.AddRepo(".", "demo");
-        ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
+        SemanticConfigFile.Save(workspace, SemanticConfigFile.Load(workspace) with
         {
             Watch = new WatchConfig { DebounceSeconds = 1 }
         });

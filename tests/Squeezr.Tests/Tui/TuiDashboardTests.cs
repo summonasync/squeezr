@@ -4,6 +4,7 @@ using Squeezr.Cli.Tui;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Tui;
 
@@ -56,7 +57,7 @@ public class TuiDashboardTests
 
     private static void PointConfigAt(string workspace, string provider)
     {
-        var config = ConfigFile.Load(workspace) with
+        var config = SemanticConfigFile.Load(workspace) with
         {
             Qdrant = new QdrantConfig { Endpoint = "http://localhost:1" },
             Embeddings = new EmbeddingsConfig
@@ -65,6 +66,6 @@ public class TuiDashboardTests
                 Ollama = new OllamaOptions { Endpoint = "http://localhost:1" },
             },
         };
-        ConfigFile.Save(workspace, config);
+        SemanticConfigFile.Save(workspace, config);
     }
 }

@@ -1,9 +1,11 @@
 using System.Reflection;
 using Spectre.Console;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Tui;
 
@@ -49,7 +51,7 @@ public static class TuiDashboard
     {
         try
         {
-            var config = ConfigFile.Load(workspaceRoot);
+            var config = SemanticConfigFile.Load(workspaceRoot);
             return (config.Embeddings.Provider.Trim(), config.Embeddings.Ollama);
         }
         catch (WorkspaceException)

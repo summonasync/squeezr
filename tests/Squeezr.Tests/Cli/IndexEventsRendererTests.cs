@@ -18,7 +18,7 @@ public sealed class IndexEventsRendererTests
         writer.ToString().ShouldBeEmpty();
 
         renderer.PhaseStarted("demo", IndexPhase.Semantic, 2);
-        renderer.PhaseStarted("demo", IndexPhase.Embeddings, 0);
+        renderer.PhaseStarted("demo", IndexPhase.Vectors, 0);
         renderer.PhaseStarted("demo", IndexPhase.Trigram, 1);
 
         var lines = Lines(writer);
@@ -60,7 +60,7 @@ public sealed class IndexEventsRendererTests
 
         renderer.PhaseStarted("demo", IndexPhase.Semantic, 1);
         renderer.ItemProcessed("demo", "a.cs", 4);
-        renderer.PhaseStarted("demo", IndexPhase.Embeddings, 1);
+        renderer.PhaseStarted("demo", IndexPhase.Vectors, 1);
         renderer.ItemProcessed("demo", "chunkhash");
         renderer.PhaseStarted("demo", IndexPhase.Trigram, 1);
         renderer.ItemProcessed("demo", "a.cs");
@@ -76,7 +76,7 @@ public sealed class IndexEventsRendererTests
         var writer = new StringWriter();
         var renderer = new IndexEventsRenderer(new IndexEventWriter(writer));
 
-        renderer.PhaseStarted("demo", IndexPhase.Embeddings, 1024);
+        renderer.PhaseStarted("demo", IndexPhase.Vectors, 1024);
         for (var i = 0; i < 1025; i++)
         {
             renderer.ItemProcessed("demo", $"chunk{i}");
@@ -111,13 +111,13 @@ public sealed class IndexEventsRendererTests
         var writer = new StringWriter();
         var renderer = new IndexEventsRenderer(new IndexEventWriter(writer));
 
-        renderer.PhaseStarted("alpha", IndexPhase.Embeddings, 600);
+        renderer.PhaseStarted("alpha", IndexPhase.Vectors, 600);
         for (var i = 0; i < 600; i++)
         {
             renderer.ItemProcessed("alpha", $"a{i}");
         }
 
-        renderer.PhaseStarted("beta", IndexPhase.Embeddings, 600);
+        renderer.PhaseStarted("beta", IndexPhase.Vectors, 600);
         for (var i = 0; i < 512; i++)
         {
             renderer.ItemProcessed("beta", $"b{i}");

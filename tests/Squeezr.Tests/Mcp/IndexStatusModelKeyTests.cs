@@ -4,6 +4,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -89,8 +90,8 @@ public sealed class IndexStatusModelKeyTests : IDisposable
     public async Task IndexStatus_UnsupportedProvider_OmitsBothModelFields()
     {
         var workspace = NewIndexedWorkspace(provider: "ollama");
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with { Provider = "onnx" }
         });
@@ -119,8 +120,8 @@ public sealed class IndexStatusModelKeyTests : IDisposable
         var manager = new WorkspaceManager(workspace);
         manager.Init("model-key-demo");
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with
             {

@@ -3,6 +3,7 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Workspace;
 
@@ -78,7 +79,7 @@ public class WorkspaceManagerInitTests
         var root = TestDirs.NewTempDir();
         new WorkspaceManager(root).Init(null);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("auto");
         config.Embeddings.OpenAiCompatible.Endpoint.ShouldBe("https://api.openai.com/v1");
@@ -113,7 +114,7 @@ public class WorkspaceManagerInitTests
             "**/TestResults/**"
         ];
         config.Indexing.Ignore.ShouldBe(pinnedDefaults);
-        config.Indexing.Ignore.ShouldBe(SqueezrConfig.CreateDefault().Indexing.Ignore);
+        config.Indexing.Ignore.ShouldBe(SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Indexing.Ignore);
         config.Indexing.Ignore.Count.ShouldBe(21);
         config.Indexing.Ignore[0].ShouldBe("**/node_modules/**");
         config.Indexing.Ignore[^1].ShouldBe("**/TestResults/**");

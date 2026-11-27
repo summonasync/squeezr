@@ -1,6 +1,6 @@
 using System.Net;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Workspace;
 
 namespace Squeezr.Tests.Embeddings;

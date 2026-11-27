@@ -114,10 +114,10 @@ public class IndexEventWriterTests
     {
         var writer = new StringWriter();
         var result = new IndexResult(
-            [new RepoIndexResult("demo", 1, 0, 0, 0, 1, 0, EmbeddingsCompleted: false, EmbeddingsSkipped: "provider unavailable: ollama probe failed")],
+            [new RepoIndexResult("demo", 1, 0, 0, 0, 1, 0, DrainCompleted: false, DrainSkippedReason: "provider unavailable: ollama probe failed")],
             DateTime.UtcNow, [],
-            EmbeddingsCompleted: false,
-            EmbeddingsSkipped: "provider unavailable: ollama probe failed");
+            DrainCompleted: false,
+            DrainSkippedReason: "provider unavailable: ollama probe failed");
 
         new IndexEventWriter(writer).Completed(result, 7, null);
 

@@ -2,12 +2,13 @@ using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.TreeSitter;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.TreeSitter;
 
@@ -61,12 +62,12 @@ public class TreeSitterRoutingTests
         }
 
         new WorkspaceIndexer().Index(
-            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+            workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
         {
             var repoId = store.FindRepo("demo")!.Id;
             var allChunks = store.ListFiles(repoId).SelectMany(f => store.ListChunksByFile(f.Id)).ToList();
-            allChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+            allChunks.ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
         }
     }
 
@@ -489,7 +490,7 @@ public class TreeSitterRoutingTests
         var result = TreeSitterIndexPhase.Run(
             Path.Combine(workspace, "repo"), repoDoc, store, [jsFile],
             new Dictionary<uint, string> { [jsFile.Id] = text },
-            SqueezrConfig.CreateDefault().Chunking, noSemantic: false,
+            SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Chunking, noSemantic: false,
             new ThrowingProvider(), warnings.Add);
 
         result.FailedPaths.ShouldBe(["src/app.js"]);
@@ -498,7 +499,7 @@ public class TreeSitterRoutingTests
         store.ListSymbolsByFile(jsFile.Id).ShouldBeEmpty();
 
         store.DeleteChunksByFile(jsFile.Id);
-        var fallback = FallbackChunker.Chunk(text, SqueezrConfig.CreateDefault().Chunking);
+        var fallback = FallbackChunker.Chunk(text, SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Chunking);
         store.InsertChunks(fallback.Select(c => new ChunkDocument
         {
             FileId = jsFile.Id,
@@ -569,8 +570,8 @@ public class TreeSitterRoutingTests
         TreeSitterIndexPhase.Run(
             Path.Combine(workspace, "repo"), repoDoc, store, [jsFile],
             new Dictionary<uint, string> { [jsFile.Id] = jsText },
-            SqueezrConfig.CreateDefault().Chunking, noSemantic: true,
-            new TreeSitterProvider(SqueezrConfig.CreateDefault()), warnings.Add);
+            SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Chunking, noSemantic: true,
+            new TreeSitterProvider(SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Core), warnings.Add);
 
         store.ListRefsByFile(rustFile.Id).ShouldNotContain(r => r.ToName == "stale_before_phase");
     }

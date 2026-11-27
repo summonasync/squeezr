@@ -68,7 +68,7 @@ public class GoFixtureEndToEndTests
                 fileChunks.ShouldContain(c => c.StartLine == symbol.StartLine && c.EndLine == symbol.EndLine);
             }
 
-            fileChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey != null);
+            fileChunks.ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey != null);
         }
 
         symbols.ShouldBe(new Dictionary<string, int>
@@ -321,11 +321,7 @@ public class GoFixtureEndToEndTests
         var chunk = store.ListChunksByFile(registry.Id).Single(c => c.StartLine == 59);
         store.Dispose();
 
-        var response = await new SearchEngine(workspace).SearchHybridAsync(
-            new SearchQuery("unmatched paraphrase zzz", false, null, null, null, null, null, null),
-            new TsFixtureHarness.FakeEmbeddingProvider(),
-            new TsFixtureHarness.OneHitVectorStore(repoId, chunk),
-            CancellationToken.None);
+        var response = await new SearchEngine(workspace).SearchHybridAsync(new SearchQuery("unmatched paraphrase zzz", false, null, null, null, null, null, null), TestVectorPhase.Arm(workspace, new TsFixtureHarness.FakeEmbeddingProvider(), new TsFixtureHarness.OneHitVectorStore(repoId, chunk)), CancellationToken.None);
 
         var hit = response.Matches.Single(m => m.Path == "internal/registry/registry.go");
         hit.Source.ShouldBe("semantic");

@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 using Shouldly;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -76,8 +76,8 @@ public partial class EmbeddingProviderServicesTests
         FindRepoRoot(), "src", project, "Embeddings", file));
 
     private static List<string> RuntimeProviderNames() =>
-        SwitchLabels(Read("Squeezr.Cli", "EmbeddingProviderFactory.cs"))
-            .Concat(SwitchLabels(Read("Squeezr.Core", "EmbeddingProviderResolver.cs")))
+        SwitchLabels(Read("Squeezr.Semantic", "EmbeddingProviderFactory.cs"))
+            .Concat(SwitchLabels(Read("Squeezr.Semantic", "EmbeddingProviderResolver.cs")))
             .Distinct(StringComparer.Ordinal)
             .ToList();
 

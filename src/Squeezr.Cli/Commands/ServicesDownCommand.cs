@@ -3,6 +3,7 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Infra;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Infra;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Cli.Commands;
 

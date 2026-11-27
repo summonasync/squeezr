@@ -1,7 +1,8 @@
 using System.Net;
 using Shouldly;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -51,7 +52,7 @@ public class EmbeddingRuntimeFactoryTests
     public void TryCreate_InvalidQdrantEndpoint_ReturnsNullsAndWarning()
     {
         var root = TestDirs.NewTempDir();
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "openai" },
             Qdrant = new QdrantConfig { Endpoint = "not a uri" }
@@ -69,7 +70,7 @@ public class EmbeddingRuntimeFactoryTests
     public void TryCreate_UnknownProvider_ReturnsNullsAndWarning()
     {
         var root = TestDirs.NewTempDir();
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "bert" }
         });
@@ -89,7 +90,7 @@ public class EmbeddingRuntimeFactoryTests
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, "{}"),
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"models":[{"name":"nomic-embed-text"}]}"""));
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "auto" }
         });
@@ -109,7 +110,7 @@ public class EmbeddingRuntimeFactoryTests
     public void TryCreate_AutoWithUnreachableOllama_FailsWithTheProbeHint()
     {
         var root = TestDirs.NewTempDir();
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig
             {
@@ -135,7 +136,7 @@ public class EmbeddingRuntimeFactoryTests
         var root = TestDirs.NewTempDir();
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK, """{"models":[{"name":"nomic-embed-text"}]}"""));
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "ollama" }
         });
@@ -153,7 +154,7 @@ public class EmbeddingRuntimeFactoryTests
 
     private static void SaveConfig(string root, string apiKeyEnv)
     {
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig
             {

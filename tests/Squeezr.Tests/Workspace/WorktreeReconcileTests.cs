@@ -3,12 +3,14 @@ using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
+using Squeezr.Semantic.Indexing.Watch;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
 using Squeezr.Tests.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Workspace;
 
@@ -678,9 +680,10 @@ public sealed class WorktreeReconcileTests : IDisposable
         collection = new FakeVectorStore();
         new WorkspaceIndexer().Index(
             main,
-            embeddings: new FakeEmbeddingProvider(),
-            vectorStore: collection,
-            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+            vectorPhase: TestVectorPhase.Runtime(
+                new FakeEmbeddingProvider(),
+                collection,
+                new EmbeddingProviderResolution("ollama", null)));
         // the parent index run has to have produced points, or every threshold below measures an empty pair
         collection.UpsertedPointCount.ShouldNotBe(0);
         var child = AddWorktree(main, LaneBranch);
@@ -701,11 +704,14 @@ public sealed class WorktreeReconcileTests : IDisposable
 
     // The runtime the verb would build for a lane whose config names ollama: the resolution travels with it,
     // because an 'auto' provider has to be resolved before a model key can be computed at all.
-    private static WorktreeReconcileRuntime Runtime(IVectorStore store, IEmbeddingProvider provider) =>
-        new(provider, store, new EmbeddingProviderResolution("ollama", null), null, []);
+    private static WorktreeReconcileRuntime Runtime(IVectorStore store, IEmbeddingProvider provider)
+    {
+        var runtime = new WatchEmbeddingRuntime(provider, store, new EmbeddingProviderResolution("ollama", null));
+        return new(runtime, runtime, null, []);
+    }
 
     private static Func<string> ModelKey(string main) =>
-        () => EmbeddingModelKey.From(ConfigFile.Load(main).Embeddings);
+        () => EmbeddingModelKey.From(SemanticConfigFile.Load(main).Embeddings);
 
     private static void WriteSource(string root, bool withTwinFiles = false)
     {
@@ -735,10 +741,10 @@ public sealed class WorktreeReconcileTests : IDisposable
     }
 
     private static int CountEmbeddedRows(string root) =>
-        ListChunks(root).Count(chunk => chunk.EmbeddingStatus == "ok");
+        ListChunks(root).Count(chunk => chunk.VectorStatus == "ok");
 
     private static int CountPendingRows(string root) =>
-        ListChunks(root).Count(chunk => chunk.EmbeddingStatus != "ok");
+        ListChunks(root).Count(chunk => chunk.VectorStatus != "ok");
 
     private static int CountTotalRows(string root) => ListChunks(root).Count;
 
@@ -796,7 +802,7 @@ public sealed class WorktreeReconcileTests : IDisposable
             Text = "gitdir: /somewhere/above/.git/worktrees/lane-a",
             TokenCount = 6,
             ChunkHash = "legacy-marker-hash",
-            EmbeddingStatus = "pending",
+            VectorStatus = "pending",
         }]);
     }
 

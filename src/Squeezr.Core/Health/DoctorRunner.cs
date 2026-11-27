@@ -13,7 +13,6 @@ public sealed record DoctorReport(bool Healthy, IReadOnlyList<DoctorFinding> Fin
 public static class DoctorRemedies
 {
     public const string Index = "squeezr index";
-    public const string IndexCheckProvider = "squeezr index — then check the embeddings provider line";
     public const string WorkspaceRepair = "squeezr workspace repair";
     public const string ServicesUp = "squeezr services up";
     public const string FleetRestart = "squeezr fleet restart";
@@ -29,12 +28,12 @@ public static class DoctorRunner
     public static DoctorReport CollectWorkspaceFindings(
         DateTime utcNow,
         Func<int, bool>? processAlive = null,
-        Func<string, WorkspaceSemanticFacts>? semanticFacts = null)
+        Func<string, WorkspaceStatus, IReadOnlyList<DoctorFinding>?>? semanticFindings = null)
     {
         var findings = new List<DoctorFinding>();
         foreach (var entry in WorkspaceRegistry.Load())
         {
-            findings.AddRange(WorkspaceFindings(entry, utcNow, processAlive, semanticFacts));
+            findings.AddRange(WorkspaceFindings(entry, utcNow, processAlive, semanticFindings));
         }
 
         findings.AddRange(OrphanFindings());
@@ -46,7 +45,7 @@ public static class DoctorRunner
         WorkspaceRegistryEntry entry,
         DateTime utcNow,
         Func<int, bool>? processAlive,
-        Func<string, WorkspaceSemanticFacts>? semanticFacts)
+        Func<string, WorkspaceStatus, IReadOnlyList<DoctorFinding>?>? semanticFindings)
     {
         var findings = new List<DoctorFinding>();
         if (!Directory.Exists(entry.RootPath))
@@ -98,106 +97,13 @@ public static class DoctorRunner
             }
         }
 
-        findings.AddRange(SemanticCoverageFindings(entry, status, semanticFacts?.Invoke(entry.RootPath)));
+        if (semanticFindings?.Invoke(entry.RootPath, status) is { } extra)
+        {
+            findings.AddRange(extra);
+        }
+
         findings.AddRange(DaemonFindings(entry, utcNow, processAlive));
         return findings;
-    }
-
-    private static IEnumerable<DoctorFinding> SemanticCoverageFindings(
-        WorkspaceRegistryEntry entry,
-        WorkspaceStatus status,
-        WorkspaceSemanticFacts? facts)
-    {
-        if (facts is null)
-        {
-            yield break;
-        }
-
-        if (facts.Health.ModelProblem is { } problem)
-        {
-            yield return new DoctorFinding("embeddings provider", StateFail, problem, null);
-            yield break;
-        }
-
-        var config = TryLoadConfig(entry);
-        var chunks = status.Repos.Sum(r => r.Chunks);
-        if (config?.Indexing.NoSemantic == true || chunks == 0)
-        {
-            yield break;
-        }
-
-        if (facts.Health.ModelKey is { } modelKey)
-        {
-            yield return new DoctorFinding(
-                "embedding model", StateInfo, ModelVintageDetail(modelKey, facts.Health.OtherModelChunks), null);
-        }
-
-        if (facts.UnavailableReason is { } unavailable)
-        {
-            yield return new DoctorFinding("semantic search", StateInfo, $"facts unavailable: {unavailable}", null);
-            yield break;
-        }
-
-        if (facts.Health.CpuOnly is { } cpu)
-        {
-            yield return new DoctorFinding("embeddings provider", StateInfo, cpu, null);
-        }
-
-        if (facts.Qdrant is not { } qdrant)
-        {
-            yield break;
-        }
-
-        if (!qdrant.Available)
-        {
-            yield return new DoctorFinding(
-                "semantic search", StateFail,
-                $"qdrant unavailable — {chunks} chunk(s) without vectors, {qdrant.PendingChunks} pending",
-                DoctorRemedies.ServicesUp);
-            yield break;
-        }
-
-        if ((qdrant.Points ?? 0) == 0)
-        {
-            yield return new DoctorFinding(
-                "semantic search", StateFail,
-                $"semantic coverage 0% — {chunks} chunk(s) indexed, {qdrant.PendingChunks} pending, no vectors in the store",
-                DoctorRemedies.IndexCheckProvider);
-            yield break;
-        }
-
-        // one watch drain pass moves at most watch.embedBudgetPerPass chunks, so a backlog at or
-        // above that line has already outlived a full drain pass and is not transient catch-up work
-        var pendingThreshold = config?.Watch.EmbedBudgetPerPass ?? WatchConfig.DefaultEmbedBudgetPerPass;
-        if (qdrant.PendingChunks >= pendingThreshold)
-        {
-            yield return new DoctorFinding(
-                "semantic search", StateFail,
-                $"{qdrant.PendingChunks} chunk(s) pending vectors (threshold {pendingThreshold}{ThresholdOrigin(pendingThreshold)})",
-                DoctorRemedies.Index);
-        }
-    }
-
-    private static string ModelVintageDetail(string modelKey, int? otherModelChunks) =>
-        otherModelChunks is null
-            ? $"{modelKey} (vintage count unavailable)"
-            : $"{modelKey} — {otherModelChunks} chunk(s) carry vectors from another embedding model";
-
-    private static string ThresholdOrigin(int pendingThreshold)
-        => pendingThreshold == WatchConfig.DefaultEmbedBudgetPerPass ? string.Empty : ", watch.embedBudgetPerPass";
-
-    private static SqueezrConfig? TryLoadConfig(WorkspaceRegistryEntry entry)
-    {
-        try
-        {
-            return ConfigFile.Load(entry.RootPath);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // an unreadable config means no semantic judgment; the workspace-level checks already
-            // report the broken store, and the coverage arm may add its own honest fail on top
-            return null;
-        }
     }
 
     private static IEnumerable<DoctorFinding> DaemonFindings(

@@ -6,6 +6,7 @@ using Squeezr.Cli.Tui;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Tui;
 
@@ -35,8 +36,8 @@ public class TuiIndexRunnerTests
     public async Task Index_QdrantDown_CompletesWithWarning()
     {
         var workspace = NewWorkspaceWithRepo();
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with { Provider = "openai" },
             Qdrant = config.Qdrant with { Endpoint = "http://localhost:9" }
@@ -67,8 +68,8 @@ public class TuiIndexRunnerTests
     {
         var workspace = NewWorkspaceWithRepo();
         TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(workspace);
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with { Indexing = config.Indexing with { NoSemantic = true } });
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with { Indexing = config.Indexing with { NoSemantic = true } });
 
         var console = TuiTestHarness.InteractiveConsole();
         TuiTestHarness.PushMenuChoice(console, 3);

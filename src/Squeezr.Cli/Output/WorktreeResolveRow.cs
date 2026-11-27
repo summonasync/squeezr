@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 

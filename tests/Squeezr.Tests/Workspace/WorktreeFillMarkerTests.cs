@@ -3,6 +3,7 @@ using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
 using Squeezr.Tests.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Workspace;
 
@@ -82,12 +83,12 @@ public sealed class WorktreeFillMarkerTests : IDisposable
         File.WriteAllText(
             Path.Combine(childStoreDir, SqueezrPaths.ConfigFileName),
             System.Text.Json.JsonSerializer.Serialize(
-                Squeezr.Core.Configuration.SqueezrConfig.CreateDefault() with
+                Squeezr.Semantic.Configuration.SemanticConfig.Bind(Squeezr.Core.Configuration.SqueezrConfig.CreateDefault()) with
                 {
-                    Embeddings = new Squeezr.Core.Configuration.EmbeddingsConfig
+                    Embeddings = new Squeezr.Semantic.Configuration.EmbeddingsConfig
                     {
                         Provider = "ollama",
-                        Ollama = new Squeezr.Core.Configuration.OllamaOptions
+                        Ollama = new Squeezr.Semantic.Configuration.OllamaOptions
                         {
                             Model = "other-model",
                             ModelProfile = null,

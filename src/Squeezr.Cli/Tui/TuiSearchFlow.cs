@@ -1,9 +1,9 @@
 using Spectre.Console;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Query;
 
 namespace Squeezr.Cli.Tui;
 
@@ -57,6 +57,9 @@ public static class TuiSearchFlow
             SearchResponse response;
             try
             {
+                var arm = embeddings is not null && vectorStore is not null
+                    ? new SemanticSearchArm(workspaceRoot, embeddings, vectorStore)
+                    : null;
                 response = await new SearchEngine(workspaceRoot, rankExclusion).SearchHybridAsync(
                     new SearchQuery(
                         query.Trim(),
@@ -67,8 +70,7 @@ public static class TuiSearchFlow
                         Language: null,
                         TopK: HitListSize,
                         MaxTokens: SearchMaxTokens),
-                    embeddings,
-                    vectorStore,
+                    arm,
                     cancellationToken);
             }
             catch (WorkspaceException ex)
@@ -79,7 +81,7 @@ public static class TuiSearchFlow
 
             foreach (var warning in response.Warnings)
             {
-                if (warning == SearchEngine.VectorStoreUnavailableWarning)
+                if (warning == SemanticSearchArm.VectorStoreUnavailableWarning)
                 {
                     if (!session.TryMarkVectorStoreUnavailableShown())
                     {

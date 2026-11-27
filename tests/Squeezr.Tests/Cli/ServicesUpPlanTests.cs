@@ -6,6 +6,7 @@ using Squeezr.Cli.Commands;
 using Squeezr.Cli.Infra;
 using Squeezr.Core.Infra;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Tests.Cli;
 

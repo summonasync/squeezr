@@ -1,0 +1,81 @@
++ WS=/var/tmp/sqzrlite-t3-fixture
++ HOME_PIN=/var/tmp/sqzrlite-t3-home
++ rm -rf /var/tmp/sqzrlite-t3-home
++ mkdir -p /var/tmp/sqzrlite-t3-home
++ export SQUEEZR_HOME=/var/tmp/sqzrlite-t3-home
++ SQUEEZR_HOME=/var/tmp/sqzrlite-t3-home
++ export NO_COLOR=1
++ NO_COLOR=1
++ DLL=/mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll
++ SQZRL='dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll'
++ cd /var/tmp/sqzrlite-t3-fixture
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll init --json
+{"workspaceName":"sqzrlite-t3-fixture","rootPath":"/var/tmp/sqzrlite-t3-fixture","createdFiles":["/var/tmp/sqzrlite-t3-home/workspaces/sqzrlite-t3-fixture-501b07a1/workspace.json","/var/tmp/sqzrlite-t3-home/workspaces/sqzrlite-t3-fixture-501b07a1/config.json","/var/tmp/sqzrlite-t3-home/workspaces/sqzrlite-t3-fixture-501b07a1/meta.db"]}
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll add repo --name fixture
+Added repo fixture at repo
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll index --json
+{"repos":[{"name":"fixture","added":150,"modified":0,"deleted":0,"skipped":0,"files":150,"ignored":0,"guardWithheld":0,"guardWithheldBuiltIns":0,"guardDropped":0,"embedded":0,"embeddingsCompleted":true,"throttled":0}],"indexedAt":"2026-11-27T15:00:14.3457449Z","warnings":[],"deferredReaps":0,"pendingReaps":0,"guardWithheld":0,"guardWithheldBuiltIns":0,"guardDropped":0,"embedded":0,"embeddingsCompleted":true,"throttled":0}
+
+real	0m1,506s
+user	0m1,094s
+sys	0m0,228s
++ echo '=== search (identifier) ==='
+=== search (identifier) ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll search LedgerEntry --top-k 3 --json
+{"type":"match","repo":"fixture","path":"src/Gen002.cs","line":3,"score":0.01639344262295082,"snippet":"public class LedgerEntry2","source":"exact"}
+{"type":"match","repo":"fixture","path":"src/Gen008.cs","line":3,"score":0.016129032258064516,"snippet":"public class LedgerEntry8","source":"exact"}
+{"type":"match","repo":"fixture","path":"src/Gen014.cs","line":3,"score":0.015873015873015872,"snippet":"public class LedgerEntry14","source":"exact"}
+{"type":"summary","matches":3,"tokensUsed":22,"truncated":false,"exactTokens":22}
++ echo '=== search (regex, docs) ==='
+=== search (regex, docs) ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll search 'Operation 1[0-9] is handled' --regex --kind docs --top-k 2 --json
+{"type":"match","repo":"fixture","path":"docs/note015.md","line":3,"score":0.01639344262295082,"snippet":"Operation 15 is handled by Reconciler. See Gen015 for the handler.","source":"exact"}
+{"type":"match","repo":"fixture","path":"docs/note010.md","line":3,"score":0.016129032258064516,"snippet":"Operation 10 is handled by VaultClient. See Gen010 for the handler.","source":"exact"}
+{"type":"summary","matches":2,"tokensUsed":38,"truncated":false,"exactTokens":38}
++ echo '=== search (prefix scope) ==='
+=== search (prefix scope) ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll search RateLimiter --prefix docs/ --json
++ tail -1
+{"type":"summary","matches":5,"tokensUsed":95,"truncated":false,"exactTokens":95}
++ echo '=== map ==='
+=== map ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll map --repo fixture --depth 1 --json
+{"repos":["fixture"],"depth":1,"lines":[{"depth":0,"text":"fixture/"},{"depth":1,"text":"docs/ (30 files)"},{"depth":1,"text":"src/ (120 files)"}],"tokensUsed":13,"truncated":false}
++ echo '=== symbol ==='
+=== symbol ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll symbol OrderService42 --json
+{"matches":[{"repo":"fixture","file":"src/Gen042.cs","startLine":3,"endLine":15,"name":"OrderService42","kind":"class","signature":"public class OrderService42","body":"public class OrderService42\n{\n    private readonly OrderServiceHelper42 _helper = new(\u0022OrderServiceHelper42\u0022);\n\n    /// \u003Csummary\u003EHandles request 42 for OrderService.\u003C/summary\u003E\n    public int Handle42(int amount)\n    {\n        var scaled = amount * 43;\n        return _helper.Scale(scaled) \u002B 42;\n    }\n\n    public string Name() =\u003E \u0022OrderService42\u0022;\n}","bodyOmitted":false,"members":[],"membersOmitted":0}],"tokensUsed":118,"truncated":false,"state":"complete"}
++ echo '=== refs (class with callsites) ==='
+=== refs (class with callsites) ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll refs OrderServiceHelper42 --json
+{"symbol":"OrderServiceHelper42","definitions":[{"repo":"fixture","kind":"class","file":"src/Gen042.cs","startLine":17,"endLine":22},{"repo":"fixture","kind":"constructor","file":"src/Gen042.cs","startLine":20,"endLine":20}],"refs":[]}
++ echo '=== refs (class with none) ==='
+=== refs (class with none) ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll refs LedgerEntry2 --json
+{"symbol":"LedgerEntry2","definitions":[{"repo":"fixture","kind":"class","file":"src/Gen002.cs","startLine":3,"endLine":15}],"refs":[]}
++ echo '=== span ==='
+=== span ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll span Gen066.cs 6 10 --json
+{"repo":"fixture","file":"src/Gen066.cs","startLine":6,"endLine":10,"context":3,"before":["public class OrderService66","{","    private readonly OrderServiceHelper66 _helper = new(\u0022OrderServiceHelper66\u0022);"],"span":["","    /// \u003Csummary\u003EHandles request 66 for OrderService.\u003C/summary\u003E","    public int Handle66(int amount)","    {","        var scaled = amount * 67;"],"after":["        return _helper.Scale(scaled) \u002B 66;","    }",""],"tokensUsed":87,"truncated":false}
++ echo '=== pack ==='
+=== pack ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll pack OrderServiceHelper42 --max-tokens 900 --json
+{"name":"OrderServiceHelper42","kind":"class","repo":"fixture","file":"src/Gen042.cs","span":"17-22","signature":"public class OrderServiceHelper42","bodyLines":["public class OrderServiceHelper42","{","    private readonly string _tag;","    public OrderServiceHelper42(string tag) =\u003E _tag = tag;","    public int Scale(int value) =\u003E value * 2 \u002B _tag.Length;","}"],"bodyOmitted":false,"members":[],"membersOmitted":0,"callers":[],"withheldCallers":0,"lookupTokens":129,"callerTokens":0,"budgetTokens":900,"lookupTruncated":false,"additionalMatches":1,"complete":true,"state":"complete"}
++ echo '=== status ==='
+=== status ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll status --json
+{"workspace":"sqzrlite-t3-fixture","repos":[{"name":"fixture","path":"repo","files":150,"symbols":960,"chunks":990,"ignored":0,"guardWithheld":0,"guardDropped":0,"lastIndexedAt":"2026-11-27T18:00:13.11+03:00"}],"kindChunks":{"code":960,"docs":30},"semantic":"unsupported"}
++ echo '=== serve smoke (real stdio process) ==='
+=== serve smoke (real stdio process) ===
++ dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Debug/net10.0/sqzrlite.dll serve
++ python3 -
+serverInfo: sqzrlite 0.1.0+1d3f82255c9453be56958c0aaa69d9b2a93c3417
+tools/list: 7 ['code_pack', 'code_search', 'expand_span', 'find_references', 'index_status', 'repo_map', 'symbol_lookup']
+code_search isError: False
+code_search hits: 2 first: src/Gen004.cs exact
+index_status semantic: unsupported | has embeddings key: False | has qdrant key: False
++ echo '=== serve stderr ==='
+=== serve stderr ===
++ cat serve-stderr.log
+sqzrlite serve: workspace '/var/tmp/sqzrlite-t3-fixture' store 'sqzrlite-t3-fixture-501b07a1' (this directory is a registered workspace root)
+sqzrlite serve: no background indexer runs in lite — tools answer from the index as of the last 'sqzrlite index' pass; re-run 'sqzrlite index' after editing files

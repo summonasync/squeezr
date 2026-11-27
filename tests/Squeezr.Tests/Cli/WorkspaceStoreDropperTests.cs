@@ -1,11 +1,11 @@
 using System.Runtime.Versioning;
 using Shouldly;
 using Squeezr.Cli.Commands;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -177,7 +177,7 @@ public sealed class WorkspaceStoreDropperTests : IDisposable
     // The config is what the door reads to find the endpoint; this one names a port nothing listens on, so
     // the live Qdrant of this machine is never in the path of a test.
     private static void WriteDeadEndpointConfig(string root) =>
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Qdrant = new QdrantConfig { Endpoint = TestWorkspaceConfig.DeadQdrantEndpoint }
         });

@@ -1,8 +1,9 @@
 using Spectre.Console;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Watch;
 
 namespace Squeezr.Cli.Tui;
 
@@ -50,6 +51,9 @@ public static class TuiIndexRunner
                 ? $"provider unavailable: {string.Join("; ", warnings)}"
                 : "provider unavailable"
             : null;
+        var vectorPhase = embeddings is not null && vectorStore is not null
+            ? new WatchEmbeddingRuntime(embeddings, vectorStore, providerResolution)
+            : null;
 
         var indexer = new WorkspaceIndexer();
         IndexResult result;
@@ -64,8 +68,8 @@ public static class TuiIndexRunner
                     new SpinnerColumn())
                 .Start(ctx => indexer.Index(
                     workspaceRoot, null, full, false,
-                    new IndexProgressRenderer(ctx), embeddings, vectorStore, reembed,
-                    StaleLockWarningSink.ToStderr, providerResolution, embeddingsUnavailable));
+                    new IndexProgressRenderer(ctx), vectorPhase, reembed,
+                    StaleLockWarningSink.ToStderr, embeddingsUnavailable));
         }
         catch (WorkspaceException ex)
         {

@@ -6,6 +6,7 @@ using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -106,7 +107,7 @@ public sealed class ServeNoIndexerNoticeTests
         manager.Init("demo");
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
         manager.AddRepo("repo", "demo");
-        ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
+        SemanticConfigFile.Save(workspace, SemanticConfigFile.Load(workspace) with
         {
             Watch = new WatchConfig { Enabled = false, DebounceSeconds = 1 }
         });

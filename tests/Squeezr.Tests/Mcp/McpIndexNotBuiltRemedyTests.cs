@@ -5,6 +5,7 @@ using Squeezr.Cli.Mcp;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -117,7 +118,7 @@ public class McpIndexNotBuiltRemedyTests
         var root = UnbuiltWorkspace("ollama");
         await using var harness = await McpTestHarness.StartAsync(root);
 
-        ConfigFile.Save(root, ConfigFile.Load(root) with
+        SemanticConfigFile.Save(root, SemanticConfigFile.Load(root) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "openai" }
         });
@@ -125,7 +126,7 @@ public class McpIndexNotBuiltRemedyTests
 
         Steps(payload).ShouldContain("squeezr services up");
 
-        ConfigFile.Save(root, ConfigFile.Load(root) with
+        SemanticConfigFile.Save(root, SemanticConfigFile.Load(root) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "ollama" }
         });
@@ -149,7 +150,7 @@ public class McpIndexNotBuiltRemedyTests
     {
         var root = TestDirs.NewTempDir();
         new WorkspaceManager(root).Init(null);
-        ConfigFile.Save(root, ConfigFile.Load(root) with
+        SemanticConfigFile.Save(root, SemanticConfigFile.Load(root) with
         {
             Embeddings = new EmbeddingsConfig { Provider = provider }
         });

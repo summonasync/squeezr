@@ -62,7 +62,7 @@ public sealed class IndexProgressRenderer : IIndexProgress
             IndexPhase.Walk => "walking",
             IndexPhase.Files => "files",
             IndexPhase.Semantic => "semantic",
-            IndexPhase.Embeddings => "embeddings",
+            IndexPhase.Vectors => "embeddings",
             IndexPhase.Trigram => "trigram",
             _ => phase.ToString()
         };

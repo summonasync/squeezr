@@ -2,6 +2,7 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Configuration;
 
@@ -29,7 +30,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Indexing.MaxFileSizeKb.ShouldBe(512);
         config.Indexing.NoSemantic.ShouldBeFalse();
@@ -56,7 +57,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("auto");
         config.Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1024);
@@ -88,7 +89,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("ollama");
         config.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
@@ -120,7 +121,7 @@ public class ConfigFileTests
             }
             """);
 
-        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+        var error = Should.Throw<WorkspaceException>(() => SemanticConfigFile.Load(root));
 
         error.Code.ShouldBe(WorkspaceException.OnnxProviderCode);
         error.Message.ShouldContain("'onnx'");
@@ -133,7 +134,7 @@ public class ConfigFileTests
     public void Save_ThenLoad_RoundTripsEmbeddingsSection()
     {
         var root = TestDirs.NewTempDir();
-        var config = SqueezrConfig.CreateDefault() with
+        var config = SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig
             {
@@ -148,8 +149,8 @@ public class ConfigFileTests
             }
         };
 
-        ConfigFile.Save(root, config);
-        var loaded = ConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config);
+        var loaded = SemanticConfigFile.Load(root);
 
         loaded.Embeddings.Provider.ShouldBe("openai");
         loaded.Embeddings.OpenAiCompatible.Endpoint.ShouldBe("http://localhost:11434/v1");
@@ -162,7 +163,7 @@ public class ConfigFileTests
     {
         var root = NewWorkspaceWithConfig("{ not json");
 
-        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+        var error = Should.Throw<WorkspaceException>(() => SemanticConfigFile.Load(root));
 
         error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
         error.Message.ShouldContain("not valid JSON");
@@ -189,7 +190,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
         config.Embeddings.Ollama.Model.ShouldBe("nomic-embed-text");
@@ -229,7 +230,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("ollama");
         config.Embeddings.Ollama.ModelProfile.ShouldBeNull();
@@ -240,7 +241,7 @@ public class ConfigFileTests
     public void Save_ThenLoad_RoundTripsOllamaSection()
     {
         var root = TestDirs.NewTempDir();
-        var config = SqueezrConfig.CreateDefault() with
+        var config = SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig
             {
@@ -255,8 +256,8 @@ public class ConfigFileTests
             }
         };
 
-        ConfigFile.Save(root, config);
-        var loaded = ConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config);
+        var loaded = SemanticConfigFile.Load(root);
 
         loaded.Embeddings.Provider.ShouldBe("ollama");
         loaded.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
@@ -291,7 +292,7 @@ public class ConfigFileTests
             }
             """);
 
-        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+        var error = Should.Throw<WorkspaceException>(() => SemanticConfigFile.Load(root));
 
         error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
         error.Message.ShouldContain("'no-such-profile'");
@@ -324,7 +325,7 @@ public class ConfigFileTests
             }
             """);
 
-        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+        var error = Should.Throw<WorkspaceException>(() => SemanticConfigFile.Load(root));
 
         error.Message.ShouldContain(SqueezrPaths.ConfigPath(root));
         error.Message.ShouldContain("'no-such-profile'");
@@ -353,7 +354,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Indexing.RankExclude.ShouldBe(["audits/**"]);
         config.Embeddings.Provider.ShouldBe("ollama");
@@ -383,7 +384,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Indexing.RankExclude.ShouldBe(["audits/**", "BACKLOG/**"]);
         config.Embeddings.Provider.ShouldBe("auto");
@@ -411,7 +412,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Indexing.RankExclude.ShouldBeEmpty();
         config.Chunking.MaxTokensPerChunk.ShouldBe(512);
@@ -422,19 +423,19 @@ public class ConfigFileTests
     public void Save_ThenLoad_RankExcludeRoundTripsAsAProperArray()
     {
         var root = TestDirs.NewTempDir();
-        var config = SqueezrConfig.CreateDefault() with
+        var config = SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
-            Indexing = SqueezrConfig.CreateDefault().Indexing with
+            Indexing = SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Indexing with
             {
                 RankExclude = ["audits/**", "BACKLOG/**"]
             }
         };
 
-        ConfigFile.Save(root, config);
+        SemanticConfigFile.Save(root, config);
 
         File.ReadAllText(SqueezrPaths.ConfigPath(root))
             .ShouldContain("\"rankExclude\": [\n");
-        ConfigFile.Load(root).Indexing.RankExclude.ShouldBe(["audits/**", "BACKLOG/**"]);
+        SemanticConfigFile.Load(root).Indexing.RankExclude.ShouldBe(["audits/**", "BACKLOG/**"]);
     }
 
     [Fact]
@@ -456,7 +457,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("auto");
         config.Embeddings.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
@@ -477,7 +478,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Chunking.MaxTokensPerChunk.ShouldBe(512);
         config.Chunking.FallbackWindowLines.ShouldBe(60);
@@ -502,7 +503,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Indexing.Ignore.ShouldContain("**/node_modules/**");
         config.Indexing.MaxFileSizeKb.ShouldBe(512);
@@ -526,7 +527,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
         config.Indexing.MaxFileSizeKb.ShouldBe(128);
@@ -549,7 +550,7 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Watch.DebounceSeconds.ShouldBe(2);
         config.Watch.BackoffMaxSeconds.ShouldBe(30);
@@ -571,9 +572,9 @@ public class ConfigFileTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
-        var defaults = SqueezrConfig.CreateDefault();
+        var defaults = SemanticConfig.Bind(SqueezrConfig.CreateDefault());
         config.Embeddings.Provider.ShouldBe(defaults.Embeddings.Provider);
         config.Chunking.MaxTokensPerChunk.ShouldBe(defaults.Chunking.MaxTokensPerChunk);
         config.Indexing.Ignore.ShouldBe(defaults.Indexing.Ignore);
@@ -588,7 +589,7 @@ public class ConfigFileTests
     {
         var root = TestDirs.NewTempDir();
 
-        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+        var error = Should.Throw<WorkspaceException>(() => SemanticConfigFile.Load(root));
 
         error.Code.ShouldBe(WorkspaceException.StorageUnavailableCode);
         error.Message.ShouldContain("could not be read");
@@ -600,7 +601,7 @@ public class ConfigFileTests
         var root = NewWorkspaceWithConfig("{}");
         File.SetUnixFileMode(SqueezrPaths.ConfigPath(root), UnixFileMode.None);
 
-        var error = Should.Throw<WorkspaceException>(() => ConfigFile.Load(root));
+        var error = Should.Throw<WorkspaceException>(() => SemanticConfigFile.Load(root));
 
         error.Code.ShouldBe(WorkspaceException.StorageUnavailableCode);
     }

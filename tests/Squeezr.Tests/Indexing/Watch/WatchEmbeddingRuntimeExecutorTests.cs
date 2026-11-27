@@ -1,8 +1,9 @@
 using Shouldly;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Watch;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Indexing.Watch;
 
 namespace Squeezr.Tests.Indexing.Watch;
 

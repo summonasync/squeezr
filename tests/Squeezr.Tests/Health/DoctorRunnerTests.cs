@@ -1,6 +1,9 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Health;
+using Squeezr.Semantic.Health;
+using Squeezr.Semantic.Workspace;
+using Squeezr.Semantic.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Serialization;
@@ -122,8 +125,8 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                new QdrantStatus(false, null, 12, 12), EmbeddingsHealth.Silent));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                new QdrantStatus(false, null, 12, 12), EmbeddingsHealth.Silent)));
 
         report.Healthy.ShouldBeFalse();
         var finding = report.Findings.Single(f => f.Name == "semantic search");
@@ -138,12 +141,12 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                new QdrantStatus(true, 0, 4, 4), EmbeddingsHealth.Silent));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 0, 4, 4), EmbeddingsHealth.Silent)));
 
         report.Healthy.ShouldBeFalse();
         var finding = report.Findings.Single(f => f.Name == "semantic search");
-        finding.Remedy.ShouldBe(DoctorRemedies.IndexCheckProvider);
+        finding.Remedy.ShouldBe(DoctorSemanticFindings.IndexCheckProviderRemedy);
         finding.Detail.ShouldContain("coverage 0%");
     }
 
@@ -153,8 +156,8 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                new QdrantStatus(true, 100, 400, 500), EmbeddingsHealth.Silent));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 100, 400, 500), EmbeddingsHealth.Silent)));
 
         report.Healthy.ShouldBeFalse();
         var finding = report.Findings.Single(f => f.Name == "semantic search");
@@ -172,8 +175,8 @@ public sealed class DoctorRunnerTests : IDisposable
         ConfigFile.Save(root, config with { Watch = config.Watch with { EmbedBudgetPerPass = 8 } });
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                new QdrantStatus(true, 2, 10, 12), EmbeddingsHealth.Silent));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 2, 10, 12), EmbeddingsHealth.Silent)));
 
         report.Healthy.ShouldBeFalse();
         var finding = report.Findings.Single(f => f.Name == "semantic search");
@@ -189,8 +192,8 @@ public sealed class DoctorRunnerTests : IDisposable
         File.WriteAllText(SqueezrPaths.ConfigPath(root), "{ not json");
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                new QdrantStatus(true, 2, 300, 312), EmbeddingsHealth.Silent));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 2, 300, 312), EmbeddingsHealth.Silent)));
 
         var finding = report.Findings.SingleOrDefault(f => f.Name == "semantic search" && f.State == DoctorRunner.StateFail);
         finding.ShouldNotBeNull();
@@ -203,9 +206,9 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 498, 2, 500),
-                new EmbeddingsHealth("ollama", null, null)));
+                new EmbeddingsHealth("ollama", null, null))));
 
         report.Healthy.ShouldBeTrue();
         report.Findings.ShouldNotContain(f => f.Name == "semantic search" || f.Name == "embeddings provider");
@@ -217,8 +220,8 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                null, EmbeddingsHealth.Silent, "qdrant endpoint is not a valid uri"));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                null, EmbeddingsHealth.Silent, "qdrant endpoint is not a valid uri")));
 
         var finding = report.Findings.Single(f => f.Name == "semantic search");
         finding.State.ShouldBe(DoctorRunner.StateInfo);
@@ -234,8 +237,8 @@ public sealed class DoctorRunnerTests : IDisposable
         ConfigFile.Save(root, config with { Indexing = config.Indexing with { NoSemantic = true } });
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                new QdrantStatus(false, null, 12, 12), EmbeddingsHealth.Silent));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                new QdrantStatus(false, null, 12, 12), EmbeddingsHealth.Silent)));
 
         report.Findings.ShouldNotContain(f => f.Name == "semantic search" || f.Name == "embeddings provider");
     }
@@ -246,9 +249,9 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 4, 0, 4),
-                new EmbeddingsHealth(null, "Embeddings provider 'onnx' is no longer supported.", null)));
+                new EmbeddingsHealth(null, "Embeddings provider 'onnx' is no longer supported.", null))));
 
         report.Healthy.ShouldBeFalse();
         var problem = report.Findings.Single(
@@ -262,9 +265,9 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 4, 0, 4),
-                new EmbeddingsHealth("ollama", null, "embedding model runs on CPU — embeddings will be slow")));
+                new EmbeddingsHealth("ollama", null, "embedding model runs on CPU — embeddings will be slow"))));
 
         report.Healthy.ShouldBeTrue();
         var info = report.Findings.Single(f => f.Name == "embeddings provider");
@@ -278,9 +281,9 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 498, 2, 500),
-                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 7)));
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 7))));
 
         report.Healthy.ShouldBeTrue();
         var finding = report.Findings.Single(f => f.Name == "embedding model");
@@ -295,9 +298,9 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 498, 2, 500),
-                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 0)));
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 0))));
 
         var finding = report.Findings.Single(f => f.Name == "embedding model");
         finding.Detail.ShouldContain("0 chunk(s) carry vectors from another embedding model");
@@ -309,9 +312,9 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 498, 2, 500),
-                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated)));
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated))));
 
         var finding = report.Findings.Single(f => f.Name == "embedding model");
         finding.Detail.ShouldBe($"{TestEmbeddingKeys.Calibrated} (vintage count unavailable)");
@@ -323,8 +326,8 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
-                new QdrantStatus(true, 498, 2, 500), EmbeddingsHealth.Silent));
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
+                new QdrantStatus(true, 498, 2, 500), EmbeddingsHealth.Silent)));
 
         report.Findings.ShouldNotContain(f => f.Name == "embedding model");
     }
@@ -335,9 +338,9 @@ public sealed class DoctorRunnerTests : IDisposable
         _ = NewIndexedWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 4, 0, 4),
-                new EmbeddingsHealth(null, "Embeddings provider 'onnx' is no longer supported.", null)));
+                new EmbeddingsHealth(null, "Embeddings provider 'onnx' is no longer supported.", null))));
 
         report.Findings.ShouldNotContain(f => f.Name == "embedding model");
     }
@@ -348,9 +351,9 @@ public sealed class DoctorRunnerTests : IDisposable
         var root = NewInitOnlyWorkspace();
 
         var report = DoctorRunner.CollectWorkspaceFindings(DateTime.UtcNow, _ => true,
-            _ => new WorkspaceSemanticFacts(
+            (root, status) => DoctorSemanticFindings.Collect(root, status, new WorkspaceSemanticFacts(
                 new QdrantStatus(true, 0, 0, 0),
-                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 0)));
+                new EmbeddingsHealth("ollama", null, null, TestEmbeddingKeys.Calibrated, 0))));
 
         report.Findings.ShouldNotContain(f => f.Name == "embedding model");
     }

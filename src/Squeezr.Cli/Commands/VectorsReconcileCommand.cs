@@ -1,13 +1,14 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Cli.Commands;
 
@@ -80,7 +81,7 @@ public sealed class VectorsReconcileCommand : AsyncCommand<VectorsReconcileComma
     private static async Task TryDropLegacyCollectionsAsync(
         string workspaceRoot, IVectorStore? vectorStore, Settings settings, CancellationToken cancellationToken)
     {
-        if (!ConfigFile.Load(workspaceRoot).Qdrant.Owned)
+        if (!SemanticConfigFile.Load(workspaceRoot).Qdrant.Owned)
         {
             return;
         }

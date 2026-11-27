@@ -6,6 +6,7 @@ using Squeezr.Cli.Mcp;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -257,7 +258,7 @@ public class ToolErrorsTests
     public void From_IndexNotBuilt_AnswersFromTheCapturedFactNotFromTheConfigOnDisk()
     {
         var root = TestDirs.NewTempDir();
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "openai" }
         });

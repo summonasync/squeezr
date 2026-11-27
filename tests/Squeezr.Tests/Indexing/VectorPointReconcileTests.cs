@@ -1,10 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -156,7 +157,7 @@ public class VectorPointReconcileTests
         report.PointsAfter.ShouldBe(remaining);
         vectorStore.Points.Count.ShouldBe(remaining);
         vectorStore.Calls.ShouldBeEmpty();
-        AllRows(workspace).ShouldContain(c => c.EmbeddingStatus == "pending");
+        AllRows(workspace).ShouldContain(c => c.VectorStatus == "pending");
     }
 
     [Fact]
@@ -166,14 +167,14 @@ public class VectorPointReconcileTests
         var vectorStore = new FakeVectorStore();
         Index(workspace, vectorStore);
         vectorStore.Points.Remove(vectorStore.Points.Keys.First());
-        var rowsBefore = AllRows(workspace).Count(c => c.EmbeddingStatus == "ok");
+        var rowsBefore = AllRows(workspace).Count(c => c.VectorStatus == "ok");
         vectorStore.Calls.Clear();
 
         var report = await VectorPointReconciler.ReconcileAsync(workspace, vectorStore, apply: false);
 
         report.StaleMarkers.ShouldBe(1);
         report.Requeued.ShouldBe(0);
-        AllRows(workspace).Count(c => c.EmbeddingStatus == "ok").ShouldBe(rowsBefore);
+        AllRows(workspace).Count(c => c.VectorStatus == "ok").ShouldBe(rowsBefore);
         vectorStore.Calls.ShouldBeEmpty();
     }
 
@@ -188,7 +189,7 @@ public class VectorPointReconcileTests
         var vectorStore = new FakeVectorStore();
         Index(workspace, vectorStore);
         var rowsBefore = AllRows(workspace);
-        rowsBefore.ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        rowsBefore.ShouldAllBe(c => c.VectorStatus == "ok");
         var sharedHash = ChunkHashes(workspace, FileIdOf(workspace, "a.cs")).First();
 
         vectorStore.Points.Remove(ChunkPointId.FromHash(sharedHash));
@@ -198,13 +199,13 @@ public class VectorPointReconcileTests
 
         report.StaleMarkers.ShouldBe(1);
         report.Requeued.ShouldBe(2);
-        AllRows(workspace).Count(c => c.ChunkHash == sharedHash && c.EmbeddingStatus == "pending").ShouldBe(2);
+        AllRows(workspace).Count(c => c.ChunkHash == sharedHash && c.VectorStatus == "pending").ShouldBe(2);
 
         new WorkspaceIndexer().Index(
-            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+            workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Points.ShouldContainKey(ChunkPointId.FromHash(sharedHash));
-        AllRows(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        AllRows(workspace).ShouldAllBe(c => c.VectorStatus == "ok");
     }
 
     [Fact]
@@ -282,7 +283,7 @@ public class VectorPointReconcileTests
     }
 
     private static void Index(string workspace, FakeVectorStore vectorStore) =>
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
     private static void SeedOrphans(FakeVectorStore vectorStore, IEnumerable<string> chunkHashes)
     {

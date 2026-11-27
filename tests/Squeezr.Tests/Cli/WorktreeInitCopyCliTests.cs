@@ -6,6 +6,7 @@ using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
 using Squeezr.Tests.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -591,7 +592,7 @@ public sealed class WorktreeInitCopyCliTests
 
     private static void WriteLaneConfig(string storeDir, string provider, string? model, bool probeFails = false)
     {
-        var defaults = SqueezrConfig.CreateDefault();
+        var defaults = SemanticConfig.Bind(SqueezrConfig.CreateDefault());
         var ollama = new OllamaOptions
         {
             Model = model ?? defaults.Embeddings.Ollama.Model,

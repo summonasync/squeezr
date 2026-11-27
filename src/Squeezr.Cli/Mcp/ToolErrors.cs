@@ -1,7 +1,7 @@
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using Squeezr.Cli.Commands;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Workspace;
 

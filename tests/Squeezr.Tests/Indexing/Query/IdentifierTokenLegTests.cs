@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Indexing.Trigram;
@@ -42,13 +42,9 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithMultipleTokens();
 
         var engine = new SearchEngine(workspace);
-        var response = await engine.SearchHybridAsync(
-            new SearchQuery(
+        var response = await engine.SearchHybridAsync(new SearchQuery(
                 "OrphanRegistry HuskLossless AdoptionRepair",
-                false, null, null, null, null, null, null),
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+                false, null, null, null, null, null, null), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         response.Matches.ShouldNotBeEmpty();
         response.Matches.ShouldContain(m => m.Source == "exact");
@@ -74,8 +70,7 @@ public class IdentifierTokenLegTests
         var query = new SearchQuery("calc;", false, null, null, null, null, null, null);
 
         var exactOnly = engine.Search(query);
-        var hybrid = await engine.SearchHybridAsync(
-            query, new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+        var hybrid = await engine.SearchHybridAsync(query, TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         hybrid.Matches.ShouldNotBeEmpty();
         Render(hybrid).ShouldBe(Render(exactOnly));
@@ -99,11 +94,7 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithPascalCaseWatcher();
 
         var engine = new SearchEngine(workspace);
-        var response = await engine.SearchHybridAsync(
-            new SearchQuery("workspace watcher", false, null, null, null, null, null, null),
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var response = await engine.SearchHybridAsync(new SearchQuery("workspace watcher", false, null, null, null, null, null, null), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         response.Matches.ShouldContain(m => m.Source == "exact" && m.Path == "WorkspaceWatcher.cs");
     }
@@ -129,11 +120,7 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithOverlap();
 
         var engine = new SearchEngine(workspace);
-        var response = await engine.SearchHybridAsync(
-            new SearchQuery("int Add", false, null, null, null, null, null, null),
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var response = await engine.SearchHybridAsync(new SearchQuery("int Add", false, null, null, null, null, null, null), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         var calcHits = response.Matches.Where(m => m.Path == "Calc.cs").ToList();
         calcHits.Count.ShouldBe(1);
@@ -263,11 +250,7 @@ public class IdentifierTokenLegTests
         var workspace = NewIndexedWorkspaceWithFilterSurfaces();
         var engine = new SearchEngine(workspace);
 
-        var response = await engine.SearchHybridAsync(
-            Query("OrphanRegistry HuskAdoption") with { Repo = "other" },
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var response = await engine.SearchHybridAsync(Query("OrphanRegistry HuskAdoption") with { Repo = "other" }, TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         var hit = response.Matches.ShouldHaveSingleItem();
         hit.Repo.ShouldBe("other");
@@ -308,11 +291,7 @@ public class IdentifierTokenLegTests
         var workspace = NewReproFixture();
         var engine = new SearchEngine(workspace);
 
-        var response = await engine.SearchHybridAsync(
-            Query("materialization feature slug planning"),
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var response = await engine.SearchHybridAsync(Query("materialization feature slug planning"), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         var code = response.Matches.Where(m => m.Path == "Planner.cs").ToList();
         code.ShouldNotBeEmpty("a dead phrase arm must not sink the identifier leg with it");
@@ -326,21 +305,13 @@ public class IdentifierTokenLegTests
         var engine = new SearchEngine(workspace);
         var query = Query("materialization feature slug planning");
 
-        var codeOnly = await engine.SearchHybridAsync(
-            query with { Kind = DocKindDetector.Code },
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var codeOnly = await engine.SearchHybridAsync(query with { Kind = DocKindDetector.Code }, TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         var code = codeOnly.Matches.ShouldHaveSingleItem();
         code.Path.ShouldBe("Planner.cs");
         code.Source.ShouldBe("exact");
 
-        var docsOnly = await engine.SearchHybridAsync(
-            query with { Kind = DocKindDetector.Docs },
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var docsOnly = await engine.SearchHybridAsync(query with { Kind = DocKindDetector.Docs }, TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         docsOnly.Matches.ShouldHaveSingleItem().Path.ShouldBe("notes.md");
     }
@@ -386,8 +357,7 @@ public class IdentifierTokenLegTests
         var query = new SearchQuery("C.lc", true, null, null, null, null, null, null);
 
         var exactOnly = engine.Search(query);
-        var hybrid = await engine.SearchHybridAsync(
-            query, new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+        var hybrid = await engine.SearchHybridAsync(query, TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         hybrid.Matches.ShouldNotBeEmpty();
         Render(hybrid).ShouldBe(Render(exactOnly));
@@ -400,11 +370,7 @@ public class IdentifierTokenLegTests
         var workspace = NewGuardBoundaryWorkspace();
         var engine = new SearchEngine(workspace);
 
-        var response = await engine.SearchHybridAsync(
-            Query("SS1-CANARY-ENV-VALUE"),
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var response = await engine.SearchHybridAsync(Query("SS1-CANARY-ENV-VALUE"), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         response.Matches.ShouldBeEmpty("a secret query must not be answered with files sharing its fragments");
         response.Warnings.ShouldContain(w => w.StartsWith("secret guard:", StringComparison.Ordinal));
@@ -424,11 +390,7 @@ public class IdentifierTokenLegTests
         var workspace = NewTwoRepoWorkspace();
         var engine = new SearchEngine(workspace);
 
-        var response = await engine.SearchHybridAsync(
-            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, null, 50, null, "src/"),
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var response = await engine.SearchHybridAsync(new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, null, 50, null, "src/"), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         response.Matches.ShouldNotBeEmpty();
         response.Matches.ShouldContain(m => m.Source == "exact");
@@ -441,11 +403,7 @@ public class IdentifierTokenLegTests
         var workspace = NewTwoRepoWorkspace();
         var engine = new SearchEngine(workspace);
 
-        var response = await engine.SearchHybridAsync(
-            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, "csharp", 50, null, "src/"),
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+        var response = await engine.SearchHybridAsync(new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, "csharp", 50, null, "src/"), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         response.Matches.ShouldNotBeEmpty();
         response.Matches.ShouldAllBe(m => m.Repo == "alpha" && m.Path.StartsWith("src/"));
@@ -460,8 +418,7 @@ public class IdentifierTokenLegTests
         var query = new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "nosuchrepo", null, null, 50, null, null);
 
         engine.Search(query).Matches.ShouldBeEmpty();
-        var response = await engine.SearchHybridAsync(
-            query, new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+        var response = await engine.SearchHybridAsync(query, TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         response.Matches.ShouldBeEmpty();
     }
@@ -472,12 +429,8 @@ public class IdentifierTokenLegTests
         var workspace = NewTwoRepoWorkspace();
         var engine = new SearchEngine(workspace);
 
-        var lower = await engine.SearchHybridAsync(
-            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, null, 50, null, null),
-            new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
-        var upper = await engine.SearchHybridAsync(
-            new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "ALPHA", null, null, 50, null, null),
-            new FakeEmbeddingProvider(), new FakeVectorStore(), CancellationToken.None);
+        var lower = await engine.SearchHybridAsync(new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "alpha", null, null, 50, null, null), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
+        var upper = await engine.SearchHybridAsync(new SearchQuery("ZephyrGadget QuaternionGizmo", false, null, "ALPHA", null, null, 50, null, null), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new FakeVectorStore()), CancellationToken.None);
 
         lower.Matches.ShouldNotBeEmpty();
         Render(upper).ShouldBe(Render(lower),
@@ -517,7 +470,7 @@ public class IdentifierTokenLegTests
             File.WriteAllText(Path.Combine(workspace, dir, "other", "Loose.cs"), source);
         }
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -543,7 +496,7 @@ public class IdentifierTokenLegTests
 
         File.WriteAllText(Path.Combine(workspace, "repo", "Store.cs"), source);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -563,7 +516,7 @@ public class IdentifierTokenLegTests
 
         File.WriteAllText(Path.Combine(workspace, "repo", "Calc.cs"), source);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -582,7 +535,7 @@ public class IdentifierTokenLegTests
             File.WriteAllText(Path.Combine(workspace, "repo", $"File{i}.cs"), source);
         }
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -599,7 +552,7 @@ public class IdentifierTokenLegTests
 
         File.WriteAllText(Path.Combine(workspace, "repo", "Split.cs"), source);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -617,7 +570,7 @@ public class IdentifierTokenLegTests
 
         File.WriteAllText(Path.Combine(workspace, "repo", "WorkspaceWatcher.cs"), source);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -652,7 +605,7 @@ public class IdentifierTokenLegTests
 
         manager.AddRepo("repo", "demo");
         manager.AddRepo("other", "other");
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -677,7 +630,7 @@ public class IdentifierTokenLegTests
             }
             """);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -697,7 +650,7 @@ public class IdentifierTokenLegTests
             "materialization notes: the feature slug for sprint planning stays materialization-free; " +
             "planning the slug naming for the feature flag happens later.");
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -722,7 +675,7 @@ public class IdentifierTokenLegTests
             }
             """);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         return workspace;
     }
 
@@ -738,7 +691,7 @@ public class IdentifierTokenLegTests
             """);
         WriteFile(workspace, "repo/.env", "OPENAI_API_KEY=SS1-CANARY-ENV-VALUE\n");
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         SecretGuardFixture.PlantPreGuardRows(workspace, [".env"]);
         return workspace;
     }

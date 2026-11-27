@@ -1,13 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Indexing.TreeSitter;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.TreeSitter;
 
@@ -67,7 +68,7 @@ public class RustFixtureEndToEndTests
             // embed side, measured per rust file: the embedding phase is language-blind, so a rust
             // chunk must leave the run as embedded rather than pending — without this the claim that
             // rust chunks carry embeddings rests on the read-side mapping alone
-            fileChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey != null);
+            fileChunks.ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey != null);
 
             foreach (var symbol in fileSymbols)
             {
@@ -146,9 +147,7 @@ public class RustFixtureEndToEndTests
         var chunk = store.ListChunksByFile(registry.Id).Single(c => c.StartLine == 28);
         store.Dispose();
 
-        var response = await new SearchEngine(workspace).SearchHybridAsync(
-            new SearchQuery("unmatched paraphrase zzz", false, null, null, null, null, null, null),
-            new FakeEmbeddingProvider(), new OneHitVectorStore(repoId, chunk), CancellationToken.None);
+        var response = await new SearchEngine(workspace).SearchHybridAsync(new SearchQuery("unmatched paraphrase zzz", false, null, null, null, null, null, null), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), new OneHitVectorStore(repoId, chunk)), CancellationToken.None);
 
         // the rust chunks carry embeddings like every other code file, so the semantic arm answers
         // for rust on a query no term match could reach
@@ -332,7 +331,7 @@ public class RustFixtureEndToEndTests
     }
 
     private static ParseResult ParseTwin() =>
-        new TreeSitterProvider(Squeezr.Core.Configuration.SqueezrConfig.CreateDefault())
+        new TreeSitterProvider(Squeezr.Semantic.Configuration.SemanticConfig.Bind(Squeezr.Core.Configuration.SqueezrConfig.CreateDefault()).Core)
             .Parse(new FileRef("demo", "web/ledger.js"), Encoding.UTF8.GetBytes(JsTwinSource));
 
     private static string NewIndexedFixture() => NewIndexedFixture(out _);
@@ -351,7 +350,7 @@ public class RustFixtureEndToEndTests
         TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         new WorkspaceIndexer().Index(
-            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new RecordingVectorStore());
+            workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new RecordingVectorStore()));
 
         store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         return workspace;

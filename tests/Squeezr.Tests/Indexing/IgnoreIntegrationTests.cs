@@ -4,6 +4,7 @@ using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -98,8 +99,8 @@ public class IgnoreIntegrationTests
 
         WriteFile(workspace, "repo/.gitignore", "build/gen/\n");
 
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Indexing = config.Indexing with { RespectGitignore = false }
         });

@@ -1,0 +1,46 @@
+== bench: sqzrlite baseline ==
+date: 2026-11-27 17:51 UTC
+commit: 65e7d09 (feat/130-sqzrlite)
+box: Linux 7.0.0-44-generic, 32 cores, 61 GB, dotnet 10.0.301
+load: 0.43 (1m) 0.40 (5m) 0.61 (15m)
+binary: /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite
+binary facts: 218339864 B single-file, publish dir holds 31 entries (28 native .so side-cars, rest is the MSBuild BuildHost trees; 0 loose managed DLLs)
+publish shape: self-contained single-file + ReadyToRun; trim and NativeAOT are rejected by measurement (Spectre.Console.Cli reflection dies, exit 134) — scripts/publish-sqzrlite.sh header and audits/130-t5-2026-11-27/ carry the proof
+source variant: dotnet /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/src/Squeezr.Lite/bin/Release/net10.0/sqzrlite.dll (44 DLLs in the build output)
+== fixture ==
+fixture: /tmp/sqzrlite-bench.r6hKo7/fixture — 150 files (120 .cs, 30 .md), 70217 B, generated fresh for this run
+== full index ==
+lite index (published): wall 0:00.78 | max rss 214500 KB | 150 files, 960 symbols, 990 chunks
+load: 0.43 (1m) 0.40 (5m) 0.61 (15m)
+full product index --no-semantic (same fixture): wall 0:01.37 | max rss 207628 KB | the semantic-phase row lives in the research doc (598 s / 1.11 GB on a 1165-file fixture) and needs Qdrant/Ollama
+load: 0.43 (1m) 0.40 (5m) 0.61 (15m)
+== startup: one-shot map cold (each rep a fresh process on the warm store) ==
+published: reps=5 walls=[0.19, 0.19, 0.19, 0.2, 0.19]s median_wall=0.19s avg_peak_rss=100MB
+source:    reps=5 walls=[0.3, 0.29, 0.31, 0.3, 0.3]s median_wall=0.30s avg_peak_rss=75MB
+load: 0.47 (1m) 0.41 (5m) 0.61 (15m)
+== startup: serve spawn -> initialize -> first repo_map answer (real stdio) ==
+published: init [0.125, 0.125, 0.131, 0.13, 0.141] s -> [0.228, 0.231, 0.237, 0.238, 0.244] s first answer (median 0.237 s)
+source:    first answer [0.473, 0.467, 0.462, 0.479, 0.46] s (median 0.467 s)
+load: 0.52 (1m) 0.42 (5m) 0.62 (15m)
+== steady idle: serve --watch, converged store, no queries ==
+sampling /proc statm+stat every 2 s for 240s (published)...
+sampling /proc statm+stat every 2 s for 240s (build-from-source)...
+load: 0.52 (1m) 0.58 (5m) 0.63 (15m)
+idle (published): rss 93.5/98.0/102.5 MB min/avg/max over 240s, cpu 0.27% (of one core), watch armed: True
+query mix (converged store, guard on):
+  code_search      n=12 p50=    64ms p95=   106ms
+  symbol_lookup    n= 6 p50=    12ms p95=    14ms
+  find_references  n= 6 p50=    13ms p95=    14ms
+  repo_map         n= 6 p50=    14ms p95=    14ms
+  index_status     n= 2 p50=    19ms p95=    14ms
+  overall          n=32 p50=    14ms p95=   104ms | checked/query 0-150, staleTotal sum 0
+check price: topK=2 median 11ms / 1 candidates, topK=50 median 162ms / 50 candidates -> ~3.08 ms/candidate [inferred by subtraction]
+burst10 (10 files edited): during-burst queries n=10, wall 59-470ms, inline heals 3, stale reports 0
+  pass line: sqzrlite serve: watch pass +0 ~7 -0 (skipped: 0, 105ms) | edit->completion 2.48s | burst total 6.4s
+burst30 (30 files edited): during-burst queries n=20, wall 54-147ms, inline heals 13, stale reports 0
+  pass line: sqzrlite serve: watch pass +0 ~17 -0 (skipped: 0, 16ms) | edit->completion 2.17s | burst total 2.2s
+post-pass: walls [79, 7, 7]ms, staleTotal sum 0
+idle (source):    rss 65.9/69.3/72.8 MB min/avg/max over 240s, cpu 0.29% (of one core)
+== done ==
+load: 0.52 (1m) 0.58 (5m) 0.63 (15m)
+2026-11-27 18:00 UTC

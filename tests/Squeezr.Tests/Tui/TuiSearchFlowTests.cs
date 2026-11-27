@@ -4,6 +4,7 @@ using Squeezr.Cli.Tui;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Tui;
 
@@ -161,8 +162,8 @@ public class TuiSearchFlowTests
 
     private static void ConfigureUnavailableVectorStore(string workspace)
     {
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Embeddings = config.Embeddings with
             {

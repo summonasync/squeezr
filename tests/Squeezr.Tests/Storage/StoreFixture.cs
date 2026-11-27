@@ -65,7 +65,7 @@ internal static class StoreFixture
                         Text = $"chunk {file}-{index} of the seeded fixture store",
                         TokenCount = 12,
                         ChunkHash = $"hash-{file}-{index}",
-                        EmbeddingStatus = modelKey is null ? "pending" : "ok",
+                        VectorStatus = modelKey is null ? "pending" : "ok",
                         ModelKey = modelKey,
                     })
                     .ToList();

@@ -1,6 +1,7 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Configuration;
 
@@ -30,7 +31,7 @@ public class WatchConfigTests
             }
             """);
 
-        AssertDefaults(ConfigFile.Load(root));
+        AssertDefaults(SemanticConfigFile.Load(root).Core);
     }
 
     [Fact]
@@ -132,7 +133,7 @@ public class WatchConfigTests
     public void Save_ThenLoad_RoundTripsWatchSection()
     {
         var root = TestDirs.NewTempDir();
-        var config = SqueezrConfig.CreateDefault() with
+        var config = SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Watch = new WatchConfig
             {
@@ -144,8 +145,8 @@ public class WatchConfigTests
             }
         };
 
-        ConfigFile.Save(root, config);
-        var loaded = ConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config);
+        var loaded = SemanticConfigFile.Load(root);
 
         loaded.Watch.Enabled.ShouldBeTrue();
         loaded.Watch.DebounceSeconds.ShouldBe(7);
@@ -177,6 +178,6 @@ public class WatchConfigTests
               "watch": {{watchValue}}
             }
             """);
-        return ConfigFile.Load(root);
+        return SemanticConfigFile.Load(root).Core;
     }
 }

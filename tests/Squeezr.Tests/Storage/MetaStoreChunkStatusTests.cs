@@ -56,7 +56,7 @@ public class MetaStoreChunkStatusTests
         store.MarkChunksEmbedded(chunks.Select(c => c.Id), "m1");
 
         store.ListPendingChunks(1, "m1", 100).ShouldBeEmpty();
-        store.ListChunksByFile(1).ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == "m1");
+        store.ListChunksByFile(1).ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == "m1");
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public class MetaStoreChunkStatusTests
 
         store.ListPendingChunks(1, "m1", 100).Count.ShouldBe(2);
         store.ListPendingChunks(2, "m1", 100).ShouldHaveSingleItem();
-        store.ListChunksByFile(1).ShouldAllBe(c => c.EmbeddingStatus == "pending" && c.ModelKey == null);
+        store.ListChunksByFile(1).ShouldAllBe(c => c.VectorStatus == "pending" && c.ModelKey == null);
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public class MetaStoreChunkStatusTests
             FileId = fileId,
             Text = "snippet",
             ChunkHash = $"{repoId}-{fileId}",
-            EmbeddingStatus = status,
+            VectorStatus = status,
             ModelKey = modelKey
         };
 }

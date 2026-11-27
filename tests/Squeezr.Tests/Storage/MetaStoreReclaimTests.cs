@@ -331,7 +331,7 @@ public class MetaStoreReclaimTests
                 EndLine = i * 20 + 20,
                 TokenCount = 500,
                 Text = $"{new string('q', 2000)} bulk chunk {i}",
-                EmbeddingStatus = "pending",
+                VectorStatus = "pending",
             }),
         ]);
         return workspace;
@@ -366,7 +366,7 @@ public class MetaStoreReclaimTests
                 EndLine = 2,
                 TokenCount = 1_000,
                 Text = $"PRIVATE KEY BEGINS {Canary} {new string('m', 4_000)}",
-                EmbeddingStatus = "pending",
+                VectorStatus = "pending",
             },
         ]);
         return workspace;

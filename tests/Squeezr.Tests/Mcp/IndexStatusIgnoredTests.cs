@@ -4,6 +4,7 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -85,8 +86,8 @@ public class IndexStatusIgnoredTests
         manager.Init("demo");
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
 
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with
         {
             Indexing = config.Indexing with { RespectGitignore = respectGitignore }
         });

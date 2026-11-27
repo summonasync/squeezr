@@ -2,6 +2,7 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Xunit.Abstractions;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -22,7 +23,7 @@ public class SecretGuardIngestionCostTests(ITestOutputHelper output)
         var workspace = IngestionWorkspaces.NewWorkspaceWithPlainFile();
         SecretGuardFixture.SetGuardExtra(workspace, Masks);
         var guard = SecretGuardIngestion.Load(workspace);
-        var extras = ConfigFile.Load(workspace).Indexing.SecretGuardExtra;
+        var extras = SemanticConfigFile.Load(workspace).Indexing.SecretGuardExtra;
 
         var perScope = BytesPerDecision(guard.IsProtected);
         var perCall = BytesPerDecision(path => SecretGuard.IsProtected(path, extras));

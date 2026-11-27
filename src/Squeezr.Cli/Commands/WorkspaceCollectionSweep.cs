@@ -1,10 +1,11 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Cli.Commands;
 
@@ -138,7 +139,7 @@ internal static partial class WorkspaceCollectionSweep
             QdrantConfig qdrant;
             try
             {
-                qdrant = ConfigFile.Load(row.RootPath).Qdrant;
+                qdrant = SemanticConfigFile.Load(row.RootPath).Qdrant;
             }
             catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
             {

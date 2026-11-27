@@ -7,6 +7,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -78,7 +79,7 @@ public class McpToolsTests
         try
         {
             Environment.SetEnvironmentVariable("SQUEEZR_TOOLS_TEST_KEY", "dummy");
-            ConfigFile.Save(workspace, SqueezrConfig.CreateDefault() with
+            SemanticConfigFile.Save(workspace, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
             {
                 Embeddings = new EmbeddingsConfig
                 {
@@ -204,7 +205,7 @@ public class McpToolsTests
     public async Task IndexStatus_ReturnsFreshnessBlock()
     {
         var workspace = NewIndexedWorkspace();
-        ConfigFile.Save(workspace, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(workspace, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Qdrant = new QdrantConfig { Endpoint = "http://localhost:9" }
         });

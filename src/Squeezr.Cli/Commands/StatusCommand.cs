@@ -1,6 +1,6 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Health;
@@ -8,6 +8,9 @@ using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Health;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Commands;
 
@@ -51,8 +54,6 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                 health = EmbeddingVintages.Measure(health, store);
             }
 
-            status = status with { Qdrant = qdrant };
-
             if (settings.Json)
             {
                 var staleFiles = DetectStaleFilesIfReadable(workspaceRoot);
@@ -61,7 +62,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                     FleetWatchAdoption.FromStore(workspaceRoot),
                     ReconcilePendingNotice.Read(workspaceRoot),
                     embeddingModelKey: health.ModelKey,
-                    otherModelChunks: health.OtherModelChunks) with
+                    otherModelChunks: health.OtherModelChunks,
+                    qdrant: qdrant) with
                 { KindChunks = kindChunks };
                 if (onnxStore)
                 {
@@ -135,7 +137,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
                         $"Embedding model: {modelKey.EscapeMarkup()}{VintageSuffix(health.OtherModelChunks)}");
                 }
 
-                if (RankExclusion.Parse(config.Indexing.RankExclude) is { IsActive: true, Patterns: var patterns })
+                if (RankExclusion.Parse(config.Core.Indexing.RankExclude) is { IsActive: true, Patterns: var patterns })
                 {
                     AnsiConsole.MarkupLine(
                         $"[grey]Rank exclude: {patterns.Count} pattern(s) — {string.Join(", ", patterns).EscapeMarkup()}[/]");
@@ -234,7 +236,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         }
     }
 
-    private static SqueezrConfig? LoadConfigIfReadable(string workspaceRoot, out WorkspaceException? configError)
+    private static SemanticConfig? LoadConfigIfReadable(string workspaceRoot, out WorkspaceException? configError)
     {
         configError = null;
         if (!File.Exists(SqueezrPaths.ConfigPath(workspaceRoot)))
@@ -244,7 +246,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
 
         try
         {
-            return ConfigFile.Load(workspaceRoot);
+            return SemanticConfigFile.Load(workspaceRoot);
         }
         catch (WorkspaceException ex)
         {

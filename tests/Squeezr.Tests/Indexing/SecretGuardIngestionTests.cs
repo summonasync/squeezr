@@ -12,7 +12,6 @@ namespace Squeezr.Tests.Indexing;
 
 using static Squeezr.Tests.Indexing.IngestionWorkspaces;
 
-
 // Every route that can put a path into a store: the full pass, the paced delta the daemon runs, and the
 // single-file reindex a read call triggers. The guard has to answer on all three, on the path alone, and
 // report a count without ever repeating the name it is protecting.

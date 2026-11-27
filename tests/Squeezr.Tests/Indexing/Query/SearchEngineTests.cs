@@ -1,5 +1,5 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -96,9 +96,8 @@ public class SearchEngineTests
 
         var response = await engine.SearchHybridAsync(
             GlobQuery("needle") with { PathGlob = "a/**" },
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+            TestVectorPhase.Arm(fixture.Workspace, new FakeEmbeddingProvider(), new FakeVectorStore()),
+                        CancellationToken.None);
 
         var hit = response.Matches.ShouldHaveSingleItem();
         hit.Path.ShouldBe("a/x.js");
@@ -113,9 +112,8 @@ public class SearchEngineTests
 
         var response = await engine.SearchHybridAsync(
             GlobQuery("collector lookup") with { PathGlob = "a/**" },
-            new FakeEmbeddingProvider(),
-            new FakeVectorStore(),
-            CancellationToken.None);
+            TestVectorPhase.Arm(fixture.Workspace, new FakeEmbeddingProvider(), new FakeVectorStore()),
+                        CancellationToken.None);
 
         response.Matches.ShouldNotBeEmpty();
         response.Matches.ShouldAllBe(m => m.Path == "a/x.js");
@@ -154,9 +152,8 @@ public class SearchEngineTests
 
         var response = await engine.SearchHybridAsync(
             GlobQuery("zzquiescent watershed") with { PathGlob = "a/**" },
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None);
+            TestVectorPhase.Arm(fixture.Workspace, new FakeEmbeddingProvider(), store),
+                        CancellationToken.None);
 
         response.Matches.ShouldNotBeEmpty();
         response.Matches.ShouldAllBe(m => m.Path == "a/x.js");

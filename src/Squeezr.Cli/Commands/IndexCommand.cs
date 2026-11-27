@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Watch;
 
 namespace Squeezr.Cli.Commands;
 
@@ -43,6 +43,7 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
             EmbeddingProviderResolution? providerResolution = null;
             IEmbeddingProvider? embeddings = null;
             IVectorStore? vectorStore = null;
+            IIndexVectorPhase? vectorPhase = null;
             string? embeddingsUnavailable = null;
             var rootResolution = WorkspaceRootResolver.ResolveCurrentDirectory();
             var effectiveNoSemantic = rootResolution.IsWorkspace
@@ -58,6 +59,11 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                 var warnings = EmbeddingRuntimeFactory.TryCreate(
                     rootResolution.RootPath, withProvider: !effectiveNoSemantic,
                     out embeddings, out vectorStore, out providerResolution);
+                if (embeddings is not null && vectorStore is not null)
+                {
+                    vectorPhase = new WatchEmbeddingRuntime(embeddings, vectorStore, providerResolution);
+                }
+
                 var providerLine = EmbeddingProviderLogLine.Describe(embeddings is null ? null : providerResolution);
                 if (providerLine is not null)
                 {
@@ -104,16 +110,16 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
                         new SpinnerColumn())
                     .Start(ctx => indexer.Index(
                         workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
-                        new IndexProgressRenderer(ctx), embeddings, vectorStore, settings.Reembed,
-                        StaleLockWarningSink.ToStderr, providerResolution, embeddingsUnavailable));
+                        new IndexProgressRenderer(ctx), vectorPhase, settings.Reembed,
+                        StaleLockWarningSink.ToStderr, embeddingsUnavailable));
             }
             else
             {
                 renderer = settings.Events ? new IndexEventsRenderer(events!) : null;
                 result = indexer.Index(
                     workspaceRoot, settings.Repo, settings.Full, settings.NoSemantic,
-                    renderer, embeddings, vectorStore, settings.Reembed,
-                    StaleLockWarningSink.ToStderr, providerResolution, embeddingsUnavailable);
+                    renderer, vectorPhase, settings.Reembed,
+                    StaleLockWarningSink.ToStderr, embeddingsUnavailable);
             }
 
             events?.Completed(

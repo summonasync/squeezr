@@ -1,6 +1,7 @@
 using Shouldly;
 using Squeezr.Cli.Commands;
 using Squeezr.Core.Indexing;
+using Squeezr.Semantic.Indexing;
 
 namespace Squeezr.Tests.Cli;
 

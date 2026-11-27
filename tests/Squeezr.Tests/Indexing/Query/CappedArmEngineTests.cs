@@ -1,5 +1,5 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -167,11 +167,7 @@ public class CappedArmEngineTests
         };
         var engine = new SearchEngine(fixture.Root, RankExclusion.Parse(["docs/**"]));
 
-        var response = engine.SearchHybridAsync(
-            new SearchQuery("zznotaword", false, null, null, null, null, null, null, "docs/"),
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None).GetAwaiter().GetResult();
+        var response = engine.SearchHybridAsync(new SearchQuery("zznotaword", false, null, null, null, null, null, null, "docs/"), TestVectorPhase.Arm(fixture.Root, new FakeEmbeddingProvider(), store), CancellationToken.None).GetAwaiter().GetResult();
 
         store.LastTopK.ShouldBe(ScopedVectorBudget.Ceiling);
         response.Matches.ShouldBeEmpty();
@@ -204,11 +200,7 @@ public class CappedArmEngineTests
         string workspace, string query, FakeVectorStore store, string? prefix = null)
     {
         var engine = new SearchEngine(workspace);
-        return engine.SearchHybridAsync(
-            new SearchQuery(query, false, null, null, null, null, null, null, prefix),
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None).GetAwaiter().GetResult();
+        return engine.SearchHybridAsync(new SearchQuery(query, false, null, null, null, null, null, null, prefix), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), store), CancellationToken.None).GetAwaiter().GetResult();
     }
 
     private sealed record WorkspaceFixture(string Root, uint RepoId, Dictionary<string, ChunkDocument> Chunks);
@@ -230,7 +222,7 @@ public class CappedArmEngineTests
 
         manager.AddRepo("repo", "demo");
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         var repoId = store.FindRepo("demo")!.Id;

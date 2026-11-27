@@ -38,6 +38,6 @@ public sealed record IndexCompletedLine(
             result.GuardDropped,
             result.Embedded,
             result.Throttled,
-            result.EmbeddingsCompleted,
-            result.EmbeddingsSkipped);
+            result.DrainCompleted,
+            result.DrainSkippedReason);
 }

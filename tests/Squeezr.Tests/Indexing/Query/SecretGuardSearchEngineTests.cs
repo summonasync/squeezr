@@ -1,5 +1,5 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Workspace;
@@ -79,7 +79,7 @@ public class SecretGuardSearchEngineTests
         };
 
         var response = await new SearchEngine(workspace).SearchHybridAsync(
-            Literal("zznotaword"), new SecretGuardFixture.FixedEmbeddings(), store, CancellationToken.None);
+            Literal("zznotaword"), TestVectorPhase.Arm(workspace, new SecretGuardFixture.FixedEmbeddings(), store), CancellationToken.None);
 
         response.Matches.ShouldBeEmpty();
         Withheld(response.Warnings)!.ShouldMatch(

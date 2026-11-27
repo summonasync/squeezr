@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -108,8 +108,7 @@ public class FusionRegressionPinTests
             .SearchHybridAsync(
                 new SearchQuery(query, Regex: false, IgnoreCase: null, Repo: null, PathGlob: null,
                     Language: null, TopK: 10, MaxTokens: null, Prefix: null),
-                new DeterministicEmbeddingProvider(),
-                store,
+                TestVectorPhase.Arm(workspace, new DeterministicEmbeddingProvider(), store),
                 CancellationToken.None,
                 tuning: tuning)
             .GetAwaiter()
@@ -133,7 +132,7 @@ public class FusionRegressionPinTests
         File.WriteAllText(Path.Combine(workspace, "repo", "Notes.md"), NotesSource);
 
         new WorkspaceIndexer().Index(
-            workspace, embeddings: new DeterministicEmbeddingProvider(), vectorStore: new RecordedVectorStore());
+            workspace, vectorPhase: TestVectorPhase.Runtime(new DeterministicEmbeddingProvider(), new RecordedVectorStore()));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         repoId = store.FindRepo("demo")!.Id;

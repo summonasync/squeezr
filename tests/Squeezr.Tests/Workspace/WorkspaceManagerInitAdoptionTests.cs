@@ -4,6 +4,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Workspace;
 
@@ -36,9 +37,9 @@ public sealed class WorkspaceManagerInitAdoptionTests : IDisposable
         var storeDir = Path.Combine(SqueezrHome.WorkspacesDir, storeKey);
         Directory.CreateDirectory(storeDir);
 
-        var customConfig = SqueezrConfig.CreateDefault() with
+        var customConfig = SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
-            Embeddings = SqueezrConfig.CreateDefault().Embeddings with { Provider = "ollama" }
+            Embeddings = SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Embeddings with { Provider = "ollama" }
         };
         var configJson = JsonSerializer.Serialize(customConfig, SqueezrJson.FileOptions);
         var configPath = Path.Combine(storeDir, SqueezrPaths.ConfigFileName);
@@ -66,7 +67,7 @@ public sealed class WorkspaceManagerInitAdoptionTests : IDisposable
         result.RepairHint.ShouldBeNull();
 
         File.ReadAllText(configPath).ShouldBe(configJson);
-        ConfigFile.Load(root).Embeddings.Provider.ShouldBe("ollama");
+        SemanticConfigFile.Load(root).Embeddings.Provider.ShouldBe("ollama");
 
         var adopted = WorkspaceManifestFile.Load(root);
         adopted.Name.ShouldBe(name);
@@ -129,9 +130,9 @@ public sealed class WorkspaceManagerInitAdoptionTests : IDisposable
         var storeDir = CreateStoreDir(WorkspaceStoreKeys.Create(name, WorkspaceCanonicalPath.Canonicalize(root)));
         var configPath = Path.Combine(storeDir, SqueezrPaths.ConfigFileName);
         var configJson = JsonSerializer.Serialize(
-            SqueezrConfig.CreateDefault() with
+            SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
             {
-                Embeddings = SqueezrConfig.CreateDefault().Embeddings with { Provider = "ollama" }
+                Embeddings = SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Embeddings with { Provider = "ollama" }
             },
             SqueezrJson.FileOptions);
         File.WriteAllText(configPath, configJson);

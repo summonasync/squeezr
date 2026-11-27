@@ -2,12 +2,13 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using Shouldly;
 using Squeezr.Cli.Commands;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -437,7 +438,7 @@ public sealed class WorktreeDropCliTests : IDisposable
         File.WriteAllText(
             Path.Combine(storeDir, SqueezrPaths.ConfigFileName),
             JsonSerializer.Serialize(
-                SqueezrConfig.CreateDefault() with
+                SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
                 {
                     Qdrant = new QdrantConfig { Endpoint = TestWorkspaceConfig.DeadQdrantEndpoint }
                 },

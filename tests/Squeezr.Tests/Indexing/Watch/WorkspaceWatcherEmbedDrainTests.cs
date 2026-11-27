@@ -1,11 +1,13 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Watch;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.Watch;
 
@@ -34,7 +36,7 @@ public class WorkspaceWatcherEmbedDrainTests
         var provider = new CountingEmbeddingProvider();
         var recorder = new DrainRecorder();
         using var cts = new CancellationTokenSource();
-        var watcher = new WorkspaceWatcher(recorder, embeddings: Runtime(provider, new FakeVectorStore()));
+        var watcher = new WorkspaceWatcher(recorder, vectorPhase: Runtime(provider, new FakeVectorStore()));
         await watcher.StartAsync(workspace, cts.Token);
         try
         {
@@ -47,7 +49,7 @@ public class WorkspaceWatcherEmbedDrainTests
             await Task.Delay(QuietSettle);
             recorder.Faults.ShouldBeEmpty();
 
-            ChunksOf(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+            ChunksOf(workspace).ShouldAllBe(c => c.VectorStatus == "ok");
             new SearchEngine(workspace).Search(Query("drainfresh")).Matches.ShouldNotBeEmpty();
         }
         finally
@@ -73,7 +75,7 @@ public class WorkspaceWatcherEmbedDrainTests
         var provider = new CountingEmbeddingProvider();
         var recorder = new DrainRecorder();
         using var cts = new CancellationTokenSource();
-        var watcher = new WorkspaceWatcher(recorder, embeddings: Runtime(provider, new FakeVectorStore()));
+        var watcher = new WorkspaceWatcher(recorder, vectorPhase: Runtime(provider, new FakeVectorStore()));
         await watcher.StartAsync(workspace, cts.Token);
         try
         {
@@ -98,7 +100,7 @@ public class WorkspaceWatcherEmbedDrainTests
             provider.EmbeddedTextCount.ShouldBe(
                 distinctHashes, "identical chunk texts share one vector, the rest is marking");
             recorder.Faults.ShouldBeEmpty();
-            ChunksOf(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+            ChunksOf(workspace).ShouldAllBe(c => c.VectorStatus == "ok");
         }
         finally
         {
@@ -119,7 +121,7 @@ public class WorkspaceWatcherEmbedDrainTests
         var provider = new CountingEmbeddingProvider();
         var recorder = new DrainRecorder();
         using var cts = new CancellationTokenSource();
-        var watcher = new WorkspaceWatcher(recorder, embeddings: Runtime(provider, new UnavailableVectorStore()));
+        var watcher = new WorkspaceWatcher(recorder, vectorPhase: Runtime(provider, new UnavailableVectorStore()));
         await watcher.StartAsync(workspace, cts.Token);
         try
         {
@@ -131,7 +133,7 @@ public class WorkspaceWatcherEmbedDrainTests
                 r.Warnings.Any(w => w.Contains("vector store is unavailable", StringComparison.Ordinal)));
             PendingCount(workspace).ShouldBe(
                 pendingBefore, "the re-chunked file replaces its own rows: the queue must not shrink below the backlog");
-            ChunksOf(workspace).ShouldAllBe(c => c.EmbeddingStatus != "ok");
+            ChunksOf(workspace).ShouldAllBe(c => c.VectorStatus != "ok");
             provider.EmbeddedTextCount.ShouldBe(0);
 
             WriteFile(workspace, "repo/Beta.cs", ThreeMethodSource("Ledger", "ledgerfresh"));
@@ -193,7 +195,7 @@ public class WorkspaceWatcherEmbedDrainTests
         var provider = new FailsFromSecondCallProvider();
         var recorder = new DrainRecorder();
         using var cts = new CancellationTokenSource();
-        var watcher = new WorkspaceWatcher(recorder, embeddings: Runtime(provider, new FakeVectorStore()));
+        var watcher = new WorkspaceWatcher(recorder, vectorPhase: Runtime(provider, new FakeVectorStore()));
         await watcher.StartAsync(workspace, cts.Token);
         try
         {
@@ -203,8 +205,8 @@ public class WorkspaceWatcherEmbedDrainTests
             recorder.Completed.Count.ShouldBe(2, "one partial pass buys exactly one retry, a retry that fails at the tail buys nothing");
 
             var partial = recorder.Completed.Single(r => r.Embedded > 0);
-            partial.EmbeddingsCompleted.ShouldBeFalse();
-            recorder.Completed.ShouldContain(r => r.Embedded == 0 && !r.EmbeddingsCompleted);
+            partial.DrainCompleted.ShouldBeFalse();
+            recorder.Completed.ShouldContain(r => r.Embedded == 0 && !r.DrainCompleted);
             PendingCount(workspace).ShouldBe(pendingBefore - partial.Embedded);
         }
         finally
@@ -223,7 +225,7 @@ public class WorkspaceWatcherEmbedDrainTests
         var provider = new CountingEmbeddingProvider();
         var recorder = new DrainRecorder();
         using var cts = new CancellationTokenSource();
-        var watcher = new WorkspaceWatcher(recorder, embeddings: Runtime(provider, new MismatchVectorStore()));
+        var watcher = new WorkspaceWatcher(recorder, vectorPhase: Runtime(provider, new MismatchVectorStore()));
         await watcher.StartAsync(workspace, cts.Token);
         try
         {
@@ -249,8 +251,8 @@ public class WorkspaceWatcherEmbedDrainTests
         }
     }
 
-    private static Task<WatchEmbeddingRuntime?> Runtime(IEmbeddingProvider provider, IVectorStore store) =>
-        Task.FromResult<WatchEmbeddingRuntime?>(
+    private static Task<IIndexVectorPhase?> Runtime(IEmbeddingProvider provider, IVectorStore store) =>
+        Task.FromResult<IIndexVectorPhase?>(
             new WatchEmbeddingRuntime(provider, store, new EmbeddingProviderResolution("ollama", null)));
 
     private static async Task UntilAsync(Func<bool> condition, string? what = null) =>
@@ -298,7 +300,7 @@ public class WorkspaceWatcherEmbedDrainTests
         manager.Init(null);
         TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
-        ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
+        SemanticConfigFile.Save(workspace, SemanticConfigFile.Load(workspace) with
         {
             Watch = new WatchConfig { DebounceSeconds = 1, EmbedBudgetPerPass = embedBudget }
         });

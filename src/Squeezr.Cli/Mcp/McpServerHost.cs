@@ -4,13 +4,16 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Cli.Mcp.Onboarding;
 using Squeezr.Cli.Mcp.Tools;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Watch;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Core.Indexing;
 
 namespace Squeezr.Cli.Mcp;
 
@@ -93,7 +96,7 @@ public static class McpServerHost
         bool events,
         WatchOwnerClaim? claimOverride,
         bool embedWatch = true,
-        Task<WatchEmbeddingRuntime?>? embeddingRuntime = null,
+        Task<IIndexVectorPhase?>? embeddingRuntime = null,
         TextWriter? stderr = null)
     {
         var diagnostics = stderr ?? Console.Error;
@@ -160,7 +163,7 @@ public static class McpServerHost
     private static async Task<ServeWatchPresence?> TryStartWatchEngineAsync(
         McpWorkspace workspace, bool watchRequested, bool watchEnabledInConfig, CancellationToken ct, bool events,
         WatchOwnerClaim? claimOverride, string? embedDrainReason,
-        Task<WatchEmbeddingRuntime?>? embeddingRuntime, TextWriter stderr)
+        Task<IIndexVectorPhase?>? embeddingRuntime, TextWriter stderr)
     {
         if (!watchRequested && !watchEnabledInConfig)
         {
@@ -263,7 +266,7 @@ public static class McpServerHost
 
     private static WorkspaceWatcher BuildWatcher(
         string workspaceRoot, bool events, TextWriter stderr, WatchOwnerClaim claim,
-        Task<WatchEmbeddingRuntime?>? runtimeTask)
+        Task<IIndexVectorPhase?>? runtimeTask)
     {
         if (events)
         {
@@ -276,11 +279,11 @@ public static class McpServerHost
 
         return new WorkspaceWatcher(
             new ServeWatchStatus(stderr), onStaleTakeover: StaleLockWarningSink.ToStderr, claim: claim,
-            embeddings: runtimeTask);
+            vectorPhase: runtimeTask);
     }
 
-    private static Task<WatchEmbeddingRuntime?>? ResolveEmbeddingRuntime(
-        string? embedDrainReason, Task<WatchEmbeddingRuntime?>? embeddingRuntime, string workspaceRoot,
+    private static Task<IIndexVectorPhase?>? ResolveEmbeddingRuntime(
+        string? embedDrainReason, Task<IIndexVectorPhase?>? embeddingRuntime, string workspaceRoot,
         TextWriter stderr)
     {
         if (embedDrainReason is not null)
@@ -289,7 +292,7 @@ public static class McpServerHost
             return null;
         }
 
-        return embeddingRuntime ?? Task.Run(
+        return embeddingRuntime ?? Task.Run<IIndexVectorPhase?>(
             () => CreateWatchEmbeddingRuntime(workspaceRoot, stderr), CancellationToken.None);
     }
 
@@ -303,7 +306,7 @@ public static class McpServerHost
         CancellationToken ct,
         bool events,
         string? embedDrainReason,
-        Task<WatchEmbeddingRuntime?>? embeddingRuntime,
+        Task<IIndexVectorPhase?>? embeddingRuntime,
         TextWriter stderr,
         WatchOwnerOutcome outcome,
         Func<WorkspaceWatcher, bool> promote)
@@ -345,7 +348,7 @@ public static class McpServerHost
 
     // Runs on a worker thread off the JSON-RPC startup path: provider resolution may probe an HTTP
     // endpoint before the runtime is usable. Whatever happens here, serve must keep answering.
-    private static WatchEmbeddingRuntime? CreateWatchEmbeddingRuntime(string workspaceRoot, TextWriter stderr)
+    private static IIndexVectorPhase? CreateWatchEmbeddingRuntime(string workspaceRoot, TextWriter stderr)
     {
         try
         {

@@ -5,6 +5,7 @@ using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -220,8 +221,8 @@ public sealed class HookSessionStartCliTests
         await RunCheckedAsync(main, "init", "--name", name, "--json");
         await RunCheckedAsync(main, "add", ".", "--name", "main", "--json");
         await RunCheckedAsync(main, "index", "--no-semantic", "--json");
-        var config = ConfigFile.Load(main);
-        ConfigFile.Save(main, config with { Indexing = config.Indexing with { NoSemantic = true } });
+        var config = SemanticConfigFile.Load(main);
+        SemanticConfigFile.Save(main, config with { Indexing = config.Indexing with { NoSemantic = true } });
         return main;
     }
 
@@ -249,7 +250,7 @@ public sealed class HookSessionStartCliTests
             JsonSerializer.Serialize(
                 new WorkspaceManifest { Name = branch.Split('/')[^1], RootPath = childRoot },
                 SqueezrJson.FileOptions));
-        var defaults = SqueezrConfig.CreateDefault();
+        var defaults = SemanticConfig.Bind(SqueezrConfig.CreateDefault());
         File.WriteAllText(
             Path.Combine(storeDir, SqueezrPaths.ConfigFileName),
             JsonSerializer.Serialize(

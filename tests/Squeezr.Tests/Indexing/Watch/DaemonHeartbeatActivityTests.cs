@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Serialization;
@@ -145,9 +145,9 @@ public sealed class DaemonHeartbeatActivityTests : IDisposable
     {
         using var writer = CreateWriter();
         writer.Start();
-        writer.SetEmbeddingExecutor(new EmbeddingExecutor("gpu", null), "ollama");
+        writer.SetExecutorEvidence("gpu", "ollama");
 
-        writer.PhaseStarted("demo", IndexPhase.Embeddings, 9);
+        writer.PhaseStarted("demo", IndexPhase.Vectors, 9);
 
         var activity = ReadBeat().ShouldNotBeNull().Activity.ShouldNotBeNull();
         activity.Phase.ShouldBe("embeddings");
@@ -160,7 +160,7 @@ public sealed class DaemonHeartbeatActivityTests : IDisposable
     {
         using var writer = CreateWriter();
         writer.Start();
-        writer.SetEmbeddingExecutor(new EmbeddingExecutor("cpu", null), "ollama");
+        writer.SetExecutorEvidence("cpu", "ollama");
 
         writer.PhaseStarted("demo", IndexPhase.Files, 5);
 
@@ -188,7 +188,7 @@ public sealed class DaemonHeartbeatActivityTests : IDisposable
         using var writer = CreateWriter();
         writer.Start();
         ReadBeatText().Contains("activity").ShouldBeFalse("an idle beat keeps the pre-068 wire shape");
-        writer.PhaseStarted("demo", IndexPhase.Embeddings, 9);
+        writer.PhaseStarted("demo", IndexPhase.Vectors, 9);
 
         var legacy = JsonSerializer.Deserialize<LegacyBeatShape>(
             File.ReadAllText(writer.BeatPath), SqueezrJson.FileOptions);

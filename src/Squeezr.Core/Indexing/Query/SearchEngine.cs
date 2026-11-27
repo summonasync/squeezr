@@ -1,4 +1,3 @@
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
@@ -7,8 +6,6 @@ namespace Squeezr.Core.Indexing.Query;
 
 public sealed class SearchEngine
 {
-    public const string VectorStoreUnavailableWarning = "vector store is unavailable, falling back to exact search only";
-
     private static readonly TruncationHint Truncation = new(
     [
         new("raise", ["maxTokens"]),
@@ -36,8 +33,7 @@ public sealed class SearchEngine
 
     public async Task<SearchResponse> SearchHybridAsync(
         SearchQuery query,
-        IEmbeddingProvider? embeddings,
-        IVectorStore? vectorStore,
+        ISemanticArmSource? semanticArm,
         CancellationToken ct,
         SemanticCoverage? coverage = null,
         FusionTuning? tuning = null)
@@ -70,19 +66,13 @@ public sealed class SearchEngine
         var semantic = SemanticArm.Empty;
         var warnings = new List<string>();
 
-        if (vectorStore is not null && embeddings is not null)
+        if (semanticArm is not null)
         {
             try
             {
-                if (!await vectorStore.IsAvailableAsync(ct))
-                {
-                    warnings.Add(VectorStoreUnavailableWarning);
-                }
-                else if (await vectorStore.CountAsync(ct) > 0)
-                {
-                    semantic = await SemanticHitsResolver.Resolve(
-                        _workspaceRoot, query, embeddings, vectorStore, ct, fileScope, guard);
-                }
+                var resolved = await semanticArm.SearchAsync(query, ct, fileScope, guard);
+                semantic = resolved.Arm;
+                warnings.AddRange(resolved.Warnings);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -120,7 +110,7 @@ public sealed class SearchEngine
 
         var merged = RrfMerger.Merge(exactRanked, semantic.Hits, tuning);
         var semanticScores = semantic.Hits.Select(hit => hit.Match.Score).ToList();
-        return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores, embeddings?.ModelKey);
+        return Finalize(merged, query, AppendWithheld(warnings, guard), exactRanked.Count, semanticScores, semanticArm?.ModelKey);
     }
 
     private static List<string> AppendWithheld(List<string> warnings, SecretGuardReader guard)

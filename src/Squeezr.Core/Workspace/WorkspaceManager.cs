@@ -212,7 +212,7 @@ public sealed class WorkspaceManager
             }
 
             var composePath = SqueezrPaths.ComposePath(_root);
-            if (ServicesComposeFile.IsSqueezrGenerated(composePath))
+            if (GeneratedComposeFile.IsSqueezrGenerated(composePath))
             {
                 File.Delete(composePath);
                 removed.Add(composePath);

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Squeezr.Core\Squeezr.Core.csproj" />
+    <ProjectReference Include="..\Squeezr.Semantic\Squeezr.Semantic.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -11,7 +12,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
-    <PackageReference Include="Qdrant.Client" Version="1.19.0" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -5,6 +5,7 @@ using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.Watch;
 
@@ -318,7 +319,7 @@ public class WorkspaceWatcherTests
 
     private static void UseFastDebounce(string workspace)
     {
-        ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
+        SemanticConfigFile.Save(workspace, SemanticConfigFile.Load(workspace) with
         {
             Watch = new WatchConfig { DebounceSeconds = 1 }
         });

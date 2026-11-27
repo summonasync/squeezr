@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Squeezr.Semantic.Configuration;
 using Shouldly;
 using Spectre.Console;
 using Squeezr.Cli.Commands;
@@ -854,12 +855,12 @@ public sealed class WatchdAutostartCliTests
             SqueezrPaths.WorkspacesDirName,
             storeKey,
             SqueezrPaths.ConfigFileName);
-        var config = JsonSerializer.Deserialize<SqueezrConfig>(
-            File.ReadAllText(configPath), SqueezrJson.FileOptions)!;
+        var config = SemanticConfig.Bind(JsonSerializer.Deserialize<SqueezrConfig>(
+            File.ReadAllText(configPath), SqueezrJson.FileOptions)!);
         File.WriteAllText(
             configPath,
             JsonSerializer.Serialize(
-                config with { Qdrant = config.Qdrant with { Endpoint = TestWorkspaceConfig.DeadQdrantEndpoint } },
+                SemanticConfigFile.Attach(config.Core, config with { Qdrant = config.Qdrant with { Endpoint = TestWorkspaceConfig.DeadQdrantEndpoint } }),
                 SqueezrJson.FileOptions));
     }
 

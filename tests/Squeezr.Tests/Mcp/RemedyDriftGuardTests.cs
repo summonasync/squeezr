@@ -8,6 +8,8 @@ using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Indexing;
 
 namespace Squeezr.Tests.Mcp;
 
@@ -32,7 +34,7 @@ public class RemedyDriftGuardTests
     private static readonly string[] CarrierWiredThrowSites =
     [
         "src/Squeezr.Core/Indexing/WorkspaceCompactor.cs",
-        "src/Squeezr.Core/Indexing/VectorPointReconciler.cs"
+        "src/Squeezr.Semantic/Indexing/VectorPointReconciler.cs"
     ];
 
     private static readonly string[] InlineRemedyLiterals =
@@ -349,7 +351,7 @@ public class RemedyDriftGuardTests
     {
         var root = TestDirs.NewTempDir();
         new WorkspaceManager(root).Init(null);
-        ConfigFile.Save(root, ConfigFile.Load(root) with
+        SemanticConfigFile.Save(root, SemanticConfigFile.Load(root) with
         {
             Embeddings = new EmbeddingsConfig { Provider = provider }
         });

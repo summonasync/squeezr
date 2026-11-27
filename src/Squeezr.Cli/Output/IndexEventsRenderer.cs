@@ -50,7 +50,7 @@ public sealed class IndexEventsRenderer : IIndexProgress
             _writer.FileIndexed(repoName, currentItem, _files);
         }
 
-        if (phase is IndexPhase.Embeddings)
+        if (phase is IndexPhase.Vectors)
         {
             var done = ++_embeddedChunks[repoName];
             if (done % EmbeddingsProgressInterval == 0)
