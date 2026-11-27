@@ -1,0 +1,2 @@
+sqzrlite serve: workspace '/var/tmp/sqzrlite-t3-fixture' store 'sqzrlite-t3-fixture-501b07a1' (this directory is a registered workspace root)
+sqzrlite serve: no background indexer runs in lite — tools answer from the index as of the last 'sqzrlite index' pass; re-run 'sqzrlite index' after editing files
