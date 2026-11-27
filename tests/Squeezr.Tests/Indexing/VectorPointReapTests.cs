@@ -593,7 +593,8 @@ public class VectorPointReapTests
         {
             WorkspaceIndexer.RebuildTrigramIndex(
                 workspace, store, WorkspaceManifestFile.Load(workspace), warnings,
-                new Dictionary<uint, string>(), SqueezrPaths.TrigramIndexPath(workspace), vectorPhase: TestVectorPhase.Runtime(null, vectorStore));
+                new Dictionary<uint, string>(), SqueezrPaths.TrigramIndexPath(workspace),
+                vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
             store.CountPendingReaps().ShouldBe(0);
         }
