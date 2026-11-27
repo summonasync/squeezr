@@ -6,7 +6,6 @@ using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
-using Squeezr.Core.Indexing;
 using Squeezr.Semantic.Indexing.Watch;
 using Squeezr.Semantic.Configuration;
 
