@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Squeezr.Core.Indexing;
 
 // GuardWithheld counts paths this pass refused entry for; GuardWithheldBuiltIns is the half of that the
@@ -13,6 +15,6 @@ public sealed record RepoIndexResult(
     int GuardWithheldBuiltIns = 0,
     int GuardDropped = 0,
     int Embedded = 0,
-    bool DrainCompleted = true,
+    [property: JsonPropertyName("embeddingsCompleted")] bool DrainCompleted = true,
     int Throttled = 0,
-    string? DrainSkippedReason = null);
+    [property: JsonPropertyName("embeddingsSkipped")] string? DrainSkippedReason = null);

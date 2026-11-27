@@ -8,7 +8,7 @@ public sealed record SemanticConfig(SqueezrConfig Core, EmbeddingsConfig Embeddi
 {
     public static SemanticConfig Bind(SqueezrConfig core) =>
         new(core, Section<EmbeddingsConfig>(core, "embeddings") ?? new EmbeddingsConfig(),
-            Section<QdrantConfig>(core, "qdrant") ?? new QdrantConfig());
+            Section<QdrantConfig>(core, "qdrant") ?? new QdrantConfig { Endpoint = "http://localhost:6334" });
 
     // Pass-throughs so editors can treat the bound view as the whole config: writing one routes into
     // the carried core document, so a later Attach saves the edited section with the rest.

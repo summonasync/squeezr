@@ -78,7 +78,7 @@ public partial class EmbeddingProviderServicesTests
 
     private static List<string> RuntimeProviderNames() =>
         SwitchLabels(Read("Squeezr.Cli", "EmbeddingProviderFactory.cs"))
-            .Concat(SwitchLabels(Read("Squeezr.Core", "EmbeddingProviderResolver.cs")))
+            .Concat(SwitchLabels(Read("Squeezr.Semantic", "EmbeddingProviderResolver.cs")))
             .Distinct(StringComparer.Ordinal)
             .ToList();
 

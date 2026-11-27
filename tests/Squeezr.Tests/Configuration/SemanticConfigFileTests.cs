@@ -46,7 +46,7 @@ public class SemanticConfigFileTests
         var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("auto");
-        config.Qdrant.Endpoint.ShouldBe("");
+        config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
         config.Qdrant.Owned.ShouldBeFalse();
     }
 
@@ -66,7 +66,7 @@ public class SemanticConfigFileTests
         var config = SemanticConfigFile.Load(root);
 
         config.Embeddings.Provider.ShouldBe("auto");
-        config.Qdrant.Endpoint.ShouldBe("");
+        config.Qdrant.Endpoint.ShouldBe("http://localhost:6334");
         config.Core.Chunking.MaxTokensPerChunk.ShouldBe(256);
     }
 

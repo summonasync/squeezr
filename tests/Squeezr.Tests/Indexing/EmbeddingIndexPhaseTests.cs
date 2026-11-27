@@ -337,7 +337,7 @@ public class EmbeddingIndexPhaseTests
 
         new WorkspaceIndexer().Index(workspace, progress: progress);
 
-        progress.Events.ShouldNotContain(e => e.Contains(":Embeddings:", StringComparison.Ordinal));
+        progress.Events.ShouldNotContain(e => e.Contains(":Vectors:", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public class EmbeddingIndexPhaseTests
             workspace, progress: progress, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         progress.Events.ShouldContain(e =>
-            e.StartsWith("phase:demo:Embeddings:", StringComparison.Ordinal) && !e.EndsWith(":0", StringComparison.Ordinal));
+            e.StartsWith("phase:demo:Vectors:", StringComparison.Ordinal) && !e.EndsWith(":0", StringComparison.Ordinal));
     }
 
     [Fact]

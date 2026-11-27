@@ -34,7 +34,7 @@ public class RemedyDriftGuardTests
     private static readonly string[] CarrierWiredThrowSites =
     [
         "src/Squeezr.Core/Indexing/WorkspaceCompactor.cs",
-        "src/Squeezr.Core/Indexing/VectorPointReconciler.cs"
+        "src/Squeezr.Semantic/Indexing/VectorPointReconciler.cs"
     ];
 
     private static readonly string[] InlineRemedyLiterals =
