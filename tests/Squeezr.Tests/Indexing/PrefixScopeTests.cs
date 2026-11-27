@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
@@ -219,12 +219,12 @@ public class PrefixScopeTests
         };
         var engine = new SearchEngine(workspace);
 
-        var scoped = Hybrid(engine, store, "src/");
+        var scoped = Hybrid(workspace, engine, store, "src/");
         store.LastTopK.ShouldBe(ScopedVectorBudget.For(2, 4));
         store.LastTopK.ShouldBe(40);
         scoped.Matches.ShouldHaveSingleItem().Path.ShouldBe("src/Core/Alpha.cs");
 
-        var unscoped = Hybrid(engine, store, null);
+        var unscoped = Hybrid(workspace, engine, store, null);
         store.LastTopK.ShouldBe(20);
         unscoped.Matches.Select(m => m.Path)
             .ShouldBe(["lib/util.js", "src/Core/Alpha.cs"]);
@@ -279,12 +279,8 @@ public class PrefixScopeTests
         }
     }
 
-    private static SearchResponse Hybrid(SearchEngine engine, FakeVectorStore store, string? prefix) =>
-        engine.SearchHybridAsync(
-            Query("whatever", prefix),
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None).GetAwaiter().GetResult();
+    private static SearchResponse Hybrid(string workspaceRoot, SearchEngine engine, FakeVectorStore store, string? prefix) =>
+        engine.SearchHybridAsync(Query("whatever", prefix), TestVectorPhase.Arm(workspaceRoot, new FakeEmbeddingProvider(), store), CancellationToken.None).GetAwaiter().GetResult();
 
     private static SearchQuery Query(string query, string? prefix = null) =>
         new(query, false, null, null, null, null, null, null, prefix);
@@ -343,8 +339,7 @@ public class PrefixScopeTests
         {
             new WorkspaceIndexer().Index(
                 workspace,
-                embeddings: new FakeEmbeddingProvider(),
-                vectorStore: new FakeVectorStore());
+                vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
         }
         else
         {

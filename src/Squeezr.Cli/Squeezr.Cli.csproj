@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Squeezr.Core\Squeezr.Core.csproj" />
+    <ProjectReference Include="..\Squeezr.Semantic\Squeezr.Semantic.csproj" />
   </ItemGroup>
 
   <ItemGroup>

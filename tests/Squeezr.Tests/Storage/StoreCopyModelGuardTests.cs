@@ -74,7 +74,7 @@ public sealed class StoreCopyModelGuardTests
                 RepoId = 1,
                 Text = "chunk from a foreign model",
                 ChunkHash = "hash-foreign",
-                EmbeddingStatus = "ok",
+                VectorStatus = "ok",
                 ModelKey = "openai/text-embedding-3-small/1536",
             }]);
         }

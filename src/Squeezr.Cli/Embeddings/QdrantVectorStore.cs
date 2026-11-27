@@ -3,8 +3,10 @@ using Grpc.Core;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Core.Indexing;
 
 namespace Squeezr.Cli.Embeddings;
 

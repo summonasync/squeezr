@@ -3,6 +3,7 @@ using Squeezr.Cli.Commands;
 using Squeezr.Cli.Infra;
 using Squeezr.Cli.Mcp;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Cli.Output;
 

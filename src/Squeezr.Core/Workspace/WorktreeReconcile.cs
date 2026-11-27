@@ -1,4 +1,3 @@
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 
@@ -83,7 +82,7 @@ public static class WorktreeReconcile
 
         var obligation = before.ObligationChunks > 0;
         var owed = fill.State == WorktreeFillState.Filled || marker?.CoordinatesProven != true;
-        ClaimCheck? byRecord = null;
+        VectorClaimCheck? byRecord = null;
 
         // A lane whose record proves the coordinates still says what its collection answers now, and asks for
         // it in the unit a record can be checked in: a spread of the ids its own claim names, one batch, never
@@ -91,13 +90,13 @@ public static class WorktreeReconcile
         // none of them is the degraded collection this verb exists to catch, and it owes the pass back.
         if (!owed && obligation)
         {
-            byRecord = AttestSample(Runtime().VectorStore, before, ct);
+            byRecord = Probe(Runtime()).Attest(before.EmbeddedHashes, ct);
             owed = byRecord.Gap;
         }
 
         if (!owed)
         {
-            var settled = Judge(before, noSemantic, byRecord ?? ClaimCheck.NothingToAsk(), passFailure: null);
+            var settled = Judge(before, noSemantic, byRecord ?? VectorClaimCheck.NothingToAsk(), passFailure: null);
             // The record and the measurement disagree in exactly one window: the store still says its
             // semantic arm never landed, while the rows and the ids it names answer nothing short of that.
             // A record this verb will not rewrite cannot be outlived, so the disagreement owes the pass
@@ -126,12 +125,10 @@ public static class WorktreeReconcile
                 full: false,
                 noSemantic: noSemantic,
                 progress: null,
-                embeddings: runtime.Embeddings,
-                vectorStore: runtime.VectorStore,
+                vectorPhase: runtime.VectorPhase,
                 reembed: false,
                 onStaleTakeover: onStaleTakeover,
-                embeddingProviderResolution: runtime.ProviderResolution,
-                embeddingsUnavailableReason: runtime.EmbeddingsUnavailableReason,
+                semanticUnavailableReason: runtime.SemanticUnavailableReason,
                 cancellationToken: ct);
         }
         catch (Exception ex) when (IsRecoverable(ex))
@@ -141,7 +138,7 @@ public static class WorktreeReconcile
 
         var after = ReadRows(registered.RootPath) ?? before;
         var stillObligated = after.ObligationChunks > 0;
-        var measured = stillObligated ? MeasureClaim(runtime.VectorStore, after, ct) : ClaimCheck.NothingToAsk();
+        var measured = stillObligated ? Probe(runtime).Measure(after.EmbeddedHashes, ct) : VectorClaimCheck.NothingToAsk();
         var verdict = Judge(after, noSemantic, measured, passFailure);
         var outcome = Outcome(verdict, passRan: true, after, stillObligated, measured, pass, runtime,
             basis: "pass", marker: marker);
@@ -153,6 +150,22 @@ public static class WorktreeReconcile
     // the record: a lane that deleted its trigram.idx, or a parent that never built one, both say more than a
     // copied flag does, and presence is the one part of this that is cheap to look at (review-116-08 §2
     // caveat 1).
+    // A runtime with no probe is the honest "the collection was never asked" shape: the verdict comes
+    // from the rows alone, worded exactly as a store with nothing to ask reads.
+    private static IWorktreeVectorProbe Probe(WorktreeReconcileRuntime runtime) =>
+        runtime.VectorProbe ?? SilentProbe.Instance;
+
+    private sealed class SilentProbe : IWorktreeVectorProbe
+    {
+        public static readonly SilentProbe Instance = new();
+
+        public VectorClaimCheck Measure(IReadOnlyList<string> chunkHashes, CancellationToken ct) =>
+            new(null, null, "this worktree has no vector store to ask", Probed: 0);
+
+        public VectorClaimCheck Attest(IReadOnlyList<string> chunkHashes, CancellationToken ct) =>
+            new(null, null, "this worktree has no vector store to ask", Probed: 0);
+    }
+
     private static bool ExactArmOf(string manifestPath) =>
         File.Exists(Path.Combine(Path.GetDirectoryName(manifestPath)!, SqueezrPaths.TrigramIndexFileName));
 
@@ -170,17 +183,6 @@ public static class WorktreeReconcile
     // What a measurement of the collection found, in the claim's own unit. Whether a reader may take these
     // numbers as this call's measurement or only as an attestation of the record is not carried here — the
     // outcome's 'basis' says it, and a sample never answers how much of the claim the collection reaches.
-    private sealed record ClaimCheck(long? Points, int? Uncovered, string? Failure, int Probed)
-    {
-        public bool Gap => Uncovered is > 0;
-
-        public bool Answered => Failure is null;
-
-        // The shape a store with no vector claim is measured against: nothing was asked, so nothing is
-        // reported, and the verdict comes from the rows alone.
-        public static ClaimCheck NothingToAsk() => new(null, null, null, Probed: 0);
-    }
-
     // Null is 'this store holds no database at all', which is the lane born before its main worktree was
     // indexed. A database that exists and will not open is a different fact and is reported as such: the lane
     // is not empty, it is unreadable, and the class of that refusal is the store's own observation rather
@@ -212,84 +214,6 @@ public static class WorktreeReconcile
         }
     }
 
-    // The claim asked by id, within a ceiling. The ceiling is what keeps a session start unbounded-proof:
-    // past it this pass says it did not measure, instead of weighing the claim against a number that
-    // answers a different question.
-    private static ClaimCheck MeasureClaim(IVectorStore? store, StoreRows rows, CancellationToken ct)
-    {
-        if (store is null)
-        {
-            return new ClaimCheck(null, null, "this worktree has no vector store to ask", Probed: 0);
-        }
-
-        if (rows.ObligationChunks > ReconcileProbeBudget.FullClaimIdCeiling)
-        {
-            return new ClaimCheck(
-                null, null,
-                $"this store names {rows.ObligationChunks} chunk hash(es), past the "
-                + $"{ReconcileProbeBudget.FullClaimIdCeiling} ids one reconcile pass will ask a collection "
-                + "for",
-                Probed: rows.ObligationChunks);
-        }
-
-        var ids = Ids(rows.EmbeddedHashes);
-        try
-        {
-            var missing = store.MissingPointIdsAsync(ids, ct).GetAwaiter().GetResult();
-            var points = store.CountAsync(ct).GetAwaiter().GetResult();
-            return new ClaimCheck(points, missing.Count, null, Probed: ids.Count);
-        }
-        catch (Exception ex) when (IsRecoverable(ex))
-        {
-            return new ClaimCheck(null, null, ex.Message, Probed: ids.Count);
-        }
-    }
-
-    // The record's spot-check: a spread over the ids the claim names, one batch, chosen by position rather
-    // than by luck so the same store asks the same questions every start.
-    private static ClaimCheck AttestSample(IVectorStore? store, StoreRows rows, CancellationToken ct)
-    {
-        if (store is null)
-        {
-            return new ClaimCheck(null, null, "this worktree has no vector store to ask", Probed: 0);
-        }
-
-        var ids = Sample(rows.EmbeddedHashes, ReconcileProbeBudget.AttestationSampleIds);
-        try
-        {
-            var missing = store.MissingPointIdsAsync(ids, ct).GetAwaiter().GetResult();
-            return new ClaimCheck(null, missing.Count, null, Probed: ids.Count);
-        }
-        catch (Exception ex) when (IsRecoverable(ex))
-        {
-            return new ClaimCheck(null, null, ex.Message, Probed: ids.Count);
-        }
-    }
-
-    private static IReadOnlyList<ulong> Ids(IReadOnlyList<string> hashes) =>
-        [.. hashes.Select(ChunkPointId.FromHash)];
-
-    private static IReadOnlyList<ulong> Sample(IReadOnlyList<string> hashes, int take)
-    {
-        var distinct = hashes
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(hash => hash, StringComparer.Ordinal)
-            .ToList();
-        if (distinct.Count <= take)
-        {
-            return Ids(distinct);
-        }
-
-        var ids = new List<ulong>(take);
-        var stride = distinct.Count / take;
-        for (var seat = 0; seat < take; seat++)
-        {
-            ids.Add(ChunkPointId.FromHash(distinct[seat * stride]));
-        }
-
-        return ids;
-    }
-
     private static string NoRowsYet(WorktreeFillOutcome fill) =>
         fill.Skip is WorktreeFillSkip.SourceHasNoRows or WorktreeFillSkip.SourceStoreMissing
             ? "this worktree holds no rows yet, because the main worktree has no index to inherit: nothing is "
@@ -303,7 +227,7 @@ public static class WorktreeReconcile
     private static (WorktreeReconcileState State, string? Reason, string? Code) Judge(
         StoreRows rows,
         bool noSemantic,
-        ClaimCheck check,
+        VectorClaimCheck check,
         string? passFailure)
     {
         if (passFailure is not null)
@@ -366,7 +290,7 @@ public static class WorktreeReconcile
         bool passRan,
         StoreRows rows,
         bool obligation,
-        ClaimCheck? check,
+        VectorClaimCheck? check,
         IndexResult? pass,
         WorktreeReconcileRuntime runtime,
         string basis,
@@ -412,7 +336,7 @@ public static class WorktreeReconcile
         ReconcileMarker? marker,
         StoreRows rows,
         (WorktreeReconcileState State, string? Reason, string? Code) verdict,
-        ClaimCheck check,
+        VectorClaimCheck check,
         bool passCompleted,
         bool exactArm)
     {

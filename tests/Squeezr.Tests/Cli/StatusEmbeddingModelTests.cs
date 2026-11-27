@@ -2,6 +2,7 @@ using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -72,8 +73,8 @@ public sealed class StatusEmbeddingModelTests
     {
         var root = TestDirs.NewTempDir();
         (await RunCliAsync(root, "init", "--json")).ExitCode.ShouldBe(0);
-        var config = ConfigFile.Load(root);
-        ConfigFile.Save(root, config with
+        var config = SemanticConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config with
         {
             Embeddings = config.Embeddings with
             {

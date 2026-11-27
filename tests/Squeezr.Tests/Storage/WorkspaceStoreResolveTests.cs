@@ -4,6 +4,7 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Storage;
 
@@ -464,8 +465,8 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
         var result = WorkspaceStore.Resolve(root);
 
         result.MigratedFromLegacy.ShouldBeTrue();
-        var defaults = SqueezrConfig.CreateDefault().Indexing.Ignore;
-        ConfigFile.Load(root).Indexing.Ignore.ShouldBe(
+        var defaults = SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Indexing.Ignore;
+        SemanticConfigFile.Load(root).Indexing.Ignore.ShouldBe(
             ["**/node_modules/**", "**/custom-build/**", .. defaults.Where(d => d != "**/node_modules/**")]);
     }
 
@@ -486,7 +487,7 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
 
         var raw = File.ReadAllText(Path.Combine(result.StoreDir!, SqueezrPaths.ConfigFileName));
         raw.ShouldNotContain("gitAware");
-        ConfigFile.Load(root).Embeddings.Provider.ShouldBe("ollama");
+        SemanticConfigFile.Load(root).Embeddings.Provider.ShouldBe("ollama");
     }
 
     [Fact]
@@ -496,13 +497,13 @@ public sealed class WorkspaceStoreResolveTests : IDisposable
         CreateLegacyLayoutWithConfig(root, LegacyConfig(ignore: """["**/node_modules/**"]"""));
 
         var first = WorkspaceStore.Resolve(root);
-        var afterFirst = ConfigFile.Load(root).Indexing.Ignore;
+        var afterFirst = SemanticConfigFile.Load(root).Indexing.Ignore;
 
         File.WriteAllText(Path.Combine(root, SqueezrPaths.ManifestFileName), """{"name":"legacy","repos":[]}""");
         var second = WorkspaceStore.Resolve(root);
 
         second.StoreKey.ShouldBe(first.StoreKey);
-        ConfigFile.Load(root).Indexing.Ignore.ShouldBe(afterFirst);
+        SemanticConfigFile.Load(root).Indexing.Ignore.ShouldBe(afterFirst);
     }
 
     private static string LegacyConfig(string ignore) =>

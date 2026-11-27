@@ -10,6 +10,8 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Cli.Commands;
 
@@ -159,7 +161,7 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
         {
             try
             {
-                var config = ConfigFile.Load(entry.RootPath);
+                var config = SemanticConfigFile.Load(entry.RootPath);
                 if (config.Qdrant.Owned == owned &&
                     (owned || config.Qdrant.Endpoint.Length > 0))
                 {
@@ -172,7 +174,7 @@ public sealed class ServicesUpCommand : AsyncCommand<ServicesUpCommand.Settings>
                         ? config.Qdrant with { Owned = true }
                         : config.Qdrant with { Owned = false, Endpoint = endpoint ?? config.Qdrant.Endpoint },
                 };
-                ConfigFile.Save(entry.RootPath, config);
+                SemanticConfigFile.Save(entry.RootPath, config);
             }
             catch (Exception ex) when (ex is WorkspaceException or InvalidDataException or IOException)
             {

@@ -1,7 +1,8 @@
 using Spectre.Console;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Cli.Tui;
 
@@ -17,10 +18,10 @@ public static class TuiConfigEditor
             return;
         }
 
-        SqueezrConfig config;
+        SemanticConfig config;
         try
         {
-            config = ConfigFile.Load(workspaceRoot);
+            config = SemanticConfigFile.Load(workspaceRoot);
         }
         catch (WorkspaceException ex)
         {
@@ -65,7 +66,7 @@ public static class TuiConfigEditor
             }
 
             config = result.Config;
-            ConfigFile.Save(workspaceRoot, config);
+            SemanticConfigFile.Save(workspaceRoot, config);
             console.MarkupLine("[green]Saved.[/]");
             if (section == "embeddings")
             {
@@ -78,7 +79,7 @@ public static class TuiConfigEditor
     private static async Task<SectionResult> RunSectionFormAsync(
         IAnsiConsole console,
         string section,
-        SqueezrConfig config,
+        SemanticConfig config,
         IReadOnlyList<FieldDef> fields,
         CancellationToken cancellationToken)
     {
@@ -382,19 +383,19 @@ public static class TuiConfigEditor
     {
         public required string Key { get; init; }
 
-        public required Func<SqueezrConfig, string> Get { get; init; }
+        public required Func<SemanticConfig, string> Get { get; init; }
 
-        public required Func<SqueezrConfig, string, FieldResult> Apply { get; init; }
+        public required Func<SemanticConfig, string, FieldResult> Apply { get; init; }
     }
 
-    private readonly record struct FieldResult(bool Ok, SqueezrConfig? Config, string Error)
+    private readonly record struct FieldResult(bool Ok, SemanticConfig? Config, string Error)
     {
-        public static FieldResult Valid(SqueezrConfig config) => new(true, config, string.Empty);
+        public static FieldResult Valid(SemanticConfig config) => new(true, config, string.Empty);
 
         public static FieldResult Fail(string error) => new(false, null, error);
     }
 
-    private readonly record struct SectionResult(bool Save, SqueezrConfig Config);
+    private readonly record struct SectionResult(bool Save, SemanticConfig Config);
 
     private readonly record struct FieldChange(string Key, string OldValue, string NewValue);
 }

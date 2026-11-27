@@ -2,8 +2,10 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Embeddings;
 

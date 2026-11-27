@@ -29,7 +29,7 @@ public class SemanticIndexIntegrationTests
 
         var chunks = store.ListChunksByFile(calcFile.Id);
         chunks.ShouldNotBeEmpty();
-        chunks.ShouldAllBe(c => c.TokenCount > 0 && c.ChunkHash.Length == 64 && c.EmbeddingStatus == "pending");
+        chunks.ShouldAllBe(c => c.TokenCount > 0 && c.ChunkHash.Length == 64 && c.VectorStatus == "pending");
         chunks.ShouldContain(c => c.SymbolId == add.Id);
 
         var refs = store.ListSymbolsByFile(calcFile.Id)

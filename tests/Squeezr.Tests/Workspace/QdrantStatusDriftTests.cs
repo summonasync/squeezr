@@ -1,5 +1,6 @@
 using Shouldly;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Tests.Workspace;
 

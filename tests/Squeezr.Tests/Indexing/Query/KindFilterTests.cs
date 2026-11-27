@@ -1,5 +1,5 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -74,11 +74,7 @@ public class KindFilterTests
     private static SearchResponse Search(string workspace, string query, KindAwareVectorStore store, string? kind)
     {
         var engine = new SearchEngine(workspace);
-        return engine.SearchHybridAsync(
-            new SearchQuery(query, false, null, null, null, null, null, null, null, kind),
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None).GetAwaiter().GetResult();
+        return engine.SearchHybridAsync(new SearchQuery(query, false, null, null, null, null, null, null, null, kind), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), store), CancellationToken.None).GetAwaiter().GetResult();
     }
 
     private static string NewIndexedWorkspace(out VectorHit docsChunk)
@@ -100,7 +96,7 @@ public class KindFilterTests
             Path.Combine(workspace, "repo", "docs", "Notes.md"),
             $"# Watch notes\n\n{SharedLine}.\n");
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new KindAwareVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new KindAwareVectorStore()));
 
         using var meta = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         var repoId = meta.FindRepo("demo")!.Id;

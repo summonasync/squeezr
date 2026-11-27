@@ -5,6 +5,7 @@ using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.Watch;
 
@@ -199,10 +200,10 @@ public sealed class WorkspaceWatcherStampHandoffTests
         var manager = new WorkspaceManager(workspace);
         manager.Init(null);
         manager.AddRepo(".", "demo");
-        var config = ConfigFile.Load(workspace);
+        var config = SemanticConfigFile.Load(workspace);
         // NoSemantic keeps the reconciliation pass cost deterministic: these tests pin who consumes the
         // hand-off record, not how fast a cold Roslyn session parses a repo under whatever else is running
-        ConfigFile.Save(workspace, config with
+        SemanticConfigFile.Save(workspace, config with
         {
             Watch = new WatchConfig { DebounceSeconds = 1 },
             Indexing = config.Indexing with { NoSemantic = true }

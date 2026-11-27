@@ -165,7 +165,7 @@ public sealed class StatusDropQdrantTests
             FileId = 1,
             Text = $"e{i}",
             ChunkHash = $"e{i}",
-            EmbeddingStatus = "ok",
+            VectorStatus = "ok",
             ModelKey = "m1"
         }));
         store.InsertChunks(chunks);

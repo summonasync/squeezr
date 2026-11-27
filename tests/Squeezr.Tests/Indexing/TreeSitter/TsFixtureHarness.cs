@@ -1,10 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.TreeSitter;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.TreeSitter;
 
@@ -33,7 +34,7 @@ internal static class TsFixtureHarness
         TestWorkspaceConfig.UseOllamaEmbeddings(workspace);
         manager.AddRepo("repo", "demo");
         new WorkspaceIndexer().Index(
-            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new RecordingVectorStore());
+            workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new RecordingVectorStore()));
         return workspace;
     }
 
@@ -74,7 +75,7 @@ internal static class TsFixtureHarness
             .ToList();
 
     internal static ParseResult ParseTwin(string relativePath, string source) =>
-        new TreeSitterProvider(Squeezr.Core.Configuration.SqueezrConfig.CreateDefault())
+        new TreeSitterProvider(Squeezr.Semantic.Configuration.SemanticConfig.Bind(Squeezr.Core.Configuration.SqueezrConfig.CreateDefault()).Core)
             .Parse(new FileRef("demo", relativePath), Encoding.UTF8.GetBytes(source));
 
     internal sealed class FakeEmbeddingProvider : IEmbeddingProvider

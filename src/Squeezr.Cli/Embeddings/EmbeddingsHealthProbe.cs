@@ -1,7 +1,9 @@
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Health;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Health;
 
 namespace Squeezr.Cli.Embeddings;
 
@@ -14,7 +16,7 @@ public static class EmbeddingsHealthProbe
     {
         try
         {
-            var config = ConfigFile.Load(workspaceRoot);
+            var config = SemanticConfigFile.Load(workspaceRoot);
             if (config.Indexing.NoSemantic)
             {
                 return EmbeddingsHealth.Silent;

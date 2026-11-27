@@ -2,6 +2,7 @@ using Shouldly;
 using Spectre.Console.Testing;
 using Squeezr.Cli.Tui;
 using Squeezr.Core.Configuration;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Tui;
 
@@ -75,7 +76,7 @@ public class TuiEndToEndTests
         console.Output.ShouldContain("Calc.cs:7");
         console.Output.ShouldContain("public int Add(int a, int b)");
         console.Output.ShouldContain("Calc.Add");
-        ConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:9999");
+        SemanticConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:9999");
     }
 
     private static void WriteFile(string workspace, string relativePath, string content)

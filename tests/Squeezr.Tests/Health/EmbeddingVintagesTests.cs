@@ -1,6 +1,7 @@
 using Shouldly;
 using Squeezr.Core.Health;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Health;
 
 namespace Squeezr.Tests.Health;
 
@@ -95,7 +96,7 @@ public sealed class EmbeddingVintagesTests
         EndLine = 4,
         Text = $"body {hash}",
         ChunkHash = hash,
-        EmbeddingStatus = status,
+        VectorStatus = status,
         ModelKey = modelKey,
     };
 }

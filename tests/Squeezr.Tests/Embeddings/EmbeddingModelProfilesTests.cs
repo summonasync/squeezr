@@ -1,5 +1,5 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 
 namespace Squeezr.Tests.Embeddings;
 

@@ -1,5 +1,4 @@
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Indexing.Roslyn;
 using Squeezr.Core.Storage;
@@ -43,7 +42,7 @@ public sealed class WorkspaceWatcher
     private readonly IIndexProgress? _progress;
     private readonly Action<string>? _onStaleTakeover;
     private readonly WatchOwnerClaim? _claim;
-    private readonly Task<WatchEmbeddingRuntime?>? _embeddings;
+    private readonly Task<IIndexVectorPhase?>? _vectorPhase;
     private readonly TimeSpan _passBudget;
     private readonly object _gate = new();
     private readonly HashSet<string> _pending = [];
@@ -64,7 +63,7 @@ public sealed class WorkspaceWatcher
     private DateTime _lastEventAt = DateTime.MinValue;
     private DateTime _lastForcedEmptyBatchAt = DateTime.MinValue;
     private DateTime _lastClaimBeat = DateTime.MinValue;
-    private WatchEmbeddingRuntime? _runtime;
+    private IIndexVectorPhase? _runtime;
     private bool _runtimeResolved;
     private int _embedBudget = WatchConfig.DefaultEmbedBudgetPerPass;
     private bool _forcePass;
@@ -76,14 +75,14 @@ public sealed class WorkspaceWatcher
         IIndexProgress? progress = null,
         Action<string>? onStaleTakeover = null,
         WatchOwnerClaim? claim = null,
-        Task<WatchEmbeddingRuntime?>? embeddings = null,
+        Task<IIndexVectorPhase?>? vectorPhase = null,
         TimeSpan? passBudget = null)
     {
         _status = status;
         _progress = progress;
         _onStaleTakeover = onStaleTakeover;
         _claim = claim;
-        _embeddings = embeddings;
+        _vectorPhase = vectorPhase;
         _passBudget = passBudget ?? DefaultPassBudget;
         _passBudgetLadder = new PassBudgetLadder(_passBudget, MaxArmedPassBudget);
     }
@@ -123,7 +122,7 @@ public sealed class WorkspaceWatcher
             // a drain-equipped watcher opens with a catch-up pass so pending left by earlier sessions
             // starts moving without waiting for an edit; embed-free watchers keep their zero-pass idle
             // unless the record above proves the last pass never completed
-            _forcePass = _embeddings is not null || cutShort;
+            _forcePass = _vectorPhase is not null || cutShort;
             _lastEventAt = DateTime.MinValue;
             _lastForcedEmptyBatchAt = DateTime.MinValue;
         }
@@ -464,7 +463,7 @@ public sealed class WorkspaceWatcher
         var runtime = await ResolveRuntimeAsync(cancellationToken).ConfigureAwait(false);
         if (runtime is not null)
         {
-            _heartbeat?.SetEmbeddingExecutor(runtime.Executor, runtime.ProviderName);
+            _heartbeat?.SetExecutorEvidence(runtime.ExecutorDevice, runtime.ProviderName);
         }
 
         var storeDir = SqueezrPaths.StoreDir(_workspaceRoot);
@@ -543,7 +542,7 @@ public sealed class WorkspaceWatcher
 
     private async Task RunPassCoreAsync(
         List<string> batch,
-        WatchEmbeddingRuntime? runtime,
+        IIndexVectorPhase? runtime,
         CancellationToken passToken,
         CancellationToken cancellationToken)
     {
@@ -559,8 +558,7 @@ public sealed class WorkspaceWatcher
                 var result = _indexer.Index(
                     _workspaceRoot, progress: progress, onStaleTakeover: _onStaleTakeover,
                     changedPaths: batch, sessions: _sessions,
-                    embeddings: runtime?.Provider, vectorStore: runtime?.Store,
-                    embeddingProviderResolution: runtime?.Resolution,
+                    vectorPhase: runtime,
                     embedBudgetPerPass: runtime is null ? null : _embedBudget,
                     cancellationToken: passToken);
                 _passBudgetLadder.NoteCompleted();
@@ -575,7 +573,7 @@ public sealed class WorkspaceWatcher
                         _forcePass = true;
                     }
                 }
-                else if (runtime is not null && !result.EmbeddingsCompleted && result.Embedded > 0)
+                else if (runtime is not null && !result.DrainCompleted && result.Embedded > 0)
                 {
                     // the phase died mid-drain after real progress: the un-attempted tail would sit forever
                     // behind a wait for edits. One re-arm, debounced as usual; the retry starts at the tail
@@ -642,9 +640,9 @@ public sealed class WorkspaceWatcher
         }
     }
 
-    private async Task<WatchEmbeddingRuntime?> ResolveRuntimeAsync(CancellationToken cancellationToken)
+    private async Task<IIndexVectorPhase?> ResolveRuntimeAsync(CancellationToken cancellationToken)
     {
-        if (_embeddings is null)
+        if (_vectorPhase is null)
         {
             return null;
         }
@@ -654,19 +652,19 @@ public sealed class WorkspaceWatcher
             return _runtime;
         }
 
-        if (!_embeddings.IsCompleted)
+        if (!_vectorPhase.IsCompleted)
         {
-            await _embeddings.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _vectorPhase.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        if (_embeddings.Status == TaskStatus.RanToCompletion)
+        if (_vectorPhase.Status == TaskStatus.RanToCompletion)
         {
-            _runtime = _embeddings.Result;
+            _runtime = _vectorPhase.Result;
         }
         else
         {
             _status?.Faulted(
-                $"watch embed drain disabled: {_embeddings.Exception?.GetBaseException().Message}");
+                $"watch embed drain disabled: {_vectorPhase.Exception?.GetBaseException().Message}");
         }
 
         _runtimeResolved = true;

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Squeezr.Core.Embeddings;
 using Squeezr.Core.Serialization;
 
 namespace Squeezr.Core.Indexing.Watch;
@@ -27,7 +26,7 @@ public sealed class DaemonHeartbeatWriter : IDisposable
     private DateTime _startedAt;
     private DateTime _nextSweepAt;
     private DaemonActivity? _activity;
-    private EmbeddingExecutor? _executor;
+    private string? _executorDevice;
     private string? _executorProvider;
     private bool _disposed;
 
@@ -101,14 +100,14 @@ public sealed class DaemonHeartbeatWriter : IDisposable
         Beat();
     }
 
-    // Store-only on purpose: the verdict belongs to the embeddings phase that follows, and rewriting the
+    // Store-only on purpose: the verdict belongs to the vector phase that follows, and rewriting the
     // beat here would double the pass's file writes for a value that changes never. The evidence itself is
-    // probed once per runtime (WatchEmbeddingRuntime memoizes), so the watcher can re-present it every pass.
-    public void SetEmbeddingExecutor(EmbeddingExecutor executor, string provider)
+    // probed once per runtime, so the watcher can re-present it every pass.
+    public void SetExecutorEvidence(string device, string provider)
     {
         lock (_gate)
         {
-            _executor = executor;
+            _executorDevice = device;
             _executorProvider = provider;
         }
     }
@@ -120,14 +119,19 @@ public sealed class DaemonHeartbeatWriter : IDisposable
     {
         lock (_gate)
         {
-            var embeddingPhase = phase == IndexPhase.Embeddings;
+            var vectorPhase = phase == IndexPhase.Vectors;
             _activity = new DaemonActivity(
-                phase.ToString().ToLowerInvariant(), repoName, 0, totalItems, null, _utcNow(),
-                embeddingPhase ? _executor?.Device : null,
-                embeddingPhase ? _executorProvider : null);
+                PhaseName(phase), repoName, 0, totalItems, null, _utcNow(),
+                vectorPhase ? _executorDevice : null,
+                vectorPhase ? _executorProvider : null);
             Beat();
         }
     }
+
+    // The drain phase keeps the wire name every stored beat and fleet listing already spells, so a beat
+    // written by this build reads exactly like one an earlier build left behind.
+    private static string PhaseName(IndexPhase phase) =>
+        phase == IndexPhase.Vectors ? "embeddings" : phase.ToString().ToLowerInvariant();
 
     public void ItemProcessed(string repoName, string currentItem)
     {

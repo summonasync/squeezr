@@ -1,8 +1,9 @@
 using Shouldly;
 using Squeezr.Cli.Embeddings;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -73,7 +74,7 @@ public class QdrantStatusProbeTests
                 FileId = (uint)i,
                 Text = "snippet",
                 ChunkHash = $"h{i}",
-                EmbeddingStatus = i < pendingChunks ? "pending" : "ok",
+                VectorStatus = i < pendingChunks ? "pending" : "ok",
                 ModelKey = i < pendingChunks ? null : "m1"
             }));
         }

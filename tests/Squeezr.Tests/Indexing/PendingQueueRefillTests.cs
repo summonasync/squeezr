@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -76,16 +76,16 @@ public class PendingQueueRefillTests
         var provider = new CountingEmbeddingProvider();
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
         provider.EmbeddedTextCount.ShouldBeGreaterThan(0);
 
         provider.Reset();
         vectorStore.Calls.Clear();
-        indexer.Index(workspace, full: true, embeddings: provider, vectorStore: vectorStore);
+        indexer.Index(workspace, full: true, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
 
         provider.EmbeddedTextCount.ShouldBe(0);
         vectorStore.Calls.ShouldNotContain(c => c.StartsWith("upsert:", StringComparison.Ordinal));
-        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == ModelKey);
+        ListChunks(workspace).ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == ModelKey);
     }
 
     [Fact]
@@ -95,14 +95,14 @@ public class PendingQueueRefillTests
         WriteFile(workspace, "repo/a.cs", Source);
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new CountingEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new CountingEmbeddingProvider(), new FakeVectorStore()));
         var pendingBefore = PendingCount(workspace);
         pendingBefore.ShouldBe(0);
 
         indexer.Index(workspace, full: true);
 
         PendingCount(workspace).ShouldBe(pendingBefore);
-        ListChunks(workspace).ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == ModelKey);
+        ListChunks(workspace).ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == ModelKey);
     }
 
     [Fact]
@@ -111,14 +111,14 @@ public class PendingQueueRefillTests
         var workspace = NewWorkspace();
         WriteFile(workspace, "repo/a.cs", Source);
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new CountingEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new CountingEmbeddingProvider(), new FakeVectorStore()));
         var fileId = FileIdOf(workspace, "a.cs");
 
         WriteFile(workspace, "repo/a.cs", ReflowedSource);
         indexer.IndexFile(workspace, "demo", "a.cs");
 
         PendingCount(workspace).ShouldBe(0);
-        ListChunks(workspace, fileId).ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == ModelKey);
+        ListChunks(workspace, fileId).ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == ModelKey);
     }
 
     [Fact]
@@ -130,19 +130,19 @@ public class PendingQueueRefillTests
         var provider = new CountingEmbeddingProvider();
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
 
         var fileId = FileIdOf(workspace, "a.cs");
         WriteFile(workspace, "repo/a.cs", MovedBody);
         provider.Reset();
         vectorStore.Calls.Clear();
 
-        indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
 
         vectorStore.Calls.ShouldContain($"delete:{fileId}");
         provider.EmbeddedTextCount.ShouldBeGreaterThan(0);
-        ListChunks(workspace, fileId).ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == ModelKey);
-        ListChunks(workspace, FileIdOf(workspace, "b.cs")).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace, fileId).ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == ModelKey);
+        ListChunks(workspace, FileIdOf(workspace, "b.cs")).ShouldAllBe(c => c.VectorStatus == "ok");
         // the reap deleted every point of the file, so a marker is only honest if the vectors are back:
         // without the re-queue in RequeueReapedFiles these rows would claim vectors that are not in the store
         foreach (var chunk in ListChunks(workspace, fileId))
@@ -157,7 +157,7 @@ public class PendingQueueRefillTests
         var workspace = NewWorkspace();
         WriteFile(workspace, "repo/a.cs", Source);
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new CountingEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new CountingEmbeddingProvider(), new FakeVectorStore()));
         var fileId = FileIdOf(workspace, "a.cs");
         using (var store = OpenStore(workspace))
         {
@@ -165,14 +165,14 @@ public class PendingQueueRefillTests
         }
 
         var provider = new CountingEmbeddingProvider();
-        var first = indexer.Index(workspace, embeddings: provider, vectorStore: new FakeVectorStore());
+        var first = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, new FakeVectorStore()));
 
         first.Warnings.ShouldContain(w => w.Contains("another embedding model", StringComparison.Ordinal));
         provider.EmbeddedTextCount.ShouldBeGreaterThan(0);
-        ListChunks(workspace, fileId).ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey == ModelKey);
+        ListChunks(workspace, fileId).ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey == ModelKey);
 
         provider.Reset();
-        var second = indexer.Index(workspace, embeddings: provider, vectorStore: new FakeVectorStore());
+        var second = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, new FakeVectorStore()));
 
         second.Warnings.ShouldNotContain(w => w.Contains("another embedding model", StringComparison.Ordinal));
         provider.EmbeddedTextCount.ShouldBe(0);
@@ -190,9 +190,9 @@ public class PendingQueueRefillTests
 
         var rows = store.ListChunksByFile(1);
         rows.Count.ShouldBe(2);
-        rows.Single(c => c.ChunkHash == "hash-keep").EmbeddingStatus.ShouldBe("ok");
+        rows.Single(c => c.ChunkHash == "hash-keep").VectorStatus.ShouldBe("ok");
         rows.Single(c => c.ChunkHash == "hash-keep").ModelKey.ShouldBe(ModelKey);
-        rows.Single(c => c.ChunkHash == "hash-new").EmbeddingStatus.ShouldBe("pending");
+        rows.Single(c => c.ChunkHash == "hash-new").VectorStatus.ShouldBe("pending");
         store.CountPendingChunks(null).ShouldBe(1);
     }
 
@@ -219,7 +219,7 @@ public class PendingQueueRefillTests
             EndLine = 4,
             Text = $"body {hash}",
             ChunkHash = hash,
-            EmbeddingStatus = "ok",
+            VectorStatus = "ok",
             ModelKey = ModelKey
         };
 

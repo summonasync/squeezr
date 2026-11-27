@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
@@ -56,11 +56,7 @@ public class SearchFileDedupTests
 
     private static SearchResponse Hybrid(
         string workspace, FakeVectorStore store, int? topK = null, string? query = null) =>
-        new SearchEngine(workspace).SearchHybridAsync(
-            new SearchQuery(query ?? Unmatched, false, null, null, null, null, topK, null),
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None).GetAwaiter().GetResult();
+        new SearchEngine(workspace).SearchHybridAsync(new SearchQuery(query ?? Unmatched, false, null, null, null, null, topK, null), TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider(), store), CancellationToken.None).GetAwaiter().GetResult();
 
     private static FakeVectorStore VectorStore(uint repoId, List<ChunkDocument> docChunks, ChunkDocument calcChunk) =>
         new()
@@ -98,7 +94,7 @@ public class SearchFileDedupTests
             }
             """);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         repoId = store.FindRepo("demo")!.Id;

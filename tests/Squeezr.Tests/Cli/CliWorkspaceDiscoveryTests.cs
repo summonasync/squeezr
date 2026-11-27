@@ -7,6 +7,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Serialization;
 using Squeezr.Core.Storage;
 using Squeezr.Tests.Indexing.Ignore;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -161,7 +162,7 @@ public sealed class CliWorkspaceDiscoveryTests
         File.WriteAllText(
             Path.Combine(root, SqueezrPaths.ManifestFileName),
             """{"name":"legacy","repos":[]}""");
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault());
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()));
         using (new MetaStore(Path.Combine(root, SqueezrPaths.StoreDirName, SqueezrPaths.MetaDbFileName), createIfMissing: true))
         {
         }
@@ -323,7 +324,7 @@ public sealed class CliWorkspaceDiscoveryTests
     // child pinned, so the config is written by path rather than through the in-process config helper.
     private static void GuardInStore(string home, string rootPath, params string[] globs)
     {
-        var config = SqueezrConfig.CreateDefault();
+        var config = SemanticConfig.Bind(SqueezrConfig.CreateDefault());
         File.WriteAllText(
             Path.Combine(StoreDir(home, StoreKeyOf(home, rootPath)), SqueezrPaths.ConfigFileName),
             JsonSerializer.Serialize(

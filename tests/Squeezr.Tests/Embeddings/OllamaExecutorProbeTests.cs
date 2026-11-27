@@ -2,7 +2,8 @@ using System.Net;
 using Shouldly;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Embeddings;
 

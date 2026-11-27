@@ -4,6 +4,7 @@ using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Indexing.Ignore;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.Watch;
 
@@ -94,7 +95,7 @@ public class WorkspaceWatcherLinkedWorktreeTests
         manager.Init(null);
         manager.AddRepo("repo", "demo");
         new WorkspaceIndexer().Index(workspace);
-        ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
+        SemanticConfigFile.Save(workspace, SemanticConfigFile.Load(workspace) with
         {
             Watch = new WatchConfig { DebounceSeconds = 1 }
         });

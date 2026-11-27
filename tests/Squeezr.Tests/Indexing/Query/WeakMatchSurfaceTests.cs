@@ -7,12 +7,14 @@ using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.RankEval;
 using Squeezr.Cli.Tui;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Semantic.Indexing.Query;
 using Squeezr.Core.Workspace;
 using Squeezr.Tests.Mcp;
 using Squeezr.Tests.Tui;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.Query;
 
@@ -63,7 +65,7 @@ public sealed class WeakMatchSurfaceTests : IDisposable
             .ToList();
 
         AssertStatedKeyIsUncalibrated(workspace);
-        warnings.ShouldContain(SearchEngine.VectorStoreUnavailableWarning);
+        warnings.ShouldContain(SemanticSearchArm.VectorStoreUnavailableWarning);
         warnings.ShouldNotContain(w => w.Contains("at low confidence", StringComparison.Ordinal));
         warnings.ShouldNotContain(w => w.Contains("weak-match floor", StringComparison.Ordinal));
     }
@@ -96,7 +98,7 @@ public sealed class WeakMatchSurfaceTests : IDisposable
         await TuiSearchFlow.RunAsync(console, workspace, new TuiSession(), CancellationToken.None);
 
         AssertStatedKeyIsUncalibrated(workspace);
-        console.Output.ShouldContain(SearchEngine.VectorStoreUnavailableWarning);
+        console.Output.ShouldContain(SemanticSearchArm.VectorStoreUnavailableWarning);
         console.Output.ShouldNotContain("at low confidence");
         console.Output.ShouldNotContain("weak-match floor");
     }
@@ -111,7 +113,7 @@ public sealed class WeakMatchSurfaceTests : IDisposable
             CancellationToken.None);
 
         AssertStatedKeyIsUncalibrated(workspace);
-        outcome.Warnings.ShouldContain(SearchEngine.VectorStoreUnavailableWarning);
+        outcome.Warnings.ShouldContain(SemanticSearchArm.VectorStoreUnavailableWarning);
         outcome.Warnings.ShouldNotContain(w => w.Contains("at low confidence", StringComparison.Ordinal));
         outcome.Warnings.ShouldNotContain(w => w.Contains("weak-match floor", StringComparison.Ordinal));
     }
@@ -141,7 +143,7 @@ public sealed class WeakMatchSurfaceTests : IDisposable
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
         manager.AddRepo("repo", "demo");
-        ConfigFile.Save(workspace, ConfigFile.Load(workspace) with
+        SemanticConfigFile.Save(workspace, SemanticConfigFile.Load(workspace) with
         {
             Embeddings = new EmbeddingsConfig
             {

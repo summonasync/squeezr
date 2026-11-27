@@ -4,6 +4,7 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Watch;
 
 namespace Squeezr.Cli.Commands;
 
@@ -257,10 +258,12 @@ public sealed class WorktreeInitCommand : Command<WorktreeInitCommand.Settings>
         var warnings = EmbeddingRuntimeFactory.TryCreate(
             laneRoot, withProvider: !noSemantic,
             out var embeddings, out var vectorStore, out var providerResolution);
+        var runtime = embeddings is not null && vectorStore is not null
+            ? new WatchEmbeddingRuntime(embeddings, vectorStore, providerResolution)
+            : null;
         return new WorktreeReconcileRuntime(
-            embeddings,
-            vectorStore,
-            providerResolution,
+            runtime,
+            runtime,
             embeddings is null && !noSemantic
                 ? warnings.Count > 0
                     ? $"provider unavailable: {string.Join("; ", warnings)}"

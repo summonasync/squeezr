@@ -1,7 +1,8 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Semantic.Indexing.Query;
 
 namespace Squeezr.Tests.Indexing.Query;
 

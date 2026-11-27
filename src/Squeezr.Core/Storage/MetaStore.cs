@@ -224,7 +224,7 @@ public sealed class MetaStore : IDisposable
     // watch pass, and materializing the chunk documents (Text included) to answer an Any() is not free.
     public bool HasEmbeddedChunks(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection)
-            .Exists(c => c.FileId == fileId && c.EmbeddingStatus == "ok");
+            .Exists(c => c.FileId == fileId && c.VectorStatus == "ok");
 
     public IReadOnlyList<string> ListChunkHashesByFile(uint fileId) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection)
@@ -241,7 +241,7 @@ public sealed class MetaStore : IDisposable
 
     public IReadOnlyList<string> ListEmbeddedChunkHashes() =>
         _db.GetCollection<ChunkDocument>(ChunksCollection)
-            .Find(c => c.EmbeddingStatus == "ok")
+            .Find(c => c.VectorStatus == "ok")
             .Select(c => c.ChunkHash)
             .Distinct(StringComparer.Ordinal)
             .ToList();
@@ -257,10 +257,10 @@ public sealed class MetaStore : IDisposable
         }
 
         var collection = _db.GetCollection<ChunkDocument>(ChunksCollection);
-        var stale = collection.Find(c => c.EmbeddingStatus == "ok" && chunkHashes.Contains(c.ChunkHash)).ToList();
+        var stale = collection.Find(c => c.VectorStatus == "ok" && chunkHashes.Contains(c.ChunkHash)).ToList();
         foreach (var chunk in stale)
         {
-            chunk.EmbeddingStatus = "pending";
+            chunk.VectorStatus = "pending";
             chunk.ModelKey = null;
         }
 
@@ -289,7 +289,7 @@ public sealed class MetaStore : IDisposable
     public void ReplaceFileChunks(uint fileId, IReadOnlyList<ChunkDocument> chunks)
     {
         var collection = _db.GetCollection<ChunkDocument>(ChunksCollection);
-        var markers = collection.Find(c => c.FileId == fileId && c.EmbeddingStatus == "ok")
+        var markers = collection.Find(c => c.FileId == fileId && c.VectorStatus == "ok")
             .Select(c => (c.ChunkHash, c.ModelKey))
             .ToList()
             .GroupBy(m => m.ChunkHash)
@@ -300,7 +300,7 @@ public sealed class MetaStore : IDisposable
         {
             if (markers.TryGetValue(chunk.ChunkHash, out var modelKey) && modelKey is not null)
             {
-                chunk.EmbeddingStatus = "ok";
+                chunk.VectorStatus = "ok";
                 chunk.ModelKey = modelKey;
             }
         }
@@ -317,19 +317,19 @@ public sealed class MetaStore : IDisposable
         if (modelKey is null)
         {
             return repoId.HasValue
-                ? chunks.Count(c => c.RepoId == repoId.Value && c.EmbeddingStatus != "ok")
-                : chunks.Count(c => c.EmbeddingStatus != "ok");
+                ? chunks.Count(c => c.RepoId == repoId.Value && c.VectorStatus != "ok")
+                : chunks.Count(c => c.VectorStatus != "ok");
         }
 
         return repoId.HasValue
-            ? chunks.Count(c => c.RepoId == repoId.Value && (c.EmbeddingStatus != "ok" || c.ModelKey != modelKey))
-            : chunks.Count(c => c.EmbeddingStatus != "ok" || c.ModelKey != modelKey);
+            ? chunks.Count(c => c.RepoId == repoId.Value && (c.VectorStatus != "ok" || c.ModelKey != modelKey))
+            : chunks.Count(c => c.VectorStatus != "ok" || c.ModelKey != modelKey);
     }
 
     public SemanticCoverage GetSemanticCoverage()
     {
         var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
-        return new SemanticCoverage(chunks.Count(), chunks.Count(c => c.EmbeddingStatus != "ok"));
+        return new SemanticCoverage(chunks.Count(), chunks.Count(c => c.VectorStatus != "ok"));
     }
 
     // Kind rides the file row; rows whose file is already reaped count toward no kind, so the
@@ -359,13 +359,13 @@ public sealed class MetaStore : IDisposable
     {
         var chunks = _db.GetCollection<ChunkDocument>(ChunksCollection);
         return repoId.HasValue
-            ? chunks.Count(c => c.RepoId == repoId.Value && c.EmbeddingStatus == "ok" && c.ModelKey != modelKey)
-            : chunks.Count(c => c.EmbeddingStatus == "ok" && c.ModelKey != modelKey);
+            ? chunks.Count(c => c.RepoId == repoId.Value && c.VectorStatus == "ok" && c.ModelKey != modelKey)
+            : chunks.Count(c => c.VectorStatus == "ok" && c.ModelKey != modelKey);
     }
 
     public IReadOnlyList<ChunkDocument> ListPendingChunks(uint repoId, string modelKey, int limit) =>
         _db.GetCollection<ChunkDocument>(ChunksCollection)
-            .Find(c => c.RepoId == repoId && (c.EmbeddingStatus != "ok" || c.ModelKey != modelKey))
+            .Find(c => c.RepoId == repoId && (c.VectorStatus != "ok" || c.ModelKey != modelKey))
             .OrderBy(c => c.Id)
             .Take(limit)
             .ToList();
@@ -381,7 +381,7 @@ public sealed class MetaStore : IDisposable
                 continue;
             }
 
-            chunk.EmbeddingStatus = "ok";
+            chunk.VectorStatus = "ok";
             chunk.ModelKey = modelKey;
             chunks.Update(chunk);
         }
@@ -401,7 +401,7 @@ public sealed class MetaStore : IDisposable
                 continue;
             }
 
-            chunk.EmbeddingStatus = "pending";
+            chunk.VectorStatus = "pending";
             chunk.ModelKey = null;
             chunks.Update(chunk);
         }
@@ -418,7 +418,7 @@ public sealed class MetaStore : IDisposable
 
         foreach (var chunk in rows)
         {
-            chunk.EmbeddingStatus = "pending";
+            chunk.VectorStatus = "pending";
             chunk.ModelKey = null;
         }
 

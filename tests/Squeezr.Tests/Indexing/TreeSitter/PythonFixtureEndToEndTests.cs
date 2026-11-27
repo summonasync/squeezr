@@ -77,7 +77,7 @@ public class PythonFixtureEndToEndTests
 
             // embed side measured on persisted rows: the fake provider plus the dead endpoint mean no
             // vector left the machine, while every chunk still has to leave the run stamped as embedded
-            fileChunks.ShouldAllBe(c => c.EmbeddingStatus == "ok" && c.ModelKey != null);
+            fileChunks.ShouldAllBe(c => c.VectorStatus == "ok" && c.ModelKey != null);
         }
 
         symbols.ShouldBe(new Dictionary<string, int>
@@ -348,11 +348,7 @@ public class PythonFixtureEndToEndTests
         var chunk = store.ListChunksByFile(engine.Id).Single(c => c.StartLine == 39);
         store.Dispose();
 
-        var response = await new SearchEngine(workspace).SearchHybridAsync(
-            new SearchQuery("unmatched paraphrase zzz", false, null, null, null, null, null, null),
-            new TsFixtureHarness.FakeEmbeddingProvider(),
-            new TsFixtureHarness.OneHitVectorStore(repoId, chunk),
-            CancellationToken.None);
+        var response = await new SearchEngine(workspace).SearchHybridAsync(new SearchQuery("unmatched paraphrase zzz", false, null, null, null, null, null, null), TestVectorPhase.Arm(workspace, new TsFixtureHarness.FakeEmbeddingProvider(), new TsFixtureHarness.OneHitVectorStore(repoId, chunk)), CancellationToken.None);
 
         var hit = response.Matches.Single(m => m.Path == "mini/engine.py");
         hit.Source.ShouldBe("semantic");

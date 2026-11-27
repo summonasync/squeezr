@@ -1,21 +1,25 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Squeezr.Core.Configuration;
 
 public sealed record SqueezrConfig
 {
-    public EmbeddingsConfig Embeddings { get; init; } = new();
-
     public required ChunkingConfig Chunking { get; init; }
 
     public required IndexingConfig Indexing { get; init; }
 
-    public required QdrantConfig Qdrant { get; init; }
-
     public WatchConfig Watch { get; init; } = new();
+
+    // Sections this assembly does not model (the semantic product's embeddings/qdrant, and any
+    // hand-added section) ride here as raw JSON: Core carries them through a Load/Save round trip
+    // without naming or validating them, and the semantic assembly binds them on read.
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 
     public static SqueezrConfig CreateDefault() =>
         new()
         {
-            Embeddings = new EmbeddingsConfig(),
             Chunking = new ChunkingConfig
             {
                 MaxTokensPerChunk = 512,
@@ -51,10 +55,6 @@ public sealed record SqueezrConfig
                 MaxFileSizeKb = 512,
                 NoSemantic = false,
                 RankExclude = []
-            },
-            Qdrant = new QdrantConfig
-            {
-                Endpoint = "http://localhost:6334"
             },
             Watch = new WatchConfig()
         };

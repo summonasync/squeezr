@@ -5,6 +5,7 @@ using Qdrant.Client;
 using Qdrant.Client.Grpc;
 using Shouldly;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -218,7 +219,7 @@ public class QdrantVectorStoreCopyTests
         var store = Store(handler);
 
         await store.UpsertAsync(
-            [new Squeezr.Core.Embeddings.VectorPoint(5, [1f, 2f], "hash-5", 15, 3, 1, 9, null)],
+            [new Squeezr.Semantic.Embeddings.VectorPoint(5, [1f, 2f], "hash-5", 15, 3, 1, 9, null)],
             CancellationToken.None);
 
         var request = UpsertPoints.Parser.ParseFrom(
@@ -237,7 +238,7 @@ public class QdrantVectorStoreCopyTests
         var fake = new QdrantFakeServer();
         var store = Store(fake);
         var written = Enumerable.Range(1, 3)
-            .Select(index => new Squeezr.Core.Embeddings.VectorPoint(
+            .Select(index => new Squeezr.Semantic.Embeddings.VectorPoint(
                 (ulong)index,
                 [0.1f * index, 0.2f * index],
                 $"hash-{index}",

@@ -5,6 +5,7 @@ using Spectre.Console;
 using Squeezr.Cli.Commands;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Infra;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Tests.Cli;
 

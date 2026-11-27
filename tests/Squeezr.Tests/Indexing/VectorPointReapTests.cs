@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -93,7 +93,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var fileId = FileIdOf(workspace, "a.cs");
         var untouchedPoints = vectorStore.Points.Values.Where(p => p.FileId != fileId).ToList();
@@ -101,7 +101,7 @@ public class VectorPointReapTests
         vectorStore.Calls.Clear();
 
         WriteFile(workspace, "repo/a.cs", MovedBody);
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var deletedAt = vectorStore.Calls.FindIndex(c => c.StartsWith("delete:", StringComparison.Ordinal));
         var upsertedAt = vectorStore.Calls.FindIndex(c => c.StartsWith("upsert:", StringComparison.Ordinal));
@@ -128,12 +128,12 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         var pointsBefore = vectorStore.Points.Count;
 
         WriteFile(workspace, "repo/a.cs", ReflowedSource);
         vectorStore.Calls.Clear();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldNotContain(c => c.StartsWith("delete:", StringComparison.Ordinal));
         vectorStore.Points.Count.ShouldBe(pointsBefore);
@@ -146,10 +146,10 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.Clear();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldBeEmpty();
     }
@@ -162,11 +162,11 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         var pointsBefore = vectorStore.Points.Count;
 
         vectorStore.Calls.Clear();
-        indexer.Index(workspace, full: true, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, full: true, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldNotContain(c => c.StartsWith("delete:", StringComparison.Ordinal));
         vectorStore.Points.Count.ShouldBe(pointsBefore);
@@ -180,14 +180,14 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var fileId = FileIdOf(workspace, "a.cs");
         var staleHashes = ChunkHashes(workspace, fileId);
         vectorStore.Available = false;
         WriteFile(workspace, "repo/a.cs", MovedBody);
 
-        var blocked = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var blocked = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         blocked.Warnings.ShouldContain(w => w.Contains("deferred to a later pass", StringComparison.Ordinal));
         PendingReapIds(workspace).ShouldBe([fileId]);
@@ -195,7 +195,7 @@ public class VectorPointReapTests
 
         vectorStore.Available = true;
         vectorStore.Calls.Clear();
-        var replayed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var replayed = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         replayed.Warnings.ShouldContain(w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));
         PendingReapIds(workspace).ShouldBeEmpty();
@@ -212,23 +212,23 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var fileId = FileIdOf(workspace, "a.cs");
         vectorStore.FailDelete = true;
         WriteFile(workspace, "repo/a.cs", MovedBody);
 
-        var failed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var failed = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         failed.Warnings.ShouldContain(w => w.Contains("failed to remove vectors", StringComparison.Ordinal));
         PendingReapIds(workspace).ShouldBe([fileId]);
-        ListChunks(workspace, fileId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace, fileId).ShouldAllBe(c => c.VectorStatus == "ok");
 
         vectorStore.FailDelete = false;
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         PendingReapIds(workspace).ShouldBeEmpty();
-        ListChunks(workspace, fileId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace, fileId).ShouldAllBe(c => c.VectorStatus == "ok");
         PointsOfFile(vectorStore, fileId).Select(p => p.ChunkHash)
             .ShouldBe(ChunkHashes(workspace, fileId), ignoreOrder: true);
     }
@@ -241,17 +241,17 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var droppedId = FileIdOf(workspace, "b.cs");
         var droppedHashes = ChunkHashes(workspace, droppedId);
         File.Delete(Path.Combine(workspace, "repo", "b.cs"));
         vectorStore.Available = false;
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         PendingReapIds(workspace).ShouldBe([droppedId]);
 
         vectorStore.Available = true;
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         PendingReapIds(workspace).ShouldBeEmpty();
         droppedHashes.ShouldAllBe(hash => !vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
@@ -264,14 +264,14 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var fileId = FileIdOf(workspace, "a.cs");
         var staleHashes = ChunkHashes(workspace, fileId);
         WriteFile(workspace, "repo/a.cs", MovedBody);
         vectorStore.Calls.Clear();
 
-        indexer.IndexFile(workspace, "demo", "a.cs", new FakeEmbeddingProvider(), vectorStore);
+        indexer.IndexFile(workspace, "demo", "a.cs", TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldContain($"delete:{fileId}");
         var freshHashes = ChunkHashes(workspace, fileId);
@@ -286,10 +286,10 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         vectorStore.Calls.Clear();
 
-        indexer.IndexFile(workspace, "demo", "a.cs", new FakeEmbeddingProvider(), vectorStore);
+        indexer.IndexFile(workspace, "demo", "a.cs", TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldNotContain(c => c.StartsWith("delete:", StringComparison.Ordinal));
     }
@@ -301,11 +301,11 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/a.cs", Source);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         var pointsBefore = vectorStore.Points.Count;
 
         WriteFile(workspace, "repo/a.cs", MovedBody);
-        indexer.Index(workspace, vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(null, vectorStore));
 
         vectorStore.Points.Count.ShouldBe(pointsBefore);
         PendingReapIds(workspace).ShouldBeEmpty();
@@ -319,7 +319,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var droppedId = FileIdOf(workspace, "b.cs");
         var droppedHashes = ChunkHashes(workspace, droppedId);
@@ -346,7 +346,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var droppedId = FileIdOf(workspace, "b.cs");
         var droppedHashes = ChunkHashes(workspace, droppedId);
@@ -354,7 +354,7 @@ public class VectorPointReapTests
         indexer.Index(workspace);
 
         vectorStore.Calls.Clear();
-        var replayed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var replayed = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         replayed.Warnings.ShouldContain(w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));
         vectorStore.Calls.ShouldContain($"delete:{droppedId}");
@@ -440,7 +440,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var recycledId = FileIdOf(workspace, "b.cs");
         var droppedHashes = ChunkHashes(workspace, recycledId);
@@ -456,7 +456,7 @@ public class VectorPointReapTests
         FileIdOf(workspace, "c.cs").ShouldBe(recycledId);
         vectorStore.Calls.Clear();
 
-        var replayed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var replayed = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldNotContain($"delete:{recycledId}");
         replayed.Warnings.ShouldNotContain(w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));
@@ -481,7 +481,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var liveId = FileIdOf(workspace, "b.cs");
         var liveHashes = ChunkHashes(workspace, liveId);
@@ -493,13 +493,13 @@ public class VectorPointReapTests
         }
 
         vectorStore.Calls.Clear();
-        var replayed = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var replayed = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldNotContain(c => c.StartsWith("delete:", StringComparison.Ordinal));
         replayed.Warnings.ShouldContain(w => w.Contains("file ids now name different files", StringComparison.Ordinal));
         PendingReapIds(workspace).ShouldBeEmpty();
         liveHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
-        ListChunks(workspace, liveId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace, liveId).ShouldAllBe(c => c.VectorStatus == "ok");
     }
 
     [Fact]
@@ -510,7 +510,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         File.Delete(Path.Combine(workspace, "repo", "b.cs"));
         var deferred = indexer.Index(workspace);
@@ -521,7 +521,7 @@ public class VectorPointReapTests
         standing.DeferredReaps.ShouldBe(0);
         standing.PendingReaps.ShouldBe(1);
 
-        var drained = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var drained = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         drained.DeferredReaps.ShouldBe(0);
         drained.PendingReaps.ShouldBe(0);
     }
@@ -534,7 +534,7 @@ public class VectorPointReapTests
         var vectorStore = new FakeVectorStore();
 
         var pass = new WorkspaceIndexer().Index(
-            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+            workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         pass.DeferredReaps.ShouldBe(0);
         pass.PendingReaps.ShouldBe(0);
@@ -547,7 +547,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/a.cs", Source);
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var droppedId = FileIdOf(workspace, "b.cs");
         var droppedHashes = ChunkHashes(workspace, droppedId);
@@ -582,7 +582,7 @@ public class VectorPointReapTests
         WriteFile(workspace, "repo/b.cs", OtherSource);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var droppedId = FileIdOf(workspace, "b.cs");
         var droppedHashes = ChunkHashes(workspace, droppedId);
@@ -593,7 +593,7 @@ public class VectorPointReapTests
         {
             WorkspaceIndexer.RebuildTrigramIndex(
                 workspace, store, WorkspaceManifestFile.Load(workspace), warnings,
-                new Dictionary<uint, string>(), SqueezrPaths.TrigramIndexPath(workspace), vectorStore: vectorStore);
+                new Dictionary<uint, string>(), SqueezrPaths.TrigramIndexPath(workspace), vectorPhase: TestVectorPhase.Runtime(null, vectorStore));
 
             store.CountPendingReaps().ShouldBe(0);
         }

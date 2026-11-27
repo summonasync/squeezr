@@ -1,4 +1,5 @@
 using Squeezr.Core.Configuration;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests;
 
@@ -9,8 +10,8 @@ public static class TestWorkspaceConfig
 
     public static void PointQdrantAtDeadEndpoint(string workspaceRoot)
     {
-        var config = ConfigFile.Load(workspaceRoot);
-        ConfigFile.Save(workspaceRoot, config with
+        var config = SemanticConfigFile.Load(workspaceRoot);
+        SemanticConfigFile.Save(workspaceRoot, config with
         {
             Qdrant = config.Qdrant with { Endpoint = DeadQdrantEndpoint }
         });
@@ -18,8 +19,8 @@ public static class TestWorkspaceConfig
 
     public static void UseAutoEmbeddingsWithDeadOllama(string workspaceRoot)
     {
-        var config = ConfigFile.Load(workspaceRoot);
-        ConfigFile.Save(workspaceRoot, config with
+        var config = SemanticConfigFile.Load(workspaceRoot);
+        SemanticConfigFile.Save(workspaceRoot, config with
         {
             Embeddings = config.Embeddings with
             {
@@ -31,8 +32,8 @@ public static class TestWorkspaceConfig
 
     public static void UseOllamaEmbeddings(string workspaceRoot)
     {
-        var config = ConfigFile.Load(workspaceRoot);
-        ConfigFile.Save(workspaceRoot, config with
+        var config = SemanticConfigFile.Load(workspaceRoot);
+        SemanticConfigFile.Save(workspaceRoot, config with
         {
             Embeddings = config.Embeddings with { Provider = "ollama" }
         });
@@ -40,8 +41,8 @@ public static class TestWorkspaceConfig
 
     public static void UseOnnxProvider(string workspaceRoot)
     {
-        var config = ConfigFile.Load(workspaceRoot);
-        ConfigFile.Save(workspaceRoot, config with
+        var config = SemanticConfigFile.Load(workspaceRoot);
+        SemanticConfigFile.Save(workspaceRoot, config with
         {
             Embeddings = config.Embeddings with { Provider = "onnx" }
         });
@@ -49,8 +50,8 @@ public static class TestWorkspaceConfig
 
     public static void SetRankExclude(string workspaceRoot, params string[] globs)
     {
-        var config = ConfigFile.Load(workspaceRoot);
-        ConfigFile.Save(workspaceRoot, config with
+        var config = SemanticConfigFile.Load(workspaceRoot);
+        SemanticConfigFile.Save(workspaceRoot, config with
         {
             Indexing = config.Indexing with { RankExclude = globs }
         });

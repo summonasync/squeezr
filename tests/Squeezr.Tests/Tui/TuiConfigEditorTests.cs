@@ -3,6 +3,7 @@ using Spectre.Console.Testing;
 using Squeezr.Cli.Tui;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Tui;
 
@@ -23,7 +24,7 @@ public class TuiConfigEditorTests
         var code = await TuiApp.RunAsync(console, workspace);
 
         code.ShouldBe(0);
-        ConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:9999");
+        SemanticConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:9999");
         console.Output.ShouldContain("Saved.");
     }
 
@@ -43,7 +44,7 @@ public class TuiConfigEditorTests
 
         code.ShouldBe(0);
         console.Output.ShouldContain("invalid value");
-        ConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:6334");
+        SemanticConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:6334");
     }
 
     [Fact]
@@ -61,7 +62,7 @@ public class TuiConfigEditorTests
 
         code.ShouldBe(0);
         console.Output.ShouldContain("No changes.");
-        ConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:6334");
+        SemanticConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:6334");
     }
 
     [Fact]
@@ -87,7 +88,7 @@ public class TuiConfigEditorTests
         code.ShouldBe(0);
         console.Output.ShouldContain("reembed");
         console.Output.ShouldContain("incompatible");
-        ConfigFile.Load(workspace).Embeddings.Provider.ShouldBe("openai");
+        SemanticConfigFile.Load(workspace).Embeddings.Provider.ShouldBe("openai");
     }
 
     [Fact]
@@ -110,7 +111,7 @@ public class TuiConfigEditorTests
         var code = await TuiApp.RunAsync(console, workspace);
 
         code.ShouldBe(0);
-        var saved = ConfigFile.Load(workspace).Embeddings;
+        var saved = SemanticConfigFile.Load(workspace).Embeddings;
         saved.Provider.ShouldBe("ollama");
         saved.Ollama.Endpoint.ShouldBe("http://127.0.0.1:11434");
         saved.Ollama.Model.ShouldBe("nomic-embed-text");
@@ -147,7 +148,7 @@ public class TuiConfigEditorTests
         console.Output.ShouldContain("incompatible");
         console.Output.ShouldContain("reembed");
         console.Output.ShouldContain("Changes discarded.");
-        ConfigFile.Load(workspace).Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1024);
+        SemanticConfigFile.Load(workspace).Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1024);
     }
 
     [Fact]
@@ -177,7 +178,7 @@ public class TuiConfigEditorTests
 
         code.ShouldBe(0);
         console.Output.ShouldContain("Saved.");
-        ConfigFile.Load(workspace).Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1536);
+        SemanticConfigFile.Load(workspace).Embeddings.OpenAiCompatible.Dimensions.ShouldBe(1536);
     }
 
     [Fact]
@@ -195,7 +196,7 @@ public class TuiConfigEditorTests
         var code = await TuiApp.RunAsync(console, workspace);
 
         code.ShouldBe(0);
-        ConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:6334");
+        SemanticConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe("http://localhost:6334");
     }
 
     [Fact]
@@ -220,7 +221,7 @@ public class TuiConfigEditorTests
         code.ShouldBe(0);
         console.Output.ShouldContain("invalid value");
         console.Output.ShouldContain("unknown model profile 'no-such-profile'");
-        ConfigFile.Load(workspace).Embeddings.Ollama.ModelProfile.ShouldBe("nomic-embed-text-v1.5");
+        SemanticConfigFile.Load(workspace).Embeddings.Ollama.ModelProfile.ShouldBe("nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -244,7 +245,7 @@ public class TuiConfigEditorTests
 
         code.ShouldBe(0);
         console.Output.ShouldContain("Saved.");
-        ConfigFile.Load(workspace).Embeddings.Ollama.ModelProfile.ShouldBe("bge-code-v1");
+        SemanticConfigFile.Load(workspace).Embeddings.Ollama.ModelProfile.ShouldBe("bge-code-v1");
     }
 
     [Fact]
@@ -267,11 +268,11 @@ public class TuiConfigEditorTests
     private static string NewOpenAiWorkspace()
     {
         var workspace = NewWorkspace();
-        var config = ConfigFile.Load(workspace) with
+        var config = SemanticConfigFile.Load(workspace) with
         {
-            Embeddings = ConfigFile.Load(workspace).Embeddings with { Provider = "openai" }
+            Embeddings = SemanticConfigFile.Load(workspace).Embeddings with { Provider = "openai" }
         };
-        ConfigFile.Save(workspace, config);
+        SemanticConfigFile.Save(workspace, config);
         return workspace;
     }
 }

@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Squeezr.Cli\Squeezr.Cli.csproj" />
     <ProjectReference Include="..\..\src\Squeezr.Core\Squeezr.Core.csproj" />
+    <ProjectReference Include="..\..\src\Squeezr.Semantic\Squeezr.Semantic.csproj" />
   </ItemGroup>
 
   <ItemGroup>

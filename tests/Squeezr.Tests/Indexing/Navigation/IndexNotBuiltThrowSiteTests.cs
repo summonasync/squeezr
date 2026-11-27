@@ -5,6 +5,7 @@ using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing.Navigation;
 
@@ -59,7 +60,7 @@ public class IndexNotBuiltThrowSiteTests
         Directory.CreateDirectory(Path.Combine(root, "src"));
         File.WriteAllText(Path.Combine(root, "src", "Calc.cs"), "public class Calc { public int Add() => 1; }\n");
         new WorkspaceManager(root).Init(null);
-        ConfigFile.Save(root, ConfigFile.Load(root) with
+        SemanticConfigFile.Save(root, SemanticConfigFile.Load(root) with
         {
             Embeddings = new EmbeddingsConfig { Provider = "openai" }
         });

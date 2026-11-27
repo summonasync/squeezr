@@ -1,9 +1,10 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -21,18 +22,18 @@ public class EmbeddingBudgetTests
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
 
-        var first = indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore, embedBudgetPerPass: 4);
+        var first = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore), embedBudgetPerPass: 4);
         first.Embedded.ShouldBe(4);
-        first.EmbeddingsCompleted.ShouldBeTrue();
+        first.DrainCompleted.ShouldBeTrue();
         provider.EmbeddedTextCount.ShouldBe(4);
         PendingCount(workspace).ShouldBe(pendingBefore - 4);
 
-        var second = indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore, embedBudgetPerPass: 4);
+        var second = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore), embedBudgetPerPass: 4);
         second.Embedded.ShouldBe(4);
         PendingCount(workspace).ShouldBe(pendingBefore - 8);
 
         provider.Reset();
-        var rest = indexer.Index(workspace, embeddings: provider, vectorStore: vectorStore);
+        var rest = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(provider, vectorStore));
         rest.Embedded.ShouldBe(pendingBefore - 8);
         provider.EmbeddedTextCount.ShouldBe(pendingBefore - 8);
         PendingCount(workspace).ShouldBe(0);
@@ -48,7 +49,7 @@ public class EmbeddingBudgetTests
 
         var provider = new CountingEmbeddingProvider();
         var result = new WorkspaceIndexer().Index(
-            workspace, embeddings: provider, vectorStore: new FakeVectorStore(), embedBudgetPerPass: 100_000);
+            workspace, vectorPhase: TestVectorPhase.Runtime(provider, new FakeVectorStore()), embedBudgetPerPass: 100_000);
 
         result.Embedded.ShouldBe(pendingBefore);
         PendingCount(workspace).ShouldBe(0);
@@ -63,7 +64,7 @@ public class EmbeddingBudgetTests
 
         var provider = new CountingEmbeddingProvider();
         var result = new WorkspaceIndexer().Index(
-            workspace, embeddings: provider, vectorStore: new FakeVectorStore(), embedBudgetPerPass: 0);
+            workspace, vectorPhase: TestVectorPhase.Runtime(provider, new FakeVectorStore()), embedBudgetPerPass: 0);
 
         result.Embedded.ShouldBe(0);
         provider.EmbeddedTextCount.ShouldBe(0);
@@ -77,13 +78,13 @@ public class EmbeddingBudgetTests
         var workspace = NewWorkspace();
 
         var result = new WorkspaceIndexer().Index(
-            workspace, embeddingsUnavailableReason: "provider unavailable: ollama probe failed (refused)");
+            workspace, semanticUnavailableReason: "provider unavailable: ollama probe failed (refused)");
 
-        result.EmbeddingsCompleted.ShouldBeFalse();
-        result.EmbeddingsSkipped.ShouldBe("provider unavailable: ollama probe failed (refused)");
+        result.DrainCompleted.ShouldBeFalse();
+        result.DrainSkippedReason.ShouldBe("provider unavailable: ollama probe failed (refused)");
         result.Repos.ShouldNotBeEmpty();
-        result.Repos.All(r => !r.EmbeddingsCompleted).ShouldBeTrue();
-        result.Repos.All(r => r.EmbeddingsSkipped == result.EmbeddingsSkipped).ShouldBeTrue();
+        result.Repos.All(r => !r.DrainCompleted).ShouldBeTrue();
+        result.Repos.All(r => r.DrainSkippedReason == result.DrainSkippedReason).ShouldBeTrue();
     }
 
     [Fact]
@@ -93,9 +94,9 @@ public class EmbeddingBudgetTests
 
         var result = new WorkspaceIndexer().Index(workspace);
 
-        result.EmbeddingsCompleted.ShouldBeTrue();
-        result.EmbeddingsSkipped.ShouldBeNull();
-        result.Repos.All(r => r.EmbeddingsCompleted).ShouldBeTrue();
+        result.DrainCompleted.ShouldBeTrue();
+        result.DrainSkippedReason.ShouldBeNull();
+        result.Repos.All(r => r.DrainCompleted).ShouldBeTrue();
     }
 
     [Fact]
@@ -105,10 +106,10 @@ public class EmbeddingBudgetTests
 
         var result = new WorkspaceIndexer().Index(
             workspace, noSemantic: true,
-            embeddingsUnavailableReason: "provider unavailable: ollama probe failed (refused)");
+            semanticUnavailableReason: "provider unavailable: ollama probe failed (refused)");
 
-        result.EmbeddingsCompleted.ShouldBeTrue();
-        result.EmbeddingsSkipped.ShouldBeNull();
+        result.DrainCompleted.ShouldBeTrue();
+        result.DrainSkippedReason.ShouldBeNull();
     }
 
     [Fact]
@@ -133,7 +134,7 @@ public class EmbeddingBudgetTests
             result.Embedded, "the failing batch's texts may already have been embedded when the store write died");
         warnings.ShouldContain(w => w.Contains("embeddings skipped", StringComparison.Ordinal));
         store.CountPendingChunks(1).ShouldBe(40 - result.Embedded);
-        store.ListChunksByFile(1).Count(c => c.EmbeddingStatus == "ok").ShouldBe(result.Embedded);
+        store.ListChunksByFile(1).Count(c => c.VectorStatus == "ok").ShouldBe(result.Embedded);
     }
 
     private static ChunkDocument PendingChunk(uint fileId, string hash) =>

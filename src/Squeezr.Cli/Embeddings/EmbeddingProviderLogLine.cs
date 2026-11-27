@@ -1,4 +1,4 @@
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 
 namespace Squeezr.Cli.Embeddings;
 

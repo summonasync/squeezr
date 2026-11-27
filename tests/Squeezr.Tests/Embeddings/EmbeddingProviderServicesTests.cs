@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Shouldly;
 using Squeezr.Cli.Embeddings;
+using Squeezr.Semantic.Embeddings;
 
 namespace Squeezr.Tests.Embeddings;
 

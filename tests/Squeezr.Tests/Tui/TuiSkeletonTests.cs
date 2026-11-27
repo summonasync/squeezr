@@ -7,6 +7,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Tui;
 
@@ -145,8 +146,8 @@ public class TuiSkeletonTests
         var workspace = TestDirs.NewTempDir();
         var manager = new WorkspaceManager(workspace);
         manager.Init("demo");
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with { Qdrant = config.Qdrant with { Endpoint = "not a uri" } });
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with { Qdrant = config.Qdrant with { Endpoint = "not a uri" } });
 
         var console = TuiTestHarness.InteractiveConsole();
         await TuiDashboard.RenderAsync(console, workspace);

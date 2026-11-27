@@ -2,9 +2,9 @@ using Squeezr.Core.Workspace;
 
 namespace Squeezr.Core.Storage;
 
-// A vector answer is a distance, and distances only compare inside one embedding model, so the model
+// A vector answer is a distance, and distances only compare inside one model, so the model
 // question is settled from the source store's own rows before a byte moves. The read is meta.db-only on
-// purpose: a Qdrant that is down must not be able to wave a known-incompatible copy through the door.
+// purpose: a store that is down must not be able to wave a known-incompatible copy through the door.
 //
 // It runs against an open store inside the source lock, so the rows the guard counts are the rows the copy
 // moves — an unlocked pre-read would admit a parent pass that re-embeds between the check and the copy and

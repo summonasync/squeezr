@@ -1,5 +1,5 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Indexing.Trigram;
@@ -231,9 +231,10 @@ public class SecretStorePurgeTests
 
         new WorkspaceIndexer().Index(
             workspace,
-            embeddings: new SecretGuardFixture.FixedEmbeddings(),
-            vectorStore: vectorStore,
-            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+            vectorPhase: TestVectorPhase.Runtime(
+                new SecretGuardFixture.FixedEmbeddings(),
+                vectorStore,
+                new EmbeddingProviderResolution("ollama", null)));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         var entries = store.ListPendingReaps();
@@ -331,9 +332,10 @@ public class SecretStorePurgeTests
         vectorStore.Calls.Clear();
         var replayed = new WorkspaceIndexer().Index(
             workspace,
-            embeddings: new SecretGuardFixture.FixedEmbeddings(),
-            vectorStore: vectorStore,
-            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+            vectorPhase: TestVectorPhase.Runtime(
+                new SecretGuardFixture.FixedEmbeddings(),
+                vectorStore,
+                new EmbeddingProviderResolution("ollama", null)));
 
         replayed.Warnings.ShouldContain(w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));
         foreach (var id in doomedIds)
@@ -364,9 +366,10 @@ public class SecretStorePurgeTests
         vectorStore.Calls.Clear();
         var replayed = new WorkspaceIndexer().Index(
             workspace,
-            embeddings: new SecretGuardFixture.FixedEmbeddings(),
-            vectorStore: vectorStore,
-            embeddingProviderResolution: new EmbeddingProviderResolution("ollama", null));
+            vectorPhase: TestVectorPhase.Runtime(
+                new SecretGuardFixture.FixedEmbeddings(),
+                vectorStore,
+                new EmbeddingProviderResolution("ollama", null)));
 
         replayed.Warnings.ShouldNotContain(
             w => w.Contains("replayed deferred point cleanup", StringComparison.Ordinal));

@@ -272,7 +272,7 @@ public static class WorkspaceStore
         }
 
         var composePath = Path.Combine(root, SqueezrPaths.ComposeFileName);
-        if (ServicesComposeFile.IsSqueezrGenerated(composePath))
+        if (GeneratedComposeFile.IsSqueezrGenerated(composePath))
         {
             File.Delete(composePath);
         }

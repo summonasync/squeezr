@@ -6,6 +6,7 @@ using Squeezr.Cli.Commands;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -494,7 +495,7 @@ public sealed class WorkspaceCollectionSweepTests : IDisposable
     private static QdrantSweepTarget Foreign(string endpoint) => new(endpoint, false);
 
     private static void WriteConfig(string root, string endpoint, bool owned = false) =>
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault() with
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Qdrant = new QdrantConfig { Endpoint = endpoint, Owned = owned }
         });

@@ -1,6 +1,8 @@
 using Grpc.Core;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Embeddings;
+using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -46,7 +48,7 @@ public static class WorktreeVectorCopier
         WorktreeVectorCopyRequest request,
         CancellationToken ct)
     {
-        var config = ConfigFile.Load(request.TargetRoot).Qdrant;
+        var config = SemanticConfigFile.Load(request.TargetRoot).Qdrant;
         return await CopyAsync(
             new QdrantVectorStore(config, request.SourceRoot),
             new QdrantVectorStore(config, request.TargetRoot),

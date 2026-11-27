@@ -2,6 +2,7 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Configuration;
 
@@ -28,7 +29,7 @@ public class SecretGuardExtraConfigTests
             }
             """);
 
-        var config = ConfigFile.Load(root);
+        var config = SemanticConfigFile.Load(root);
 
         config.Indexing.SecretGuardExtra.ShouldBeEmpty();
         SecretGuard.IsProtected(".env", config.Indexing.SecretGuardExtra).ShouldBeTrue();
@@ -56,7 +57,7 @@ public class SecretGuardExtraConfigTests
             }
             """);
 
-        var extra = ConfigFile.Load(root).Indexing.SecretGuardExtra;
+        var extra = SemanticConfigFile.Load(root).Indexing.SecretGuardExtra;
 
         extra.ShouldBe(["**/tokens.txt", "deploy/*.crt"]);
         SecretGuard.IsProtected("service/tokens.txt", extra).ShouldBeTrue();
@@ -87,7 +88,7 @@ public class SecretGuardExtraConfigTests
             }
             """);
 
-        var extra = ConfigFile.Load(root).Indexing.SecretGuardExtra;
+        var extra = SemanticConfigFile.Load(root).Indexing.SecretGuardExtra;
 
         SecretGuard.IsProtected("service/tokens.txt", extra).ShouldBeTrue();
         SecretGuard.IsProtected("service/readme.md", extra).ShouldBeFalse();
@@ -116,7 +117,7 @@ public class SecretGuardExtraConfigTests
             }
             """);
 
-        var extra = ConfigFile.Load(root).Indexing.SecretGuardExtra;
+        var extra = SemanticConfigFile.Load(root).Indexing.SecretGuardExtra;
 
         extra.ShouldBeNull();
         SecretGuard.IsProtected(".env", extra).ShouldBeTrue();
@@ -145,7 +146,7 @@ public class SecretGuardExtraConfigTests
             }
             """);
 
-        var extra = ConfigFile.Load(root).Indexing.SecretGuardExtra;
+        var extra = SemanticConfigFile.Load(root).Indexing.SecretGuardExtra;
 
         SecretGuard.IsProtected("prod.tokens", extra).ShouldBeTrue();
         SecretGuard.IsProtected("deploy/deep.tokens", extra).ShouldBeTrue();
@@ -156,16 +157,16 @@ public class SecretGuardExtraConfigTests
     public void Save_ThenLoad_RoundTripsSecretGuardExtra()
     {
         var root = TestDirs.NewTempDir();
-        var config = SqueezrConfig.CreateDefault() with
+        var config = SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
-            Indexing = SqueezrConfig.CreateDefault().Indexing with
+            Indexing = SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Indexing with
             {
                 SecretGuardExtra = ["**/*.kdbx.userdata"]
             }
         };
 
-        ConfigFile.Save(root, config);
-        var loaded = ConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config);
+        var loaded = SemanticConfigFile.Load(root);
 
         loaded.Indexing.SecretGuardExtra.ShouldBe(["**/*.kdbx.userdata"]);
         SecretGuard.IsProtected("keep/vault.kdbx.userdata", loaded.Indexing.SecretGuardExtra).ShouldBeTrue();
@@ -176,7 +177,7 @@ public class SecretGuardExtraConfigTests
     {
         var root = TestDirs.NewTempDir();
 
-        ConfigFile.Save(root, SqueezrConfig.CreateDefault());
+        SemanticConfigFile.Save(root, SemanticConfig.Bind(SqueezrConfig.CreateDefault()));
 
         File.ReadAllText(SqueezrPaths.ConfigPath(root)).ShouldContain("secretGuardExtra");
     }
@@ -184,7 +185,7 @@ public class SecretGuardExtraConfigTests
     [Fact]
     public void BuiltInPatterns_AreNotPartOfTheEditableIgnoreDefaults()
     {
-        var editable = SqueezrConfig.CreateDefault().Indexing.Ignore;
+        var editable = SemanticConfig.Bind(SqueezrConfig.CreateDefault()).Indexing.Ignore;
 
         editable.ShouldNotBeEmpty();
         foreach (var pattern in SecretGuard.BuiltInPatterns)

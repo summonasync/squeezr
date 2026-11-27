@@ -32,7 +32,7 @@ public sealed class ChunkDocument
     public string ChunkHash { get; set; } = string.Empty;
 
     [BsonField("embeddingStatus")]
-    public string EmbeddingStatus { get; set; } = "pending";
+    public string VectorStatus { get; set; } = "pending";
 
     [BsonField("modelKey")]
     public string? ModelKey { get; set; }

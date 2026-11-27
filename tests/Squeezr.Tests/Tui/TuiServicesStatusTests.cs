@@ -2,6 +2,7 @@ using Shouldly;
 using Spectre.Console.Testing;
 using Squeezr.Cli.Tui;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Tests.Tui;
 

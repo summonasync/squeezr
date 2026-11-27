@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Squeezr.Core.Infra;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Cli.Infra;
 

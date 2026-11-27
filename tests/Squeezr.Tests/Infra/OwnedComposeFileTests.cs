@@ -3,6 +3,8 @@ using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Infra;
 using Squeezr.Core.Serialization;
+using Squeezr.Semantic.Configuration;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Tests.Infra;
 
@@ -52,13 +54,13 @@ public class OwnedComposeFileTests
     [Fact]
     public void ConfigRoundTrip_PreservesOwnedAndPorts()
     {
-        var config = SqueezrConfig.CreateDefault() with
+        var config = SemanticConfig.Bind(SqueezrConfig.CreateDefault()) with
         {
             Qdrant = new QdrantConfig { Owned = true, RestPort = 7335, GrpcPort = 7336 },
         };
 
-        var json = JsonSerializer.Serialize(config, SqueezrJson.FileOptions);
-        var parsed = JsonSerializer.Deserialize<SqueezrConfig>(json, SqueezrJson.FileOptions)!;
+        var json = JsonSerializer.Serialize(SemanticConfigFile.Attach(config.Core, config), SqueezrJson.FileOptions);
+        var parsed = SemanticConfig.Bind(JsonSerializer.Deserialize<SqueezrConfig>(json, SqueezrJson.FileOptions)!);
 
         parsed.Qdrant.Owned.ShouldBeTrue();
         parsed.Qdrant.RestPort.ShouldBe(7335);
@@ -76,7 +78,7 @@ public class OwnedComposeFileTests
             }
             """;
 
-        var parsed = JsonSerializer.Deserialize<SqueezrConfig>(legacy, SqueezrJson.FileOptions)!;
+        var parsed = SemanticConfig.Bind(JsonSerializer.Deserialize<SqueezrConfig>(legacy, SqueezrJson.FileOptions)!);
 
         parsed.Qdrant.Owned.ShouldBeFalse();
         parsed.Qdrant.Endpoint.ShouldBe("http://localhost:6334");

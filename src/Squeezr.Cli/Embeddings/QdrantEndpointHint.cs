@@ -1,4 +1,5 @@
 using Squeezr.Core.Infra;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Cli.Embeddings;
 

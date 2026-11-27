@@ -1,9 +1,10 @@
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Query;
 
 namespace Squeezr.Tests.Indexing.Query;
 
@@ -123,7 +124,7 @@ public class SemanticHitsResolverScopeTests
         };
         var engine = new SearchEngine(fixture.Root);
 
-        var scoped = Hybrid(engine, store, "src/");
+        var scoped = Hybrid(fixture.Root, engine, store, "src/");
 
         var expectedScope = FileScope.Resolve(meta, file => PathPrefix.Matches(PathPrefix.Normalize("src/")!, file.Path));
         var survivors = scoped.Matches.Where(m => m.Source == "semantic").ToList();
@@ -132,7 +133,7 @@ public class SemanticHitsResolverScopeTests
         survivors.All(m => expectedScope.Contains(fixture.DemoFilesByPath[m.Path])).ShouldBeTrue();
         store.LastTopK.ShouldBe(ScopedVectorBudget.For(2, fixture.WorkspaceFileCount));
 
-        var caseVariant = Hybrid(engine, store, "SRC/");
+        var caseVariant = Hybrid(fixture.Root, engine, store, "SRC/");
         caseVariant.Matches.Where(m => m.Source == "semantic").Select(m => m.Path)
             .ShouldBe(survivors.Select(m => m.Path));
         store.LastTopK.ShouldBe(ScopedVectorBudget.For(2, fixture.WorkspaceFileCount));
@@ -161,12 +162,8 @@ public class SemanticHitsResolverScopeTests
             fileScope,
             SecretGuardReader.Load(workspace));
 
-    private static SearchResponse Hybrid(SearchEngine engine, FakeVectorStore store, string? prefix) =>
-        engine.SearchHybridAsync(
-            new SearchQuery("whatever", false, null, null, null, null, null, null, prefix),
-            new FakeEmbeddingProvider(),
-            store,
-            CancellationToken.None).GetAwaiter().GetResult();
+    private static SearchResponse Hybrid(string workspaceRoot, SearchEngine engine, FakeVectorStore store, string? prefix) =>
+        engine.SearchHybridAsync(new SearchQuery("whatever", false, null, null, null, null, null, null, prefix), TestVectorPhase.Arm(workspaceRoot, new FakeEmbeddingProvider(), store), CancellationToken.None).GetAwaiter().GetResult();
 
     private static WorkspaceFixture NewFixtureWorkspace()
     {
@@ -185,7 +182,7 @@ public class SemanticHitsResolverScopeTests
 
         manager.AddRepo("repo", "demo");
         manager.AddRepo("extra", "extrarepo");
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         var demoRepoId = store.FindRepo("demo")!.Id;

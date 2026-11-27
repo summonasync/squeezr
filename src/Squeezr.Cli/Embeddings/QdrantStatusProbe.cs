@@ -1,6 +1,7 @@
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Embeddings;
 

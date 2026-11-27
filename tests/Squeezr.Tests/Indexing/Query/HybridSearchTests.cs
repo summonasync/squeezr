@@ -1,11 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Indexing.Query;
 
 namespace Squeezr.Tests.Indexing.Query;
 
@@ -274,8 +275,7 @@ public class HybridSearchTests
 
         var response = await new SearchEngine(workspace).SearchHybridAsync(
             new SearchQuery("zzznotaword", false, null, null, null, null, null, null, null, null),
-            null,
-            store,
+            TestVectorPhase.Arm(workspace, null, store),
             CancellationToken.None);
 
         response.Matches.ShouldBeEmpty();
@@ -453,7 +453,7 @@ public class HybridSearchTests
 
         var response = Search(workspace, "Add", store, coverage: new SemanticCoverage(4, 1));
 
-        response.Warnings.ShouldContain(SearchEngine.VectorStoreUnavailableWarning);
+        response.Warnings.ShouldContain(SemanticSearchArm.VectorStoreUnavailableWarning);
         response.Warnings.ShouldContain("semantic coverage: 75% (1 chunk pending embedding)");
     }
 
@@ -471,8 +471,7 @@ public class HybridSearchTests
         var engine = new SearchEngine(workspace);
         return engine.SearchHybridAsync(
             new SearchQuery(query, false, null, repo, null, null, topK, maxTokens, null, kind),
-            new FakeEmbeddingProvider { ModelKey = modelKey ?? TestEmbeddingKeys.Calibrated },
-            store,
+            TestVectorPhase.Arm(workspace, new FakeEmbeddingProvider { ModelKey = modelKey ?? TestEmbeddingKeys.Calibrated }, store),
             CancellationToken.None,
             coverage).GetAwaiter().GetResult();
     }
@@ -490,7 +489,7 @@ public class HybridSearchTests
         var fullPath = Path.Combine(workspace, "repo", "Calc.cs");
         File.WriteAllText(fullPath, Source);
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         repoId = store.FindRepo("demo")!.Id;
@@ -514,7 +513,7 @@ public class HybridSearchTests
             File.WriteAllText(Path.Combine(workspace, "repo", name), BigDoc);
         }
 
-        new WorkspaceIndexer().Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+        new WorkspaceIndexer().Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         using var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace));
         repoId = store.FindRepo("demo")!.Id;

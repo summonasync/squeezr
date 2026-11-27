@@ -1,7 +1,8 @@
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Cli.Embeddings;
 
@@ -42,7 +43,7 @@ public static class EmbeddingRuntimeFactory
 
         try
         {
-            var config = ConfigFile.Load(workspaceRoot);
+            var config = SemanticConfigFile.Load(workspaceRoot);
             if (withProvider)
             {
                 providerResolution = ResolveProvider(config.Embeddings, httpHandler);
@@ -66,7 +67,7 @@ public static class EmbeddingRuntimeFactory
     // its model has to refuse before a byte moves, not after a connection was opened for the question.
     public static string ResolveModelKey(string workspaceRoot, HttpMessageHandler? httpHandler = null)
     {
-        var config = ConfigFile.Load(workspaceRoot);
+        var config = SemanticConfigFile.Load(workspaceRoot);
         var resolution = ResolveProvider(config.Embeddings, httpHandler);
         return EmbeddingModelKey.From(config.Embeddings with { Provider = resolution.Provider });
     }

@@ -1,6 +1,7 @@
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Semantic.Indexing.Query;
 
 namespace Squeezr.Cli.RankEval;
 
@@ -30,6 +31,9 @@ public sealed class RankEvalRunner
         var setupWarnings = EmbeddingRuntimeFactory.TryCreate(
             _workspaceRoot, withProvider: true, out var embeddings, out var vectorStore);
         var engine = new SearchEngine(_workspaceRoot, RankExclusion.Load(_workspaceRoot));
+        var arm = embeddings is not null && vectorStore is not null
+            ? new SemanticSearchArm(_workspaceRoot, embeddings, vectorStore)
+            : null;
 
         var scored = new List<ScoredQuery>(set.Count);
         var warnings = new List<string>(setupWarnings);
@@ -38,7 +42,7 @@ public sealed class RankEvalRunner
             var response = await engine.SearchHybridAsync(
                 new SearchQuery(entry.Query, Regex: false, IgnoreCase: null, entry.Repo, PathGlob: null,
                     Language: null, TopK: ProbeDepth, MaxTokens: null, entry.Prefix),
-                embeddings, vectorStore, cancellationToken, tuning: tuning);
+                arm, cancellationToken, tuning: tuning);
             scored.Add(RankEvalScorer.Score(entry, response.Matches));
             warnings.AddRange(response.Warnings);
         }
@@ -70,6 +74,6 @@ public sealed class RankEvalRunner
         (rows.Average(r => r.Mrr), rows.Average(r => r.PrecisionAt5), rows.Average(r => r.RecallAt10));
 
     private static bool HasVectorFailure(IReadOnlyList<string> warnings) => warnings.Any(w =>
-        w == SearchEngine.VectorStoreUnavailableWarning ||
+        w == SemanticSearchArm.VectorStoreUnavailableWarning ||
         w.StartsWith("vector search failed", StringComparison.Ordinal));
 }

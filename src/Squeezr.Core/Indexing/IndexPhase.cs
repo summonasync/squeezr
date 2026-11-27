@@ -5,6 +5,6 @@ public enum IndexPhase
     Walk,
     Files,
     Semantic,
-    Embeddings,
+    Vectors,
     Trigram
 }

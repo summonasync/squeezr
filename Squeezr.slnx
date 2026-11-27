@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Squeezr.Cli/Squeezr.Cli.csproj" />
     <Project Path="src/Squeezr.Core/Squeezr.Core.csproj" />
+    <Project Path="src/Squeezr.Semantic/Squeezr.Semantic.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Squeezr.Tests/Squeezr.Tests.csproj" />

@@ -2,6 +2,8 @@ using System.Text.Json.Serialization;
 using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Embeddings;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Output;
 
@@ -41,7 +43,8 @@ public sealed record WorkspaceStatusReport(
         FleetWatchAdoption? watchAdoption = null,
         WorktreeRecord? reconcile = null,
         string? embeddingModelKey = null,
-        int? otherModelChunks = null)
+        int? otherModelChunks = null,
+        QdrantStatus? qdrant = null)
     {
         var warnings = new List<string>();
         warnings.AddRange(ReconcilePendingNotice.Lines(reconcile));
@@ -78,7 +81,7 @@ public sealed record WorkspaceStatusReport(
             staleFiles,
             Age(lastIndexedAt),
             repos,
-            status.Qdrant,
+            qdrant,
             embeddingsProvider,
             warnings,
             ListedWorkspaces(siblings),

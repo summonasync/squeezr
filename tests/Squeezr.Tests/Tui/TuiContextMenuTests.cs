@@ -3,6 +3,7 @@ using Spectre.Console.Testing;
 using Squeezr.Cli.Tui;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Tui;
 
@@ -149,7 +150,7 @@ public class TuiContextMenuTests
 
     private static void DisableQdrantProbe(string workspace)
     {
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with { Qdrant = config.Qdrant with { Endpoint = "http://localhost:9" } });
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with { Qdrant = config.Qdrant with { Endpoint = "http://localhost:9" } });
     }
 }

@@ -4,9 +4,10 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Query;
+using Squeezr.Semantic.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 
@@ -91,9 +92,12 @@ public sealed class CodeSearchTool
             warnings.AddRange(rankExclusion.Warnings);
             var coverage = _embeddings is not null && _vectorStore is not null ? LoadCoverage(root) : null;
 
+            var arm = _embeddings is not null && _vectorStore is not null
+                ? new SemanticSearchArm(root, _embeddings, _vectorStore)
+                : null;
             var engine = new SearchEngine(root, rankExclusion);
             var searchQuery = new SearchQuery(query, false, null, repo, null, null, topK, maxTokens ?? DefaultMaxTokens, normalizedPrefix, kindFilter);
-            var response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
+            var response = await engine.SearchHybridAsync(searchQuery, arm, cancellationToken, coverage);
 
             warnings.AddRange(response.Warnings);
 
@@ -101,7 +105,7 @@ public sealed class CodeSearchTool
             var freshness = Guard(root, candidates, cancellationToken);
             if (freshness.Refreshed.Count > 0)
             {
-                response = await engine.SearchHybridAsync(searchQuery, _embeddings, _vectorStore, cancellationToken, coverage);
+                response = await engine.SearchHybridAsync(searchQuery, arm, cancellationToken, coverage);
                 foreach (var warning in response.Warnings)
                 {
                     if (!warnings.Contains(warning))

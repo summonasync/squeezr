@@ -16,6 +16,6 @@ public sealed record IndexResult(
     int GuardWithheldBuiltIns = 0,
     int GuardDropped = 0,
     int Embedded = 0,
-    bool EmbeddingsCompleted = true,
+    bool DrainCompleted = true,
     int Throttled = 0,
-    string? EmbeddingsSkipped = null);
+    string? DrainSkippedReason = null);

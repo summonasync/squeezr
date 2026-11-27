@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Health;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Ignore;
@@ -12,6 +12,8 @@ using Squeezr.Core.Indexing.Navigation;
 using Squeezr.Core.Indexing.Query;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Health;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Mcp.Tools;
 

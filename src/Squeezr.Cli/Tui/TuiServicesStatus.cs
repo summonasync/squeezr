@@ -1,5 +1,6 @@
 using Spectre.Console;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Tui;
 

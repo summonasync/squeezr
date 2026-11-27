@@ -3,6 +3,7 @@ using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -272,8 +273,8 @@ public sealed class CliEndToEndTests
         (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
         (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
 
-        var config = ConfigFile.Load(root);
-        ConfigFile.Save(root, config with
+        var config = SemanticConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config with
         {
             Embeddings = config.Embeddings with
             {
@@ -316,8 +317,8 @@ public sealed class CliEndToEndTests
         (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
         (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
 
-        var config = ConfigFile.Load(root);
-        ConfigFile.Save(root, config with
+        var config = SemanticConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config with
         {
             Embeddings = config.Embeddings with
             {
@@ -355,8 +356,8 @@ public sealed class CliEndToEndTests
         (await RunCliAsync(root, "add", "code", "--name", "code", "--json")).ExitCode.ShouldBe(0);
         (await RunCliAsync(root, "index", "--json")).ExitCode.ShouldBe(0);
 
-        var config = ConfigFile.Load(root);
-        ConfigFile.Save(root, config with { Qdrant = config.Qdrant with { Endpoint = "http://localhost:6333" } });
+        var config = SemanticConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config with { Qdrant = config.Qdrant with { Endpoint = "http://localhost:6333" } });
 
         var run = await RunCliAsync(root, "status");
 

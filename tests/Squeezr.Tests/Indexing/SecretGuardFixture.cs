@@ -1,9 +1,10 @@
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Indexing;
 
@@ -68,7 +69,7 @@ internal static class SecretGuardFixture
         var repo = store.ListRepos().First();
         var repoRoot = Path.GetFullPath(
             Path.IsPathRooted(repo.Path) ? repo.Path : Path.Combine(workspace, repo.Path));
-        var chunking = ConfigFile.Load(workspace).Chunking;
+        var chunking = SemanticConfigFile.Load(workspace).Chunking;
         var postings = new List<TrigramDocument>();
 
         foreach (var relativePath in relativePaths)
@@ -107,8 +108,8 @@ internal static class SecretGuardFixture
     // generation component, not on a max() blend — ToolResponseCacheTests pins it from both directions.
     internal static void SetGuardExtra(string workspace, params string[] globs)
     {
-        var config = ConfigFile.Load(workspace);
-        ConfigFile.Save(workspace, config with { Indexing = config.Indexing with { SecretGuardExtra = globs } });
+        var config = SemanticConfigFile.Load(workspace);
+        SemanticConfigFile.Save(workspace, config with { Indexing = config.Indexing with { SecretGuardExtra = globs } });
 
         var now = DateTime.UtcNow;
         _lastConfigStamp = now.Ticks > _lastConfigStamp.Ticks

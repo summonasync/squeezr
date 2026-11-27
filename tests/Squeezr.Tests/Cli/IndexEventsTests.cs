@@ -2,6 +2,7 @@ using System.Text.Json;
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Storage;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Cli;
 
@@ -185,8 +186,8 @@ public sealed class IndexEventsTests
         Environment.SetEnvironmentVariable(keyEnv, "test-key");
         try
         {
-            var config = ConfigFile.Load(root);
-            ConfigFile.Save(root, config with
+            var config = SemanticConfigFile.Load(root);
+            SemanticConfigFile.Save(root, config with
             {
                 Embeddings = new EmbeddingsConfig
                 {
@@ -291,8 +292,8 @@ public sealed class IndexEventsTests
         var root = TestDirs.NewTempDir();
         await InitAddAsync(root, ("a.txt", "alpha body"));
         TestWorkspaceConfig.UseAutoEmbeddingsWithDeadOllama(root);
-        var config = ConfigFile.Load(root);
-        ConfigFile.Save(root, config with { Indexing = config.Indexing with { NoSemantic = true } });
+        var config = SemanticConfigFile.Load(root);
+        SemanticConfigFile.Save(root, config with { Indexing = config.Indexing with { NoSemantic = true } });
 
         var index = await RunCliAsync(root, "index", "--events");
 

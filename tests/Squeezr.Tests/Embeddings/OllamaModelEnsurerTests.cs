@@ -4,6 +4,7 @@ using Shouldly;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Embeddings;
 

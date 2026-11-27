@@ -1,6 +1,6 @@
 using System.Runtime.Versioning;
 using Shouldly;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Indexing.Trigram;
 using Squeezr.Core.Storage;
@@ -24,7 +24,7 @@ public sealed class WorkspaceIndexerUnreadableTests
         WriteFile(workspace, "repo/beta.cs", Second);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var alphaId = FileIdOf(workspace, "alpha.cs");
         var alphaHashes = ChunkHashes(workspace, alphaId);
@@ -36,13 +36,13 @@ public sealed class WorkspaceIndexerUnreadableTests
         File.Delete(Path.Combine(workspace, "repo", "beta.cs"));
         vectorStore.Calls.Clear();
 
-        var pass = indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var pass = indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         pass.Warnings.ShouldContain(w => w.Contains("unreadable 'alpha.cs'", StringComparison.Ordinal));
         pass.Warnings.ShouldContain(w => w.Contains("index rows kept", StringComparison.Ordinal));
         PendingReapIds(workspace).ShouldBeEmpty();
         ChunkHashes(workspace, alphaId).ShouldBe(alphaHashes);
-        ListChunks(workspace, alphaId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace, alphaId).ShouldAllBe(c => c.VectorStatus == "ok");
         alphaHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
         vectorStore.Calls.ShouldNotContain($"delete:{alphaId}");
 
@@ -62,23 +62,23 @@ public sealed class WorkspaceIndexerUnreadableTests
         WriteFile(workspace, "repo/alpha.cs", First);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var alphaId = FileIdOf(workspace, "alpha.cs");
         var alphaPath = Path.Combine(workspace, "repo", "alpha.cs");
         var originalMode = File.GetUnixFileMode(alphaPath);
         File.SetUnixFileMode(alphaPath, UnixFileMode.None);
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
         File.SetUnixFileMode(alphaPath, originalMode);
 
         vectorStore.Calls.Clear();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         vectorStore.Calls.ShouldBeEmpty();
         FileIdOf(workspace, "alpha.cs").ShouldBe(alphaId);
 
         WriteFile(workspace, "repo/alpha.cs", Changed);
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         FileIdOf(workspace, "alpha.cs").ShouldBe(alphaId);
         vectorStore.Calls.ShouldContain($"delete:{alphaId}");
@@ -95,7 +95,7 @@ public sealed class WorkspaceIndexerUnreadableTests
         WriteFile(workspace, "repo/beta.cs", Second);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var alphaId = FileIdOf(workspace, "alpha.cs");
         var alphaHashes = ChunkHashes(workspace, alphaId);
@@ -103,14 +103,14 @@ public sealed class WorkspaceIndexerUnreadableTests
         File.SetUnixFileMode(Path.Combine(workspace, "repo", "alpha.cs"), UnixFileMode.None);
         vectorStore.Calls.Clear();
 
-        var pass = indexer.Index(workspace, full: true, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        var pass = indexer.Index(workspace, full: true, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         pass.Warnings.ShouldContain(w =>
             w.Contains("keeping 'alpha.cs' in the index store: unreadable", StringComparison.Ordinal));
         pass.Warnings.ShouldContain(w => w.Contains("rows kept", StringComparison.Ordinal));
         PendingReapIds(workspace).ShouldBeEmpty();
         ChunkHashes(workspace, alphaId).ShouldBe(alphaHashes);
-        ListChunks(workspace, alphaId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+        ListChunks(workspace, alphaId).ShouldAllBe(c => c.VectorStatus == "ok");
         alphaHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
         vectorStore.Calls.ShouldNotContain(c => c.StartsWith("delete:", StringComparison.Ordinal));
 
@@ -132,7 +132,7 @@ public sealed class WorkspaceIndexerUnreadableTests
         WriteFile(workspace, "repo/vault/deep.cs", Second);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var deepId = FileIdOf(workspace, "vault/deep.cs");
         var deepHashes = ChunkHashes(workspace, deepId);
@@ -149,7 +149,7 @@ public sealed class WorkspaceIndexerUnreadableTests
             File.Exists(Path.Combine(vaultPath, "deep.cs")).ShouldBeFalse();
 
             var pass = indexer.Index(
-                workspace, full: true, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+                workspace, full: true, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
             using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
             {
@@ -169,7 +169,7 @@ public sealed class WorkspaceIndexerUnreadableTests
 
             PendingReapIds(workspace).ShouldBeEmpty();
             ChunkHashes(workspace, deepId).ShouldBe(deepHashes);
-            ListChunks(workspace, deepId).ShouldAllBe(c => c.EmbeddingStatus == "ok");
+            ListChunks(workspace, deepId).ShouldAllBe(c => c.VectorStatus == "ok");
             deepHashes.ShouldAllBe(hash => vectorStore.Points.ContainsKey(ChunkPointId.FromHash(hash)));
 
             var reader = new TrigramIndexReader(SqueezrPaths.TrigramIndexPath(workspace));
@@ -195,7 +195,7 @@ public sealed class WorkspaceIndexerUnreadableTests
         WriteFile(workspace, "repo/vault/deep.cs", Second);
         var vectorStore = new FakeVectorStore();
         var indexer = new WorkspaceIndexer();
-        indexer.Index(workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+        indexer.Index(workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
         var deepId = FileIdOf(workspace, "vault/deep.cs");
         var deepHashes = ChunkHashes(workspace, deepId);
@@ -207,7 +207,7 @@ public sealed class WorkspaceIndexerUnreadableTests
             Should.Throw<UnauthorizedAccessException>(() => Directory.EnumerateFileSystemEntries(vaultPath).ToList());
 
             var pass = indexer.Index(
-                workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: vectorStore);
+                workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), vectorStore));
 
             using (var store = new MetaStore(SqueezrPaths.MetaDbPath(workspace)))
             {

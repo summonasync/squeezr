@@ -3,11 +3,14 @@ using Spectre.Console.Cli;
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Infra;
 using Squeezr.Cli.Output;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Health;
 using Squeezr.Core.Infra;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Health;
+using Squeezr.Semantic.Infra;
+using Squeezr.Semantic.Workspace;
 
 namespace Squeezr.Cli.Commands;
 
@@ -27,7 +30,8 @@ public sealed class DoctorCommand : AsyncCommand<DoctorCommand.Settings>
         var findings = new List<DoctorFinding>(DoctorRunner
             .CollectWorkspaceFindings(
                 utcNow,
-                semanticFacts: root => SemanticFacts(root, cancellationToken).GetAwaiter().GetResult())
+                semanticFindings: (root, status) =>
+                    DoctorSemanticFindings.Collect(root, status, SemanticFacts(root, cancellationToken).GetAwaiter().GetResult()))
             .Findings);
         findings.AddRange(await ServiceFindings(cancellationToken));
 

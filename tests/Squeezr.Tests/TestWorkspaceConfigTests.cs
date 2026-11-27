@@ -1,6 +1,7 @@
 using Shouldly;
 using Squeezr.Core.Configuration;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests;
 
@@ -14,6 +15,6 @@ public sealed class TestWorkspaceConfigTests
 
         TestWorkspaceConfig.PointQdrantAtDeadEndpoint(workspace);
 
-        ConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe(TestWorkspaceConfig.DeadQdrantEndpoint);
+        SemanticConfigFile.Load(workspace).Qdrant.Endpoint.ShouldBe(TestWorkspaceConfig.DeadQdrantEndpoint);
     }
 }

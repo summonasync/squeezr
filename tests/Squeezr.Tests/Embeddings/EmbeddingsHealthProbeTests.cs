@@ -6,6 +6,7 @@ using Squeezr.Core.Configuration;
 using Squeezr.Core.Health;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Tests.Embeddings;
 
@@ -160,8 +161,8 @@ public sealed class EmbeddingsHealthProbeTests : IDisposable
 
     private void SaveConfig(EmbeddingsConfig embeddings, bool noSemantic = false)
     {
-        var config = ConfigFile.Load(_root);
-        ConfigFile.Save(_root, config with
+        var config = SemanticConfigFile.Load(_root);
+        SemanticConfigFile.Save(_root, config with
         {
             Embeddings = embeddings,
             Indexing = config.Indexing with { NoSemantic = noSemantic }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Shouldly;
 using Squeezr.Core.Infra;
+using Squeezr.Semantic.Infra;
 
 namespace Squeezr.Tests.Infra;
 

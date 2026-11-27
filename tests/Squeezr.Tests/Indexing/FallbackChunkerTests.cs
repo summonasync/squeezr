@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Shouldly;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Indexing;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -72,7 +72,7 @@ public class FallbackChunkerTests
 
         var chunks = ListChunks(workspace);
         chunks.Count.ShouldBe(3);
-        chunks.ShouldAllBe(c => c.EmbeddingStatus == "pending");
+        chunks.ShouldAllBe(c => c.VectorStatus == "pending");
         chunks.ShouldAllBe(c => c.SymbolId == null);
         ChunksForPath(workspace, "docs/guide.md").ShouldHaveSingleItem();
         ChunksForPath(workspace, "app/settings.yml").ShouldHaveSingleItem();
@@ -85,10 +85,10 @@ public class FallbackChunkerTests
         var workspace = NewWorkspaceWithTextFiles();
 
         new WorkspaceIndexer().Index(
-            workspace, embeddings: new FakeEmbeddingProvider(), vectorStore: new FakeVectorStore());
+            workspace, vectorPhase: TestVectorPhase.Runtime(new FakeEmbeddingProvider(), new FakeVectorStore()));
 
         ListChunks(workspace).ShouldAllBe(
-            c => c.EmbeddingStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
+            c => c.VectorStatus == "ok" && c.ModelKey == "ollama/nomic-embed-text/768/nomic-embed-text-v1.5");
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class FallbackChunkerTests
 
         var chunk = ChunksForPath(workspace, "notes.md").ShouldHaveSingleItem();
         chunk.SymbolId.ShouldBeNull();
-        chunk.EmbeddingStatus.ShouldBe("pending");
+        chunk.VectorStatus.ShouldBe("pending");
         chunk.StartLine.ShouldBe(1);
         chunk.EndLine.ShouldBe(21);
         chunk.Text.ShouldContain("fresh 20");

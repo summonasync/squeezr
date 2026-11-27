@@ -34,26 +34,7 @@ public static class ConfigFile
             throw new WorkspaceException($"Config file at '{path}' is not valid JSON: {ex.Message}");
         }
 
-        config = NormalizeNullSections(config);
-
-        if (config.Embeddings.Provider.Trim().ToLowerInvariant() == "onnx")
-        {
-            throw new WorkspaceException(
-                "Embeddings provider 'onnx' is no longer supported. Switch embeddings.provider to 'ollama' or 'openai' and run a full reindex ('squeezr index --reembed'): vectors produced by the ONNX model are incompatible with every other embedding model.",
-                WorkspaceException.OnnxProviderCode);
-        }
-
-        try
-        {
-            _ = config.Embeddings.Ollama.ResolvedProfile;
-            _ = config.Embeddings.OpenAiCompatible.ResolvedProfile;
-        }
-        catch (ArgumentException ex)
-        {
-            throw new WorkspaceException($"Config file at '{path}': {ex.Message}");
-        }
-
-        return config;
+        return NormalizeNullSections(config);
     }
 
     public static void Save(string root, SqueezrConfig config)
@@ -72,11 +53,10 @@ public static class ConfigFile
         var defaults = SqueezrConfig.CreateDefault();
         return new SqueezrConfig
         {
-            Embeddings = config.Embeddings ?? defaults.Embeddings,
             Chunking = config.Chunking ?? defaults.Chunking,
             Indexing = config.Indexing ?? defaults.Indexing,
-            Qdrant = config.Qdrant ?? defaults.Qdrant,
-            Watch = config.Watch ?? defaults.Watch
+            Watch = config.Watch ?? defaults.Watch,
+            ExtensionData = config.ExtensionData
         };
     }
 }

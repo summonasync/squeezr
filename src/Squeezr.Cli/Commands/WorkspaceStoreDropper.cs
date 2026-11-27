@@ -1,9 +1,10 @@
 using Squeezr.Cli.Embeddings;
 using Squeezr.Cli.Output;
 using Squeezr.Core.Configuration;
-using Squeezr.Core.Embeddings;
+using Squeezr.Semantic.Embeddings;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
+using Squeezr.Semantic.Configuration;
 
 namespace Squeezr.Cli.Commands;
 
@@ -62,7 +63,7 @@ internal static class WorkspaceStoreDropper
     {
         try
         {
-            var config = ConfigFile.Load(root);
+            var config = SemanticConfigFile.Load(root);
             return new QdrantVectorStore(config.Qdrant, root);
         }
         catch (Exception ex) when (ex is WorkspaceException or IOException or UnauthorizedAccessException)
