@@ -1,0 +1,92 @@
++ WS=/var/tmp/sqzrlite-t3-fixture
++ HOME_PIN=/var/tmp/sqzrlite-t5-home
++ rm -rf /var/tmp/sqzrlite-t5-home
++ mkdir -p /var/tmp/sqzrlite-t5-home
++ export SQUEEZR_HOME=/var/tmp/sqzrlite-t5-home
++ SQUEEZR_HOME=/var/tmp/sqzrlite-t5-home
++ export NO_COLOR=1
++ NO_COLOR=1
++ BIN=/mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite
++ SQZRL=/mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite
++ echo '=== box load ==='
++ uptime
++ nproc
++ free -m
++ head -2
++ echo '=== version stamp ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite --version
++ cd /var/tmp/sqzrlite-t3-fixture
++ echo '=== init ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite init --json
++ echo '=== add ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite add repo --name fixture
++ echo '=== index ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite index --json
+
+real	0m1,228s
+user	0m0,656s
+sys	0m0,200s
++ echo '=== search (identifier) ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite search LedgerEntry --top-k 3 --json
++ echo '=== search (regex, docs) ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite search 'Operation 1[0-9] is handled' --regex --kind docs --top-k 2 --json
++ echo '=== search (prefix scope) ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite search RateLimiter --prefix docs/ --json
++ tail -1
++ echo '=== map ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite map --repo fixture --depth 1 --json
++ echo '=== symbol ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite symbol OrderService42 --json
++ echo '=== refs ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite refs OrderServiceHelper42 --json
++ echo '=== span ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite span Gen066.cs 6 10 --json
++ echo '=== pack ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite pack OrderServiceHelper42 --max-tokens 900 --json
++ echo '=== status ==='
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite status --json
++ echo '=== startup: one-shot map, cold, small fixture, 5 runs ==='
++ SMALL=/var/tmp/sqzrlite-t5-small
++ rm -rf /var/tmp/sqzrlite-t5-small
++ mkdir -p /var/tmp/sqzrlite-t5-small/repo/src
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ for i in 1 2 3 4 5 6 7 8
++ cat
++ cd /var/tmp/sqzrlite-t5-small
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite init --json
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite add repo --name repo
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite index --json
++ for run in 1 2 3 4 5
++ /usr/bin/time -f 'map run 1: %es wall, %MKB peak' /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite map --repo repo --json
+map run 1: 0.17s wall, 99908KB peak
++ for run in 1 2 3 4 5
++ /usr/bin/time -f 'map run 2: %es wall, %MKB peak' /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite map --repo repo --json
+map run 2: 0.18s wall, 99828KB peak
++ for run in 1 2 3 4 5
++ /usr/bin/time -f 'map run 3: %es wall, %MKB peak' /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite map --repo repo --json
+map run 3: 0.18s wall, 98940KB peak
++ for run in 1 2 3 4 5
++ /usr/bin/time -f 'map run 4: %es wall, %MKB peak' /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite map --repo repo --json
+map run 4: 0.19s wall, 98736KB peak
++ for run in 1 2 3 4 5
++ /usr/bin/time -f 'map run 5: %es wall, %MKB peak' /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite map --repo repo --json
+map run 5: 0.18s wall, 99304KB peak
++ echo '=== serve smoke (real stdio process) + time-to-first-answer ==='
++ cd /var/tmp/sqzrlite-t3-fixture
++ /mnt/Data/Git/Kit/Squeezr/.claude/worktrees/130-sqzrlite/artifacts/publish-sqzrlite-linux-x64/sqzrlite serve
++ python3 -
++ echo '=== serve stderr ==='
++ cat serve-stderr.log
