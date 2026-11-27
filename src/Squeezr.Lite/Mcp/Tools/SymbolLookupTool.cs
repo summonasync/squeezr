@@ -46,9 +46,14 @@ public sealed class SymbolLookupTool
             var root = _workspace.Root;
             var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
             var warnings = new List<string>();
-            var result = new SymbolLookup(root).Find(symbolName, repo, kind, budget, body: true);
+            var lookup = new SymbolLookup(root);
+            var result = lookup.Find(symbolName, repo, kind, budget, body: true);
             var candidates = QueryFreshness.Candidates(result.Matches.Select(m => (m.Repo, m.File)));
             var freshness = QueryFreshness.Guard(root, candidates, cancellationToken);
+            if (freshness.Refreshed.Count > 0)
+            {
+                result = lookup.Find(symbolName, repo, kind, budget, body: true);
+            }
 
             var clipped = result.State is AnswerState.Clipped;
 

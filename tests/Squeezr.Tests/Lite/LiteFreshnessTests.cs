@@ -150,6 +150,37 @@ public class LiteFreshnessTests : IDisposable
     }
 
     [Fact]
+    public async Task SymbolLookup_RerunsFindAfterAnInlineHeal_AndShipsTheHealedRow()
+    {
+        NewIndexedWorkspace();
+        await using var harness = await LiteMcpTestHarness.StartAsync(_workspace);
+
+        WriteFile("repo/src/Calc.cs", """
+            namespace Demo;
+
+            public class Calc
+            {
+                /// <summary>Adds numbers with a healed marker.</summary>
+                public int Add(int a, int b)
+                {
+                    return a + b;
+                }
+            }
+            """);
+
+        var envelope = Envelope(await harness.Client.CallToolAsync(
+            "symbol_lookup",
+            new Dictionary<string, object?> { ["name"] = "Add", ["maxTokens"] = 300 },
+            cancellationToken: CancellationToken.None));
+
+        envelope.GetProperty("freshness").GetProperty("refreshed").GetInt32()
+            .ShouldBeGreaterThanOrEqualTo(1);
+        envelope.GetProperty("data").EnumerateArray()
+            .Select(hit => hit.GetProperty("docComment").GetString())
+            .ShouldContain(doc => doc!.Contains("healed marker"));
+    }
+
+    [Fact]
     public async Task SymbolLookup_ShipsSuggestionsInDidYouMean_WhileStaleFilesStaysTheVerdictList()
     {
         NewIndexedWorkspace();
