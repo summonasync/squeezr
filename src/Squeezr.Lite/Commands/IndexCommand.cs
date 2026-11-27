@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Squeezr.Core.Indexing;
+using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
 using Squeezr.Lite.Config;
 using Squeezr.Lite.Output;
@@ -27,6 +28,14 @@ public sealed class IndexCommand : Command<IndexCommand.Settings>
         {
             var workspaceRoot = WorkspaceRootResolver.RequireWorkspaceRoot();
             ReportConfigWarnings(workspaceRoot);
+
+            if (WatcherOwnership.OwnerPid(SqueezrPaths.StoreDir(workspaceRoot)) is { } pid)
+            {
+                Console.Error.WriteLine(
+                    $"sqzrlite: a watcher pass owns this store (pid {pid}) — manual index skipped, the watcher " +
+                    "reconciles edits; stop that serve's --watch first if a rebuild is really needed");
+                return 0;
+            }
 
             var result = new WorkspaceIndexer().Index(
                 workspaceRoot,

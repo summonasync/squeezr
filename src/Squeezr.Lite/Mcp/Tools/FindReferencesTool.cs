@@ -28,16 +28,16 @@ public sealed class FindReferencesTool
         _identity = identity;
     }
 
-    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. A row set belongs to the declaring file's last parse: a caller indexed after a declaring file's newest parse can leave this stale — the declaring files appear in warnings with the lag named, and 'sqzrlite index' reconciles every caller now. Returns a tool error if the symbol is not indexed. Pass the symbol as 'symbol' or its alias 'name' — both are accepted, a wrong-param error names both. Pair with symbol_lookup to jump from a match to its usages.")]
+    [Description("Callers of a symbol before you edit it: every reference as file:line with the reference kind and the enclosing symbol, name-exact with no false positives (unlike grep on a name), one row per callsite even when several same-name definitions share the reference set. Every row names its repo, so callsites that only look identical across repositories stay distinct; the envelope also carries definitions ({repo, kind, file, startLine, endLine}) naming the declarations behind the rows: whenever two or more same-name declarations share one callsite list, or nothing calls the symbol at all. A row set belongs to the declaring file's last parse: a caller indexed after a declaring file's newest parse can leave this stale — the declaring files appear in warnings with the lag named, and 'sqzrlite index' reconciles every caller now. Returns a tool error if the symbol is not indexed. Pass the symbol as 'symbol' or its alias 'name' — both are accepted, a wrong-param error names both. Pair with symbol_lookup to jump from a match to its usages. The files this answer names are freshness-checked on read: modified files are reindexed inline within a per-call budget or reported in staleFiles, and the freshness block counts what was healed and what was refused.")]
     [McpServerTool(Name = "find_references", Title = "Find references")]
     public Task<object> FindAsync(
         string? symbol = null,
         string? repo = null,
         string? name = null,
         CancellationToken cancellationToken = default) =>
-        _gate.RunAsync(ct => Task.FromResult(FindCore(symbol, name, repo)), cancellationToken);
+        _gate.RunAsync(ct => Task.FromResult(FindCore(symbol, name, repo, ct)), cancellationToken);
 
-    private object FindCore(string? symbol, string? name, string? repo)
+    private object FindCore(string? symbol, string? name, string? repo, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
@@ -46,7 +46,16 @@ public sealed class FindReferencesTool
             _workspace.RequireWorkspace();
             var root = _workspace.Root;
             var warnings = new List<string>();
-            var result = new RefLookup(root).Find(symbolName, repo);
+            var lookup = new RefLookup(root);
+            var result = lookup.Find(symbolName, repo);
+
+            var namedUniverse = AnsweredFiles(result);
+            var candidates = QueryFreshness.Candidates(namedUniverse);
+            var freshness = QueryFreshness.Guard(root, candidates, cancellationToken);
+            if (freshness.Refreshed.Count > 0)
+            {
+                result = lookup.Find(symbolName, repo);
+            }
 
             var data = BuildData(root, result);
             var definitions = BuildDefinitions(result, data.Count);
@@ -65,6 +74,7 @@ public sealed class FindReferencesTool
                 warnings.Add(laggingLine);
             }
 
+            var carried = MergeStale(freshness.Stale, lagging);
             var namedFiles = data.Select(d => (d.Repo, d.File)).ToList();
             var (cost, unknownBaselineFiles) = CostBaseline.Measure(
                 root, namedFiles, tokensUsed, true);
@@ -78,11 +88,25 @@ public sealed class FindReferencesTool
                     $"{unknownBaselineFiles} referenced file(s) not in the index — excluded from the whole-file baseline");
             }
 
+            var coverageLine = AnswerFreshness.CoverageWarning(candidates.Count, namedUniverse.Count);
+            if (coverageLine is not null)
+            {
+                warnings.Add(coverageLine);
+            }
+
+            var budgetLine = AnswerFreshness.BudgetWarning(freshness.Unrefreshed.Count);
+            if (budgetLine is not null)
+            {
+                warnings.Add(budgetLine);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, tokensUsed, false, warnings, root,
-                definitions: definitions, cost: cost);
+                carried, definitions: definitions, cost: cost, freshness: AnswerFreshness.ForContent(
+                    candidates.Count, freshness.Refreshed.Count, carried.Count,
+                    carried, [laggingLine, coverageLine, budgetLine], freshness.Unrefreshed.Count));
             QueryTelemetry.Record(root, _workspace.SessionId, "find_references",
                 new { symbol = symbolName, repo },
-                envelope.TokensUsed, false, data.Count,
+                envelope.PaidTokens, false, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version, mapped: false);
             return envelope;
@@ -92,6 +116,21 @@ public sealed class FindReferencesTool
             return ToolErrors.From(ex, _workspace);
         }
     }
+
+    private static List<(string Repo, string File)> AnsweredFiles(RefLookupResult result) =>
+    [
+        .. result.Groups
+            .SelectMany(g => g.Refs.Select(r => (g.Repo, r.File)))
+            .Concat(result.Groups.SelectMany(g => g.Definitions.Select(d => (g.Repo, d.File))))
+            .Distinct()
+    ];
+
+    private static IReadOnlyList<string> MergeStale(
+        IReadOnlyList<string> guardStale,
+        IReadOnlyList<GhostRefDeclaration> lagging) =>
+        [.. guardStale
+            .Concat(lagging.Select(d => $"{d.Repo}/{d.File}"))
+            .Distinct()];
 
     private static List<RefData> BuildData(string root, RefLookupResult result)
     {

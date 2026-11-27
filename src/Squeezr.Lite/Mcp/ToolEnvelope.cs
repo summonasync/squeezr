@@ -11,12 +11,15 @@ public sealed record ToolEnvelope(
     [property: JsonPropertyName("truncated")] bool Truncated,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
     [property: JsonPropertyName("indexAge")] TimeSpan? IndexAge,
-    [property: JsonPropertyName("staleFiles")] IReadOnlyList<string> StaleFiles,
+    [property: JsonPropertyName("staleFiles"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? StaleFiles,
     [property: JsonPropertyName("didYouMean"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? DidYouMean = null,
     [property: JsonPropertyName("definitions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<RefDefinitionData>? Definitions = null,
     [property: JsonPropertyName("cost")] AnswerCost? Cost = null,
+    [property: JsonPropertyName("freshness"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    AnswerFreshness? Freshness = null,
     [property: JsonPropertyName("subject"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     AnswerSubjectBody? Subject = null)
 {
@@ -29,7 +32,8 @@ public sealed record ToolEnvelope(
         IReadOnlyList<string>? staleFiles = null,
         IReadOnlyList<string>? didYouMean = null,
         IReadOnlyList<RefDefinitionData>? definitions = null,
-        AnswerCost? cost = null)
+        AnswerCost? cost = null,
+        AnswerFreshness? freshness = null)
     {
         var lines = warnings ?? [];
         if (workspaceRoot is not null)
@@ -37,8 +41,8 @@ public sealed record ToolEnvelope(
             lines = [.. lines, .. ReconcilePendingNotice.Lines(ReconcilePendingNotice.Read(workspaceRoot))];
         }
 
-        return new(data, tokensUsed, truncated, lines, ResolveIndexAge(workspaceRoot), staleFiles ?? [],
-            didYouMean, definitions, cost);
+        return new(data, tokensUsed, truncated, lines, ResolveIndexAge(workspaceRoot), staleFiles,
+            didYouMean, definitions, cost, freshness);
     }
 
     public ToolEnvelope WithWarning(string? warning) =>
@@ -57,7 +61,7 @@ public sealed record ToolEnvelope(
             };
 
     [JsonIgnore]
-    public int PaidTokens => TokensUsed;
+    public int PaidTokens => TokensUsed + (Freshness?.FreshnessTokens ?? 0);
 
     public ToolEnvelope MarkReplayed() => this;
 

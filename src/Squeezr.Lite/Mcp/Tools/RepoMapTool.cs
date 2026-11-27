@@ -94,7 +94,10 @@ public sealed class RepoMapTool
             }
 
             var envelope = ToolEnvelope.Wrap(
-                data, result.TokensUsed, result.Truncated, warnings, root, sample.Paths);
+                data, result.TokensUsed, result.Truncated, warnings, root, sample.Paths,
+                freshness: AnswerFreshness.ForStructure(
+                    freshness.Checked, freshness.Missing.Count + freshness.Changed.Count,
+                    sample.Paths, [classLine, sampleLine]));
             QueryTelemetry.Record(root, _workspace.SessionId, "repo_map",
                 new { repo, prefix = normalizedPrefix, depth, maxTokens },
                 envelope.TokensUsed, envelope.Truncated, data.Count,

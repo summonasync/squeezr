@@ -1,3 +1,4 @@
+using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Storage;
 
 namespace Squeezr.Lite.Mcp;
@@ -11,8 +12,12 @@ internal static class StartupNotice
             return;
         }
 
-        stderr.WriteLine(
-            "sqzrlite serve: no background indexer runs in lite — tools answer from the index as of the " +
-            $"last 'sqzrlite index' pass; re-run '{LiteRemedy.IndexCommand}' after editing files");
+        var health = WatchStoreHealth.Probe(SqueezrPaths.StoreDir(workspaceRoot), DateTime.UtcNow);
+        stderr.WriteLine(health.IndexerRunning
+            ? $"sqzrlite serve: a watcher pass keeps this index fresh (pid {health.OwnerPid}); queries answer " +
+              "with a content verdict and heal within the refresh budget"
+            : "sqzrlite serve: no background indexer runs against this store — queries answer with a content " +
+              $"verdict that heals within the refresh budget; '{LiteRemedy.IndexCommand}' reconciles everything " +
+              "now, or start with --watch to keep it fresh");
     }
 }

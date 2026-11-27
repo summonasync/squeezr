@@ -25,7 +25,7 @@ public sealed class SymbolLookupTool
         _identity = identity;
     }
 
-    [Description("Look up an exact symbol by name across the indexed workspace: signature, doc comment, file:span, and body within the token budget (maxTokens, default 300) — the method you named, not the whole file. When a type's body does not fit the budget, the hit carries its member list (name, kind, line) plus membersOmitted instead, so the next call is expand_span on the member you want. Not-found returns an empty result, not an error; expand_span widens the context around a hit. Pass the symbol as 'name' or its alias 'symbol' — both are accepted, a wrong-param error names both.")]
+    [Description("Look up an exact symbol by name across the indexed workspace: signature, doc comment, file:span, and body within the token budget (maxTokens, default 300) — the method you named, not the whole file. When a type's body does not fit the budget, the hit carries its member list (name, kind, line) plus membersOmitted instead, so the next call is expand_span on the member you want. Not-found returns an empty result, not an error; expand_span widens the context around a hit. Pass the symbol as 'name' or its alias 'symbol' — both are accepted, a wrong-param error names both. Files the answer names are freshness-checked on read: modified files are reindexed inline within a per-call budget or reported in staleFiles, and the freshness block counts what was healed and what was refused.")]
     [McpServerTool(Name = "symbol_lookup", Title = "Look up symbol")]
     public Task<object> FindAsync(
         string? name = null,
@@ -34,9 +34,9 @@ public sealed class SymbolLookupTool
         int? maxTokens = null,
         string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        _gate.RunAsync(ct => Task.FromResult(FindCore(name, symbol, kind, repo, maxTokens)), cancellationToken);
+        _gate.RunAsync(ct => Task.FromResult(FindCore(name, symbol, kind, repo, maxTokens, ct)), cancellationToken);
 
-    private object FindCore(string? name, string? symbol, string? kind, string? repo, int? maxTokens)
+    private object FindCore(string? name, string? symbol, string? kind, string? repo, int? maxTokens, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
@@ -47,6 +47,8 @@ public sealed class SymbolLookupTool
             var budget = maxTokens ?? SymbolLookup.DefaultMaxTokens;
             var warnings = new List<string>();
             var result = new SymbolLookup(root).Find(symbolName, repo, kind, budget, body: true);
+            var candidates = QueryFreshness.Candidates(result.Matches.Select(m => (m.Repo, m.File)));
+            var freshness = QueryFreshness.Guard(root, candidates, cancellationToken);
 
             var clipped = result.State is AnswerState.Clipped;
 
@@ -89,11 +91,26 @@ public sealed class SymbolLookupTool
                     $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
             }
 
+            var namedCount = namedFiles.Distinct().Count();
+            var coverageLine = AnswerFreshness.CoverageWarning(candidates.Count, namedCount);
+            if (coverageLine is not null)
+            {
+                warnings.Add(coverageLine);
+            }
+
+            var budgetLine = AnswerFreshness.BudgetWarning(freshness.Unrefreshed.Count);
+            if (budgetLine is not null)
+            {
+                warnings.Add(budgetLine);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, result.TokensUsed, clipped, warnings, root,
-                result.DidYouMean, cost: cost);
+                freshness.Stale, result.DidYouMean, cost: cost, freshness: AnswerFreshness.ForContent(
+                    candidates.Count, freshness.Refreshed.Count, freshness.Stale.Count,
+                    freshness.Stale, [coverageLine, budgetLine], freshness.Unrefreshed.Count));
             QueryTelemetry.Record(root, _workspace.SessionId, "symbol_lookup",
                 new { name = symbolName, kind, repo, maxTokens = budget },
-                envelope.TokensUsed, envelope.Truncated, data.Count,
+                envelope.PaidTokens, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version,
                 mapped: !envelope.Truncated && data.Any(static hit => hit.BodyOmitted));

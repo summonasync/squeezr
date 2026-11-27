@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Server;
+using Squeezr.Core.Indexing;
+using Squeezr.Core.Indexing.Watch;
 using Squeezr.Core.Indexing.Ignore;
 using Squeezr.Core.Storage;
 using Squeezr.Core.Workspace;
@@ -97,10 +99,7 @@ public sealed class IndexStatusTool
                 siblings.Omitted,
                 reconcile);
 
-            warnings.Add(
-                "per-file freshness is not part of this aggregate report — this lite server runs no watcher and " +
-                "no content guard, so every tool answers from the index as of the last 'sqzrlite index' pass; " +
-                "re-run it after editing files");
+            warnings.Add(IndexerLine(SqueezrPaths.StoreDir(root)));
 
             var envelope = ToolEnvelope.Wrap(data, 0, false, warnings, root);
             QueryTelemetry.Record(root, _workspace.SessionId, "index_status",
@@ -116,6 +115,18 @@ public sealed class IndexStatusTool
     }
 
     private const string SemanticUnsupported = "unsupported";
+
+    private static string IndexerLine(string storeDir)
+    {
+        var health = WatchStoreHealth.Probe(storeDir, DateTime.UtcNow);
+        return health.IndexerRunning
+            ? $"per-file freshness is not part of this aggregate report — a watcher pass keeps this index " +
+              $"fresh (pid {health.OwnerPid}), and every query answer carries a content verdict that heals " +
+              $"within the refresh budget"
+            : "per-file freshness is not part of this aggregate report — no background indexer is running, " +
+              $"so answers rely on the per-query content verdict (heals up to {RefreshBudget.MaxFilesReRead} " +
+              $"file(s) per call); '{LiteRemedy.IndexCommand}' or a watcher pass reconciles the rest";
+    }
 
     private static IReadOnlyList<WorkspaceData>? BuildWorkspaceRows(WorkspaceSiblingSnapshot snapshot)
     {

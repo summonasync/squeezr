@@ -16,7 +16,7 @@ public static class LiteServerHost
 {
     private static readonly TimeSpan StdinEofGrace = TimeSpan.FromSeconds(1);
 
-    public static async Task RunStdioAsync(string startDirectory, CancellationToken ct)
+    public static async Task RunStdioAsync(string startDirectory, CancellationToken ct, bool watch = false)
     {
         var resolution = WorkspaceRootResolver.Resolve(startDirectory);
         if (resolution.ViaClaudeProjectDir)
@@ -26,15 +26,12 @@ public static class LiteServerHost
 
         WarnIfSessionOutsideWorkspace(resolution.RootPath, startDirectory, Console.Error);
         ServeBindingLine.Write(resolution, startDirectory, Console.Error);
-        if (resolution.IsWorkspace)
-        {
-            StartupNotice.WriteNoIndexerLine(resolution.RootPath, Console.Error);
-        }
 
         var inputPipe = new Pipe();
         var forwardTask = ForwardStdinAsync(inputPipe.Writer, ct);
         await RunAsync(
-            inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, startDirectory, ct);
+            inputPipe.Reader.AsStream(), Console.OpenStandardOutput(), resolution.RootPath, startDirectory, ct,
+            watch: watch);
         await forwardTask;
     }
 
@@ -72,7 +69,8 @@ public static class LiteServerHost
         string workspaceRoot,
         string sessionDirectory,
         CancellationToken ct,
-        TextWriter? stderr = null)
+        TextWriter? stderr = null,
+        bool watch = false)
     {
         var diagnostics = stderr ?? Console.Error;
         var startup = LiteConfigFile.TryLoad(workspaceRoot);
@@ -119,6 +117,8 @@ public static class LiteServerHost
         identity.Attach(provider.GetRequiredService<McpServer>());
         var server = provider.GetServices<IHostedService>().Cast<BackgroundService>().Single();
         await server.StartAsync(ct);
+        var presence = await ArmWatchEngineAsync(
+            workspace, watch, startup.Config?.Watch.Enabled ?? false, diagnostics, ct);
         lifetime.MarkStarted();
         try
         {
@@ -126,6 +126,53 @@ public static class LiteServerHost
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+        }
+        finally
+        {
+            if (presence is not null)
+            {
+                await presence.DisposeAsync();
+            }
+        }
+    }
+
+    // Arming happens after the server is accepting calls, so a slow claim round-trip never delays the first
+    // answer; a failure to arm degrades to the no-watcher serve instead of taking queries down with it.
+    private static async Task<LiteServeWatch?> ArmWatchEngineAsync(
+        LiteWorkspace workspace,
+        bool watchRequested,
+        bool watchEnabledInConfig,
+        TextWriter diagnostics,
+        CancellationToken ct)
+    {
+        if (!watchRequested && !watchEnabledInConfig)
+        {
+            if (workspace.IsWorkspace)
+            {
+                StartupNotice.WriteNoIndexerLine(workspace.Root, diagnostics);
+            }
+
+            return null;
+        }
+
+        if (!workspace.IsWorkspace)
+        {
+            diagnostics.WriteLine("warning: watch requested but workspace is not initialized; engine is off");
+            return null;
+        }
+
+        var presence = LiteServeWatch.For(workspace.Root, diagnostics);
+        try
+        {
+            await presence.StartAsync(ct);
+            return presence;
+        }
+        catch (Exception ex) when (
+            ex is WorkspaceException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            diagnostics.WriteLine($"warning: watch engine failed to start: {ex.Message}");
+            await presence.DisposeAsync();
+            return null;
         }
     }
 

@@ -27,7 +27,7 @@ public sealed class CodeSearchTool
         _identity = identity;
     }
 
-    [Description("Exact search over the indexed workspace: matches exact identifiers and domain-worded phrase fragments (\"VectorDimensionMismatchException\" or \"validate config file\") against the trigram index. Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope the search to one directory subtree. kind filters what a hit can be: \"all\" (default) matches everything, \"code\" keeps program sources, \"docs\" keeps prose and config (markdown, text, json, yaml, toml, xml). This lite server has no semantic arm: paraphrase-matching is unavailable and answers come from the exact arms only.")]
+    [Description("Exact search over the indexed workspace: matches exact identifiers and domain-worded phrase fragments (\"VectorDimensionMismatchException\" or \"validate config file\") against the trigram index. Returns file:line matches with snippets, never full bodies — expand_span reveals a body around a hit. One hit per file: the best span wins and the file's other spans collapse into alsoMatched, so topK counts distinct files, not spans. Pass prefix (e.g. \"src/\") to scope the search to one directory subtree. kind filters what a hit can be: \"all\" (default) matches everything, \"code\" keeps program sources, \"docs\" keeps prose and config (markdown, text, json, yaml, toml, xml). This lite server has no semantic arm: paraphrase-matching is unavailable and answers come from the exact arms only. Results are refreshed on read: modified files are reindexed inline within a per-call budget or reported in staleFiles, and the freshness block counts what was healed and what was refused.")]
     [McpServerTool(Name = "code_search", Title = "Search code")]
     public Task<object> SearchAsync(
         string query,
@@ -73,6 +73,20 @@ public sealed class CodeSearchTool
 
             warnings.AddRange(response.Warnings);
 
+            var candidates = QueryFreshness.Candidates(response.Matches.Select(m => (m.Repo, m.Path)));
+            var freshness = QueryFreshness.Guard(root, candidates, cancellationToken);
+            if (freshness.Refreshed.Count > 0)
+            {
+                response = await engine.SearchHybridAsync(searchQuery, semanticArm: null, cancellationToken);
+                foreach (var warning in response.Warnings)
+                {
+                    if (!warnings.Contains(warning))
+                    {
+                        warnings.Add(warning);
+                    }
+                }
+            }
+
             if (response.Truncated)
             {
                 warnings.Add(HintText.TruncationLine(
@@ -98,11 +112,26 @@ public sealed class CodeSearchTool
                     $"{unknownBaselineFiles} hit file(s) not in the index — excluded from the whole-file baseline");
             }
 
+            var namedCount = namedFiles.Distinct().Count();
+            var coverageLine = AnswerFreshness.CoverageWarning(candidates.Count, namedCount);
+            if (coverageLine is not null)
+            {
+                warnings.Add(coverageLine);
+            }
+
+            var budgetLine = AnswerFreshness.BudgetWarning(freshness.Unrefreshed.Count);
+            if (budgetLine is not null)
+            {
+                warnings.Add(budgetLine);
+            }
+
             var envelope = ToolEnvelope.Wrap(data, response.TokensUsed, response.Truncated, warnings, root,
-                cost: cost);
+                freshness.Stale, cost: cost, freshness: AnswerFreshness.ForContent(
+                    candidates.Count, freshness.Refreshed.Count, freshness.Stale.Count,
+                    freshness.Stale, [coverageLine, budgetLine], freshness.Unrefreshed.Count));
             QueryTelemetry.Record(root, _workspace.SessionId, "code_search",
                 new { query, repo, prefix = normalizedPrefix, maxTokens, topK, kind },
-                envelope.TokensUsed, envelope.Truncated, data.Count,
+                envelope.PaidTokens, envelope.Truncated, data.Count,
                 sw.ElapsedMilliseconds, indexAge: envelope.IndexAge,
                 client: _identity.Name ?? "unknown", clientVersion: _identity.Version, mapped: false);
             return envelope;
